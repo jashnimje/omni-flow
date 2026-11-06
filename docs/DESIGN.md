@@ -40,7 +40,7 @@ flowchart LR
     mcp["MCP tool registry"]
   end
   subgraph cli["omni CLI"]
-    cmds["driver, device, flow, sniff, mcp, hub"]
+    cmds["driver, device, secret, watch, flow, mcp, hub"]
   end
   devices["LAN devices, hosts, microcontrollers"]
   ui -- "commands over the service channel" --> api
@@ -140,8 +140,8 @@ A driver manifest describes one kind of device: how to find it, how to talk to i
     {
       "method": "udp_broadcast",
       "port": 38899,
-      "probe": { "method": "getSystemConfig", "params": {} },
-      "matchJsonPath": "$.result.moduleName",
+      "probe": { "method": "registration", "params": { "phoneMac": "AAAAAAAAAAAA", "register": false, "phoneIp": "1.2.3.4", "id": "1" } },
+      "matchJsonPath": "$.result.mac",
       "idJsonPath": "$.result.mac"
     }
   ],
@@ -247,18 +247,20 @@ The original spec's flow passed `brightness: 80` to a template that read only `s
 
 ## Transports and wire protocols
 
-All transports implement one interface: open, send, an incoming stream, close, and a packet tap. The tap feeds the packet inspector and the `omni sniff` command into a bounded ring buffer. Each transport owns its sockets for its whole life, so no call binds a throwaway socket.
+All transports implement one interface: open, send, an incoming stream, close, and a packet tap. The tap feeds the packet inspector and `omni watch --packets` through a bounded ring buffer. Each transport owns its sockets for its whole life, so no call binds a throwaway socket.
 
 ### UDP and Wake-on-LAN
 
-- One bound socket per transport, with broadcast enabled. Discovery probes go to the subnet-directed broadcast address (for example `192.168.1.255`), computed from the interface address and mask, with `255.255.255.255` as the fallback.
+- One bound socket per transport, with broadcast enabled. Discovery probes go to `255.255.255.255` and to a /24 directed broadcast for each interface (for example `192.168.1.255`). Dart does not expose interface netmasks, and home networks are almost always /24.
 - Wake-on-LAN sends 6 bytes of `0xFF` followed by the target MAC repeated 16 times (102 bytes) to port 9 on the broadcast address.
-- Android drops incoming broadcast and multicast packets unless the app holds a Wi-Fi multicast lock. The app's `PlatformBridge` acquires it only while discovery or WiZ push listening is active.
+- Android's Wi-Fi stack filters out multicast packets unless the app holds a `WifiManager.MulticastLock`, and holding one costs battery. Android's documentation covers multicast only, so whether broadcast replies also need the lock is checked on the phone. The app's `PlatformBridge` holds the lock only while discovery or mDNS is running.
 
 ### Philips WiZ
 
 - JSON-RPC over UDP 38899: `getPilot`, `setPilot`, `setState`, `getSystemConfig`.
-- The bulb pushes `syncPilot` state changes to port 38900, but only to a client that has sent a `registration` request with its IP and MAC. A listener that has not registered receives nothing. The registration payload and how often it must be renewed are pinned against pywizlight in M1.
+- Discovery broadcasts `{"method":"registration","params":{"phoneMac":"AAAAAAAAAAAA","register":false,"phoneIp":"1.2.3.4","id":"1"}}` to port 38899. Each bulb answers with `result.mac`, and its IP is the reply's source address. This is the message pywizlight uses, and `register: false` tells the bulb not to push to that sender.
+- Pushes: a client sends `{"method":"registration","params":{"phoneIp":<own IP>,"register":true,"phoneMac":<a MAC it made up>}}` to each bulb's port 38899 and listens on UDP 38900. The bulb then sends `syncPilot` (state in `params`, the bulb's MAC in `params.mac`) and `firstBeat` (a bulb coming online) to 38900. The registration is renewed every 20 seconds, as pywizlight does, and `syncPilot` gets no reply.
+- Bulbs accept a dimming of 10 to 100 and report their own white range. pywizlight clamps colour temperature to 1000 to 10000 K. The built-in manifest uses 2200 to 6500 K, the common tunable-white range, and narrowing it per bulb from `getModelConfig` is an open item.
 - WiZ has no authentication on the LAN. Anyone on the network can control the bulbs. OmniFlow does not change that.
 
 ### Tuya local protocol (TCP 6668)
@@ -275,8 +277,8 @@ Frame layout for v3.3, big-endian:
 
 - Device responses add a 4-byte return code before the payload. The codec decodes responses (check the CRC, read the return code, decrypt) as well as encoding requests.
 - v3.4 adds a session-key negotiation and replaces the CRC with an HMAC-SHA256. v3.5 changes the frame prefix and uses AES-GCM. Which version each of the user's devices speaks is read with a tinytuya scan before M1 decides whether v3.5 is in scope.
-- A device accepts one local connection at a time. The transport keeps one persistent connection per device with a heartbeat, and the vendor app on the same LAN can take that slot.
-- The local key comes from a one-time step through a Tuya IoT developer project linked to the Smart Life account the devices are paired with. After that, control is LAN-only.
+- A device accepts one local TCP connection at a time. The transport keeps one persistent connection per device, and the Smart Life or vendor app holds that slot while it is open, so it must be closed during use.
+- The local key comes from a one-time step: pair the device in Smart Life, link that account to a Tuya IoT developer project, then run `python -m tinytuya wizard`. After that, control is LAN-only. The key changes every time the device is removed and re-paired in the app, so a re-paired device needs its key fetched and stored again (`omni secret set`).
 
 ### Host execution (local and SSH)
 
@@ -298,10 +300,12 @@ One JSON object per line over serial, or one per datagram over UDP. The Pico W l
 
 Host to board:
 
-- `{"cmd":"describe","id":1}` - the board answers with its identity and capabilities. The host sends it on connect, because a boot event sent before the host opened the port is lost.
-- `{"cmd":"ir_send","protocol":"NEC","hex":"0x20DF10EF","id":2}`
-- `{"cmd":"gpio_write","pin":16,"value":1,"id":3}` - only pins on the board's output allowlist.
-- Board-specific commands are listed in its `describe` answer. The Arduino bridge has `relay_on` and `relay_off`.
+- `{"cmd":"describe","id":1}` - the board answers with its identity, capabilities and commands. The host sends it on connect, because a boot event sent before the host opened the port is lost. Over UDP it also registers the sender as the receiver of unsolicited events, so the host repeats it after the phone changes address. Over serial, every event goes to the port.
+- `{"cmd":"ir_send","protocol":"NEC","address":4,"command":8,"id":2}` - a standard NEC frame from its 8-bit address and command.
+- `{"cmd":"ir_send","protocol":"NEC","hex":"0x20DF10EF","id":2}` - a 32-bit code in the older most-significant-bit-first form.
+- `{"cmd":"gpio_write","pin":16,"value":1,"id":3}` - only pins on the board's output allowlist, which is set in `config.json` and can never include the radio pins or the pins the firmware itself uses.
+- Board-specific commands are listed in its `describe` answer. The Pico has `led` for the onboard LED. The Arduino bridge has `relay_on` and `relay_off`.
+- A reply carries the request's `id`, so the host can match it to the command.
 
 Board to host:
 
@@ -309,7 +313,7 @@ Board to host:
 - `{"node":"...","event":"ack","id":2,"cmd":"ir_send"}` and `{"node":"...","event":"error","id":3,"message":"pin not allowed"}`
 - Unsolicited events: `button_press`, `knob_change` (Pico) or `analog_change` (Arduino), `boot`.
 
-NEC codes are sent most-significant bit first, matching the 32-bit values that common IR libraries print when they capture a remote.
+NEC sends each byte least significant bit first, in the order address, inverted address, command, inverted command, with a 9 ms burst, a 4.5 ms space, 560 us bursts and a 38 kHz carrier at a 1/3 duty cycle. The `address` and `command` form builds exactly that. Many published code lists (old Arduino-IRremote, LIRC) use a 32-bit value written most significant bit first, such as LG's `0x20DF10EF`. The `hex` form sends that value as written, the same as IRremote's `sendNECMSB()`, so those lists work unchanged.
 
 On the Pico W, GPIO 23, 24, 25 and 29 belong to the CYW43 wireless chip, and GPIO 25 is its SPI chip select. Writing GPIO 25, the original firmware's default pin, can break Wi-Fi and BLE. The allowlist excludes those pins, and the onboard LED is driven through `Pin("LED")`.
 
@@ -430,13 +434,15 @@ Raw BLE RSSI swings by around 12 dBm from reflections and the body blocking the 
 2. **Silence tick.** Once a second, a beacon heard from in the last `silenceMs` (default 5000) is left alone. Otherwise the tracker feeds it an absent reading of -100 dBm. Without this, a beacon that goes out of range stops producing samples, the filter never updates, and the exit transition never fires. The original tracker had this defect.
 3. **Hysteresis and dwell.** Enter when the estimate stays at or above -62 dBm for 2 s. Exit when it stays at or below -74 dBm for 8 s. The gap between the thresholds stops the state toggling at the boundary. All four values are per-zone settings, tuned from a recorded RSSI trace of the user's own desk.
 
-Beacons are matched by advertised name, service UUID or manufacturer data, never by MAC.
+Beacons are matched by advertised name, service UUID or manufacturer data, never by MAC. The same matchers go into Android `ScanFilter`s: Android stops unfiltered scans while the screen is off, and keeps filtered ones running.
 
 Combining inputs: a zone is entered when its BLE input says entered, or, when the zone has no BLE input, when its Wi-Fi input matches. A Wi-Fi or geofence input set as `required` must also hold. This rule covers desk-level zones (BLE) and home-level zones (Wi-Fi) without a weighting model. A weighted vote was in the spec and is dropped until a real case needs it.
 
 ### Sensors on demand
 
 A sensor runs only while an enabled flow or zone needs it. BLE scanning runs only while a zone with a BLE input is referenced by an enabled flow, and only while the zone's `required` inputs hold (desk presence scans only on home Wi-Fi). NFC listens only when a flow has an NFC trigger. This is the main battery control, on top of the scan mode each sensor uses.
+
+Android also offers `startScan` with a `PendingIntent`, which wakes the app only when a filtered device is in range, and its guide discourages periodic scans. That fits a zone's coarse "beacon heard" signal while the phone is away from the desk. The RSSI filter needs a stream of readings, which comes from a filtered scan inside the foreground service once the beacon has been heard.
 
 ## Storage and secrets
 
@@ -537,6 +543,6 @@ App: flutter_riverpod, flutter_secure_storage, vyuh_node_flow, universal_ble, nf
 - Accounts and sync: deferred, with the choices recorded above.
 - LLM provider and model for the in-app architect (M5).
 - Tuya protocol version of each of the user's devices, and whether v3.5 is needed in M1.
-- WiZ registration payload and renewal interval, pinned against pywizlight (M1).
+- Each WiZ bulb's white range from `getModelConfig`, instead of the fixed 2200 to 6500 K.
 - The vyuh_node_flow 0.32 and mcp_dart 2.4 APIs (M3, M5).
 - Licences, if OmniFlow is ever distributed: libserialport is LGPL-3.0, and each dependency's licence needs checking before a release.

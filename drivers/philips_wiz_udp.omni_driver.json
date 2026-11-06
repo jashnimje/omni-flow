@@ -9,8 +9,8 @@
     {
       "method": "udp_broadcast",
       "port": 38899,
-      "probe": { "method": "getSystemConfig", "params": {} },
-      "matchJsonPath": "$.result.moduleName",
+      "probe": { "method": "registration", "params": { "phoneMac": "AAAAAAAAAAAA", "register": false, "phoneIp": "1.2.3.4", "id": "1" } },
+      "matchJsonPath": "$.result.mac",
       "idJsonPath": "$.result.mac"
     }
   ],

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "omniflow_mcu_serial",
+  "name": "OmniFlow board (Pico or Arduino over USB serial)",
+  "category": "microcontroller",
+  "icon": "usb",
+  "transport": { "type": "serial", "baud": 115200, "requestId": true },
+  "discovery": [{ "method": "serial", "usbVendorId": 11914 }],
+  "statePush": { "jsonPath": "$" },
+  "statePoll": { "intervalSeconds": 120, "command": { "cmd": "describe" } },
+  "reliability": { "timeoutMs": 800, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "ir_nec",
+      "type": "action",
+      "label": "Send NEC IR (address and command)",
+      "params": {
+        "address": { "type": "number", "min": 0, "max": 65535 },
+        "command": { "type": "number", "min": 0, "max": 255 }
+      },
+      "command": { "cmd": "ir_send", "protocol": "NEC", "address": "{{address}}", "command": "{{command}}" }
+    },
+    {
+      "id": "ir_send",
+      "type": "text_command",
+      "label": "Send NEC IR (32-bit code, MSB first)",
+      "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
+      "command": { "cmd": "ir_send", "protocol": "NEC", "hex": "{{value}}" }
+    },
+    {
+      "id": "led",
+      "type": "toggle",
+      "label": "Onboard LED (Pico)",
+      "command": { "cmd": "led", "value": "{{value}}" }
+    },
+    { "id": "relay_on", "type": "action", "label": "Relay on (Arduino)", "command": { "cmd": "relay_on" } },
+    { "id": "relay_off", "type": "action", "label": "Relay off (Arduino)", "command": { "cmd": "relay_off" } }
+  ]
+}

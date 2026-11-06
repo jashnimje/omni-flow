@@ -3,6 +3,20 @@
 Pure Dart OmniFlow engine and the `omni` CLI. Design: `../../docs/DESIGN.md`.
 
 ```sh
-dart test
+dart test                                   # unit tests
+OMNI_KEYCHAIN_TEST=1 dart test --tags live  # plus live tests (keychain, SSH when OMNI_SSH_* is set)
 dart run omniflow_engine:omni --help
 ```
+
+Data lives in `$OMNIFLOW_HOME` (default `~/.omniflow`), secrets in the macOS keychain under the `omniflow` service.
+
+```sh
+omni device add desk_lamp --driver philips_wiz_udp --host 192.168.1.40 --stable-id a8bb50aabbcc
+omni device invoke desk_lamp color_temp value=3000 brightness=80
+
+omni device add plug --driver tuya_plug --host 192.168.1.41 --set devId=bf...
+omni secret set plug localKey < local_key.txt
+omni device invoke plug power value=true
+```
+
+After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build`.

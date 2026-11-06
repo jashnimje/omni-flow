@@ -42,3 +42,6 @@ __pycache__/
 # Temporary files
 *.tmp
 *.bak
+
+# Board settings with Wi-Fi credentials (copy config.example.json)
+firmware/**/config.json

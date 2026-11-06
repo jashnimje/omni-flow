@@ -23,6 +23,7 @@ class ParamSpec {
     this.unit,
     this.optional = false,
     this.values = const [],
+    this.pattern,
   });
 
   final ParamType type;
@@ -31,6 +32,9 @@ class ParamSpec {
   final String? unit;
   final bool optional;
   final List<String> values;
+
+  /// For a string param, a regular expression the whole value must match.
+  final RegExp? pattern;
 
   static ParamSpec? parse(Object? json, String path, IssueCollector issues) {
     if (json is! Map) {
@@ -64,6 +68,25 @@ class ParamSpec {
         values.addAll(rawValues.cast<String>());
       }
     }
+    RegExp? pattern;
+    final rawPattern = map['pattern'];
+    if (rawPattern != null) {
+      if (type != ParamType.string || rawPattern is! String) {
+        issues.add(
+          '$path.pattern',
+          'only a string param takes a pattern, as a string',
+        );
+      } else {
+        try {
+          pattern = RegExp('^(?:$rawPattern)\$');
+        } on FormatException catch (e) {
+          issues.add(
+            '$path.pattern',
+            'is not a valid regular expression: ${e.message}',
+          );
+        }
+      }
+    }
     final optional = map['optional'];
     if (optional != null && optional is! bool) {
       issues.add('$path.optional', 'must be a boolean');
@@ -75,6 +98,7 @@ class ParamSpec {
       unit: map['unit'] is String ? map['unit'] as String : null,
       optional: optional == true,
       values: values,
+      pattern: pattern,
     );
   }
 
@@ -89,6 +113,9 @@ class ParamSpec {
         if (value is! bool) return 'must be true or false';
       case ParamType.string:
         if (value is! String) return 'must be a string';
+        if (pattern != null && !pattern!.hasMatch(value)) {
+          return 'does not match the required format';
+        }
       case ParamType.enumeration:
         if (value is! String || !values.contains(value)) {
           return 'must be one of ${values.join(', ')}';

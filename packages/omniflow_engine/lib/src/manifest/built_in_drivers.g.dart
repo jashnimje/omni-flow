@@ -2,6 +2,179 @@
 
 /// Built-in driver manifest sources, keyed by file name.
 const builtInDriverSources = <String, String>{
+  'linux_host.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "linux_host",
+  "name": "Linux host (over SSH)",
+  "category": "computer",
+  "icon": "server",
+  "transport": { "type": "exec", "port": 22 },
+  "settings": [
+    { "key": "username", "label": "Username" },
+    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
+  ],
+  "reliability": { "timeoutMs": 15000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "service_restart",
+      "type": "text_command",
+      "label": "Restart a systemd service (needs passwordless sudo for it)",
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
+      "command": ["sudo", "-n", "systemctl", "restart", "{{value}}"]
+    },
+    {
+      "id": "user_service_restart",
+      "type": "text_command",
+      "label": "Restart a user systemd service",
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
+      "command": ["systemctl", "--user", "restart", "{{value}}"]
+    },
+    {
+      "id": "suspend",
+      "type": "action",
+      "label": "Suspend",
+      "command": ["systemctl", "suspend"]
+    }
+  ]
+}
+''',
+  'macos_host.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "macos_host",
+  "name": "Mac (over SSH, or this Mac from omni)",
+  "category": "computer",
+  "icon": "laptop",
+  "transport": { "type": "exec", "port": 22 },
+  "settings": [
+    { "key": "username", "label": "Username" },
+    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
+  ],
+  "reliability": { "timeoutMs": 10000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "volume",
+      "type": "level",
+      "label": "Volume",
+      "params": { "value": { "type": "number", "min": 0, "max": 100, "unit": "%" } },
+      "command": ["osascript", "-e", "set volume output volume {{value}}"]
+    },
+    {
+      "id": "display_wake",
+      "type": "action",
+      "label": "Wake display",
+      "command": ["caffeinate", "-u", "-t", "2"]
+    },
+    {
+      "id": "display_sleep",
+      "type": "action",
+      "label": "Sleep display",
+      "command": ["pmset", "displaysleepnow"]
+    },
+    {
+      "id": "run_shortcut",
+      "type": "text_command",
+      "label": "Run a Mac shortcut",
+      "params": { "stdin": { "type": "string", "optional": true } },
+      "command": ["shortcuts", "run", "{{value}}"]
+    }
+  ]
+}
+''',
+  'omniflow_mcu_node.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "omniflow_mcu_node",
+  "name": "OmniFlow board (Pico W over Wi-Fi)",
+  "category": "microcontroller",
+  "icon": "cpu",
+  "transport": { "type": "udp", "port": 38950, "payload": "json", "requestId": true },
+  "discovery": [
+    { "method": "ble", "nameMatch": "^OMNI_" },
+    { "method": "serial", "usbVendorId": 11914 }
+  ],
+  "statePush": { "jsonPath": "$" },
+  "statePoll": { "intervalSeconds": 120, "command": { "cmd": "describe" } },
+  "reliability": { "timeoutMs": 600, "retries": 2 },
+  "capabilities": [
+    {
+      "id": "ir_nec",
+      "type": "action",
+      "label": "Send NEC IR (address and command)",
+      "params": {
+        "address": { "type": "number", "min": 0, "max": 65535 },
+        "command": { "type": "number", "min": 0, "max": 255 }
+      },
+      "command": { "cmd": "ir_send", "protocol": "NEC", "address": "{{address}}", "command": "{{command}}" }
+    },
+    {
+      "id": "ir_send",
+      "type": "text_command",
+      "label": "Send NEC IR (32-bit code, MSB first)",
+      "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
+      "command": { "cmd": "ir_send", "protocol": "NEC", "hex": "{{value}}" }
+    },
+    {
+      "id": "led",
+      "type": "toggle",
+      "label": "Onboard LED",
+      "command": { "cmd": "led", "value": "{{value}}" }
+    },
+    {
+      "id": "gpio_write",
+      "type": "action",
+      "label": "Set an output pin",
+      "params": {
+        "pin": { "type": "number", "min": 0, "max": 28 },
+        "value": { "type": "boolean" }
+      },
+      "command": { "cmd": "gpio_write", "pin": "{{pin}}", "value": "{{value}}" }
+    }
+  ]
+}
+''',
+  'omniflow_mcu_serial.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "omniflow_mcu_serial",
+  "name": "OmniFlow board (Pico or Arduino over USB serial)",
+  "category": "microcontroller",
+  "icon": "usb",
+  "transport": { "type": "serial", "baud": 115200, "requestId": true },
+  "discovery": [{ "method": "serial", "usbVendorId": 11914 }],
+  "statePush": { "jsonPath": "$" },
+  "statePoll": { "intervalSeconds": 120, "command": { "cmd": "describe" } },
+  "reliability": { "timeoutMs": 800, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "ir_nec",
+      "type": "action",
+      "label": "Send NEC IR (address and command)",
+      "params": {
+        "address": { "type": "number", "min": 0, "max": 65535 },
+        "command": { "type": "number", "min": 0, "max": 255 }
+      },
+      "command": { "cmd": "ir_send", "protocol": "NEC", "address": "{{address}}", "command": "{{command}}" }
+    },
+    {
+      "id": "ir_send",
+      "type": "text_command",
+      "label": "Send NEC IR (32-bit code, MSB first)",
+      "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
+      "command": { "cmd": "ir_send", "protocol": "NEC", "hex": "{{value}}" }
+    },
+    {
+      "id": "led",
+      "type": "toggle",
+      "label": "Onboard LED (Pico)",
+      "command": { "cmd": "led", "value": "{{value}}" }
+    },
+    { "id": "relay_on", "type": "action", "label": "Relay on (Arduino)", "command": { "cmd": "relay_on" } },
+    { "id": "relay_off", "type": "action", "label": "Relay off (Arduino)", "command": { "cmd": "relay_off" } }
+  ]
+}
+''',
   'philips_wiz_udp.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -14,8 +187,8 @@ const builtInDriverSources = <String, String>{
     {
       "method": "udp_broadcast",
       "port": 38899,
-      "probe": { "method": "getSystemConfig", "params": {} },
-      "matchJsonPath": "$.result.moduleName",
+      "probe": { "method": "registration", "params": { "phoneMac": "AAAAAAAAAAAA", "register": false, "phoneIp": "1.2.3.4", "id": "1" } },
+      "matchJsonPath": "$.result.mac",
       "idJsonPath": "$.result.mac"
     }
   ],
@@ -63,6 +236,53 @@ const builtInDriverSources = <String, String>{
         "method": "setPilot",
         "params": { "state": true, "r": "{{r}}", "g": "{{g}}", "b": "{{b}}", "dimming": "{{brightness|state.dimming|100}}" }
       }
+    }
+  ]
+}
+''',
+  'shelly_plus_switch.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "shelly_plus_switch",
+  "name": "Shelly Plus or Pro switch (Gen2 local RPC, switch 0)",
+  "category": "power",
+  "icon": "plug",
+  "transport": { "type": "http", "port": 80 },
+  "statePoll": { "intervalSeconds": 60, "command": { "path": "/rpc/Switch.GetStatus", "query": { "id": 0 } } },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "path": "/rpc/Switch.Set", "query": { "id": 0, "on": "{{value}}" } },
+      "stateJsonPath": "$.output"
+    }
+  ]
+}
+''',
+  'tuya_plug.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "tuya_plug",
+  "name": "Tuya smart plug (local, switch on DP 1)",
+  "category": "power",
+  "icon": "plug",
+  "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
+  "settings": [
+    { "key": "devId", "label": "Device id" },
+    { "key": "localKey", "label": "Local key", "secret": true }
+  ],
+  "statePush": { "jsonPath": "$.dps" },
+  "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
+  "reliability": { "timeoutMs": 1500, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "cmd": "control", "dps": { "1": "{{value}}" } },
+      "stateJsonPath": "$['1']"
     }
   ]
 }

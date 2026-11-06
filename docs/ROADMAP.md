@@ -1,6 +1,6 @@
 # OmniFlow Roadmap
 
-> Status: active. M0 done apart from the Android SDK setup. Before M1: the hardware and network checks below. Design: `docs/DESIGN.md`.
+> Status: active. M1 code is complete and tested against emulated devices, except MQTT (deferred) and Tuya v3.4 or v3.5 (waiting on the scan). Next: the M1 live exit test on real hardware, then M2. Design: `docs/DESIGN.md`.
 
 Android is the only app target. Headless-first vertical slices: the engine is proven from the CLI on the Mac before the app wraps it. Every milestone ends with a test that runs against real hardware where it is available. Live hardware: Philips WiZ, Tuya/Wipro, Pico W and Arduino. The Android TV is owned but not yet available, so ADB is tested against fixtures until it is.
 
@@ -16,17 +16,17 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 
 ## M1 - Drivers and transports from the CLI
 
-- [ ] Core API: command and event message types, with the CLI calling only them.
+- [x] Core API: command messages (`OmniEngine.handle`) and event messages (`OmniEngine.events`: `device.stateChanged`, `wiz.firstBeat`, `packet.captured`).
 - [x] Manifest model and validator for schema v1, with typed param checks and static placeholder checks.
 - [x] Driver registry with embedded built-ins (`tool/embed_drivers.dart`, checked by a test).
 - [x] Structured template renderer with typed params and fallback chains.
-- [ ] drift database with migrations, the database lock file, and `SecretStore` (macOS keychain for the CLI).
-- [ ] Transports: UDP with request and retry, Wake-on-LAN, directed broadcast and the packet tap (done), WiZ registration, the Tuya v3.3 codec with frame splitting, matching tinytuya golden frames (done), TCP transport for Tuya, v3.4 or v3.5 if the scan below needs them, HTTP, MQTT, local argv execution and POSIX quoting for SSH (done), the SSH executor with host-key pinning, the NDJSON line decoder with streaming UTF-8 and a line cap (done), serial port access.
-- [ ] Device runtime: per-device queue, timeouts and retries, address healing, polling and liveness, optimistic state.
-- [ ] Discovery: UDP probe with subnet-directed broadcast, mDNS, serial port watch.
-- [ ] Built-in drivers: WiZ (done), Tuya local, macOS host, Linux host, MCU node, Android TV ADB (fixture-tested).
-- [ ] Firmware v1: Pico pin allowlist, `describe`, request ids, UDP NDJSON channel with `config.json`. Arduino: bounded buffer, `describe`.
-- [ ] CLI: `omni driver list|validate|discover`, `omni device add|list|invoke`, `omni sniff udp|serial`.
+- [x] drift database (schema v1: devices and user manifests, the flow tables come with M2), the database lock file, and `SecretStore` with the macOS keychain store for the CLI (its live test passed once, opt-in with `OMNI_KEYCHAIN_TEST=1`).
+- [ ] Transports: UDP with request and retry, Wake-on-LAN, directed broadcast and the packet tap (done), WiZ push registration renewed every 20 s with `syncPilot` routed by MAC (done), the Tuya v3.3 codec with frame splitting, matching tinytuya golden frames (done), the Tuya TCP channel with a persistent connection per device (done), v3.4 or v3.5 if the scan below needs them, HTTP (done, with Shelly Gen2 RPC checked against Shelly's docs), MQTT (deferred until a device needs it: none of the current hardware speaks MQTT, and it needs a broker to test against), local argv execution and POSIX quoting for SSH (done), the SSH executor with host keys pinned on first use (done, live test opt-in: `OMNI_SSH_HOST`, `OMNI_SSH_USER`, `OMNI_SSH_KEY`), the NDJSON line decoder with streaming UTF-8 and a line cap (done), serial port access through stty, with reads via cat so a close never blocks (done, tested over a pseudo-terminal).
+- [x] Device runtime: per-device queue, timeouts and retries, address healing, poll and push state, optimistic state, liveness check. Scheduling the polls lands with `omni hub` in M2.
+- [x] Discovery: UDP probe to 255.255.255.255 and a /24 broadcast per interface, matched by JSONPath, with the stable id read for address healing. USB serial boards found by sending `describe` to each `/dev/cu.usbmodem*` or `/dev/ttyACM*` port. Both behind `omni device discover`. mDNS waits for a device that needs it (WiZ does not use it, Shelly works by IP).
+- [ ] Built-in drivers: WiZ (done), Tuya plug on DP 1 (done; bulb DPs after the scan), macOS host (done), Linux host (done), Shelly Plus switch (done), MCU node over UDP and over USB serial (done), Android TV ADB (moved to M4 with the rest of ADB: the TV is not available and the AOSP protocol reference could not be fetched).
+- [x] Firmware v1: Pico pin allowlist, `describe`, request ids, onboard LED, UDP NDJSON channel with `config.json`. Arduino: bounded buffer, `describe`, request ids. Pico code passes a Python syntax check and its NEC bit logic passes a host test (`firmware/pico_w/test_nec.py`). The Arduino sketch is not compiled yet (no `arduino-cli`). Neither has run on a board.
+- [x] CLI: `omni driver list|validate|register`, `omni device add|discover|list|get|invoke|refresh|remove`, `omni secret set`, `omni watch [--packets]` (which replaces the planned `omni sniff`).
 - Exit: from the CLI, the real WiZ goes to 80% at 3000K, the real Tuya plug toggles, the Pico acknowledges an IR send over serial and over UDP, and the Mac changes volume over SSH.
 
 ## M2 - Flow engine running headless
@@ -105,11 +105,37 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 - No secrets in the repo: a grep for key-shaped strings before each commit, and fixtures use made-up keys.
 - High-risk content from MCP, the architect and imports waits for approval.
 
+## Checked against references
+
+What the code and design assume, checked on 2026-11-06 against primary sources. "Confirmed" means the source says it. "Fixed" means the source disagreed and the code or design changed.
+
+| Claim | Source | Result |
+| --- | --- | --- |
+| Tuya v3.3 frame: 0x55AA prefix, length covers CRC and suffix, CRC-32 over header and payload, version header only on some commands, 4-byte return code in replies | tinytuya 1.20 source (`message_helper.py`, `header.py`, `command_types.py`) | Confirmed. The codec matches tinytuya frames byte for byte |
+| Tuya v3.5 uses the 0x6699 prefix and AES-GCM | tinytuya `pack_message` | Confirmed |
+| A Tuya device allows one TCP connection, and the vendor app takes it | tinytuya README | Confirmed |
+| A Tuya local key survives re-pairing | tinytuya README | Fixed. The key changes on every re-pair. Design says to fetch and store it again |
+| WiZ discovery with a `getSystemConfig` probe matched on `result.moduleName` | pywizlight `discovery.py` | Fixed. pywizlight broadcasts `registration` with `register: false` and reads `result.mac`. The manifest now does the same |
+| WiZ pushes need a `registration` call, renewed, to port 38900 | pywizlight `push_manager.py`, `bulb.py` | Confirmed: `phoneIp`, `register: true`, `phoneMac`, listen on 38900, renew every 20 s, no reply to `syncPilot` |
+| WiZ dimming 10 to 100, RGB 0 to 255 | pywizlight `bulb.py` | Confirmed. Colour temperature is clamped to 1000 to 10000 K there, and the manifest's 2200 to 6500 K stays as an open item per bulb |
+| NEC sends the 32-bit value most significant bit first | SB-Projects NEC page, Arduino-IRremote README | Fixed. NEC is LSB first per byte. The firmware now also takes `address` and `command`, and the `hex` form is documented as the older MSB convention (`sendNECMSB()`) |
+| Pico W GPIO 23, 24, 25, 29 belong to the CYW43, and the LED is on the wireless chip | pico-sdk `boards/pico_w.h`, Raspberry Pi Pico docs | Confirmed: `WL_REG_ON` 23, data and host wake 24, `WL_CS` 25, `WL_CLOCK` 29, LED is `WL_GPIO0` |
+| `$.1` is a valid JSONPath | RFC 9535 section 2.5.1.1 | Fixed earlier. A dotted name cannot start with a digit, so the plug uses `$['1']` |
+| Android needs a multicast lock for broadcast and multicast | Android `WifiManager.MulticastLock` reference | Partly. The reference covers multicast only. Broadcast stays an on-phone check |
+| Android stops unfiltered BLE scans with the screen off | Android `BluetoothLeScanner` reference | Confirmed. Filtered scans keep running |
+| A filtered `PendingIntent` scan can wake the app when a beacon is in range | Android BLE background guide | Confirmed, and added to the design as the low-power wake-up |
+| `neverForLocation` filters some beacons from results | Android Bluetooth permissions guide | Confirmed |
+| `dataSync` services get 6 hours per day on Android 15, and `BOOT_COMPLETED` cannot start `dataSync` | Android 15 behaviour changes | Confirmed. The design uses `connectedDevice` and `location` |
+| A `location` service cannot be created from the background | Android foreground service restrictions | Confirmed |
+| dartssh2 accepts any host key when no verifier is passed | dartssh2 4.1 source (`ssh_transport.dart`) | Confirmed, so `SshExecutor` always passes one. The fingerprint is `SHA256:` plus base64, like `ssh-keygen -l` |
+| macOS has local network privacy | macOS developer forums (points to TN3179) | Confirmed since macOS 15. Whether it applies to a CLI run from a terminal was not readable, and it is a candidate cause of the empty first discovery |
+| ADB legacy protocol (CNXN, AUTH token types, OPEN, WRTE) | AOSP `protocol.txt` | Not checked. Every mirror tried returned 404. Checked before the ADB work in M4 |
+
 ## Verification
 
 - Engine: `dart analyze`, `dart format --set-exit-if-changed .`, `dart test`. Live tests: `dart test --tags live`, opt-in, against real devices.
 - App: `flutter analyze`, `flutter test`, then runs on a real Android phone, with screenshots.
-- Firmware: `mpremote run` on the Pico W with a `describe` and `ir_send` round trip, and `arduino-cli compile` for the sketch.
+- Firmware: `python3 -I firmware/pico_w/test_nec.py` on the host, then `mpremote` on the Pico W with a `describe` and `ir_send` round trip, and `arduino-cli compile` for the sketch.
 
 ## Log
 
@@ -117,3 +143,6 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 - 2026-11-06: Workspace scaffolded. Engine: `dart analyze` clean, `dart format` clean, 2 tests pass, `dart run omniflow_engine:omni --version` prints `omni 0.1.0`. App: `flutter analyze` clean, 1 widget test passes. No device build yet (needs the Android SDK).
 - 2026-11-06: Design review. Added the command and event core API, single database owner, protocol coverage, device runtime (queue, retries, address healing, polling), zones as entities, time-scaled Kalman Q, run modes, sensors on demand, the UI section, and Android service types verified against the Android 15 behaviour changes. Original spec files removed after every piece of their content was folded into `docs/DESIGN.md` or into a decision there. Repo identity moved from a repo-local setting to `includeIf`.
 - 2026-11-06: Scope set to Android only, with no accounts. Sync choices (Google sign-in, encrypted Drive change log, first-wins claims over home Wi-Fi) recorded in `docs/DESIGN.md` as deferred.
+- 2026-11-06: M1 engine batches landed: template renderer, manifests, registry, UDP, Tuya codec and channel, host exec, SSH, NDJSON, device runtime, storage, core API, CLI and WiZ discovery. 130 tests pass. The first `omni device discover --driver philips_wiz_udp` on the real LAN found no bulbs, not yet diagnosed (bulb power, network, or the Mac Local Network permission for the terminal).
+- 2026-11-06: Checked the build against primary references (tinytuya, pywizlight, SB-Projects NEC, pico-sdk, RFC 9535, Android and macOS docs, dartssh2 source). Two fixes landed: the WiZ discovery probe and NEC bit order. Findings are in the table above.
+- 2026-11-06: M1 completed in code: WiZ push, engine events and `omni watch`, the HTTP channel with Shelly and Linux drivers, USB serial with discovery. 148 engine tests pass. Live hardware test still to run.

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "linux_host",
+  "name": "Linux host (over SSH)",
+  "category": "computer",
+  "icon": "server",
+  "transport": { "type": "exec", "port": 22 },
+  "settings": [
+    { "key": "username", "label": "Username" },
+    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
+  ],
+  "reliability": { "timeoutMs": 15000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "service_restart",
+      "type": "text_command",
+      "label": "Restart a systemd service (needs passwordless sudo for it)",
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
+      "command": ["sudo", "-n", "systemctl", "restart", "{{value}}"]
+    },
+    {
+      "id": "user_service_restart",
+      "type": "text_command",
+      "label": "Restart a user systemd service",
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
+      "command": ["systemctl", "--user", "restart", "{{value}}"]
+    },
+    {
+      "id": "suspend",
+      "type": "action",
+      "label": "Suspend",
+      "command": ["systemctl", "suspend"]
+    }
+  ]
+}

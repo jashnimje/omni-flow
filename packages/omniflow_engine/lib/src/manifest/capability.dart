@@ -112,6 +112,7 @@ class CapabilitySpec {
       _checkPlaceholders(command, params, '$path.command', issues);
     }
     final stateJsonPath = issues.optionalString(map, 'stateJsonPath', path);
+    issues.jsonPath(stateJsonPath, '$path.stateJsonPath');
     if (issues.issues.length > before || id == null || type == null) {
       return null;
     }

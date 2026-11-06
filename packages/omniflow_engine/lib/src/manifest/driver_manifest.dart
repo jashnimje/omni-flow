@@ -177,6 +177,8 @@ class DriverManifest {
         );
         continue;
       }
+      issues.jsonPath(entry['matchJsonPath'], '$path.matchJsonPath');
+      issues.jsonPath(entry['idJsonPath'], '$path.idJsonPath');
       discovery.add(
         DiscoverySpec(
           entry['method'] as String,
@@ -248,6 +250,8 @@ class DriverManifest {
 
     final statePush = issues.optionalMap(map, 'statePush', root);
     final statePoll = issues.optionalMap(map, 'statePoll', root);
+    issues.jsonPath(statePush?['jsonPath'], '$root.statePush.jsonPath');
+    issues.jsonPath(statePoll?['jsonPath'], '$root.statePoll.jsonPath');
 
     if (issues.hasIssues ||
         id == null ||

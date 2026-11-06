@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "macos_host",
+  "name": "Mac (over SSH, or this Mac from omni)",
+  "category": "computer",
+  "icon": "laptop",
+  "transport": { "type": "exec", "port": 22 },
+  "settings": [
+    { "key": "username", "label": "Username" },
+    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
+  ],
+  "reliability": { "timeoutMs": 10000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "volume",
+      "type": "level",
+      "label": "Volume",
+      "params": { "value": { "type": "number", "min": 0, "max": 100, "unit": "%" } },
+      "command": ["osascript", "-e", "set volume output volume {{value}}"]
+    },
+    {
+      "id": "display_wake",
+      "type": "action",
+      "label": "Wake display",
+      "command": ["caffeinate", "-u", "-t", "2"]
+    },
+    {
+      "id": "display_sleep",
+      "type": "action",
+      "label": "Sleep display",
+      "command": ["pmset", "displaysleepnow"]
+    },
+    {
+      "id": "run_shortcut",
+      "type": "text_command",
+      "label": "Run a Mac shortcut",
+      "params": { "stdin": { "type": "string", "optional": true } },
+      "command": ["shortcuts", "run", "{{value}}"]
+    }
+  ]
+}

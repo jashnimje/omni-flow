@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "shelly_plus_switch",
+  "name": "Shelly Plus or Pro switch (Gen2 local RPC, switch 0)",
+  "category": "power",
+  "icon": "plug",
+  "transport": { "type": "http", "port": 80 },
+  "statePoll": { "intervalSeconds": 60, "command": { "path": "/rpc/Switch.GetStatus", "query": { "id": 0 } } },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "path": "/rpc/Switch.Set", "query": { "id": 0, "on": "{{value}}" } },
+      "stateJsonPath": "$.output"
+    }
+  ]
+}

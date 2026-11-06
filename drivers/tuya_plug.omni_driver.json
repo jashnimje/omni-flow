@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "tuya_plug",
+  "name": "Tuya smart plug (local, switch on DP 1)",
+  "category": "power",
+  "icon": "plug",
+  "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
+  "settings": [
+    { "key": "devId", "label": "Device id" },
+    { "key": "localKey", "label": "Local key", "secret": true }
+  ],
+  "statePush": { "jsonPath": "$.dps" },
+  "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
+  "reliability": { "timeoutMs": 1500, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "cmd": "control", "dps": { "1": "{{value}}" } },
+      "stateJsonPath": "$['1']"
+    }
+  ]
+}

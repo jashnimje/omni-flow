@@ -42,6 +42,29 @@ void main() {
     }
   });
 
+  test('a device reply with a return code matches tinytuya too', () {
+    final v = vector('statusReply');
+    final frame = codec.encode(
+      seq: v['seq'] as int,
+      command: v['cmd'] as int,
+      body: Map<String, Object?>.from(v['body'] as Map),
+      retcode: v['retcode'] as int,
+    );
+    expect(toHex(frame), v['frameHex']);
+  });
+
+  test('an acknowledgement with no body decodes to a null body', () {
+    final ack = codec.encode(
+      seq: 5,
+      command: TuyaCommand.control,
+      body: null,
+      retcode: 0,
+    );
+    final frame = codec.decode(ack);
+    expect(frame.retcode, 0);
+    expect(frame.body, isNull);
+  });
+
   group('decode', () {
     test('a device status reply, with its return code', () {
       final v = vector('statusReply');

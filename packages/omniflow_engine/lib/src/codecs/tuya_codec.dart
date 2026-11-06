@@ -86,20 +86,28 @@ class TuyaCodec {
   final String version;
 
   /// A client frame: header, optional version header, AES-128-ECB body, CRC-32, suffix.
+  ///
+  /// A device reply (for an emulator or a test) passes [retcode], which goes
+  /// right after the header. A null [body] sends no payload, as a device does
+  /// when it acknowledges a control command.
   Uint8List encode({
     required int seq,
     required int command,
-    required Map<String, Object?> body,
+    required Map<String, Object?>? body,
+    int? retcode,
   }) {
-    final encrypted = _aes(
-      true,
-      Uint8List.fromList(utf8.encode(jsonEncode(body))),
-    );
     final payload = BytesBuilder(copy: false);
-    if (!TuyaCommand.withoutVersionHeader.contains(command)) {
-      payload.add(_version33Header);
+    if (retcode != null) {
+      payload.add((ByteData(4)..setUint32(0, retcode)).buffer.asUint8List());
     }
-    payload.add(encrypted);
+    if (body != null) {
+      if (!TuyaCommand.withoutVersionHeader.contains(command)) {
+        payload.add(_version33Header);
+      }
+      payload.add(
+        _aes(true, Uint8List.fromList(utf8.encode(jsonEncode(body)))),
+      );
+    }
     final payloadBytes = payload.toBytes();
 
     final header = ByteData(_headerLength)

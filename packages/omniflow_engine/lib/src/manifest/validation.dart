@@ -1,3 +1,5 @@
+import 'package:json_path/json_path.dart';
+
 /// One problem found while validating input, with the JSON path it sits at.
 class ValidationIssue {
   const ValidationIssue(this.path, this.message);
@@ -91,5 +93,19 @@ class IssueCollector {
     if (value is List) return value;
     add('$path.$key', 'must be an array');
     return const [];
+  }
+
+  /// Records an issue when [expression] is set but is not valid JSONPath.
+  void jsonPath(Object? expression, String path) {
+    if (expression == null) return;
+    if (expression is! String) {
+      add(path, 'must be a JSONPath string');
+      return;
+    }
+    try {
+      JsonPath(expression);
+    } on FormatException catch (e) {
+      add(path, 'is not valid JSONPath: ${e.message}');
+    }
   }
 }
