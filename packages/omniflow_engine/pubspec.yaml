@@ -1,0 +1,19 @@
+name: omniflow_engine
+description: Pure Dart OmniFlow engine (no Flutter dependency) and the omni CLI. Driver manifests, transports, flow validation and execution, presence filtering, storage and MCP tools.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+executables:
+  omni: omni
+
+dependencies:
+  args: ^2.7.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

@@ -1,0 +1,44 @@
+# Per-repo gitignore - toolchain noise (workspace-hardening 28.1, R33.3/R17.3).
+# OS noise and credential patterns come from the global ~/.gitignore_global.
+
+# Dart / Flutter
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/ios/Flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
+**/android/.gradle/
+**/android/local.properties
+**/ios/Pods/
+**/macos/Pods/
+coverage/
+
+# Python (firmware tooling, golden-vector scripts)
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local device data and secrets used by live tests
+.omniflow/
+*.secrets.json
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# Temporary files
+*.tmp
+*.bak
