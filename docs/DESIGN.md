@@ -173,14 +173,15 @@ A driver manifest describes one kind of device: how to find it, how to talk to i
         "value": { "type": "number", "min": 2200, "max": 6500, "unit": "K" },
         "brightness": { "type": "number", "min": 10, "max": 100, "optional": true }
       },
-      "command": { "method": "setPilot", "params": { "state": true, "temp": "{{value}}", "dimming": "{{brightness|state.brightness|100}}" } },
+      "command": { "method": "setPilot", "params": { "state": true, "temp": "{{value}}", "dimming": "{{brightness|state.dimming|100}}" } },
       "stateJsonPath": "$.temp"
     },
     {
       "id": "rgb",
       "type": "color_rgb",
       "label": "Colour",
-      "command": { "method": "setPilot", "params": { "state": true, "r": "{{r}}", "g": "{{g}}", "b": "{{b}}", "dimming": "{{brightness|state.brightness|100}}" } }
+      "params": { "brightness": { "type": "number", "min": 10, "max": 100, "optional": true } },
+      "command": { "method": "setPilot", "params": { "state": true, "r": "{{r}}", "g": "{{g}}", "b": "{{b}}", "dimming": "{{brightness|state.dimming|100}}" } }
     }
   ]
 }
@@ -213,8 +214,8 @@ The type decides the UI control, the default `value` parameter and how an agent 
 
 Commands are structured JSON templates, not text templates. The renderer walks the template. A string that is exactly one placeholder (`"{{value}}"`) is replaced by the typed value, so `true` stays a boolean and `80` stays a number. A string with a placeholder inside other text gets string interpolation. This removes the escaping problem Mustache has with JSON, where `{{value}}` is HTML-escaped and would have to sit unquoted inside a JSON string.
 
-- A placeholder is a dotted path with optional fallbacks: `{{brightness|state.brightness|100}}`. The first path that resolves wins, and a literal number, string or boolean can end the chain.
-- Paths resolve against, in order: the action's params, the device's current state (`state.*`), non-secret device settings (`device.*`), flow variables (`%name`), global variables (`$Name`) and the triggering message (`msg.*`).
+- A placeholder is a dotted path with optional fallbacks: `{{brightness|state.dimming|100}}`. The first path that resolves wins, and a literal number, string or boolean can end the chain.
+- A bare name reads the action's params. Every other source needs a prefix: `state.*` (current device state), `device.*` (non-secret device settings), `msg.*` (the triggering message), `$Name` (global variables) and `%name` (flow variables). The manifest validator rejects a bare name that is not a declared param, so a typo fails at load time instead of at the first command.
 - Params are validated against the capability's `params` schema before rendering. A value out of range or of the wrong type fails the action without sending anything.
 - For `text` and `hex` payloads the template is a string. For `exec` the template is an argv array (see Transports), and each element is rendered as text with no shell involved.
 

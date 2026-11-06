@@ -17,13 +17,14 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 ## M1 - Drivers and transports from the CLI
 
 - [ ] Core API: command and event message types, with the CLI calling only them.
-- [ ] Manifest model, schema v1 in `schemas/`, validator, driver registry with embedded built-ins.
-- [ ] Structured template renderer with typed params and fallback chains.
+- [x] Manifest model and validator for schema v1, with typed param checks and static placeholder checks.
+- [x] Driver registry with embedded built-ins (`tool/embed_drivers.dart`, checked by a test).
+- [x] Structured template renderer with typed params and fallback chains.
 - [ ] drift database with migrations, the database lock file, and `SecretStore` (macOS keychain for the CLI).
-- [ ] Transports: UDP with Wake-on-LAN and WiZ registration, TCP with the Tuya codec (encode and decode, versions decided by the scan below), HTTP, MQTT, local and SSH argv execution with host-key pinning, serial with a streaming line splitter.
+- [ ] Transports: UDP with request and retry, Wake-on-LAN, directed broadcast and the packet tap (done), WiZ registration, the Tuya v3.3 codec with frame splitting, matching tinytuya golden frames (done), TCP transport for Tuya, v3.4 or v3.5 if the scan below needs them, HTTP, MQTT, local argv execution and POSIX quoting for SSH (done), the SSH executor with host-key pinning, the NDJSON line decoder with streaming UTF-8 and a line cap (done), serial port access.
 - [ ] Device runtime: per-device queue, timeouts and retries, address healing, polling and liveness, optimistic state.
 - [ ] Discovery: UDP probe with subnet-directed broadcast, mDNS, serial port watch.
-- [ ] Built-in drivers: WiZ, Tuya local, macOS host, Linux host, MCU node, Android TV ADB (fixture-tested).
+- [ ] Built-in drivers: WiZ (done), Tuya local, macOS host, Linux host, MCU node, Android TV ADB (fixture-tested).
 - [ ] Firmware v1: Pico pin allowlist, `describe`, request ids, UDP NDJSON channel with `config.json`. Arduino: bounded buffer, `describe`.
 - [ ] CLI: `omni driver list|validate|discover`, `omni device add|list|invoke`, `omni sniff udp|serial`.
 - Exit: from the CLI, the real WiZ goes to 80% at 3000K, the real Tuya plug toggles, the Pico acknowledges an IR send over serial and over UDP, and the Mac changes volume over SSH.
@@ -55,7 +56,7 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 
 ## M5 - MCP, AI architect, firmware generator
 
-- [ ] Tool registry with full validation and MCP error results, plus device-state resources.
+- [ ] Tool registry with full validation and MCP error results, plus device-state resources, and the manifest and flow JSON Schemas in `schemas/` for MCP clients.
 - [ ] `omni mcp` over stdio.
 - [ ] Approval flow in the app for high-risk manifests, flows and imports.
 - [ ] In-app architect on the command bar, with a diff and approval before anything is saved.

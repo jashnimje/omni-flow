@@ -1,0 +1,41 @@
+{
+  "generator": "tinytuya 1.20.0",
+  "localKey": "0123456789abcdef",
+  "control": {
+    "seq": 1,
+    "cmd": 7,
+    "body": {
+      "devId": "bf0000000000000000test",
+      "uid": "bf0000000000000000test",
+      "t": "1700000000",
+      "dps": {
+        "1": true
+      }
+    },
+    "frameHex": "000055aa000000010000000700000087332e33000000000000000000000000692cbbef37f7c782afdf7c5fe9c2479c11ae1d8da0ef348eb0298b038df701cc8fc41d5d006239f84c5db356c6ef6c98cf0545150034305f184dd405914bc331f9645c25b6fa8a9bfbe41e4dd4d1f3302125e1846bd4f824d1b2e468c239926631836d84bd28cb4b20619eb84882ca2ad51c69a60000aa55"
+  },
+  "statusQuery": {
+    "seq": 2,
+    "cmd": 10,
+    "body": {
+      "gwId": "bf0000000000000000test",
+      "devId": "bf0000000000000000test",
+      "uid": "bf0000000000000000test",
+      "t": "1700000000"
+    },
+    "frameHex": "000055aa000000020000000a0000008851fd05636f95317b33b19c404fc2360acf0545150034305f184dd405914bc3316548aebc81850480ec1ad4cf3b463b7611ae1d8da0ef348eb0298b038df701cc8fc41d5d006239f84c5db356c6ef6c98cf0545150034305f184dd405914bc331f9645c25b6fa8a9bfbe41e4dd4d1f3300efea48a0091daa595a3a780fe13bd0ea84719cb0000aa55"
+  },
+  "statusReply": {
+    "seq": 2,
+    "cmd": 10,
+    "retcode": 0,
+    "body": {
+      "devId": "bf0000000000000000test",
+      "dps": {
+        "1": true,
+        "2": 0
+      }
+    },
+    "frameHex": "000055aa000000020000000a0000004c00000000692cbbef37f7c782afdf7c5fe9c2479c11ae1d8da0ef348eb0298b038df701cc2125e1846bd4f824d1b2e468c2399266dbea79db61f4832f7a396fac415b49b1e1162ab00000aa55"
+  }
+}

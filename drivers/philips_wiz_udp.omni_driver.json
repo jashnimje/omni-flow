@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "philips_wiz_udp",
+  "name": "Philips WiZ Light (local UDP)",
+  "category": "lighting",
+  "icon": "lightbulb",
+  "transport": { "type": "udp", "port": 38899, "listenPort": 38900, "payload": "json" },
+  "discovery": [
+    {
+      "method": "udp_broadcast",
+      "port": 38899,
+      "probe": { "method": "getSystemConfig", "params": {} },
+      "matchJsonPath": "$.result.moduleName",
+      "idJsonPath": "$.result.mac"
+    }
+  ],
+  "statePush": { "method": "syncPilot", "jsonPath": "$.params" },
+  "statePoll": { "intervalSeconds": 60, "command": { "method": "getPilot", "params": {} }, "jsonPath": "$.result" },
+  "reliability": { "timeoutMs": 500, "retries": 2 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "id": 1, "method": "setState", "params": { "state": "{{value}}" } },
+      "stateJsonPath": "$.state"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "Brightness",
+      "params": { "value": { "type": "number", "min": 10, "max": 100, "unit": "%" } },
+      "command": { "id": 1, "method": "setPilot", "params": { "state": true, "dimming": "{{value}}" } },
+      "stateJsonPath": "$.dimming"
+    },
+    {
+      "id": "color_temp",
+      "type": "color_temp",
+      "label": "White temperature",
+      "params": {
+        "value": { "type": "number", "min": 2200, "max": 6500, "unit": "K" },
+        "brightness": { "type": "number", "min": 10, "max": 100, "optional": true }
+      },
+      "command": {
+        "id": 1,
+        "method": "setPilot",
+        "params": { "state": true, "temp": "{{value}}", "dimming": "{{brightness|state.dimming|100}}" }
+      },
+      "stateJsonPath": "$.temp"
+    },
+    {
+      "id": "rgb",
+      "type": "color_rgb",
+      "label": "Colour",
+      "params": { "brightness": { "type": "number", "min": 10, "max": 100, "optional": true } },
+      "command": {
+        "id": 1,
+        "method": "setPilot",
+        "params": { "state": true, "r": "{{r}}", "g": "{{g}}", "b": "{{b}}", "dimming": "{{brightness|state.dimming|100}}" }
+      }
+    }
+  ]
+}
