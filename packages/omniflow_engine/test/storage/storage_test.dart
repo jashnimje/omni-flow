@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:omniflow_engine/omniflow_engine.dart';
+import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 
 final sample = Device(
@@ -84,6 +85,71 @@ void main() {
     });
     expect(await DriftManifestStore(db).all(), ['{"id":"my_gadget"}']);
     await db.close();
+  });
+
+  test('a v1 database migrates to v2 and keeps its devices', () async {
+    final dir = await Directory.systemTemp.createTemp('omni_migrate');
+    addTearDown(() => dir.delete(recursive: true));
+    // The v1 tables, exactly as drift creates them (unchanged in v2).
+    final reference = OmniDatabase.memory();
+    await DriftDeviceStore(reference).all();
+    final ddl = [
+      for (final row
+          in await reference
+              .customSelect(
+                "SELECT sql FROM sqlite_master WHERE name IN ('devices', 'driver_manifests')",
+              )
+              .get())
+        row.read<String>('sql'),
+    ];
+    await reference.close();
+    expect(ddl, hasLength(2));
+    final file = File('${dir.path}/omniflow.sqlite');
+    final v1 = sqlite3.open(file.path);
+    for (final statement in ddl) {
+      v1.execute(statement);
+    }
+    v1.execute(
+      "INSERT INTO devices (id, name, driver_id, host) VALUES ('desk_lamp', 'Desk lamp', 'philips_wiz_udp', '10.0.0.5')",
+    );
+    v1.execute('PRAGMA user_version = 1');
+    v1.close();
+
+    final db = OmniDatabase.file(file);
+    addTearDown(db.close);
+    expect((await DriftDeviceStore(db).get('desk_lamp'))!.host, '10.0.0.5');
+    await DriftFlowStore(db).put(
+      'f',
+      {'id': 'f'},
+      enabled: true,
+      approved: true,
+      at: DateTime.utc(2026),
+    );
+    await DriftZoneStore(db).put('desk', {'id': 'desk'});
+    await DriftGlobalStore(db).put('HomeMode', 'home', DateTime.utc(2026));
+    expect((await DriftFlowStore(db).get('f'))!.approved, isTrue);
+    expect(await DriftZoneStore(db).all(), [
+      {'id': 'desk'},
+    ]);
+    expect(await DriftGlobalStore(db).all(), {'HomeMode': 'home'});
+    final version = await db.customSelect('PRAGMA user_version').getSingle();
+    expect(version.read<int>('user_version'), 2);
+  });
+
+  test('the execution log keeps only the newest rows', () async {
+    final db = OmniDatabase.memory();
+    addTearDown(db.close);
+    final log = ExecutionLogStore(db, cap: 3);
+    for (var i = 1; i <= 5; i++) {
+      await log.add({
+        'run': 'r$i',
+        'flow': i.isEven ? 'even' : 'odd',
+        'outcome': 'completed',
+        'startedAt': '2026-11-06T19:00:0${i}Z',
+      });
+    }
+    expect((await log.recent()).map((t) => t['run']), ['r5', 'r4', 'r3']);
+    expect((await log.recent(flowId: 'even')).map((t) => t['run']), ['r4']);
   });
 
   test(

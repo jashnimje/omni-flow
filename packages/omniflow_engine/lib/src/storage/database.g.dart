@@ -874,6 +874,1238 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
   }
 }
 
+class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FlowsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _flowJsonMeta = const VerificationMeta(
+    'flowJson',
+  );
+  @override
+  late final GeneratedColumn<String> flowJson = GeneratedColumn<String>(
+    'flow_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _enabledMeta = const VerificationMeta(
+    'enabled',
+  );
+  @override
+  late final GeneratedColumn<bool> enabled = GeneratedColumn<bool>(
+    'enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _approvedMeta = const VerificationMeta(
+    'approved',
+  );
+  @override
+  late final GeneratedColumn<bool> approved = GeneratedColumn<bool>(
+    'approved',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("approved" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    flowJson,
+    enabled,
+    approved,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'flows';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FlowRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('flow_json')) {
+      context.handle(
+        _flowJsonMeta,
+        flowJson.isAcceptableOrUnknown(data['flow_json']!, _flowJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_flowJsonMeta);
+    }
+    if (data.containsKey('enabled')) {
+      context.handle(
+        _enabledMeta,
+        enabled.isAcceptableOrUnknown(data['enabled']!, _enabledMeta),
+      );
+    }
+    if (data.containsKey('approved')) {
+      context.handle(
+        _approvedMeta,
+        approved.isAcceptableOrUnknown(data['approved']!, _approvedMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  FlowRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FlowRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      flowJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}flow_json'],
+      )!,
+      enabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}enabled'],
+      )!,
+      approved: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}approved'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $FlowsTable createAlias(String alias) {
+    return $FlowsTable(attachedDatabase, alias);
+  }
+}
+
+class FlowRow extends DataClass implements Insertable<FlowRow> {
+  final String id;
+  final String flowJson;
+  final bool enabled;
+
+  /// False while a flow from MCP, the AI architect or an import waits for
+  /// the user to approve its high-risk parts.
+  final bool approved;
+  final DateTime updatedAt;
+  const FlowRow({
+    required this.id,
+    required this.flowJson,
+    required this.enabled,
+    required this.approved,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['flow_json'] = Variable<String>(flowJson);
+    map['enabled'] = Variable<bool>(enabled);
+    map['approved'] = Variable<bool>(approved);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  FlowsCompanion toCompanion(bool nullToAbsent) {
+    return FlowsCompanion(
+      id: Value(id),
+      flowJson: Value(flowJson),
+      enabled: Value(enabled),
+      approved: Value(approved),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory FlowRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FlowRow(
+      id: serializer.fromJson<String>(json['id']),
+      flowJson: serializer.fromJson<String>(json['flowJson']),
+      enabled: serializer.fromJson<bool>(json['enabled']),
+      approved: serializer.fromJson<bool>(json['approved']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'flowJson': serializer.toJson<String>(flowJson),
+      'enabled': serializer.toJson<bool>(enabled),
+      'approved': serializer.toJson<bool>(approved),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  FlowRow copyWith({
+    String? id,
+    String? flowJson,
+    bool? enabled,
+    bool? approved,
+    DateTime? updatedAt,
+  }) => FlowRow(
+    id: id ?? this.id,
+    flowJson: flowJson ?? this.flowJson,
+    enabled: enabled ?? this.enabled,
+    approved: approved ?? this.approved,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  FlowRow copyWithCompanion(FlowsCompanion data) {
+    return FlowRow(
+      id: data.id.present ? data.id.value : this.id,
+      flowJson: data.flowJson.present ? data.flowJson.value : this.flowJson,
+      enabled: data.enabled.present ? data.enabled.value : this.enabled,
+      approved: data.approved.present ? data.approved.value : this.approved,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FlowRow(')
+          ..write('id: $id, ')
+          ..write('flowJson: $flowJson, ')
+          ..write('enabled: $enabled, ')
+          ..write('approved: $approved, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, flowJson, enabled, approved, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FlowRow &&
+          other.id == this.id &&
+          other.flowJson == this.flowJson &&
+          other.enabled == this.enabled &&
+          other.approved == this.approved &&
+          other.updatedAt == this.updatedAt);
+}
+
+class FlowsCompanion extends UpdateCompanion<FlowRow> {
+  final Value<String> id;
+  final Value<String> flowJson;
+  final Value<bool> enabled;
+  final Value<bool> approved;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const FlowsCompanion({
+    this.id = const Value.absent(),
+    this.flowJson = const Value.absent(),
+    this.enabled = const Value.absent(),
+    this.approved = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  FlowsCompanion.insert({
+    required String id,
+    required String flowJson,
+    this.enabled = const Value.absent(),
+    this.approved = const Value.absent(),
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       flowJson = Value(flowJson),
+       updatedAt = Value(updatedAt);
+  static Insertable<FlowRow> custom({
+    Expression<String>? id,
+    Expression<String>? flowJson,
+    Expression<bool>? enabled,
+    Expression<bool>? approved,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (flowJson != null) 'flow_json': flowJson,
+      if (enabled != null) 'enabled': enabled,
+      if (approved != null) 'approved': approved,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  FlowsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? flowJson,
+    Value<bool>? enabled,
+    Value<bool>? approved,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return FlowsCompanion(
+      id: id ?? this.id,
+      flowJson: flowJson ?? this.flowJson,
+      enabled: enabled ?? this.enabled,
+      approved: approved ?? this.approved,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (flowJson.present) {
+      map['flow_json'] = Variable<String>(flowJson.value);
+    }
+    if (enabled.present) {
+      map['enabled'] = Variable<bool>(enabled.value);
+    }
+    if (approved.present) {
+      map['approved'] = Variable<bool>(approved.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FlowsCompanion(')
+          ..write('id: $id, ')
+          ..write('flowJson: $flowJson, ')
+          ..write('enabled: $enabled, ')
+          ..write('approved: $approved, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ZonesTable extends Zones with TableInfo<$ZonesTable, ZoneRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ZonesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _zoneJsonMeta = const VerificationMeta(
+    'zoneJson',
+  );
+  @override
+  late final GeneratedColumn<String> zoneJson = GeneratedColumn<String>(
+    'zone_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, zoneJson];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'zones';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ZoneRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('zone_json')) {
+      context.handle(
+        _zoneJsonMeta,
+        zoneJson.isAcceptableOrUnknown(data['zone_json']!, _zoneJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_zoneJsonMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ZoneRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ZoneRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      zoneJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}zone_json'],
+      )!,
+    );
+  }
+
+  @override
+  $ZonesTable createAlias(String alias) {
+    return $ZonesTable(attachedDatabase, alias);
+  }
+}
+
+class ZoneRow extends DataClass implements Insertable<ZoneRow> {
+  final String id;
+  final String zoneJson;
+  const ZoneRow({required this.id, required this.zoneJson});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['zone_json'] = Variable<String>(zoneJson);
+    return map;
+  }
+
+  ZonesCompanion toCompanion(bool nullToAbsent) {
+    return ZonesCompanion(id: Value(id), zoneJson: Value(zoneJson));
+  }
+
+  factory ZoneRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ZoneRow(
+      id: serializer.fromJson<String>(json['id']),
+      zoneJson: serializer.fromJson<String>(json['zoneJson']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'zoneJson': serializer.toJson<String>(zoneJson),
+    };
+  }
+
+  ZoneRow copyWith({String? id, String? zoneJson}) =>
+      ZoneRow(id: id ?? this.id, zoneJson: zoneJson ?? this.zoneJson);
+  ZoneRow copyWithCompanion(ZonesCompanion data) {
+    return ZoneRow(
+      id: data.id.present ? data.id.value : this.id,
+      zoneJson: data.zoneJson.present ? data.zoneJson.value : this.zoneJson,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ZoneRow(')
+          ..write('id: $id, ')
+          ..write('zoneJson: $zoneJson')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, zoneJson);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ZoneRow &&
+          other.id == this.id &&
+          other.zoneJson == this.zoneJson);
+}
+
+class ZonesCompanion extends UpdateCompanion<ZoneRow> {
+  final Value<String> id;
+  final Value<String> zoneJson;
+  final Value<int> rowid;
+  const ZonesCompanion({
+    this.id = const Value.absent(),
+    this.zoneJson = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ZonesCompanion.insert({
+    required String id,
+    required String zoneJson,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       zoneJson = Value(zoneJson);
+  static Insertable<ZoneRow> custom({
+    Expression<String>? id,
+    Expression<String>? zoneJson,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (zoneJson != null) 'zone_json': zoneJson,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ZonesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? zoneJson,
+    Value<int>? rowid,
+  }) {
+    return ZonesCompanion(
+      id: id ?? this.id,
+      zoneJson: zoneJson ?? this.zoneJson,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (zoneJson.present) {
+      map['zone_json'] = Variable<String>(zoneJson.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ZonesCompanion(')
+          ..write('id: $id, ')
+          ..write('zoneJson: $zoneJson, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $GlobalVariablesTable extends GlobalVariables
+    with TableInfo<$GlobalVariablesTable, GlobalRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $GlobalVariablesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _valueJsonMeta = const VerificationMeta(
+    'valueJson',
+  );
+  @override
+  late final GeneratedColumn<String> valueJson = GeneratedColumn<String>(
+    'value_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [name, valueJson, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'global_variables';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<GlobalRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('value_json')) {
+      context.handle(
+        _valueJsonMeta,
+        valueJson.isAcceptableOrUnknown(data['value_json']!, _valueJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_valueJsonMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {name};
+  @override
+  GlobalRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return GlobalRow(
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      valueJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}value_json'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $GlobalVariablesTable createAlias(String alias) {
+    return $GlobalVariablesTable(attachedDatabase, alias);
+  }
+}
+
+class GlobalRow extends DataClass implements Insertable<GlobalRow> {
+  final String name;
+  final String valueJson;
+  final DateTime updatedAt;
+  const GlobalRow({
+    required this.name,
+    required this.valueJson,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['name'] = Variable<String>(name);
+    map['value_json'] = Variable<String>(valueJson);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  GlobalVariablesCompanion toCompanion(bool nullToAbsent) {
+    return GlobalVariablesCompanion(
+      name: Value(name),
+      valueJson: Value(valueJson),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory GlobalRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return GlobalRow(
+      name: serializer.fromJson<String>(json['name']),
+      valueJson: serializer.fromJson<String>(json['valueJson']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'name': serializer.toJson<String>(name),
+      'valueJson': serializer.toJson<String>(valueJson),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  GlobalRow copyWith({String? name, String? valueJson, DateTime? updatedAt}) =>
+      GlobalRow(
+        name: name ?? this.name,
+        valueJson: valueJson ?? this.valueJson,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
+  GlobalRow copyWithCompanion(GlobalVariablesCompanion data) {
+    return GlobalRow(
+      name: data.name.present ? data.name.value : this.name,
+      valueJson: data.valueJson.present ? data.valueJson.value : this.valueJson,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('GlobalRow(')
+          ..write('name: $name, ')
+          ..write('valueJson: $valueJson, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(name, valueJson, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is GlobalRow &&
+          other.name == this.name &&
+          other.valueJson == this.valueJson &&
+          other.updatedAt == this.updatedAt);
+}
+
+class GlobalVariablesCompanion extends UpdateCompanion<GlobalRow> {
+  final Value<String> name;
+  final Value<String> valueJson;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const GlobalVariablesCompanion({
+    this.name = const Value.absent(),
+    this.valueJson = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  GlobalVariablesCompanion.insert({
+    required String name,
+    required String valueJson,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : name = Value(name),
+       valueJson = Value(valueJson),
+       updatedAt = Value(updatedAt);
+  static Insertable<GlobalRow> custom({
+    Expression<String>? name,
+    Expression<String>? valueJson,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (name != null) 'name': name,
+      if (valueJson != null) 'value_json': valueJson,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  GlobalVariablesCompanion copyWith({
+    Value<String>? name,
+    Value<String>? valueJson,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return GlobalVariablesCompanion(
+      name: name ?? this.name,
+      valueJson: valueJson ?? this.valueJson,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (valueJson.present) {
+      map['value_json'] = Variable<String>(valueJson.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('GlobalVariablesCompanion(')
+          ..write('name: $name, ')
+          ..write('valueJson: $valueJson, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ExecutionLogTable extends ExecutionLog
+    with TableInfo<$ExecutionLogTable, LogRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ExecutionLogTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _runIdMeta = const VerificationMeta('runId');
+  @override
+  late final GeneratedColumn<String> runId = GeneratedColumn<String>(
+    'run_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _flowIdMeta = const VerificationMeta('flowId');
+  @override
+  late final GeneratedColumn<String> flowId = GeneratedColumn<String>(
+    'flow_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _outcomeMeta = const VerificationMeta(
+    'outcome',
+  );
+  @override
+  late final GeneratedColumn<String> outcome = GeneratedColumn<String>(
+    'outcome',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _startedAtMeta = const VerificationMeta(
+    'startedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> startedAt = GeneratedColumn<DateTime>(
+    'started_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _traceJsonMeta = const VerificationMeta(
+    'traceJson',
+  );
+  @override
+  late final GeneratedColumn<String> traceJson = GeneratedColumn<String>(
+    'trace_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    runId,
+    flowId,
+    outcome,
+    startedAt,
+    traceJson,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'execution_log';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LogRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('run_id')) {
+      context.handle(
+        _runIdMeta,
+        runId.isAcceptableOrUnknown(data['run_id']!, _runIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_runIdMeta);
+    }
+    if (data.containsKey('flow_id')) {
+      context.handle(
+        _flowIdMeta,
+        flowId.isAcceptableOrUnknown(data['flow_id']!, _flowIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_flowIdMeta);
+    }
+    if (data.containsKey('outcome')) {
+      context.handle(
+        _outcomeMeta,
+        outcome.isAcceptableOrUnknown(data['outcome']!, _outcomeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_outcomeMeta);
+    }
+    if (data.containsKey('started_at')) {
+      context.handle(
+        _startedAtMeta,
+        startedAt.isAcceptableOrUnknown(data['started_at']!, _startedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_startedAtMeta);
+    }
+    if (data.containsKey('trace_json')) {
+      context.handle(
+        _traceJsonMeta,
+        traceJson.isAcceptableOrUnknown(data['trace_json']!, _traceJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_traceJsonMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  LogRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LogRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      runId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}run_id'],
+      )!,
+      flowId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}flow_id'],
+      )!,
+      outcome: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}outcome'],
+      )!,
+      startedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}started_at'],
+      )!,
+      traceJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}trace_json'],
+      )!,
+    );
+  }
+
+  @override
+  $ExecutionLogTable createAlias(String alias) {
+    return $ExecutionLogTable(attachedDatabase, alias);
+  }
+}
+
+class LogRow extends DataClass implements Insertable<LogRow> {
+  final int id;
+  final String runId;
+  final String flowId;
+  final String outcome;
+  final DateTime startedAt;
+  final String traceJson;
+  const LogRow({
+    required this.id,
+    required this.runId,
+    required this.flowId,
+    required this.outcome,
+    required this.startedAt,
+    required this.traceJson,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['run_id'] = Variable<String>(runId);
+    map['flow_id'] = Variable<String>(flowId);
+    map['outcome'] = Variable<String>(outcome);
+    map['started_at'] = Variable<DateTime>(startedAt);
+    map['trace_json'] = Variable<String>(traceJson);
+    return map;
+  }
+
+  ExecutionLogCompanion toCompanion(bool nullToAbsent) {
+    return ExecutionLogCompanion(
+      id: Value(id),
+      runId: Value(runId),
+      flowId: Value(flowId),
+      outcome: Value(outcome),
+      startedAt: Value(startedAt),
+      traceJson: Value(traceJson),
+    );
+  }
+
+  factory LogRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LogRow(
+      id: serializer.fromJson<int>(json['id']),
+      runId: serializer.fromJson<String>(json['runId']),
+      flowId: serializer.fromJson<String>(json['flowId']),
+      outcome: serializer.fromJson<String>(json['outcome']),
+      startedAt: serializer.fromJson<DateTime>(json['startedAt']),
+      traceJson: serializer.fromJson<String>(json['traceJson']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'runId': serializer.toJson<String>(runId),
+      'flowId': serializer.toJson<String>(flowId),
+      'outcome': serializer.toJson<String>(outcome),
+      'startedAt': serializer.toJson<DateTime>(startedAt),
+      'traceJson': serializer.toJson<String>(traceJson),
+    };
+  }
+
+  LogRow copyWith({
+    int? id,
+    String? runId,
+    String? flowId,
+    String? outcome,
+    DateTime? startedAt,
+    String? traceJson,
+  }) => LogRow(
+    id: id ?? this.id,
+    runId: runId ?? this.runId,
+    flowId: flowId ?? this.flowId,
+    outcome: outcome ?? this.outcome,
+    startedAt: startedAt ?? this.startedAt,
+    traceJson: traceJson ?? this.traceJson,
+  );
+  LogRow copyWithCompanion(ExecutionLogCompanion data) {
+    return LogRow(
+      id: data.id.present ? data.id.value : this.id,
+      runId: data.runId.present ? data.runId.value : this.runId,
+      flowId: data.flowId.present ? data.flowId.value : this.flowId,
+      outcome: data.outcome.present ? data.outcome.value : this.outcome,
+      startedAt: data.startedAt.present ? data.startedAt.value : this.startedAt,
+      traceJson: data.traceJson.present ? data.traceJson.value : this.traceJson,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LogRow(')
+          ..write('id: $id, ')
+          ..write('runId: $runId, ')
+          ..write('flowId: $flowId, ')
+          ..write('outcome: $outcome, ')
+          ..write('startedAt: $startedAt, ')
+          ..write('traceJson: $traceJson')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, runId, flowId, outcome, startedAt, traceJson);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LogRow &&
+          other.id == this.id &&
+          other.runId == this.runId &&
+          other.flowId == this.flowId &&
+          other.outcome == this.outcome &&
+          other.startedAt == this.startedAt &&
+          other.traceJson == this.traceJson);
+}
+
+class ExecutionLogCompanion extends UpdateCompanion<LogRow> {
+  final Value<int> id;
+  final Value<String> runId;
+  final Value<String> flowId;
+  final Value<String> outcome;
+  final Value<DateTime> startedAt;
+  final Value<String> traceJson;
+  const ExecutionLogCompanion({
+    this.id = const Value.absent(),
+    this.runId = const Value.absent(),
+    this.flowId = const Value.absent(),
+    this.outcome = const Value.absent(),
+    this.startedAt = const Value.absent(),
+    this.traceJson = const Value.absent(),
+  });
+  ExecutionLogCompanion.insert({
+    this.id = const Value.absent(),
+    required String runId,
+    required String flowId,
+    required String outcome,
+    required DateTime startedAt,
+    required String traceJson,
+  }) : runId = Value(runId),
+       flowId = Value(flowId),
+       outcome = Value(outcome),
+       startedAt = Value(startedAt),
+       traceJson = Value(traceJson);
+  static Insertable<LogRow> custom({
+    Expression<int>? id,
+    Expression<String>? runId,
+    Expression<String>? flowId,
+    Expression<String>? outcome,
+    Expression<DateTime>? startedAt,
+    Expression<String>? traceJson,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (runId != null) 'run_id': runId,
+      if (flowId != null) 'flow_id': flowId,
+      if (outcome != null) 'outcome': outcome,
+      if (startedAt != null) 'started_at': startedAt,
+      if (traceJson != null) 'trace_json': traceJson,
+    });
+  }
+
+  ExecutionLogCompanion copyWith({
+    Value<int>? id,
+    Value<String>? runId,
+    Value<String>? flowId,
+    Value<String>? outcome,
+    Value<DateTime>? startedAt,
+    Value<String>? traceJson,
+  }) {
+    return ExecutionLogCompanion(
+      id: id ?? this.id,
+      runId: runId ?? this.runId,
+      flowId: flowId ?? this.flowId,
+      outcome: outcome ?? this.outcome,
+      startedAt: startedAt ?? this.startedAt,
+      traceJson: traceJson ?? this.traceJson,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (runId.present) {
+      map['run_id'] = Variable<String>(runId.value);
+    }
+    if (flowId.present) {
+      map['flow_id'] = Variable<String>(flowId.value);
+    }
+    if (outcome.present) {
+      map['outcome'] = Variable<String>(outcome.value);
+    }
+    if (startedAt.present) {
+      map['started_at'] = Variable<DateTime>(startedAt.value);
+    }
+    if (traceJson.present) {
+      map['trace_json'] = Variable<String>(traceJson.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ExecutionLogCompanion(')
+          ..write('id: $id, ')
+          ..write('runId: $runId, ')
+          ..write('flowId: $flowId, ')
+          ..write('outcome: $outcome, ')
+          ..write('startedAt: $startedAt, ')
+          ..write('traceJson: $traceJson')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$OmniDatabase extends GeneratedDatabase {
   _$OmniDatabase(QueryExecutor e) : super(e);
   $OmniDatabaseManager get managers => $OmniDatabaseManager(this);
@@ -881,6 +2113,12 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
     this,
   );
   late final $DevicesTable devices = $DevicesTable(this);
+  late final $FlowsTable flows = $FlowsTable(this);
+  late final $ZonesTable zones = $ZonesTable(this);
+  late final $GlobalVariablesTable globalVariables = $GlobalVariablesTable(
+    this,
+  );
+  late final $ExecutionLogTable executionLog = $ExecutionLogTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -888,6 +2126,10 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
   List<DatabaseSchemaEntity> get allSchemaEntities => [
     driverManifests,
     devices,
+    flows,
+    zones,
+    globalVariables,
+    executionLog,
   ];
 }
 
@@ -1364,6 +2606,728 @@ typedef $$DevicesTableProcessedTableManager =
       DeviceRow,
       PrefetchHooks Function()
     >;
+typedef $$FlowsTableCreateCompanionBuilder = FlowsCompanion Function({
+  required String id,
+  required String flowJson,
+  Value<bool> enabled,
+  Value<bool> approved,
+  required DateTime updatedAt,
+  Value<int> rowid,
+});
+typedef $$FlowsTableUpdateCompanionBuilder = FlowsCompanion Function({
+  Value<String> id,
+  Value<String> flowJson,
+  Value<bool> enabled,
+  Value<bool> approved,
+  Value<DateTime> updatedAt,
+  Value<int> rowid,
+});
+
+class $$FlowsTableFilterComposer extends Composer<_$OmniDatabase, $FlowsTable> {
+  $$FlowsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get flowJson => $composableBuilder(
+    column: $table.flowJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get approved => $composableBuilder(
+    column: $table.approved,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$FlowsTableOrderingComposer
+    extends Composer<_$OmniDatabase, $FlowsTable> {
+  $$FlowsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get flowJson => $composableBuilder(
+    column: $table.flowJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get approved => $composableBuilder(
+    column: $table.approved,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FlowsTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $FlowsTable> {
+  $$FlowsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get flowJson =>
+      $composableBuilder(column: $table.flowJson, builder: (column) => column);
+
+  GeneratedColumn<bool> get enabled =>
+      $composableBuilder(column: $table.enabled, builder: (column) => column);
+
+  GeneratedColumn<bool> get approved =>
+      $composableBuilder(column: $table.approved, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$FlowsTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $FlowsTable,
+          FlowRow,
+          $$FlowsTableFilterComposer,
+          $$FlowsTableOrderingComposer,
+          $$FlowsTableAnnotationComposer,
+          $$FlowsTableCreateCompanionBuilder,
+          $$FlowsTableUpdateCompanionBuilder,
+          (FlowRow, BaseReferences<_$OmniDatabase, $FlowsTable, FlowRow>),
+          FlowRow,
+          PrefetchHooks Function()
+        > {
+  $$FlowsTableTableManager(_$OmniDatabase db, $FlowsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$FlowsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$FlowsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$FlowsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> flowJson = const Value.absent(),
+                Value<bool> enabled = const Value.absent(),
+                Value<bool> approved = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FlowsCompanion(
+                id: id,
+                flowJson: flowJson,
+                enabled: enabled,
+                approved: approved,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String flowJson,
+                Value<bool> enabled = const Value.absent(),
+                Value<bool> approved = const Value.absent(),
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => FlowsCompanion.insert(
+                id: id,
+                flowJson: flowJson,
+                enabled: enabled,
+                approved: approved,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$FlowsTable, FlowRow>(table),
+                  BaseReferences<_$OmniDatabase, $FlowsTable, FlowRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FlowsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $FlowsTable,
+      FlowRow,
+      $$FlowsTableFilterComposer,
+      $$FlowsTableOrderingComposer,
+      $$FlowsTableAnnotationComposer,
+      $$FlowsTableCreateCompanionBuilder,
+      $$FlowsTableUpdateCompanionBuilder,
+      (FlowRow, BaseReferences<_$OmniDatabase, $FlowsTable, FlowRow>),
+      FlowRow,
+      PrefetchHooks Function()
+    >;
+typedef $$ZonesTableCreateCompanionBuilder = ZonesCompanion Function({
+  required String id,
+  required String zoneJson,
+  Value<int> rowid,
+});
+typedef $$ZonesTableUpdateCompanionBuilder = ZonesCompanion Function({
+  Value<String> id,
+  Value<String> zoneJson,
+  Value<int> rowid,
+});
+
+class $$ZonesTableFilterComposer extends Composer<_$OmniDatabase, $ZonesTable> {
+  $$ZonesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get zoneJson => $composableBuilder(
+    column: $table.zoneJson,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ZonesTableOrderingComposer
+    extends Composer<_$OmniDatabase, $ZonesTable> {
+  $$ZonesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get zoneJson => $composableBuilder(
+    column: $table.zoneJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ZonesTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $ZonesTable> {
+  $$ZonesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get zoneJson =>
+      $composableBuilder(column: $table.zoneJson, builder: (column) => column);
+}
+
+class $$ZonesTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $ZonesTable,
+          ZoneRow,
+          $$ZonesTableFilterComposer,
+          $$ZonesTableOrderingComposer,
+          $$ZonesTableAnnotationComposer,
+          $$ZonesTableCreateCompanionBuilder,
+          $$ZonesTableUpdateCompanionBuilder,
+          (ZoneRow, BaseReferences<_$OmniDatabase, $ZonesTable, ZoneRow>),
+          ZoneRow,
+          PrefetchHooks Function()
+        > {
+  $$ZonesTableTableManager(_$OmniDatabase db, $ZonesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ZonesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ZonesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ZonesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> zoneJson = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) => ZonesCompanion(id: id, zoneJson: zoneJson, rowid: rowid),
+          createCompanionCallback: ({
+            required String id,
+            required String zoneJson,
+            Value<int> rowid = const Value.absent(),
+          }) => ZonesCompanion.insert(id: id, zoneJson: zoneJson, rowid: rowid),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$ZonesTable, ZoneRow>(table),
+                  BaseReferences<_$OmniDatabase, $ZonesTable, ZoneRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ZonesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $ZonesTable,
+      ZoneRow,
+      $$ZonesTableFilterComposer,
+      $$ZonesTableOrderingComposer,
+      $$ZonesTableAnnotationComposer,
+      $$ZonesTableCreateCompanionBuilder,
+      $$ZonesTableUpdateCompanionBuilder,
+      (ZoneRow, BaseReferences<_$OmniDatabase, $ZonesTable, ZoneRow>),
+      ZoneRow,
+      PrefetchHooks Function()
+    >;
+typedef $$GlobalVariablesTableCreateCompanionBuilder =
+    GlobalVariablesCompanion Function({
+      required String name,
+      required String valueJson,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$GlobalVariablesTableUpdateCompanionBuilder =
+    GlobalVariablesCompanion Function({
+      Value<String> name,
+      Value<String> valueJson,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$GlobalVariablesTableFilterComposer
+    extends Composer<_$OmniDatabase, $GlobalVariablesTable> {
+  $$GlobalVariablesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get valueJson => $composableBuilder(
+    column: $table.valueJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$GlobalVariablesTableOrderingComposer
+    extends Composer<_$OmniDatabase, $GlobalVariablesTable> {
+  $$GlobalVariablesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get valueJson => $composableBuilder(
+    column: $table.valueJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$GlobalVariablesTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $GlobalVariablesTable> {
+  $$GlobalVariablesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get valueJson =>
+      $composableBuilder(column: $table.valueJson, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$GlobalVariablesTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $GlobalVariablesTable,
+          GlobalRow,
+          $$GlobalVariablesTableFilterComposer,
+          $$GlobalVariablesTableOrderingComposer,
+          $$GlobalVariablesTableAnnotationComposer,
+          $$GlobalVariablesTableCreateCompanionBuilder,
+          $$GlobalVariablesTableUpdateCompanionBuilder,
+          (
+            GlobalRow,
+            BaseReferences<_$OmniDatabase, $GlobalVariablesTable, GlobalRow>,
+          ),
+          GlobalRow,
+          PrefetchHooks Function()
+        > {
+  $$GlobalVariablesTableTableManager(
+    _$OmniDatabase db,
+    $GlobalVariablesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$GlobalVariablesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$GlobalVariablesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$GlobalVariablesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> name = const Value.absent(),
+                Value<String> valueJson = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => GlobalVariablesCompanion(
+                name: name,
+                valueJson: valueJson,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String name,
+                required String valueJson,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => GlobalVariablesCompanion.insert(
+                name: name,
+                valueJson: valueJson,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$GlobalVariablesTable, GlobalRow>(table),
+                  BaseReferences<
+                    _$OmniDatabase,
+                    $GlobalVariablesTable,
+                    GlobalRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$GlobalVariablesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $GlobalVariablesTable,
+      GlobalRow,
+      $$GlobalVariablesTableFilterComposer,
+      $$GlobalVariablesTableOrderingComposer,
+      $$GlobalVariablesTableAnnotationComposer,
+      $$GlobalVariablesTableCreateCompanionBuilder,
+      $$GlobalVariablesTableUpdateCompanionBuilder,
+      (
+        GlobalRow,
+        BaseReferences<_$OmniDatabase, $GlobalVariablesTable, GlobalRow>,
+      ),
+      GlobalRow,
+      PrefetchHooks Function()
+    >;
+typedef $$ExecutionLogTableCreateCompanionBuilder =
+    ExecutionLogCompanion Function({
+      Value<int> id,
+      required String runId,
+      required String flowId,
+      required String outcome,
+      required DateTime startedAt,
+      required String traceJson,
+    });
+typedef $$ExecutionLogTableUpdateCompanionBuilder =
+    ExecutionLogCompanion Function({
+      Value<int> id,
+      Value<String> runId,
+      Value<String> flowId,
+      Value<String> outcome,
+      Value<DateTime> startedAt,
+      Value<String> traceJson,
+    });
+
+class $$ExecutionLogTableFilterComposer
+    extends Composer<_$OmniDatabase, $ExecutionLogTable> {
+  $$ExecutionLogTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get runId => $composableBuilder(
+    column: $table.runId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get flowId => $composableBuilder(
+    column: $table.flowId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get outcome => $composableBuilder(
+    column: $table.outcome,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get startedAt => $composableBuilder(
+    column: $table.startedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get traceJson => $composableBuilder(
+    column: $table.traceJson,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ExecutionLogTableOrderingComposer
+    extends Composer<_$OmniDatabase, $ExecutionLogTable> {
+  $$ExecutionLogTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get runId => $composableBuilder(
+    column: $table.runId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get flowId => $composableBuilder(
+    column: $table.flowId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get outcome => $composableBuilder(
+    column: $table.outcome,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get startedAt => $composableBuilder(
+    column: $table.startedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get traceJson => $composableBuilder(
+    column: $table.traceJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ExecutionLogTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $ExecutionLogTable> {
+  $$ExecutionLogTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get runId =>
+      $composableBuilder(column: $table.runId, builder: (column) => column);
+
+  GeneratedColumn<String> get flowId =>
+      $composableBuilder(column: $table.flowId, builder: (column) => column);
+
+  GeneratedColumn<String> get outcome =>
+      $composableBuilder(column: $table.outcome, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get startedAt =>
+      $composableBuilder(column: $table.startedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get traceJson =>
+      $composableBuilder(column: $table.traceJson, builder: (column) => column);
+}
+
+class $$ExecutionLogTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $ExecutionLogTable,
+          LogRow,
+          $$ExecutionLogTableFilterComposer,
+          $$ExecutionLogTableOrderingComposer,
+          $$ExecutionLogTableAnnotationComposer,
+          $$ExecutionLogTableCreateCompanionBuilder,
+          $$ExecutionLogTableUpdateCompanionBuilder,
+          (LogRow, BaseReferences<_$OmniDatabase, $ExecutionLogTable, LogRow>),
+          LogRow,
+          PrefetchHooks Function()
+        > {
+  $$ExecutionLogTableTableManager(_$OmniDatabase db, $ExecutionLogTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ExecutionLogTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ExecutionLogTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ExecutionLogTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> runId = const Value.absent(),
+                Value<String> flowId = const Value.absent(),
+                Value<String> outcome = const Value.absent(),
+                Value<DateTime> startedAt = const Value.absent(),
+                Value<String> traceJson = const Value.absent(),
+              }) => ExecutionLogCompanion(
+                id: id,
+                runId: runId,
+                flowId: flowId,
+                outcome: outcome,
+                startedAt: startedAt,
+                traceJson: traceJson,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String runId,
+                required String flowId,
+                required String outcome,
+                required DateTime startedAt,
+                required String traceJson,
+              }) => ExecutionLogCompanion.insert(
+                id: id,
+                runId: runId,
+                flowId: flowId,
+                outcome: outcome,
+                startedAt: startedAt,
+                traceJson: traceJson,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$ExecutionLogTable, LogRow>(table),
+                  BaseReferences<_$OmniDatabase, $ExecutionLogTable, LogRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ExecutionLogTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $ExecutionLogTable,
+      LogRow,
+      $$ExecutionLogTableFilterComposer,
+      $$ExecutionLogTableOrderingComposer,
+      $$ExecutionLogTableAnnotationComposer,
+      $$ExecutionLogTableCreateCompanionBuilder,
+      $$ExecutionLogTableUpdateCompanionBuilder,
+      (LogRow, BaseReferences<_$OmniDatabase, $ExecutionLogTable, LogRow>),
+      LogRow,
+      PrefetchHooks Function()
+    >;
 
 class $OmniDatabaseManager {
   final _$OmniDatabase _db;
@@ -1372,4 +3336,12 @@ class $OmniDatabaseManager {
       $$DriverManifestsTableTableManager(_db, _db.driverManifests);
   $$DevicesTableTableManager get devices =>
       $$DevicesTableTableManager(_db, _db.devices);
+  $$FlowsTableTableManager get flows =>
+      $$FlowsTableTableManager(_db, _db.flows);
+  $$ZonesTableTableManager get zones =>
+      $$ZonesTableTableManager(_db, _db.zones);
+  $$GlobalVariablesTableTableManager get globalVariables =>
+      $$GlobalVariablesTableTableManager(_db, _db.globalVariables);
+  $$ExecutionLogTableTableManager get executionLog =>
+      $$ExecutionLogTableTableManager(_db, _db.executionLog);
 }

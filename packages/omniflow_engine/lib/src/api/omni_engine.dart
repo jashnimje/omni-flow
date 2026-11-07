@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'command_bar.dart';
 import '../devices/channels.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
@@ -9,7 +10,15 @@ import '../devices/discovery.dart';
 import '../devices/http_channel.dart';
 import '../devices/serial_channel.dart';
 import '../devices/tuya_channel.dart';
+import '../dag/cards.dart';
+import '../dag/expression.dart';
+import '../dag/flow.dart';
+import '../dag/flow_engine.dart';
+import '../dag/node_types.dart';
+import '../dag/validator.dart';
 import '../devices/wiz_push.dart';
+import '../zones/zones.dart';
+import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../manifest/validation.dart';
@@ -48,8 +57,22 @@ class OmniEngine {
     this.discovery,
     this._tap,
     this.serial,
+    this._udp,
     this._closers,
   ) {
+    flows = FlowEngine(_EngineFlowHost(this));
+    serial.events.listen((e) => _boardEvent(e.json, e.deviceId));
+    _udp.incoming.listen((d) {
+      final Object? json;
+      try {
+        json = jsonDecode(d.text);
+      } on FormatException {
+        return;
+      }
+      if (json is Map && json['node'] is String && json['event'] is String) {
+        _boardEvent(Map<String, Object?>.from(json), null);
+      }
+    });
     devices.events.listen(
       (e) => _emit({
         'event': 'device.stateChanged',
@@ -99,7 +122,7 @@ class OmniEngine {
         TransportType.exec: ExecChannel(hostExecutors(secrets)),
       },
     );
-    return OmniEngine._(
+    final engine = OmniEngine._(
       db,
       lock,
       registry,
@@ -108,8 +131,11 @@ class OmniEngine {
       discovery,
       tap,
       serial,
+      udp,
       [() async => udp.close(), tuya.close, serial.close, devices.close],
     );
+    await engine._loadFlowState();
+    return engine;
   }
 
   final OmniDatabase _db;
@@ -120,7 +146,104 @@ class OmniEngine {
   final UdpDiscovery discovery;
   final PacketTap? _tap;
   final SerialChannel serial;
+  final UdpTransport _udp;
   final List<Future<void> Function()> _closers;
+  late final FlowEngine flows;
+  final _hubTimers = <Timer>[];
+
+  /// Unsolicited board lines (button presses, knob turns) become
+  /// `board.event`. Replies (ack, error, describe) are not events.
+  void _boardEvent(Map<String, Object?> json, String? deviceId) {
+    final type = json['event'];
+    if (type is! String || const {'ack', 'error', 'describe'}.contains(type)) {
+      return;
+    }
+    _emit({
+      'event': 'board.event',
+      'type': type,
+      'node': json['node'],
+      'deviceId': ?deviceId,
+      'payload': json,
+    });
+  }
+
+  Future<void> _loadFlowState() async {
+    flows.globals.addAll(await DriftGlobalStore(_db).all());
+    for (final d in await DriftDeviceStore(_db).all()) {
+      flows.deviceStates[d.id] = d.state;
+    }
+    flows.setZones([
+      for (final z in await DriftZoneStore(_db).all()) ZoneSpec.parse(z),
+    ]);
+    await _reloadFlows();
+  }
+
+  Future<void> _reloadFlows() async {
+    flows.load([
+      for (final r in await DriftFlowStore(_db).all())
+        if (r.enabled && r.approved) FlowSpec.parse(r.json),
+    ]);
+  }
+
+  Future<FlowReferences> _references() async {
+    final devices = {
+      for (final d in await DriftDeviceStore(_db).all()) d.id: d.driverId,
+    };
+    return FlowReferences(
+      devices: devices.keys.toSet(),
+      zones: {
+        for (final z in await DriftZoneStore(_db).all()) z['id'] as String,
+      },
+      flows: {
+        for (final f in await DriftFlowStore(_db).all()) f.json['id'] as String,
+      },
+      capabilityOf: (d, c) => registry[devices[d] ?? '']?.capability(c),
+    );
+  }
+
+  /// True when a flow drives a device whose driver runs host commands.
+  Future<bool> _isHighRisk(FlowSpec flow) async {
+    final devices = {
+      for (final d in await DriftDeviceStore(_db).all()) d.id: d.driverId,
+    };
+    return flow.nodes.any(
+      (n) =>
+          n.type == 'device_capability' &&
+          (registry[devices[n.config['deviceId']] ?? '']?.isHighRisk ?? false),
+    );
+  }
+
+  /// Runs flows on their own: WiZ pushes, time and interval triggers, a zone
+  /// tick every second, and each device's state poll. `omni hub` calls this.
+  Future<void> startHub({int wizListenPort = 38900}) async {
+    await startWizPush(listenPort: wizListenPort);
+    flows.startTimers();
+    _hubTimers.add(
+      Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => flows.zoneTick(DateTime.now()),
+      ),
+    );
+    for (final d in await DriftDeviceStore(_db).all()) {
+      final poll = registry[d.driverId]?.statePoll;
+      final seconds = poll?['intervalSeconds'];
+      if (seconds is! int || seconds <= 0) continue;
+      _hubTimers.add(
+        Timer.periodic(Duration(seconds: seconds), (_) async {
+          try {
+            await devices.refreshState(d.id);
+          } catch (e) {
+            _emit({
+              'event': 'device.pollFailed',
+              'device': d.id,
+              'error': '$e',
+            });
+          }
+        }),
+      );
+    }
+  }
+
   final _events = StreamController<Map<String, Object?>>.broadcast();
   WizPushManager? _wizPush;
 
@@ -185,6 +308,7 @@ class OmniEngine {
       return {'id': m.id, 'highRisk': m.isHighRisk};
     },
     'device.add': _addDevice,
+    ..._flowCommands,
     'device.discover': (args) async {
       final driverId = _string(args, 'driver');
       final manifest = registry[driverId];
@@ -214,9 +338,15 @@ class OmniEngine {
         ],
       };
     },
-    'device.list': (_) async => {
+    'device.list': (args) async => {
       'devices': [
-        for (final d in await DriftDeviceStore(_db).all()) _deviceJson(d),
+        for (final d in await DriftDeviceStore(_db).all())
+          if (args['room'] == null || args['room'] == d.room)
+            {
+              ..._deviceJson(d),
+              if (args['withCapabilities'] == true)
+                'capabilities': _capabilitiesJson(d.driverId),
+            },
       ],
     },
     'device.get': (args) async => {
@@ -290,6 +420,12 @@ class OmniEngine {
       return _failure(ApiError('template', e.message));
     } on ArgumentError catch (e) {
       return _failure(ApiError('invalid', '${e.message}'));
+    } on StateError catch (e) {
+      return _failure(ApiError('not_ready', e.message));
+    } on ExpressionException catch (e) {
+      return _failure(ApiError('invalid', e.message));
+    } catch (e) {
+      return _failure(ApiError('internal', '$e'));
     }
   }
 
@@ -347,6 +483,31 @@ class OmniEngine {
     return device;
   }
 
+  /// Each capability of a driver with the params it accepts, for UIs and agents.
+  List<Map<String, Object?>> _capabilitiesJson(String driverId) => [
+    for (final c
+        in registry[driverId]?.capabilities ?? const <CapabilitySpec>[])
+      {
+        'id': c.id,
+        'type': c.type.wireName,
+        'label': c.label,
+        'highRisk': registry[driverId]!.isHighRisk,
+        if (stateKeyOf(c.stateJsonPath) != null)
+          'stateKey': stateKeyOf(c.stateJsonPath),
+        'params': {
+          for (final p in c.params.entries)
+            p.key: {
+              'type': p.value.type.wireName,
+              if (p.value.min != null) 'min': p.value.min,
+              if (p.value.max != null) 'max': p.value.max,
+              if (p.value.unit != null) 'unit': p.value.unit,
+              if (p.value.values.isNotEmpty) 'values': p.value.values,
+              if (p.value.optional) 'optional': true,
+            },
+        },
+      },
+  ];
+
   static Map<String, Object?> _deviceJson(Device d) => {
     'id': d.id,
     'name': d.name,
@@ -377,7 +538,218 @@ class OmniEngine {
     'error': e.toJson(),
   };
 
+  Map<String, Future<Map<String, Object?>> Function(Map<String, Object?> args)>
+  get _flowCommands => {
+    'flow.validate': (args) async {
+      final flow = FlowSpec.parse(_object(args, 'flow'));
+      final issues = validateFlow(flow, refs: await _references());
+      if (issues.isNotEmpty) {
+        throw ValidationException('flow ${flow.id}', issues);
+      }
+      return {'id': flow.id, 'highRisk': await _isHighRisk(flow)};
+    },
+    'flow.save': (args) async {
+      final flow = FlowSpec.parse(_object(args, 'flow'));
+      final issues = validateFlow(flow, refs: await _references());
+      if (issues.isNotEmpty) {
+        throw ValidationException('flow ${flow.id}', issues);
+      }
+      final highRisk = await _isHighRisk(flow);
+      // A caller that is not the user (MCP, the architect, an import) passes
+      // trusted: false, and a high-risk flow then waits for approval.
+      final approved = args['trusted'] != false || !highRisk;
+      await DriftFlowStore(_db).put(
+        flow.id,
+        flow.toJson(),
+        enabled: flow.enabled,
+        approved: approved,
+        at: DateTime.now().toUtc(),
+      );
+      await _reloadFlows();
+      return {'id': flow.id, 'highRisk': highRisk, 'approved': approved};
+    },
+    'flow.approve': (args) async {
+      final id = _string(args, 'id');
+      final record = await DriftFlowStore(_db).get(id);
+      if (record == null) throw ApiError('not_found', 'no flow $id');
+      await DriftFlowStore(_db).put(
+        id,
+        record.json,
+        enabled: record.enabled,
+        approved: true,
+        at: DateTime.now().toUtc(),
+      );
+      await _reloadFlows();
+      return {'id': id, 'approved': true};
+    },
+    'flow.list': (_) async => {
+      'flows': [
+        for (final r in await DriftFlowStore(_db).all())
+          {
+            'id': r.json['id'],
+            'name': r.json['name'],
+            'enabled': r.enabled,
+            'approved': r.approved,
+            'loaded': flows.loadedFlows.contains(r.json['id']),
+          },
+      ],
+    },
+    'flow.get': (args) async {
+      final record = await DriftFlowStore(_db).get(_string(args, 'id'));
+      if (record == null) throw ApiError('not_found', 'no flow ${args['id']}');
+      return {
+        'flow': record.json,
+        'enabled': record.enabled,
+        'approved': record.approved,
+      };
+    },
+    'flow.remove': (args) async {
+      final removed = await DriftFlowStore(_db).remove(_string(args, 'id'));
+      await _reloadFlows();
+      return {'removed': removed};
+    },
+    'flow.enable': (args) async {
+      final id = _string(args, 'id');
+      final record = await DriftFlowStore(_db).get(id);
+      if (record == null) throw ApiError('not_found', 'no flow $id');
+      final enabled = args['enabled'] != false;
+      final json = {...record.json, 'enabled': enabled};
+      await DriftFlowStore(_db).put(
+        id,
+        json,
+        enabled: enabled,
+        approved: record.approved,
+        at: DateTime.now().toUtc(),
+      );
+      await _reloadFlows();
+      return {'id': id, 'enabled': enabled};
+    },
+    'flow.run': (args) async {
+      final traces = await flows.run(
+        _string(args, 'id'),
+        triggerId: args['trigger'] as String?,
+        msg: args['msg'] == null ? const {} : _object(args, 'msg'),
+      );
+      return {'runs': traces.map((t) => t.toJson()).toList()};
+    },
+    'flow.dryRun': (args) async {
+      final id = _string(args, 'id');
+      final record = await DriftFlowStore(_db).get(id);
+      if (record == null) throw ApiError('not_found', 'no flow $id');
+      final flow = FlowSpec.parse(record.json);
+      final trigger =
+          args['trigger'] as String? ??
+          flow.nodes
+              .firstWhere(
+                (n) =>
+                    builtInNodeTypes[n.type]?.category == NodeCategory.trigger,
+              )
+              .id;
+      final at = args['at'] is String
+          ? DateTime.parse(args['at'] as String)
+          : DateTime.now();
+      final msg = args['msg'] == null
+          ? <String, Object?>{}
+          : _object(args, 'msg');
+      final trace = await flows.dryRun(flow, trigger, {
+        'trigger': 'dry_run',
+        ...msg,
+      }, at);
+      return {'run': trace.toJson()};
+    },
+    'flow.log': (args) async => {
+      'runs': await ExecutionLogStore(_db).recent(
+        flowId: args['id'] as String?,
+        limit: args['limit'] is int ? args['limit'] as int : 20,
+      ),
+    },
+    'flow.cards': (args) async {
+      final record = await DriftFlowStore(_db).get(_string(args, 'id'));
+      if (record == null) throw ApiError('not_found', 'no flow ${args['id']}');
+      final cards = projectCards(FlowSpec.parse(record.json));
+      return cards == null
+          ? {'tree': false}
+          : {'tree': true, ...cards.toJson()};
+    },
+    'command.interpret': (args) async {
+      final devices = [
+        for (final d in await DriftDeviceStore(_db).all())
+          if (registry[d.driverId] != null)
+            CommandDevice(d.id, d.name, registry[d.driverId]!),
+      ];
+      final flowList = [
+        for (final f in await DriftFlowStore(_db).all())
+          CommandFlow(f.json['id'] as String, f.json['name'] as String),
+      ];
+      return interpretCommand(
+        _string(args, 'text'),
+        devices,
+        flowList,
+      ).toJson();
+    },
+    'var.list': (_) async => {'variables': await DriftGlobalStore(_db).all()},
+    'var.set': (args) async {
+      final name = _string(args, 'name');
+      if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(name)) {
+        throw ApiError('invalid', 'a variable name is letters, digits and _');
+      }
+      await flows.setGlobal(name, args['value']);
+      return {'name': name, 'value': args['value']};
+    },
+    'var.remove': (args) async {
+      final name = _string(args, 'name');
+      flows.globals.remove(name);
+      return {'removed': await DriftGlobalStore(_db).remove(name)};
+    },
+    'zone.save': (args) async {
+      final zone = ZoneSpec.parse(_object(args, 'zone'));
+      await DriftZoneStore(_db).put(zone.id, zone.toJson());
+      flows.setZones([
+        for (final z in await DriftZoneStore(_db).all()) ZoneSpec.parse(z),
+      ]);
+      return {'id': zone.id};
+    },
+    'zone.list': (_) async => {
+      'zones': [
+        for (final z in await DriftZoneStore(_db).all())
+          {...z, 'inside': flows.zones.isInside(z['id'] as String)},
+      ],
+      'needBle': flows.zones.zonesNeedingBle.toList(),
+    },
+    'zone.remove': (args) async {
+      final removed = await DriftZoneStore(_db).remove(_string(args, 'id'));
+      flows.setZones([
+        for (final z in await DriftZoneStore(_db).all()) ZoneSpec.parse(z),
+      ]);
+      return {'removed': removed};
+    },
+    'sensor.ble': (args) async {
+      final rssi = args['rssi'];
+      if (rssi is! num) throw ApiError('invalid', 'rssi must be a number');
+      flows.bleReading(
+        _string(args, 'name'),
+        rssi.toDouble(),
+        args['at'] is String
+            ? DateTime.parse(args['at'] as String)
+            : DateTime.now(),
+      );
+      return {'zones': flows.zones.states};
+    },
+    'sensor.wifi': (args) async {
+      await flows.wifi(
+        args['ssid'] as String?,
+        args['bssid'] as String?,
+        DateTime.now(),
+      );
+      return {'zones': flows.zones.states};
+    },
+  };
+
   Future<void> close() async {
+    for (final t in _hubTimers) {
+      t.cancel();
+    }
+    await flows.close();
     await _wizPush?.stop();
     for (final close in _closers) {
       await close();
@@ -386,4 +758,32 @@ class OmniEngine {
     await _lock.release();
     await _events.close();
   }
+}
+
+class _EngineFlowHost implements FlowHost {
+  _EngineFlowHost(this._engine);
+
+  final OmniEngine _engine;
+
+  @override
+  Future<Map<String, Object?>?> invokeDevice(
+    String deviceId,
+    String capabilityId,
+    Map<String, Object?> params,
+  ) async =>
+      (await _engine.devices.invoke(deviceId, capabilityId, params)).reply.json;
+
+  @override
+  Future<void> saveGlobal(String name, Object? value) =>
+      DriftGlobalStore(_engine._db).put(name, value, DateTime.now().toUtc());
+
+  @override
+  Future<void> saveTrace(Map<String, Object?> trace) =>
+      ExecutionLogStore(_engine._db).add(trace);
+
+  @override
+  void emit(Map<String, Object?> event) => _engine._emit(event);
+
+  @override
+  Stream<Map<String, Object?>> get events => _engine.events;
 }

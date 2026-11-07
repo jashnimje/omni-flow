@@ -241,6 +241,13 @@ void main() {
     expect(result.device.state['temp'], 3000);
   });
 
+  test('stateKeyOf reads top-level keys only', () {
+    expect(stateKeyOf(r'$.dimming'), 'dimming');
+    expect(stateKeyOf(r"$['1']"), '1');
+    expect(stateKeyOf(r'$.a.b'), isNull);
+    expect(stateKeyOf(null), isNull);
+  });
+
   test('a manifest with an invalid JSONPath is rejected at load time', () {
     expect(
       () => DriverManifest.parse({

@@ -1,10 +1,20 @@
 /// OmniFlow engine: the one core API shared by the omni CLI and the app.
 library;
 
+export 'src/api/command_bar.dart';
 export 'src/api/omni_engine.dart';
 export 'src/cli/omni_command_runner.dart';
 export 'src/codecs/crc32.dart';
 export 'src/codecs/tuya_codec.dart';
+export 'src/dag/cards.dart';
+export 'src/dag/conditions.dart';
+export 'src/dag/executor.dart';
+export 'src/dag/flow_engine.dart';
+export 'src/dag/expression.dart';
+export 'src/dag/flow.dart';
+export 'src/dag/node_types.dart';
+export 'src/dag/transformers.dart';
+export 'src/dag/validator.dart';
 export 'src/devices/channels.dart';
 export 'src/devices/device.dart';
 export 'src/devices/device_service.dart';
@@ -14,6 +24,7 @@ export 'src/devices/serial_channel.dart';
 export 'src/devices/tuya_channel.dart';
 export 'src/devices/wiz_push.dart';
 export 'src/manifest/capability.dart';
+export 'src/mcp/omni_mcp.dart';
 export 'src/manifest/driver_manifest.dart';
 export 'src/manifest/driver_registry.dart';
 export 'src/manifest/param_spec.dart';
@@ -28,3 +39,4 @@ export 'src/transports/packet_tap.dart';
 export 'src/transports/ssh_executor.dart';
 export 'src/transports/udp_transport.dart';
 export 'src/version.dart';
+export 'src/zones/zones.dart';

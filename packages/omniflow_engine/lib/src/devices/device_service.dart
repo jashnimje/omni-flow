@@ -15,6 +15,12 @@ final _topLevelKey = RegExp(
   r"^\$(?:\.([A-Za-z_][A-Za-z0-9_]*)|\['([^']+)'\])$",
 );
 
+/// The top-level state key a capability reads, or null for deeper paths.
+String? stateKeyOf(String? jsonPath) {
+  final m = jsonPath == null ? null : _topLevelKey.firstMatch(jsonPath);
+  return m == null ? null : (m.group(1) ?? m.group(2));
+}
+
 class DeviceNotFoundException implements Exception {
   DeviceNotFoundException(this.message);
 

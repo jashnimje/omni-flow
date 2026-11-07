@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
+import 'package:mcp_dart/mcp_dart.dart' show StdioServerTransport;
 
 import '../api/omni_engine.dart';
+import '../mcp/omni_mcp.dart';
 import '../storage/keychain_secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../version.dart';
@@ -121,6 +124,166 @@ class OmniCommandRunner extends CommandRunner<int> {
       ]),
     );
     addCommand(_Watch());
+    addCommand(_Hub());
+    addCommand(_Mcp());
+    String id(List<String> rest) => _one(rest, 'ID');
+    addCommand(
+      _Group('flow', 'Validate, save, run and inspect flows.', [
+        _FileCommand(
+          'validate',
+          'Check a flow file against your devices and zones.',
+          'flow.validate',
+          key: 'flow',
+        ),
+        _FileCommand(
+          'save',
+          'Add or replace a flow from a file.',
+          'flow.save',
+          key: 'flow',
+        ),
+        _ApiCommand(
+          'list',
+          'List flows and whether they are loaded.',
+          'flow.list',
+          (_, _) async => {},
+        ),
+        _ApiCommand(
+          'get',
+          'Show a flow.',
+          'flow.get',
+          (rest, _) async => {'id': id(rest)},
+          usage: 'ID',
+        ),
+        _ApiCommand(
+          'remove',
+          'Remove a flow.',
+          'flow.remove',
+          (rest, _) async => {'id': id(rest)},
+          usage: 'ID',
+        ),
+        _ApiCommand(
+          'enable',
+          'Enable a flow.',
+          'flow.enable',
+          (rest, _) async => {'id': id(rest), 'enabled': true},
+          usage: 'ID',
+        ),
+        _ApiCommand(
+          'disable',
+          'Disable a flow.',
+          'flow.enable',
+          (rest, _) async => {'id': id(rest), 'enabled': false},
+          usage: 'ID',
+        ),
+        _ApiCommand(
+          'approve',
+          'Approve a high-risk flow that is waiting.',
+          'flow.approve',
+          (rest, _) async => {'id': id(rest)},
+          usage: 'ID',
+        ),
+        _ApiCommand(
+          'run',
+          'Fire a flow\'s manual triggers: omni flow run ID [key=value ...]',
+          'flow.run',
+          (rest, _) async {
+            if (rest.isEmpty) throw UsageException('needs ID', '');
+            return {
+              'id': rest.first,
+              'msg': {'payload': parseKeyValues(rest.skip(1))},
+            };
+          },
+          usage: 'ID [key=value ...]',
+        ),
+        _FlowDryRun(),
+        _ApiCommand(
+          'log',
+          'Show recent runs, of one flow or all.',
+          'flow.log',
+          (rest, _) async => {if (rest.isNotEmpty) 'id': rest.first},
+          usage: '[ID]',
+        ),
+      ]),
+    );
+    addCommand(
+      _Group('var', 'Global variables.', [
+        _ApiCommand(
+          'list',
+          'List global variables.',
+          'var.list',
+          (_, _) async => {},
+        ),
+        _ApiCommand(
+          'set',
+          'Set one: omni var set HomeSsids \'["HomeNet"]\'',
+          'var.set',
+          (rest, _) async {
+            if (rest.length != 2) throw UsageException('needs NAME VALUE', '');
+            return {
+              'name': rest[0],
+              'value': parseKeyValues(['v=${rest[1]}'])['v'],
+            };
+          },
+          usage: 'NAME VALUE',
+        ),
+        _ApiCommand(
+          'remove',
+          'Remove one.',
+          'var.remove',
+          (rest, _) async => {'name': _one(rest, 'NAME')},
+          usage: 'NAME',
+        ),
+      ]),
+    );
+    addCommand(
+      _Group('zone', 'Zones for presence.', [
+        _FileCommand(
+          'save',
+          'Add or replace a zone from a file.',
+          'zone.save',
+          key: 'zone',
+        ),
+        _ApiCommand(
+          'list',
+          'List zones and who is inside.',
+          'zone.list',
+          (_, _) async => {},
+        ),
+        _ApiCommand(
+          'remove',
+          'Remove a zone.',
+          'zone.remove',
+          (rest, _) async => {'id': id(rest)},
+          usage: 'ID',
+        ),
+      ]),
+    );
+    addCommand(
+      _Group('sensor', 'Feed sensor readings by hand, for testing zones.', [
+        _ApiCommand(
+          'ble',
+          'One BLE reading: omni sensor ble OMNI_PICO_DESK -55',
+          'sensor.ble',
+          (rest, _) async {
+            if (rest.length != 2 || num.tryParse(rest[1]) == null) {
+              throw UsageException('needs NAME RSSI', '');
+            }
+            return {'name': rest[0], 'rssi': num.parse(rest[1])};
+          },
+          usage: 'NAME RSSI',
+        ),
+        _ApiCommand(
+          'wifi',
+          'The current Wi-Fi: omni sensor wifi HomeNet',
+          'sensor.wifi',
+          (rest, _) async => {
+            if (rest.isNotEmpty) 'ssid': rest[0],
+            if (rest.length > 1) 'bssid': rest[1],
+          },
+          usage: '[SSID] [BSSID]',
+        ),
+      ]),
+    );
     addCommand(
       _Group('secret', 'Store device secrets in the keychain.', [
         _ApiCommand(
@@ -251,20 +414,24 @@ class _ApiCommand extends Command<int> {
 }
 
 class _FileCommand extends _ApiCommand {
-  _FileCommand(String name, String description, String apiCommand)
-    : super(name, description, apiCommand, (rest, _) async {
-        if (rest.length != 1) throw UsageException('needs a manifest FILE', '');
-        final Object? manifest;
-        try {
-          manifest = jsonDecode(await File(rest.single).readAsString());
-        } on FormatException catch (e) {
-          throw UsageException(
-            '${rest.single} is not valid JSON: ${e.message}',
-            '',
-          );
-        }
-        return {'manifest': manifest};
-      }, usage: 'FILE');
+  _FileCommand(
+    String name,
+    String description,
+    String apiCommand, {
+    String key = 'manifest',
+  }) : super(name, description, apiCommand, (rest, _) async {
+         if (rest.length != 1) throw UsageException('needs a $key FILE', '');
+         final Object? manifest;
+         try {
+           manifest = jsonDecode(await File(rest.single).readAsString());
+         } on FormatException catch (e) {
+           throw UsageException(
+             '${rest.single} is not valid JSON: ${e.message}',
+             '',
+           );
+         }
+         return {key: manifest};
+       }, usage: 'FILE');
 }
 
 class _DeviceAdd extends _ApiCommand {
@@ -397,6 +564,122 @@ class _Watch extends Command<int> {
       return 0;
     } finally {
       await subscription.cancel();
+      await engine.close();
+    }
+  }
+}
+
+class _FlowDryRun extends _ApiCommand {
+  _FlowDryRun()
+    : super(
+        'dry-run',
+        'Run a flow without sending anything: omni flow dry-run ID [--at 2026-11-06T19:00] [key=value ...]',
+        'flow.dryRun',
+        (_, _) async => {},
+        usage: 'ID [key=value ...]',
+      ) {
+    argParser
+      ..addOption('at', help: 'Local time to pretend it is (ISO 8601).')
+      ..addOption(
+        'trigger',
+        help: 'Which trigger node to fire. Default: the first.',
+      );
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    if (a.rest.isEmpty) throw UsageException('needs ID', '');
+    return {
+      'id': a.rest.first,
+      if (a.option('at') != null) 'at': a.option('at'),
+      if (a.option('trigger') != null) 'trigger': a.option('trigger'),
+      'msg': {'payload': parseKeyValues(a.rest.skip(1))},
+    };
+  }
+}
+
+/// Runs everything on its own until stopped: flows from their triggers, WiZ
+/// pushes, timers, zone ticks and device polls. Prints events as JSON lines.
+class _Hub extends Command<int> {
+  _Hub() {
+    argParser
+      ..addOption(
+        'seconds',
+        help: 'Stop after this many seconds. Default: until Ctrl-C.',
+      )
+      ..addOption(
+        'wiz-port',
+        defaultsTo: '38900',
+        help: 'Port to receive WiZ pushes on.',
+      );
+  }
+
+  @override
+  String get name => 'hub';
+
+  @override
+  String get description =>
+      'Run flows headless on this machine (the optional always-on hub).';
+
+  @override
+  Future<int> run() async {
+    final omni = runner! as OmniCommandRunner;
+    final a = argResults!;
+    final engine = await omni.engineFactory(omni.home);
+    final subscription = engine.events.listen(
+      (e) => omni.out.writeln(jsonEncode(e)),
+    );
+    try {
+      await engine.startHub(wizListenPort: int.parse(a.option('wiz-port')!));
+      omni.out.writeln(
+        jsonEncode({
+          'event': 'hub.started',
+          'flows': engine.flows.loadedFlows.toList(),
+        }),
+      );
+      final seconds = a.option('seconds');
+      if (seconds != null) {
+        await Future<void>.delayed(
+          Duration(milliseconds: (double.parse(seconds) * 1000).round()),
+        );
+      } else {
+        await ProcessSignal.sigint.watch().first;
+      }
+      return 0;
+    } finally {
+      await subscription.cancel();
+      await engine.close();
+    }
+  }
+}
+
+/// Serves the MCP tools over stdin and stdout, for Claude Code or Claude
+/// Desktop to start as a subprocess. Nothing else may write to stdout.
+class _Mcp extends Command<int> {
+  @override
+  String get name => 'mcp';
+
+  @override
+  String get description => 'Serve the OmniFlow MCP tools over stdio.';
+
+  @override
+  Future<int> run() async {
+    final omni = runner! as OmniCommandRunner;
+    final engine = await omni.engineFactory(omni.home, tap: PacketTap());
+    final closed = Completer<void>();
+    final transport = StdioServerTransport();
+    try {
+      await createOmniMcpServer(engine).connect(transport);
+      // connect() installs the server's own close handler, so chain onto it.
+      final serverOnClose = transport.onclose;
+      transport.onclose = () {
+        serverOnClose?.call();
+        if (!closed.isCompleted) closed.complete();
+      };
+      await closed.future;
+      return 0;
+    } finally {
       await engine.close();
     }
   }

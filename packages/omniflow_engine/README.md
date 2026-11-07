@@ -20,3 +20,12 @@ omni device invoke plug power value=true
 ```
 
 After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build`.
+
+Flows:
+
+```sh
+omni flow save evening_desk.flow.json      # validated against your devices and zones
+omni flow dry-run evening_desk --at 2026-11-06T19:00
+omni var set HomeSsids '["HomeNet"]'
+omni hub                                   # runs every enabled flow until Ctrl-C
+```

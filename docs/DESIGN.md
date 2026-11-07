@@ -430,7 +430,7 @@ A zone is a first-class entity, not part of a flow: a named place (desk, bedroom
 
 Raw BLE RSSI swings by around 12 dBm from reflections and the body blocking the signal, so a raw threshold makes lights flicker. Each beacon goes through a filter and then a hysteresis gate.
 
-1. **Kalman filter.** `P' = P + Q * dt`, `K = P' / (P' + R)`, `x = x + K (z - x)`, `P = (1 - K) P'`, with `Q = 0.065` per second, `R = 3.5`, and `dt` the seconds since the last update. Scaling Q by elapsed time keeps the filter's behaviour the same whatever rate the phone delivers scan results at. The spec added Q per sample, which makes the filter slower on a phone that reports often and faster on one that reports rarely.
+1. **Kalman filter.** `P' = P + Q * dt`, `K = P' / (P' + R)`, `x = x + K (z - x)`, `P = (1 - K) P'`, with `Q = 0.65` per second, `R = 3.5`, and `dt` the seconds since the last update. Scaling Q by elapsed time keeps the filter's behaviour the same whatever rate the phone delivers scan results at. The spec added `Q = 0.065` per sample, which makes the filter slower on a phone that reports often and faster on one that reports rarely. Its beacon advertises every 100 ms, so 0.065 per sample is 0.65 per second. On a synthetic walk with readings 3 to 4 times a second and +-12 dBm noise, the zone is entered 2 to 6 seconds after reaching the desk, and exits after leaving, with no flicker in between.
 2. **Silence tick.** Once a second, a beacon heard from in the last `silenceMs` (default 5000) is left alone. Otherwise the tracker feeds it an absent reading of -100 dBm. Without this, a beacon that goes out of range stops producing samples, the filter never updates, and the exit transition never fires. The original tracker had this defect.
 3. **Hysteresis and dwell.** Enter when the estimate stays at or above -62 dBm for 2 s. Exit when it stays at or below -74 dBm for 8 s. The gap between the thresholds stops the state toggling at the boundary. All four values are per-zone settings, tuned from a recorded RSSI trace of the user's own desk.
 
@@ -471,14 +471,16 @@ One tool registry inside the engine serves two surfaces:
 
 Tools:
 
-- `discover_devices_and_capabilities` - devices, their drivers and current state, optionally filtered by room.
-- `sniff_live_packets` - a bounded capture from the packet tap, with secrets redacted.
-- `register_custom_driver_manifest` - validates against the manifest schema and stores it.
-- `deploy_automation_flow_dag` - runs the full flow validator and stores the flow.
-- `simulate_flow_dry_run` - dry run with a simulated event, returning the trace.
-- `generate_mcu_firmware` - fills a Pico or Arduino template from a capability list and pins, checked against the pin allowlist. Flashing stays a manual step from a desktop (`mpremote` or the Arduino tools).
+- `discover_devices_and_capabilities` - devices, their drivers and current state, and each capability with its params, optionally filtered by room.
+- `invoke_device_capability` - runs one capability now. Refused for a device whose driver runs host commands.
+- `register_custom_driver_manifest` - validates against the manifest schema and stores it. Refused for a driver that runs host commands: only the user adds those, with `omni driver register`.
+- `deploy_automation_flow_dag` - runs the full flow validator and stores the flow as untrusted, so a flow that drives a host-command device is stored but not loaded until the user approves it (`omni flow approve`).
+- `list_flows` - flows with whether they are enabled, approved and loaded.
+- `simulate_flow_dry_run` - dry run at a chosen time with a chosen message, returning the trace.
+- `sniff_live_packets` - a capture of 1 to 10 seconds from the packet tap.
+- `generate_mcu_firmware` - the `config.json` for a Pico W running `firmware/pico_w`, from a node id, beacon name and output pins, refusing the radio and firmware pins. Flashing stays a manual step from a desktop (`mpremote`).
 
-Device state is also exposed as MCP resources that a client can subscribe to.
+Each tool is a thin call into the core API, so an agent can do nothing the CLI cannot. Device state as subscribable MCP resources, and an Arduino sketch template, are not built yet.
 
 A tool returns validation failures as an MCP error result with the full error list, so the agent can correct and retry. The original spec threw an exception and checked only that a flow had at least one node.
 

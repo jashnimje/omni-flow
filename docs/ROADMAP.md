@@ -31,13 +31,13 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 
 ## M2 - Flow engine running headless
 
-- [ ] Flow model, schema v1, validator.
-- [ ] Node type registry and the node set in `docs/DESIGN.md`.
-- [ ] Variables (`$Global`, `%flow`, `msg`) and the Wi-Fi bindings.
-- [ ] Zones as entities, with the Kalman filter (time-scaled Q), silence tick and hysteresis, fed by recorded traces in tests.
-- [ ] Executor: run modes, concurrent branches, cooldown armed at the first action, gates, traces to the execution log, dry run with an injectable clock.
-- [ ] CLI: `omni flow validate|run|dry-run`, `omni zone`, `omni hub`.
-- Exit: the evening-desk flow passes end to end on fakes, and runs live from `omni hub` with a Pico button press as the trigger.
+- [x] Flow model, schema v1, validator (ids, ports, Kahn cycle check naming only the nodes on the cycle, reachability, per-type config and reference checks).
+- [x] Node type registry and the node set in `docs/DESIGN.md`, and the flow engine: device, zone, board, Wi-Fi, time-of-day (DST-safe) and interval triggers, high-risk flows waiting for approval, traces in the execution log.
+- [x] Variables (`$Global` persisted, `%flow`, `msg`) and the Wi-Fi bindings (`$WifiSsid`, `$HomeWifiConnected` from `$HomeSsids`, `$Zone_<id>`).
+- [x] Zones as entities: Kalman filter with Q per second (0.65, the spec's per-sample value at its 10 Hz beacon), silence tick, hysteresis with dwell, Wi-Fi input with a required flag, and the zones that need BLE scanning right now. Tested on synthetic noisy walks.
+- [x] Executor: run modes, concurrent branches, cooldown armed at the first action, cooldown and debounce gates, delay, wait_for_event, bounded repeat, action error ports, per-node traces, dry run with an injectable clock.
+- [x] CLI: `omni flow validate|save|list|get|remove|enable|disable|approve|run|dry-run|log`, `omni var`, `omni zone`, `omni sensor ble|wifi`, `omni hub`.
+- Exit: the evening-desk flow passes end to end on fakes (done: zone entry on home Wi-Fi drives the emulated bulb through the real engine), and runs live from `omni hub` with a Pico button press as the trigger (needs the board).
 
 ## M3 - Android app
 
@@ -56,11 +56,11 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 
 ## M5 - MCP, AI architect, firmware generator
 
-- [ ] Tool registry with full validation and MCP error results, plus device-state resources, and the manifest and flow JSON Schemas in `schemas/` for MCP clients.
-- [ ] `omni mcp` over stdio.
-- [ ] Approval flow in the app for high-risk manifests, flows and imports.
+- [x] Tool registry over the core API with MCP error results carrying every validation issue (eight tools). Device-state resources and JSON Schema files for clients are not built yet.
+- [x] `omni mcp` over stdio, tested against the real process.
+- [ ] Approval: in the engine (agent flows are untrusted, `omni flow approve`, high-risk drivers refused to agents). The approval screen in the app comes with M3.
 - [ ] In-app architect on the command bar, with a diff and approval before anything is saved.
-- [ ] Firmware templates for Pico and Arduino.
+- [ ] Firmware: Pico W `config.json` generation with the pin allowlist (done). An Arduino template is not built.
 
 ## M6 - Optional
 
