@@ -41,10 +41,10 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 
 ## M3 - Android app
 
-- [ ] Foreground service owning the engine and database, the app's engine client over the service channel, and Riverpod providers over the event stream.
-- [ ] Dashboard generated from capability types, plus the command bar.
-- [ ] Flow editor: card tree and vyuh_node_flow canvas over one flow JSON, inline validation errors, live run highlighting.
-- [ ] Packet inspector over the transport taps, with capture-to-node and the BLE RSSI chart.
+- [x] Engine client and Riverpod providers over the event stream, with the engine in the app process for now. The foreground service that owns the engine on Android, and its service-channel client, need the Android SDK and a phone to build and test (moved to M4).
+- [x] Dashboard generated from capability types (switch, slider, button, d-pad, text), grouped by room, live from state events, plus the command bar interpreted by the engine.
+- [ ] Flow editor: the read-only card view, flow list with enable, run and approve (done). Editing on cards, the vyuh_node_flow canvas and live run highlighting are not built.
+- [ ] Packet inspector: live list of packets (done). Capture-to-node and the BLE RSSI chart are not built.
 - Exit: build and run the evening flow from the phone, and see its packets in the inspector.
 
 ## M4 - Background runtime, presence, ADB
