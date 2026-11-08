@@ -15,15 +15,15 @@
       "id": "service_restart",
       "type": "text_command",
       "label": "Restart a systemd service (needs passwordless sudo for it)",
-      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@_][A-Za-z0-9@._-]*" } },
       "command": ["sudo", "-n", "systemctl", "restart", "{{value}}"]
     },
     {
       "id": "user_service_restart",
       "type": "text_command",
       "label": "Restart a user systemd service",
-      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
-      "command": ["systemctl", "--user", "restart", "{{value}}"]
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@_][A-Za-z0-9@._-]*" } },
+      "command": ["systemctl", "--user", "restart", "--", "{{value}}"]
     },
     {
       "id": "suspend",

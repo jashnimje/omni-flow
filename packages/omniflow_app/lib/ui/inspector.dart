@@ -21,6 +21,7 @@ class Inspector extends ConsumerWidget {
           leading: Icon(
             outgoing ? Icons.north_east : Icons.south_west,
             size: 18,
+            semanticLabel: outgoing ? 'Sent' : 'Received',
           ),
           title: Text(
             '${p['text']}',

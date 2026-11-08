@@ -1,0 +1,5 @@
+# Live tests drive real devices on the LAN. Run them only on purpose:
+#   dart test -t live
+tags:
+  live:
+    skip: "live hardware test; run with dart test -t live"

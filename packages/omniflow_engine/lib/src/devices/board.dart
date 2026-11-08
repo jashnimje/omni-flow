@@ -53,10 +53,13 @@ class BoardPin {
   final int watchDelta;
   final bool invert;
 
-  /// The device state value for a raw reading: a bool for a digital input,
-  /// the number itself for everything else.
-  Object stateValue(num raw) =>
-      mode.isDigitalInput ? (raw != 0) != invert : raw;
+  /// The device state value for a raw reading: a bool for a digital input or
+  /// an output, the number itself for everything else.
+  Object stateValue(num raw) => switch (mode) {
+    PinMode.input || PinMode.inputPullup => (raw != 0) != invert,
+    PinMode.output => raw != 0,
+    _ => raw,
+  };
 
   CapabilitySpec get capability => switch (mode) {
     PinMode.output => CapabilitySpec(
@@ -230,12 +233,7 @@ DriverManifest? manifestFor(DriverRegistry registry, Device device) {
   ]);
 }
 
-/// Checks [pins] against a board's describe reply and returns one message per
-/// pin the board cannot do, empty when every pin fits.
-List<String> pinsUnsupportedBy(
-  List<BoardPin> pins,
-  Map<String, Object?> describe,
-) {
+Map<int, Set<String>> _offeredCaps(Map<String, Object?> describe) {
   final offered = <int, Set<String>>{};
   final list = describe['pins'];
   if (list is List) {
@@ -245,22 +243,75 @@ List<String> pinsUnsupportedBy(
       }
     }
   }
+  return offered;
+}
+
+/// Checks [pins] against a board's describe reply and returns one message per
+/// pin the board cannot do, empty when every pin fits.
+///
+/// A board that lists `pullup` in some pin's caps has internal pull-ups only
+/// there (ESP32 GPIO34-39 and ESP8266 GPIO16 have none). Older firmware
+/// lists no `pullup` at all, and then any input pin is taken to have one.
+/// When describe gives `watches`, the most pins the board can watch, more
+/// watched pins than that are refused before anything is sent.
+List<String> pinsUnsupportedBy(
+  List<BoardPin> pins,
+  Map<String, Object?> describe,
+) {
+  final offered = _offeredCaps(describe);
+  final reportsPullup = offered.values.any((c) => c.contains('pullup'));
   final board = describe['board'] ?? 'this board';
   final needed = {
     PinMode.input: 'in',
-    PinMode.inputPullup: 'in',
+    PinMode.inputPullup: reportsPullup ? 'pullup' : 'in',
     PinMode.output: 'out',
     PinMode.pwm: 'pwm',
     PinMode.servo: 'servo',
     PinMode.adc: 'adc',
   };
+  final watched = pins.where((p) => p.watchMs != null).length;
+  final limit = describe['watches'];
   return [
     for (final p in pins)
       if (offered[p.pin] == null)
         '${p.name}: pin ${p.pin} is not available on $board'
+      else if (p.mode == PinMode.inputPullup &&
+          !offered[p.pin]!.contains(needed[p.mode]) &&
+          offered[p.pin]!.contains('in'))
+        '${p.name}: pin ${p.pin} on $board has no internal pull-up: add an '
+            'external resistor and use mode in'
       else if (!offered[p.pin]!.contains(needed[p.mode]))
         '${p.name}: pin ${p.pin} on $board cannot do ${p.mode.wireName} '
             '(it can do ${(offered[p.pin]!.toList()..sort()).join(', ')})',
+    if (limit is int && watched > limit)
+      '$watched pins are watched but $board can watch $limit: '
+          'set "watch": false on the inputs that do not need it',
+  ];
+}
+
+/// The pins a describe reply says have a mode set, for [pinSetupCommands]
+/// to release the ones no longer configured. Each pin entry carries `mode`
+/// once the firmware reports it.
+List<int> pinsSetOnBoard(Map<String, Object?> describe) {
+  // The firmware lists them as "set": [{"pin", "mode"}]; a mode on a pins
+  // entry is read too.
+  final set = describe['set'];
+  final list = describe['pins'];
+  return [
+    if (set is List)
+      for (final p in set)
+        if (p is Map &&
+            p['pin'] is int &&
+            p['mode'] is String &&
+            p['mode'] != 'none')
+          p['pin'] as int,
+    if (set is! List && list is List)
+      for (final p in list)
+        if (p is Map &&
+            p['pin'] is int &&
+            p['mode'] is String &&
+            p['mode'] != 'none')
+          p['pin'] as int,
   ];
 }
 
@@ -268,27 +319,43 @@ List<String> pinsUnsupportedBy(
 /// outputs back to the value the device state remembers, and start watching
 /// inputs. Safe to send again at any time: the firmware leaves a pin that
 /// already has its mode alone.
+///
+/// Every mode and write goes out before the first watch, so a board that
+/// refuses a watch (too many watched pins) still has every output set up.
+/// [current] are the pins the board has set ([pinsSetOnBoard]): any of them
+/// no longer configured is released, and a configured input that is not to
+/// be watched has its watch stopped.
 List<Map<String, Object?>> pinSetupCommands(
   List<BoardPin> pins,
-  Map<String, Object?> state,
-) => [
-  for (final p in pins) ...[
-    {'cmd': 'pin.mode', 'pin': p.pin, 'mode': p.mode.wireName},
-    if (p.mode == PinMode.output && state[p.name] is bool)
-      {'cmd': 'pin.write', 'pin': p.pin, 'value': state[p.name]},
-    if (p.mode == PinMode.pwm && state[p.name] is num)
-      {'cmd': 'pwm.write', 'pin': p.pin, 'value': state[p.name]},
-    if (p.mode == PinMode.servo && state[p.name] is num)
-      {'cmd': 'servo.write', 'pin': p.pin, 'value': state[p.name]},
-    if (p.watchMs != null)
-      {
-        'cmd': 'pin.watch',
-        'pin': p.pin,
-        'ms': p.watchMs,
-        'delta': p.watchDelta,
-      },
-  ],
-];
+  Map<String, Object?> state, {
+  Iterable<int> current = const [],
+}) {
+  final configured = {for (final p in pins) p.pin};
+  return [
+    for (final pin in current)
+      if (!configured.contains(pin))
+        {'cmd': 'pin.mode', 'pin': pin, 'mode': 'none'},
+    for (final p in pins) ...[
+      {'cmd': 'pin.mode', 'pin': p.pin, 'mode': p.mode.wireName},
+      if (p.mode == PinMode.output && state[p.name] is bool)
+        {'cmd': 'pin.write', 'pin': p.pin, 'value': state[p.name]},
+      if (p.mode == PinMode.pwm && state[p.name] is num)
+        {'cmd': 'pwm.write', 'pin': p.pin, 'value': state[p.name]},
+      if (p.mode == PinMode.servo && state[p.name] is num)
+        {'cmd': 'servo.write', 'pin': p.pin, 'value': state[p.name]},
+    ],
+    for (final p in pins)
+      if (p.watchMs != null)
+        {
+          'cmd': 'pin.watch',
+          'pin': p.pin,
+          'ms': p.watchMs,
+          'delta': p.watchDelta,
+        }
+      else if (p.mode.isInput)
+        {'cmd': 'pin.watch', 'pin': p.pin, 'off': true},
+  ];
+}
 
 /// True when [host] names a serial port rather than a network address.
 bool isSerialHost(String host) =>

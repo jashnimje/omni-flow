@@ -113,6 +113,32 @@ void main() {
       expect(issues.first, startsWith(r'$.transport.type'));
     });
 
+    test('a transport the engine has no channel for yet', () {
+      for (final (type, why) in [
+        ('adb', 'adb arrives with M4'),
+        ('tcp', 'tcp is not supported yet'),
+      ]) {
+        final json = validManifest()..['transport'] = {'type': type};
+        expect(issuesFor(json), [r'$.transport.type: ' + why]);
+      }
+    });
+
+    test('integer on a param that is not a number', () {
+      final json = validManifest();
+      (json['capabilities'] as List).add({
+        'id': 'say',
+        'type': 'text_command',
+        'params': {
+          'value': {'type': 'string', 'integer': true},
+        },
+        'command': {'text': '{{value}}'},
+      });
+      expect(
+        issuesFor(json).single,
+        startsWith(r'$.capabilities[3].params.value.integer'),
+      );
+    });
+
     test('a duplicate capability id', () {
       final json = validManifest();
       (json['capabilities'] as List).add({
@@ -218,6 +244,23 @@ void main() {
         );
       },
     );
+
+    test('an integer param takes whole numbers only, sent as an int', () {
+      final brightness = DriverRegistry.withBuiltIns()['philips_wiz_udp']!
+          .capability('brightness')!;
+      final sent = brightness.validateParams({'value': 80.0});
+      expect(sent['value'], isA<int>().having((v) => v, 'value', 80));
+      expect(
+        () => brightness.validateParams({'value': 50.5}),
+        throwsA(
+          isA<ValidationException>().having(
+            (e) => '${e.issues}',
+            'issues',
+            contains('whole number'),
+          ),
+        ),
+      );
+    });
 
     test('a string param cannot smuggle a number check', () {
       final dpad = CapabilitySpec.parse(

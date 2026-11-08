@@ -190,5 +190,41 @@ void main() {
       );
       expect(executor.calls, isEmpty);
     });
+
+    test('a value that would be read as an option is rejected', () async {
+      for (final capability in ['service_restart', 'user_service_restart']) {
+        await expectLater(
+          service.invoke('pi', capability, {'value': '--help'}),
+          throwsA(isA<ValidationException>()),
+        );
+      }
+      expect(executor.calls, isEmpty);
+      await service.invoke('pi', 'user_service_restart', {
+        'value': 'syncthing.service',
+      });
+      expect(executor.calls.single, [
+        'systemctl',
+        '--user',
+        'restart',
+        '--',
+        'syncthing.service',
+      ]);
+    });
+
+    test('a Shortcut name takes no leading dash, quote or backslash', () {
+      final shortcut = DriverRegistry.withBuiltIns()['macos_host']!.capability(
+        'run_shortcut',
+      )!;
+      expect(shortcut.validateParams({'value': 'Focus: work'}), {
+        'value': 'Focus: work',
+      });
+      for (final bad in ['-i', "it's", r'a\b', 'say "x"']) {
+        expect(
+          () => shortcut.validateParams({'value': bad}),
+          throwsA(isA<ValidationException>()),
+          reason: bad,
+        );
+      }
+    });
   });
 }

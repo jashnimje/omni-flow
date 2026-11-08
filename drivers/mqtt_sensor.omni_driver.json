@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "mqtt_sensor",
+  "name": "MQTT sensor (any topic with a number or text)",
+  "category": "sensor",
+  "icon": "gauge",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "stateTopic", "label": "Topic the sensor publishes on" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "value" }] },
+  "capabilities": [{ "id": "value", "type": "sensor", "label": "Value", "stateJsonPath": "$.value" }]
+}

@@ -1,46 +1,83 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/api/engine_client.dart';
-import 'package:omniflow_app/state/providers.dart';
-import 'package:omniflow_app/ui/home.dart';
+import 'package:omniflow_app/startup.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
 
+/// A UDP port nothing is bound to right now.
+Future<int> freePort() async {
+  final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+  final port = socket.port;
+  socket.close();
+  return port;
+}
+
 void main() {
-  testWidgets('the app runs on the real engine and database', (tester) async {
+  testWidgets('the app starts the hub on the real engine and hears a board', (
+    tester,
+  ) async {
     late Directory home;
-    late OmniEngine engine;
+    late Started started;
+    late int helloPort;
     await tester.runAsync(() async {
       home = await Directory.systemTemp.createTemp('omni_app');
-      engine = await OmniEngine.open(
+      helloPort = await freePort();
+      started = await startEngine(
         home: home,
         secrets: InMemorySecretStore(),
+        wizListenPort: await freePort(),
+        boardHelloPort: helloPort,
       );
-      await engine.handle('device.add', {
+      await started.client.call('device.add', {
         'id': 'desk_lamp',
         'name': 'Desk lamp',
         'driver': 'philips_wiz_udp',
         'host': '127.0.0.1',
       });
     });
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          engineClientProvider.overrideWithValue(InProcessEngineClient(engine)),
-        ],
-        child: const OmniFlowApp(),
-      ),
-    );
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 300)),
-    );
-    await tester.pumpAndSettle();
+    expect(started.hubError, isNull);
+    await tester.pumpWidget(Launcher(start: () async => started));
+
+    Future<void> pumpUntil(Finder finder) async {
+      for (var i = 0; i < 50 && finder.evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump();
+      }
+    }
+
+    await pumpUntil(find.text('Desk lamp'));
     expect(find.text('Desk lamp'), findsOneWidget);
-    expect(find.byType(Slider), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('device-desk_lamp')), findsOneWidget);
+
     await tester.runAsync(() async {
-      await engine.close();
+      final socket = await RawDatagramSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      socket.send(
+        utf8.encode(
+          jsonEncode({
+            'event': 'hello',
+            'node': 'hall_board',
+            'board': 'esp32',
+          }),
+        ),
+        InternetAddress.loopbackIPv4,
+        helloPort,
+      );
+      socket.close();
+    });
+    final found = find.text('New board found: hall_board (esp32) at 127.0.0.1');
+    await pumpUntil(found);
+    expect(found, findsOneWidget);
+
+    await tester.runAsync(() async {
+      await (started.client as InProcessEngineClient).engine.close();
       await home.delete(recursive: true);
     });
   });

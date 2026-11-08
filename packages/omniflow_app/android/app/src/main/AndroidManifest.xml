@@ -2,12 +2,18 @@
     <!-- LAN control of lights, plugs, boards and hosts. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Held only while discovery or mDNS runs (docs/DESIGN.md, UDP). -->
+    <!-- Declared for the multicast lock the M4 platform bridge will hold during
+         discovery (docs/DESIGN.md, UDP). Nothing acquires it yet. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- No backup: secrets are keystore-bound, so a restored copy on another
+         phone cannot be decrypted. -->
     <application
         android:label="OmniFlow"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

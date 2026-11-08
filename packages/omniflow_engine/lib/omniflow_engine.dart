@@ -22,6 +22,7 @@ export 'src/devices/device.dart';
 export 'src/devices/device_service.dart';
 export 'src/devices/discovery.dart';
 export 'src/devices/http_channel.dart';
+export 'src/devices/mqtt_channel.dart';
 export 'src/devices/serial_channel.dart';
 export 'src/devices/tuya_channel.dart';
 export 'src/devices/wiz_push.dart';

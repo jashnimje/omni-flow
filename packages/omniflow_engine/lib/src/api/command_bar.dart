@@ -6,10 +6,12 @@ import '../manifest/driver_manifest.dart';
 class Interpretation {
   const Interpretation.call(this.command, this.args, this.summary)
     : askText = null;
-  const Interpretation.ask(String text)
+
+  /// Text for the architect. [summary] says what was understood when a
+  /// device matched but the rest did not, so the user can fix the line.
+  const Interpretation.ask(String text, {this.summary = 'Ask the architect'})
     : command = null,
       args = const {},
-      summary = 'Ask the architect',
       askText = text;
 
   final String? command;
@@ -104,9 +106,19 @@ Interpretation interpretCommand(
   }, '${device.name}: $what');
 
   final value = rest.toLowerCase();
-  final toggle = ofType(CapabilityType.toggle);
-  if ((value == 'on' || value == 'off') && toggle != null) {
-    return invoke(toggle, {'value': value == 'on'}, value);
+  final toggles = caps.where((c) => c.type == CapabilityType.toggle).toList();
+  if (value == 'on' || value == 'off') {
+    if (toggles.length == 1) {
+      return invoke(toggles.single, {'value': value == 'on'}, value);
+    }
+    if (toggles.length > 1) {
+      return Interpretation.ask(
+        text,
+        summary:
+            '${device.name} has several switches: ${toggles.map((c) => c.id).join(', ')}. '
+            'Say which, like "${device.id} ${toggles.first.id} $value"',
+      );
+    }
   }
   final pct = _percent.firstMatch(value);
   final level = ofType(CapabilityType.level);
@@ -139,11 +151,33 @@ Interpretation interpretCommand(
     if (arg == 'true' || arg == 'on') parsed = true;
     if (arg == 'false' || arg == 'off') parsed = false;
     if (_number.hasMatch(arg)) parsed = num.parse(arg);
-    return invoke(
-      byId,
-      arg.isEmpty ? const {} : {'value': parsed},
-      arg.isEmpty ? byId.label : '${byId.label} $arg',
+    final required = [
+      for (final p in byId.params.entries)
+        if (!p.value.optional) p.key,
+    ];
+    if (arg.isEmpty && required.isEmpty) {
+      return invoke(byId, const {}, byId.label);
+    }
+    // One value can only fill one param: the one required, or the only one.
+    final into = required.length == 1
+        ? required.single
+        : required.isEmpty && byId.params.length == 1
+        ? byId.params.keys.single
+        : null;
+    if (arg.isNotEmpty && into != null) {
+      return invoke(byId, {into: parsed}, '${byId.label} $arg');
+    }
+    return Interpretation.ask(
+      text,
+      summary:
+          '${device.name} ${byId.id} takes ${byId.params.keys.join(', ')}. '
+          'Use the device screen or ask the architect',
     );
   }
-  return Interpretation.ask(text);
+  return Interpretation.ask(
+    text,
+    summary:
+        '${device.name} accepts ${caps.map((c) => c.id).join(', ')}, '
+        'like "${device.id} ${caps.isEmpty ? 'on' : caps.first.id} ..."',
+  );
 }

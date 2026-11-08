@@ -15,7 +15,9 @@ const Map<String, _Board> _boards = {
   'esp32': (
     fqbn: 'esp32:esp32:esp32',
     wifi: true,
-    pins: 'GPIO 0-5, 12-19, 21-23, 25-27, 32, 33 any mode; 34-39 input only; analog on 32-39',
+    pins:
+        'GPIO 0, 2, 4, 5, 12-19, 21-23, 25-27, 32, 33 any mode (1 and 3 are USB serial); '
+        '34-39 input only; analog on 32-39',
   ),
   'esp8266': (
     fqbn: 'esp8266:esp8266:nodemcuv2',
@@ -126,6 +128,15 @@ McpServer createOmniMcpServer(OmniEngine engine) {
           'this driver runs host commands, so only the user can register it',
         );
       }
+      // Replacing a user driver changes what that user's devices and
+      // approved flows do, so that is the user's call too.
+      final id = checked['id'] as String;
+      if (engine.registry[id] != null && !engine.registry.isBuiltIn(id)) {
+        return refuse(
+          'needs_user',
+          'a user driver $id exists. Only the user can replace it (omni driver register)',
+        );
+      }
       return reply(
         await engine.handle('driver.register', {'manifest': args['manifest']}),
       );
@@ -136,7 +147,9 @@ McpServer createOmniMcpServer(OmniEngine engine) {
     'deploy_automation_flow_dag',
     description:
         'Validates and saves a flow (schema v1). Every validation issue comes back at once. '
-        'A flow that drives a host-command device is stored disabled until the user approves it.',
+        'A flow that drives a host-command device, or starts or feeds one that does, is stored '
+        'but not loaded until the user approves it (approved: false). An existing flow the user '
+        'saved or approved is replaced only as unapproved.',
     inputSchema: JsonSchema.object(
       properties: {'flow': freeObject},
       required: ['flow'],

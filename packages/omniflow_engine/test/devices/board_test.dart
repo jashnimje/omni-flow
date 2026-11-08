@@ -141,6 +141,145 @@ void main() {
     ]);
   });
 
+  test('every mode and write goes out before the first watch', () {
+    final pins = parseBoardPins({
+      'button': {'pin': 0, 'mode': 'in_pullup'},
+      'relay': {'pin': 4, 'mode': 'out'},
+    });
+    expect(pinSetupCommands(pins, {'relay': false}).map((c) => c['cmd']), [
+      'pin.mode',
+      'pin.mode',
+      'pin.write',
+      'pin.watch',
+    ]);
+  });
+
+  test('pins no longer configured are released and unwatched inputs stop', () {
+    final pins = parseBoardPins({
+      'door': {'pin': 0, 'mode': 'in', 'watch': false},
+    });
+    final describe = {
+      'pins': [
+        {
+          'pin': 0,
+          'mode': 'in',
+          'caps': ['in', 'out'],
+        },
+        {
+          'pin': 4,
+          'mode': 'out',
+          'caps': ['in', 'out'],
+        },
+        {
+          'pin': 5,
+          'mode': 'none',
+          'caps': ['in', 'out'],
+        },
+        {
+          'pin': 6,
+          'caps': ['in', 'out'],
+        },
+      ],
+    };
+    expect(pinsSetOnBoard(describe), [0, 4]);
+    // The shape the firmware sends: a top-level list of pins with a mode.
+    expect(
+      pinsSetOnBoard({
+        'pins': describe['pins'],
+        'set': [
+          {'pin': 7, 'mode': 'out'},
+          {'pin': 8, 'mode': 'none'},
+        ],
+      }),
+      [7],
+    );
+    expect(
+      pinSetupCommands(pins, const {}, current: pinsSetOnBoard(describe)),
+      [
+        {'cmd': 'pin.mode', 'pin': 4, 'mode': 'none'},
+        {'cmd': 'pin.mode', 'pin': 0, 'mode': 'in'},
+        {'cmd': 'pin.watch', 'pin': 0, 'off': true},
+      ],
+    );
+  });
+
+  test('more watched pins than the board has watches is refused', () {
+    final pins = parseBoardPins({
+      'a': {'pin': 0, 'mode': 'in'},
+      'b': {'pin': 1, 'mode': 'in'},
+      'c': {'pin': 2, 'mode': 'in', 'watch': false},
+    });
+    final describe = {
+      'board': 'uno',
+      'watches': 1,
+      'pins': [
+        for (final p in [0, 1, 2])
+          {
+            'pin': p,
+            'caps': ['in'],
+          },
+      ],
+    };
+    expect(pinsUnsupportedBy(pins, describe), [
+      '2 pins are watched but uno can watch 1: '
+          'set "watch": false on the inputs that do not need it',
+    ]);
+    expect(pinsUnsupportedBy(pins, {...describe, 'watches': 2}), isEmpty);
+  });
+
+  test(
+    'in_pullup needs a pull-up when the board reports which pins have one',
+    () {
+      final pins = parseBoardPins({
+        'button': {'pin': 34, 'mode': 'in_pullup'},
+      });
+      expect(
+        pinsUnsupportedBy(pins, {
+          'board': 'esp32',
+          'pins': [
+            {
+              'pin': 4,
+              'caps': ['in', 'pullup', 'out'],
+            },
+            {
+              'pin': 34,
+              'caps': ['in', 'adc'],
+            },
+          ],
+        }),
+        [
+          'button: pin 34 on esp32 has no internal pull-up: add an external '
+              'resistor and use mode in',
+        ],
+      );
+      expect(
+        pinsUnsupportedBy(pins, {
+          'board': 'esp32',
+          'pins': [
+            {
+              'pin': 34,
+              'caps': ['in', 'adc'],
+            },
+          ],
+        }),
+        isEmpty,
+        reason: 'firmware that reports no pullup at all is not second-guessed',
+      );
+    },
+  );
+
+  test('an output reads back as on or off', () {
+    final relay = parseBoardPins({
+      'relay': {'pin': 4, 'mode': 'out'},
+    }).single;
+    expect(relay.stateValue(1), true);
+    expect(relay.stateValue(0), false);
+    expect(
+      pinSetupCommands([relay], {'relay': relay.stateValue(1)}),
+      contains(equals({'cmd': 'pin.write', 'pin': 4, 'value': true})),
+    );
+  });
+
   test('a serial port path picks the serial link', () {
     expect(isSerialHost('/dev/cu.usbmodem1101'), isTrue);
     expect(isSerialHost('COM3'), isTrue);

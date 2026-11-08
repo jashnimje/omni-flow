@@ -117,6 +117,28 @@ void main() {
     },
   );
 
+  test(
+    'discover asks a port a device holds through that device\'s port',
+    () async {
+      await service.invoke('pico_usb', 'led', {'value': true});
+      final stray = <SerialEvent>[];
+      channel.events
+          .where((e) => e.json['event'] == 'describe')
+          .listen(stray.add);
+      final manifest = v1Registry()['omniflow_mcu_serial']!;
+      for (var round = 0; round < 4; round++) {
+        final found = await channel.discover(
+          manifest,
+          ports: () async => [tty],
+        );
+        expect(found.single['stableId'], 'pty_board', reason: 'round $round');
+        final ack = await service.invoke('pico_usb', 'led', {'value': false});
+        expect(ack.reply.json, containsPair('event', 'ack'));
+      }
+      expect(stray, isEmpty);
+    },
+  );
+
   test('a missing port is a transport timeout', () async {
     await store.put(
       const Device(

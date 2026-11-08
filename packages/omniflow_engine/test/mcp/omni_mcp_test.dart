@@ -26,7 +26,8 @@ void main() {
     await engine.handle('device.add', {
       'id': 'mac_mini',
       'driver': 'macos_host',
-      'host': 'local',
+      // TEST-NET: a broken guard fails to connect instead of running here.
+      'host': '192.0.2.1',
     });
     final toServer = StreamController<List<int>>();
     final toClient = StreamController<List<int>>();
@@ -183,6 +184,61 @@ void main() {
     });
     expect(http.isError, isFalse);
     expect(engine.registry['fan'], isNotNull);
+  });
+
+  test('an agent cannot replace a driver or a flow the user saved', () async {
+    final userDriver = {
+      'schemaVersion': 1,
+      'id': 'fan',
+      'name': 'Fan',
+      'category': 'misc',
+      'transport': {'type': 'http'},
+      'capabilities': [
+        {
+          'id': 'go',
+          'type': 'action',
+          'command': {'path': '/go'},
+        },
+      ],
+    };
+    await engine.handle('driver.register', {'manifest': userDriver});
+    final replaced = await call('register_custom_driver_manifest', {
+      'manifest': {...userDriver, 'name': 'Not your fan'},
+    });
+    expect(replaced.isError, isTrue);
+    expect((body(replaced)['error'] as Map)['type'], 'needs_user');
+    expect(engine.registry['fan']!.name, 'Fan');
+
+    Map<String, Object?> lampFlow(bool value) => {
+      'schemaVersion': 1,
+      'id': 'lamp_on',
+      'name': 'Lamp',
+      'nodes': [
+        {'id': 'go', 'type': 'manual'},
+        {
+          'id': 'l',
+          'type': 'device_capability',
+          'config': {
+            'deviceId': 'desk_lamp',
+            'capabilityId': 'power',
+            'params': {'value': value},
+          },
+        },
+      ],
+      'edges': [
+        {
+          'id': 'e',
+          'from': {'node': 'go', 'port': 'out'},
+          'to': {'node': 'l', 'port': 'in'},
+        },
+      ],
+    };
+    await engine.handle('flow.save', {'flow': lampFlow(true), 'trusted': true});
+    final over = await call('deploy_automation_flow_dag', {
+      'flow': lampFlow(false),
+    });
+    expect((body(over)['highRisk'], body(over)['approved']), (false, false));
+    expect(engine.flows.loadedFlows, isEmpty);
   });
 
   test(

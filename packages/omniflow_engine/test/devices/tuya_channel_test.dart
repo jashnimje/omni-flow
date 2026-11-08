@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
+
+import '../support/tuya_frames.dart';
 
 const localKey = '0123456789abcdef';
 const devId = 'bf0000000000000000test';
@@ -23,8 +26,16 @@ class FakePlug {
   final received = <TuyaFrame>[];
   final dps = <String, Object?>{'1': false};
   int connections = 0;
+  int disconnects = 0;
   bool silent = false;
+  bool answerHeartbeats = true;
   int retcode = 0;
+
+  /// Plain text sent, encrypted, instead of the control acknowledgement.
+  String? refuseWith;
+
+  /// A frame no codec can decode, sent before every reply.
+  bool garbageFirst = false;
 
   int get port => _server.port;
 
@@ -33,47 +44,71 @@ class FakePlug {
     final splitter = TuyaFrameSplitter();
     // The channel may drop the connection first, which resets this side.
     unawaited(socket.done.catchError((Object _) {}));
-    socket.listen(
-      (Uint8List chunk) {
-        for (final raw in splitter.add(chunk)) {
-          final frame = codec.decode(raw, fromDevice: false);
-          received.add(frame);
-          if (silent) continue;
-          if (frame.command == TuyaCommand.control) {
-            dps.addAll(Map<String, Object?>.from(frame.body!['dps'] as Map));
+    socket.listen(onDone: () => disconnects++, onError: (Object _) {}, (
+      Uint8List chunk,
+    ) {
+      for (final raw in splitter.add(chunk)) {
+        final frame = codec.decode(raw, fromDevice: false);
+        received.add(frame);
+        if (silent) continue;
+        if (garbageFirst) {
+          socket.add(
+            rawTuyaFrame(frame.command, [
+              ...tuyaRetcode(0),
+              ...ascii.encode('3.3'),
+              0,
+            ]),
+          );
+        }
+        final refusal = refuseWith;
+        if (frame.command == TuyaCommand.control && refusal != null) {
+          socket.add(
+            rawTuyaFrame(frame.command, seq: frame.seq, [
+              ...tuyaRetcode(0),
+              ...tuyaEncrypt(localKey, utf8.encode(refusal)),
+            ]),
+          );
+        } else if (frame.command == TuyaCommand.heartbeat) {
+          if (answerHeartbeats) {
             socket.add(
               codec.encode(
                 seq: frame.seq,
-                command: TuyaCommand.control,
+                command: TuyaCommand.heartbeat,
                 body: null,
-                retcode: retcode,
-              ),
-            );
-            socket.add(
-              codec.encode(
-                seq: 0,
-                command: TuyaCommand.status,
-                body: {'devId': devId, 'dps': Map.of(dps)},
-                retcode: 0,
-              ),
-            );
-          } else if (frame.command == TuyaCommand.dpQuery) {
-            socket.add(
-              codec.encode(
-                seq: frame.seq,
-                command: TuyaCommand.dpQuery,
-                body: {'devId': devId, 'dps': Map.of(dps)},
                 retcode: 0,
               ),
             );
           }
+        } else if (frame.command == TuyaCommand.control) {
+          dps.addAll(Map<String, Object?>.from(frame.body!['dps'] as Map));
+          socket.add(
+            codec.encode(
+              seq: frame.seq,
+              command: TuyaCommand.control,
+              body: null,
+              retcode: retcode,
+            ),
+          );
+          socket.add(
+            codec.encode(
+              seq: 0,
+              command: TuyaCommand.status,
+              body: {'devId': devId, 'dps': Map.of(dps)},
+              retcode: 0,
+            ),
+          );
+        } else if (frame.command == TuyaCommand.dpQuery) {
+          socket.add(
+            codec.encode(
+              seq: frame.seq,
+              command: TuyaCommand.dpQuery,
+              body: {'devId': devId, 'dps': Map.of(dps)},
+              retcode: 0,
+            ),
+          );
         }
-      },
-      onError: (Object _) {
-        // A send the OS could not route (no network, no broadcast route)
-        // comes back here on some systems. It is not a reply: ignore it.
-      },
-    );
+      }
+    });
   }
 
   Future<void> close() => _server.close();
@@ -158,6 +193,78 @@ void main() {
       throwsA(isA<MissingSecretException>()),
     );
     expect(plug.received, isEmpty);
+  });
+
+  test('a refusal in plain text fails the command with its words', () async {
+    plug.refuseWith = 'json obj data unvalid';
+    await expectLater(
+      service.invoke('plug', 'power', {'value': true}),
+      throwsA(
+        isA<CommandFailedException>().having(
+          (e) => e.message,
+          'message',
+          contains('json obj data unvalid'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'an undecodable frame is skipped and the real reply still lands',
+    () async {
+      plug.garbageFirst = true;
+      final result = await service.invoke('plug', 'power', {'value': true});
+      expect(result.device.state['1'], true);
+    },
+  );
+
+  group('heartbeat', () {
+    late TuyaChannel beating;
+    late DeviceService beatingService;
+
+    setUp(() {
+      beating = TuyaChannel(
+        secrets,
+        clock: () => clock,
+        heartbeatEvery: const Duration(milliseconds: 100),
+      );
+      beatingService = DeviceService(
+        registry: DriverRegistry.withBuiltIns(),
+        store: store,
+        channels: {TransportType.tuya: beating},
+      );
+    });
+
+    tearDown(() => beating.close());
+
+    Future<void> until(bool Function() done) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (!done()) {
+        if (DateTime.now().isAfter(deadline)) fail('never happened');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    }
+
+    test('an idle connection sends heartbeats and stays open', () async {
+      await beatingService.invoke('plug', 'power', {'value': true});
+      await until(
+        () =>
+            plug.received
+                .where((f) => f.command == TuyaCommand.heartbeat)
+                .length >=
+            3,
+      );
+      expect(plug.disconnects, 0);
+      expect(plug.connections, 1);
+    });
+
+    test('two unanswered heartbeats close the connection', () async {
+      plug.answerHeartbeats = false;
+      await beatingService.invoke('plug', 'power', {'value': true});
+      await until(() => plug.disconnects == 1);
+      await beatingService.invoke('plug', 'power', {'value': false});
+      expect(plug.connections, 2);
+    });
   });
 
   test('a non-zero return code is a failed command', () async {

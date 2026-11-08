@@ -1,3 +1,4 @@
+import '../devices/device_service.dart' show stateKeyOf;
 import '../manifest/capability.dart';
 import '../manifest/validation.dart';
 import '../template/template_renderer.dart';
@@ -11,6 +12,7 @@ class FlowReferences {
     this.devices = const {},
     this.zones = const {},
     this.flows = const {},
+    this.calls = const {},
   });
 
   /// The capability [capabilityId] of device [deviceId], or null.
@@ -19,6 +21,9 @@ class FlowReferences {
   final Set<String> devices;
   final Set<String> zones;
   final Set<String> flows;
+
+  /// The flows each stored flow starts with `run_flow`, to find call cycles.
+  final Map<String, Set<String>> calls;
 
   static CapabilitySpec? _none(String _, String _) => null;
 }
@@ -131,6 +136,9 @@ final Map<String, NodeType> builtInNodeTypes = {
       if (c['inMin'] is num && c['inMin'] == c['inMax']) {
         i.add(p, 'inMin and inMax must differ');
       }
+      if (c['round'] != null && c['round'] is! bool) {
+        i.add('$p.round', 'is true or false');
+      }
       _paths(c, p, i);
     }),
     NodeType('math', NodeCategory.transformer, ['out'], (c, p, i, _) {
@@ -210,7 +218,7 @@ void _checkToggle(
   if (capability == null) {
     i.add('$p.capabilityId', '$deviceId has no capability $capabilityId');
   } else if (capability.type != CapabilityType.toggle ||
-      capability.stateJsonPath == null) {
+      stateKeyOf(capability.stateJsonPath) == null) {
     i.add(
       '$p.capabilityId',
       '$capabilityId is not an on/off toggle with state',

@@ -63,6 +63,21 @@ List<String> renderArgv(
 /// remote side always runs the command through the login shell.
 String posixShellJoin(List<String> argv) => argv.map(_quote).join(' ');
 
+/// Refuses an argv that [posixShellJoin] cannot quote for every login shell.
+/// fish reads `\\` and `\'` as escapes even inside single quotes, so a
+/// backslash in an argument could end the quoting early there. Throws an
+/// [ArgumentError] before anything is sent.
+void checkSshArgv(List<String> argv) {
+  final bad = argv.where((a) => a.contains(r'\')).firstOrNull;
+  if (bad != null) {
+    throw ArgumentError.value(
+      bad,
+      'argv',
+      'a backslash cannot be sent safely over SSH',
+    );
+  }
+}
+
 final _safe = RegExp(r'^[A-Za-z0-9_@%+=:,./-]+$');
 
 String _quote(String arg) {
@@ -87,8 +102,8 @@ class LocalExecutor implements HostExecutor {
       argv.sublist(1),
       runInShell: false,
     );
-    final out = process.stdout.transform(utf8.decoder).join();
-    final err = process.stderr.transform(utf8.decoder).join();
+    final out = _Collected(process.stdout);
+    final err = _Collected(process.stderr);
     if (stdin != null) process.stdin.write(stdin);
     await process.stdin.close();
     final int code;
@@ -96,13 +111,47 @@ class LocalExecutor implements HostExecutor {
       code = await process.exitCode.timeout(timeout);
     } on TimeoutException {
       process.kill(ProcessSignal.sigkill);
+      await Future.wait([out.cancel(), err.cancel()]);
       throw CommandTimeoutException(argv, timeout);
     }
+    // A child left in the background (`sleep 5 &`) keeps the pipes open after
+    // the command exits, so the output is whatever arrived within the timeout.
+    final remaining = timeout - watch.elapsed;
+    await Future.wait([out.done(remaining), err.done(remaining)]);
     return CommandResult(
       exitCode: code,
-      stdout: (await out).trimRight(),
-      stderr: (await err).trimRight(),
+      stdout: out.text.trimRight(),
+      stderr: err.text.trimRight(),
       duration: watch.elapsed,
     );
+  }
+}
+
+class _Collected {
+  _Collected(Stream<List<int>> stream) {
+    _subscription = stream
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(
+          _text.write,
+          onError: (Object _) {},
+          onDone: _finished.complete,
+        );
+  }
+
+  final _text = StringBuffer();
+  final _finished = Completer<void>();
+  late final StreamSubscription<String> _subscription;
+
+  String get text => _text.toString();
+
+  Future<void> done(Duration within) async {
+    if (!within.isNegative) {
+      await _finished.future.timeout(within, onTimeout: () {});
+    }
+    await cancel();
+  }
+
+  Future<void> cancel() async {
+    if (!_finished.isCompleted) await _subscription.cancel();
   }
 }

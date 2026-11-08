@@ -24,6 +24,16 @@ enum TransportType {
 
   final String wireName;
 
+  /// Why a manifest cannot use this transport yet: the engine has no channel
+  /// for it. Null when it can.
+  String? get notYetSupported => switch (this) {
+    tcp => 'tcp is not supported yet',
+    adb => 'adb arrives with M4',
+    _ => null,
+  };
+
+  bool get isSupported => notYetSupported == null;
+
   static TransportType? fromWire(Object? name) =>
       values.where((t) => t.wireName == name).firstOrNull;
 }
@@ -315,8 +325,10 @@ class DriverManifest {
     if (type == null) {
       issues.add(
         '$path.type',
-        'must be one of ${TransportType.values.map((t) => t.wireName).join(', ')}',
+        'must be one of ${TransportType.values.where((t) => t.isSupported).map((t) => t.wireName).join(', ')}',
       );
+    } else if (!type.isSupported) {
+      issues.add('$path.type', type.notYetSupported!);
     }
     final payload = map['payload'] == null
         ? PayloadEncoding.json

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "tasmota_mqtt",
+  "name": "Tasmota device (MQTT)",
+  "category": "power",
+  "icon": "power",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "topic", "label": "Tasmota topic (Configuration, MQTT, Topic)" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": {
+    "topics": [
+      { "topic": "stat/{{device.topic}}/RESULT" },
+      { "topic": "tele/{{device.topic}}/STATE" },
+      { "topic": "stat/{{device.topic}}/POWER", "key": "POWER" }
+    ],
+    "refresh": { "topic": "cmnd/{{device.topic}}/STATE", "payload": "" }
+  },
+  "reliability": { "timeoutMs": 3000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["ON", "OFF"],
+      "command": { "topic": "cmnd/{{device.topic}}/POWER", "payload": "{{value}}" },
+      "stateJsonPath": "$.POWER"
+    },
+    {
+      "id": "dimmer",
+      "type": "level",
+      "label": "Brightness",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 100, "unit": "%" } },
+      "command": { "topic": "cmnd/{{device.topic}}/Dimmer", "payload": "{{value}}" },
+      "stateJsonPath": "$.Dimmer"
+    }
+  ]
+}

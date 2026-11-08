@@ -3,7 +3,7 @@
 Pure Dart OmniFlow engine and the `omni` CLI. Design: `../../docs/DESIGN.md`.
 
 ```sh
-dart test                                   # unit tests
+dart test -x live                           # unit tests
 OMNI_KEYCHAIN_TEST=1 dart test --tags live  # plus live tests (keychain, SSH when OMNI_SSH_* is set)
 dart run omniflow_engine:omni --help
 ```
@@ -21,11 +21,13 @@ omni device invoke plug power value=true
 
 After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build`.
 
-Flows:
+Flows. Save the sample flow from `docs/DESIGN.md` (Flows, Schema v1) to a file first. Its id is `flow_arrive_desk_evening`.
 
 ```sh
-omni flow save evening_desk.flow.json      # validated against your devices and zones
-omni flow dry-run evening_desk --at 2026-11-06T19:00
+omni flow save arrive_desk.flow.json       # validated against your devices and zones
+omni flow dry-run flow_arrive_desk_evening --at 2026-11-06T19:00
 omni var set HomeSsids '["HomeNet"]'
-omni hub                                   # runs every enabled flow until Ctrl-C
+omni hub                                   # runs every enabled flow until Ctrl-C or SIGTERM
 ```
+
+Every `omni` command, `omni hub` and `omni mcp` included, holds the database lock while it runs, so only one of them can use a data directory at a time.

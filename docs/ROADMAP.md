@@ -1,6 +1,6 @@
 # OmniFlow Roadmap
 
-> Status: active. M1, M2 and M5 are complete in code, M3 in part. M7 (universal boards and links) is complete in the engine, CLI, MCP and firmware; MQTT, mDNS and the app sheets remain. Live hardware tests and the Android service wait on hardware and the Android SDK. Design: `docs/DESIGN.md`.
+> Status: active. M1 and M2 are complete in code. M3 is in part: the app has device setup, approval and link screens, but no flow editing, canvas or inspector tabs. M5 has its tools, `omni mcp` and engine approval. The in-app architect, MCP resources and JSON Schemas are open, and `omni mcp` cannot run beside `omni hub`. M7 (universal boards, links, MQTT) is complete except mDNS and releasing removed pins, and proven against emulated devices. Nothing has run on a physical board or a phone yet. Live hardware tests and the Android service wait on hardware and the Android SDK. Milestones are listed in the order the work happened, so M7 comes before M6. Design: `docs/DESIGN.md`.
 
 Android is the only app target. Headless-first vertical slices: the engine is proven from the CLI on the Mac before the app wraps it. Every milestone ends with a test that runs against real hardware where it is available. Live hardware: Philips WiZ, Tuya/Wipro, Pico W and Arduino. The Android TV is owned but not yet available, so ADB is tested against fixtures until it is.
 
@@ -21,18 +21,18 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 - [x] Driver registry with embedded built-ins (`tool/embed_drivers.dart`, checked by a test).
 - [x] Structured template renderer with typed params and fallback chains.
 - [x] drift database (schema v1: devices and user manifests, the flow tables come with M2), the database lock file, and `SecretStore` with the macOS keychain store for the CLI (its live test passed once, opt-in with `OMNI_KEYCHAIN_TEST=1`).
-- [ ] Transports: UDP with request and retry, Wake-on-LAN, directed broadcast and the packet tap (done), WiZ push registration renewed every 20 s with `syncPilot` routed by MAC (done), the Tuya v3.3 codec with frame splitting, matching tinytuya golden frames (done), the Tuya TCP channel with a persistent connection per device (done), v3.4 or v3.5 if the scan below needs them, HTTP (done, with Shelly Gen2 RPC checked against Shelly's docs), MQTT (deferred until a device needs it: none of the current hardware speaks MQTT, and it needs a broker to test against), local argv execution and POSIX quoting for SSH (done), the SSH executor with host keys pinned on first use (done, live test opt-in: `OMNI_SSH_HOST`, `OMNI_SSH_USER`, `OMNI_SSH_KEY`), the NDJSON line decoder with streaming UTF-8 and a line cap (done), serial port access through stty, with reads via cat so a close never blocks (done, tested over a pseudo-terminal).
-- [x] Device runtime: per-device queue, timeouts and retries, address healing, poll and push state, optimistic state, liveness check. Scheduling the polls lands with `omni hub` in M2.
-- [x] Discovery: UDP probe to 255.255.255.255 and a /24 broadcast per interface, matched by JSONPath, with the stable id read for address healing. USB serial boards found by sending `describe` to each `/dev/cu.usbmodem*` or `/dev/ttyACM*` port. Both behind `omni device discover`. mDNS waits for a device that needs it (WiZ does not use it, Shelly works by IP).
-- [ ] Built-in drivers: WiZ (done), Tuya plug on DP 1 (done; bulb DPs after the scan), macOS host (done), Linux host (done), Shelly Plus switch (done), MCU node over UDP and over USB serial (done), Android TV ADB (moved to M4 with the rest of ADB: the TV is not available and the AOSP protocol reference could not be fetched).
-- [x] Firmware v1: Pico pin allowlist, `describe`, request ids, onboard LED, UDP NDJSON channel with `config.json`. Arduino: bounded buffer, `describe`, request ids. Pico code passes a Python syntax check and its NEC bit logic passes a host test (`firmware/pico_w/test_nec.py`). The Arduino sketch is not compiled yet (no `arduino-cli`). Neither has run on a board.
+- [ ] Transports: UDP with request and retry, Wake-on-LAN, directed broadcast and the packet tap (done), WiZ push registration renewed every 20 s with `syncPilot` routed by MAC (done), the Tuya v3.3 codec with frame splitting, matching tinytuya golden frames (done), the Tuya TCP channel with a persistent connection per device (done), v3.4 or v3.5 if the scan below needs them, HTTP (done, with Shelly Gen2 RPC checked against Shelly's docs), MQTT (done in M7, tested against an in-test broker), local argv execution and POSIX quoting for SSH (done), the SSH executor with host keys pinned on first use (done, live test opt-in: `OMNI_SSH_HOST`, `OMNI_SSH_USER`, `OMNI_SSH_KEY`), the NDJSON line decoder with streaming UTF-8 and a line cap (done), serial port access through stty, with reads via cat so a close never blocks (done, tested over a pseudo-terminal).
+- [x] Device runtime: per-device queue, timeouts and retries, address healing, poll and push state, optimistic state, and liveness as the `online` field in device JSON, shown on the app's device cards. Scheduling the polls lands with `omni hub` in M2.
+- [x] Discovery: UDP probe to 255.255.255.255 and a /24 broadcast per interface, matched by JSONPath, with the stable id read for address healing. USB serial boards found by sending `describe` to each `/dev/cu.usbmodem*`, `/dev/cu.usbserial*`, `/dev/ttyACM*` or `/dev/ttyUSB*` port. Both behind `omni device discover`. mDNS waits for a device that needs it (WiZ does not use it, Shelly works by IP).
+- [ ] Built-in drivers: WiZ (done), Tuya plug on DP 1 (done; bulb DPs after the scan), macOS host (done), Linux host (done), Shelly Plus switch (done), MCU node over UDP and over USB serial (done in M1, replaced in M7 by `omniflow_board`), Android TV ADB (moved to M4 with the rest of ADB: the TV is not available and the AOSP protocol reference could not be fetched).
+- [x] Firmware v1 (retired in M7, kept here as history): a MicroPython Pico W firmware with a pin allowlist and `config.json`, and an Arduino sketch, both since replaced by `firmware/omniflow_node`.
 - [x] CLI: `omni driver list|validate|register`, `omni device add|discover|list|get|invoke|refresh|remove`, `omni secret set`, `omni watch [--packets]` (which replaces the planned `omni sniff`).
 - Exit: from the CLI, the real WiZ goes to 80% at 3000K, the real Tuya plug toggles, the Pico acknowledges an IR send over serial and over UDP, and the Mac changes volume over SSH.
 
 ## M2 - Flow engine running headless
 
 - [x] Flow model, schema v1, validator (ids, ports, Kahn cycle check naming only the nodes on the cycle, reachability, per-type config and reference checks).
-- [x] Node type registry and the node set in `docs/DESIGN.md`, and the flow engine: device, zone, board, Wi-Fi, time-of-day (DST-safe) and interval triggers, high-risk flows waiting for approval, traces in the execution log.
+- [x] Node type registry with the built node set listed in `docs/DESIGN.md` (the planned triggers, the `hold` gate and the `exec`, HTTP and MQTT actions are not built), and the flow engine: device, zone, board, Wi-Fi, time-of-day (DST-safe) and interval triggers, high-risk flows waiting for approval, traces in the execution log.
 - [x] Variables (`$Global` persisted, `%flow`, `msg`) and the Wi-Fi bindings (`$WifiSsid`, `$HomeWifiConnected` from `$HomeSsids`, `$Zone_<id>`).
 - [x] Zones as entities: Kalman filter with Q per second (0.65, the spec's per-sample value at its 10 Hz beacon), silence tick, hysteresis with dwell, Wi-Fi input with a required flag, and the zones that need BLE scanning right now. Tested on synthetic noisy walks.
 - [x] Executor: run modes, concurrent branches, cooldown armed at the first action, cooldown and debounce gates, delay, wait_for_event, bounded repeat, action error ports, per-node traces, dry run with an injectable clock.
@@ -41,10 +41,12 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 
 ## M3 - Android app
 
-- [x] Engine client and Riverpod providers over the event stream, with the engine in the app process for now. The foreground service that owns the engine on Android, and its service-channel client, need the Android SDK and a phone to build and test (moved to M4).
-- [x] Dashboard generated from capability types (switch, slider, button, d-pad, text), grouped by room, live from state events, plus the command bar interpreted by the engine.
-- [ ] Flow editor: the read-only card view, flow list with enable, run and approve (done). Editing on cards, the vyuh_node_flow canvas and live run highlighting are not built.
+- [x] Engine client and Riverpod providers over the event stream, with the engine in the app process for now. The app starts the hub at launch, shows a banner when that fails and a Retry screen when the engine cannot open. The foreground service that owns the engine on Android, and its service-channel client, need the Android SDK and a phone to build and test (moved to M4).
+- [x] Dashboard generated from capability types (switch, slider, button, d-pad, text, colour presets and hex, a params form for actions and exec), grouped by room, live from state events, with offline chips, a confirmation for host commands, plus the command bar interpreted by the engine.
+- [x] Devices from the phone: Add device (driver, scan or address, name, room), rename or move, remove. MQTT and Tuya settings and secrets still need the CLI.
+- [ ] Flow editor: the read-only card view, flow list with enable, run, remove and an approval page that shows what would run and approves that revision (done). Editing on cards, the vyuh_node_flow canvas and live run highlighting are not built.
 - [ ] Packet inspector: live list of packets (done). Capture-to-node and the BLE RSSI chart are not built.
+- [x] No Android backup: `allowBackup="false"` and data extraction rules that exclude every domain. Not yet built into an APK.
 - Exit: build and run the evening flow from the phone, and see its packets in the inspector.
 
 ## M4 - Background runtime, presence, ADB
@@ -56,33 +58,36 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 
 ## M5 - MCP, AI architect, firmware generator
 
-- [x] Tool registry over the core API with MCP error results carrying every validation issue (eight tools). Device-state resources and JSON Schema files for clients are not built yet.
-- [x] `omni mcp` over stdio, tested against the real process.
-- [ ] Approval: in the engine (agent flows are untrusted, `omni flow approve`, high-risk drivers refused to agents). The approval screen in the app comes with M3.
+- [x] Tool registry over the core API with MCP error results carrying every validation issue (ten tools). Device-state resources and JSON Schema files for clients are not built yet.
+- [x] `omni mcp` over stdio, tested against the real process. Known limit: it holds the database lock, so it cannot run while `omni hub` runs on the same data directory. `omni` commands as clients of a running hub over a local socket are planned.
+- [x] Approval: in the engine (saves are untrusted unless they say `trusted: true`, high risk is transitive across `run_flow` and globals, `flow.approve` needs the reviewed revision, approval is revoked when risk rises, high-risk drivers are refused to agents) and the approval page in the app.
 - [ ] In-app architect on the command bar, with a diff and approval before anything is saved.
-- [ ] Firmware: Pico W `config.json` generation with the pin allowlist (done). An Arduino template is not built.
+- [x] Firmware: `generate_mcu_firmware` returns build instructions, not code: every board runs `firmware/omniflow_node`, so it returns the flash command, the `omni board setup` and `omni device add` commands, and the pins the board offers.
 
 ## M7 - Universal boards and links
 
 The pass that makes OmniFlow the tool for microcontrollers and smart things: any board, any pin, any ecosystem, linked in one line. Design: "Universal board runtime" and "Links" in `docs/DESIGN.md`.
 
 - [x] Protocol v2 core in plain C++ (`firmware/omniflow_node/omni_core.*`) with board profiles, and a native virtual board (`host/host_board.cpp`, stdin, `--pty` or UDP) for tests. Native core tests pass.
-- [x] Arduino sketch for ESP32, ESP8266, Pico W and Uno over that core (serial, Wi-Fi UDP, hello broadcast, mDNS, Wi-Fi and IR setup kept in flash). `./check.sh` compiles it for all four with arduino-cli: Uno 896 of 2048 bytes RAM, ESP32 72% of flash. Not yet run on a board.
+- [x] Arduino sketch for ESP32, ESP8266, Pico W and Uno over that core (serial, Wi-Fi UDP, hello broadcast, mDNS, Wi-Fi and IR setup kept in flash). `./check.sh` compiles it for all four with arduino-cli and fails on a compile error or a warning in the sketch's own files: Uno 937 of 2048 bytes RAM and 17136 bytes of flash after the 2026-11-07 hardening. Not yet run on a board.
+- [x] Firmware hardening: a `pullup` cap, mode `none` to release a pin, `watches` and `set` in `describe`, events to up to three hosts that sent `describe` in the last 90 s, datagrams only from the board's subnet, `wifi.clear`, node-name and password rules, a reserved IR pin, parse errors with the request id and `value too long`, servos starting at 90 degrees, a 12-servo pool on the Uno with no servo on 9 and 10, the serial pins 1 and 3 dropped from the ESP32 profile, and classic-ESP32 and Uno or Nano build guards. Setup commands live in the shared core, so the virtual board runs them too. Compile-verified on the boards, tested natively.
+- [ ] Pico W Wi-Fi join without blocking serial. The join no longer waits for DHCP, but arduino-pico 6.3.2 still blocks up to 15 s per attempt inside `CYW43::begin`. Retries back off from 30 s to 5 minutes.
 - [x] ~~MicroPython Pico W firmware on protocol v2~~ dropped: the Arduino sketch runs on the Pico W, and the MicroPython v1 firmware and its two drivers were retired.
-- [x] `omniflow_board` driver over the `omniflow` transport (serial or UDP by host): named pins become capabilities, pins are set up on add, on pin changes, at hub start and on a hello without setup, outputs are restored, `pin.changed` becomes state, a moved board is followed.
+- [x] `omniflow_board` driver over the `omniflow` transport (serial or UDP by host): named pins become capabilities, pins are set up on add, on pin changes, at hub start and on a hello without setup, outputs are restored, `pin.changed` becomes state, a moved board is followed only when it answers as itself at the new address.
+- [ ] Releasing pins removed from a board device. `pinSetupCommands` can emit `pin.mode none`, but provisioning does not pass the board's current pins, and the engine reads them from `pins[].mode` while the firmware reports `set`.
 - [x] Board discovery: describe broadcast and USB serial probe in `device discover`, `board.found` from hellos in the hub.
 - [x] Engine end-to-end tests against the virtual board over a pseudo-terminal and UDP, and a CLI test from USB setup to named pins.
 - [x] `omni board setup | pin | pins | provision`, with the Wi-Fi password read from stdin and masked in the packet inspector.
-- [ ] MQTT channel, with Tasmota, ESPHome and generic MQTT drivers, tested against an in-test broker.
-- [ ] mDNS discovery for ESPHome and Shelly.
+- [x] MQTT channel with `tasmota_mqtt`, `zigbee2mqtt_device`, `mqtt_switch` (ESPHome and Home Assistant style topics) and `mqtt_sensor`, tested against an in-test MQTT 3.1.1 broker, including a link from an MQTT sensor to a Tasmota plug. Not yet run against a real broker.
+- [ ] mDNS discovery for ESPHome, Shelly and `_omniflow._udp`. Boards are already found by broadcast and hello, so this is for third-party devices. Open.
 - [x] `device_toggle` node and links (`omni link add | list | remove`, `link.create`, MCP `link_devices` and `configure_board_pins`), tested across two virtual boards.
-- [ ] Link sheet and board pin sheet in the app.
-- [ ] Full end-to-end pass: engine, CLI, MCP, app and firmware, recorded in the log.
+- [x] Link sheet (built from `link.options`), board pin sheet, sensor values and a new-board prompt in the app (widget tests). The prompt fires in the real app because the app starts the hub at launch, which a test proves with a hello datagram. Not yet run on a phone.
+- [x] Full end-to-end pass on the Mac: engine, CLI binary, MCP, app tests and firmware compile, recorded in the log. On-hardware and on-phone runs remain.
 
 ## M6 - Optional
 
 - [ ] Accounts and sync as recorded in `docs/DESIGN.md`: Google sign-in, an encrypted change log in the user's Drive, and first-wins flow claims over home Wi-Fi.
-- [ ] Hue CLIP v2 SSE, LG webOS, Samsung Tizen, Home Assistant, Zigbee2MQTT, a Matter sidecar, ARP presence in hub mode, 433 MHz RF firmware.
+- [ ] Hue CLIP v2 SSE, LG webOS, Samsung Tizen, Home Assistant, a Matter sidecar, ARP presence in hub mode, 433 MHz RF firmware. Zigbee2MQTT shipped in M7.
 
 ## Checks
 
@@ -92,9 +97,9 @@ The pass that makes OmniFlow the tool for microcontrollers and smart things: any
 2. **WiZ.** Find the bulb's IP in the router or the WiZ app. From the Mac, `echo '{"method":"getPilot","params":{}}' | nc -u -w1 <ip> 38899` should print a JSON reply. Note the `moduleName` from `getSystemConfig`.
 3. **Tuya and Wipro.** Check that the Wipro devices pair with the Smart Life app, since OEM apps can lock devices to their own cloud. Create a Tuya IoT developer project, link the Smart Life account, then run `python -m tinytuya wizard` (mise python) for the local keys and `python -m tinytuya scan` for each device's protocol version. The versions decide whether v3.5 is in M1. Close the vendor app while testing, because the device takes one local connection.
 4. **Mac.** System Settings, General, Sharing, Remote Login on, and note the username. Over SSH from another machine, try `osascript -e 'output volume of (get volume settings)'`, `caffeinate -u -t 2` with the display asleep, and `shortcuts run <name>`. The last two may need a logged-in GUI session, and the result decides which `macos_host` capabilities work from the phone.
-5. **Boards.** Flash `firmware/omniflow_node` (README there), then `omni board setup <port> --ssid <network> --name <name>`. Wiring is free: name each pin with `omni board pin`. On a Pico W keep off GPIO 23, 24, 25 and 29. An IR LED needs a transistor driver.
-7. **Phone.** Model, Android version and maker, because some makers kill background services beyond what stock Android does. Developer options and USB debugging on, for installing builds.
-8. **Android TV, when available.** Developer options, network or ADB debugging on, the IP noted, and whether port 5555 stays open after a reboot.
+5. **Boards.** Flash `firmware/omniflow_node` (README there), then `omni board setup <port> --ssid <network> --name <name>`. Wiring is free: name each pin with `omni board pin`. On a Pico W keep off GPIO 23, 24, 25 and 29. Wire buttons and loads to strapping pins last: ESP8266 0, 2 and 15, ESP32 0, 2, 5, 12 and 15. An IR LED needs a transistor driver.
+6. **Phone.** Model, Android version and maker, because some makers kill background services beyond what stock Android does. Developer options and USB debugging on, for installing builds.
+7. **Android TV, when available.** Developer options, network or ADB debugging on, the IP noted, and whether port 5555 stays open after a reboot.
 
 ### Early spikes (short throwaway tests to retire design risks)
 
@@ -113,13 +118,15 @@ The pass that makes OmniFlow the tool for microcontrollers and smart things: any
 - **M2:** validator rejects a cycle, a dangling edge, an unknown port and an unreachable action. A trigger during a delay behaves per each run mode. A trigger that fails the condition does not arm the cooldown. `time_window` 18:00-05:00 matches at 23:00 and 02:00 and not at 12:00. A schedule across a DST change fires once. The recorded RSSI trace produces exactly one enter and one exit, and silence alone produces an exit.
 - **M3:** card view round-trips the example flow without changes. A graph that is not a tree shows read-only cards. Edits in either view show in the other.
 - **M4:** flows still fire after the app is swiped away, after an hour with the screen off, and after a reboot (connectedDevice service only, until the app is opened). Battery drain over 24 hours on home Wi-Fi is measured and recorded here. BLE scanning stops when the phone leaves home Wi-Fi.
-- **M5:** an MCP call that registers an `exec` driver leaves it disabled until approved in the app. An invalid flow from MCP returns an error result listing every validation error.
+- **M5:** an MCP call that registers an `exec` driver is refused with `needs_user`, and a high-risk flow from MCP is stored unapproved and not loaded until the user approves its revision. An invalid flow from MCP returns an error result listing every validation error.
+- **M7:** on a real board, a pin round trip over USB and Wi-Fi, an IR send a receiver decodes, a servo that starts at 90 degrees, and a reboot that the hub notices and re-provisions.
 
 ### Security checks (every milestone)
 
-- No listening sockets: `lsof -nP -iTCP -sTCP:LISTEN` on the Mac while the app and `omni hub` run, and the same check on the phone over `adb shell`.
+- No TCP listeners: `lsof -nP -iTCP -sTCP:LISTEN` on the Mac while `omni hub` runs, and the same check on the phone over `adb shell` while the app runs.
+- Only the expected UDP sockets: `lsof -nP -iUDP` shows the ephemeral command socket, 38900 and 38951 and nothing else.
 - No secrets in the repo: a grep for key-shaped strings before each commit, and fixtures use made-up keys.
-- High-risk content from MCP, the architect and imports waits for approval.
+- High-risk drivers from MCP are refused, and high-risk flows from MCP and the architect wait for approval. Imports are not built yet.
 
 ## Checked against references
 
@@ -149,7 +156,7 @@ What the code and design assume, checked on 2026-11-06 against primary sources. 
 
 ## Verification
 
-- Engine: `dart analyze`, `dart format --set-exit-if-changed .`, `dart test`. Live tests: `dart test --tags live`, opt-in, against real devices.
+- Engine: `dart analyze`, `dart format --set-exit-if-changed lib test tool bin`, `dart run tool/embed_drivers.dart --check`, `dart test -x live`. Live tests: `dart test --tags live`, opt-in, against real devices.
 - App: `flutter analyze`, `flutter test`, then runs on a real Android phone, with screenshots.
 - Firmware: `firmware/omniflow_node/check.sh` (native core tests, the virtual board, and `arduino-cli compile` for Uno, ESP8266, Pico W and ESP32), then on a real board a `describe`, `omni board setup` and a pin round trip.
 
@@ -163,3 +170,6 @@ What the code and design assume, checked on 2026-11-06 against primary sources. 
 - 2026-11-06: Checked the build against primary references (tinytuya, pywizlight, SB-Projects NEC, pico-sdk, RFC 9535, Android and macOS docs, dartssh2 source). Two fixes landed: the WiZ discovery probe and NEC bit order. Findings are in the table above.
 - 2026-11-06: M1 completed in code: WiZ push, engine events and `omni watch`, the HTTP channel with Shelly and Linux drivers, USB serial with discovery. 148 engine tests pass. Live hardware test still to run.
 - 2026-11-07: M7 boards and links landed. One firmware core with board profiles, tested natively, and an Arduino sketch that compiles for Uno, ESP8266, Pico W and ESP32. The `omniflow_board` driver, board setup over USB, pin naming, hello handling and links are tested end to end against the firmware core built as a virtual board, over a pty and UDP. Fixed on the way: profile names clashing with core macros (`ESP8266`), Uno RAM at 101% (literals moved to flash), a provisioning future that awaited itself, a reboot missed by whole-second uptime (hello now reports `set`), and two links between the same ends sharing an id. The MicroPython firmware was retired. 245 engine tests pass. Nothing has run on a physical board yet.
+- 2026-11-07: M7 full pass. MQTT with Tasmota, Zigbee2MQTT, switch and sensor drivers, toggles with device on/off words, app sheets for pins and links, sensor values and new-board prompts. Security pass (builder-security): the hub opens no TCP listener (`lsof`), its three UDP sockets take board traffic only from local addresses and known devices, and board setup commands are USB only. Follow links between on/off and numeric ends are refused. Results: 251 engine tests, 13 app tests, firmware core tests and arduino-cli builds for Uno, ESP8266, Pico W and ESP32, and a smoke run of the `omni` binary against the virtual board (add, pin, invoke, a refused out-of-range value, a refused radio pin, two links). Not proven: any physical board, a real MQTT broker, the phone.
+- 2026-11-07: Full audit of engine, app, firmware and docs. 93 findings confirmed against source: 87 fixed in full and 6 in part, with the rest deferred (the flow `trusted` column, the Pico W join still blocking serial up to 15 s, no automated test for `omni hub` signal handling, a `dart_test.yaml` that skips live tests, a GPIO picker in the app, and the `.gitignore` `config.json` line). Engine: `hub.start`/`hub.stop`, `engine.status` and load issues, fail-closed trust with transitive high risk, revision-gated approval and revocation, hashed link ids and `link.options`, `run_flow` cycle and debounce-mode checks, unchanged flows and zones kept across reloads, safe device removal, MQTT watch and broker reset, Tuya heartbeat and refusals, WiZ push sender checks (the earlier security pass had missed that this socket took any sender), `matchMethod` and integer params, `tcp` and `adb` refused, SSH backslash refusal. App: hub start at launch, approval page, add, edit and remove devices, link sheet from `link.options`, offline chips, host-command confirmation, no Android backup. Firmware: the hardening item under M7. Docs: DESIGN and ROADMAP now separate built from planned. New open items found on the way: releasing removed board pins (engine and firmware disagree on where `describe` reports modes), provisioning stopping at the first failed command, rounding follow links into integer params, and the Pico W setup poll. Results: 338 engine tests, 51 app tests, firmware core tests in both builds and arduino-cli builds for all four boards.
+- 2026-11-07: Audit follow-up across the fixers' boundaries. The engine read set-up pins from a field the firmware does not send, so a pin removed from the setting stayed set on the board: it now reads the firmware's `set` list, releases removed pins, and keeps going past a refused setup command, reporting all of them (e2e test). Follow links round into whole-number params. `board.setup` waits out the Pico W join stall (30 s default). `dart_test.yaml` now skips live tests by default, the stale `config.json` ignore is gone, and `board.found` carries a name. Results: 340 engine tests (2 live skipped), 51 app tests, firmware `check.sh` green, and the `omni` binary smoke run against the virtual board. Still unproven: physical boards, a real MQTT broker, the phone.

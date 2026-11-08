@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "zigbee2mqtt_device",
+  "name": "Zigbee device (Zigbee2MQTT)",
+  "category": "zigbee",
+  "icon": "zigbee",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "friendlyName", "label": "Friendly name in Zigbee2MQTT" },
+    { "key": "baseTopic", "label": "Base topic, zigbee2mqtt unless changed" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": {
+    "topics": [{ "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}" }],
+    "refresh": { "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}/get", "payload": { "state": "" } }
+  },
+  "reliability": { "timeoutMs": 3000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["ON", "OFF"],
+      "command": { "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}/set", "payload": { "state": "{{value}}" } },
+      "stateJsonPath": "$.state"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "Brightness",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 254 } },
+      "command": { "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}/set", "payload": { "brightness": "{{value}}" } },
+      "stateJsonPath": "$.brightness"
+    },
+    { "id": "temperature", "type": "sensor", "label": "Temperature", "stateJsonPath": "$.temperature" },
+    { "id": "humidity", "type": "sensor", "label": "Humidity", "stateJsonPath": "$.humidity" },
+    { "id": "occupancy", "type": "sensor", "label": "Motion", "stateJsonPath": "$.occupancy" },
+    { "id": "contact", "type": "sensor", "label": "Contact (closed)", "stateJsonPath": "$.contact" },
+    { "id": "battery", "type": "sensor", "label": "Battery", "stateJsonPath": "$.battery" }
+  ]
+}

@@ -178,3 +178,17 @@ InternetAddress directedBroadcast(InternetAddress address, int prefixLength) {
     ]),
   );
 }
+
+/// True for loopback, link-local and private (RFC 1918) IPv4 addresses, and
+/// loopback, link-local and unique-local IPv6: the networks a home device
+/// can be on. Device messages from anywhere else are ignored.
+bool isLocalNetworkAddress(InternetAddress address) {
+  if (address.isLoopback || address.isLinkLocal) return true;
+  final b = address.rawAddress;
+  if (address.type == InternetAddressType.IPv4) {
+    return b[0] == 10 ||
+        (b[0] == 172 && b[1] >= 16 && b[1] <= 31) ||
+        (b[0] == 192 && b[1] == 168);
+  }
+  return (b[0] & 0xFE) == 0xFC;
+}

@@ -32,6 +32,7 @@ class TuyaChannel implements DriverChannel {
     this._renderer = const TemplateRenderer(),
     DateTime Function()? clock,
     this._connectTimeout = const Duration(seconds: 3),
+    this._heartbeatEvery = const Duration(seconds: 10),
   }) : _clock = clock ?? DateTime.now;
 
   final SecretStore _secrets;
@@ -39,6 +40,7 @@ class TuyaChannel implements DriverChannel {
   final TemplateRenderer _renderer;
   final DateTime Function() _clock;
   final Duration _connectTimeout;
+  final Duration _heartbeatEvery;
   final _connections = <String, _TuyaConnection>{};
   final _pushes = StreamController<TuyaPush>.broadcast();
 
@@ -77,7 +79,12 @@ class TuyaChannel implements DriverChannel {
     final reliability = request.manifest.reliability;
     final port = device.port ?? request.manifest.transport.port ?? 6668;
     for (var attempt = 0; attempt <= reliability.retries; attempt++) {
-      final connection = await _connection(device, port, TuyaCodec(localKey));
+      final connection = await _connection(
+        device,
+        port,
+        devId,
+        TuyaCodec(localKey),
+      );
       try {
         final frame = await connection.request(
           command,
@@ -106,6 +113,7 @@ class TuyaChannel implements DriverChannel {
   Future<_TuyaConnection> _connection(
     Device device,
     int port,
+    String devId,
     TuyaCodec codec,
   ) async {
     final existing = _connections[device.id];
@@ -128,12 +136,14 @@ class TuyaChannel implements DriverChannel {
     final connection = _TuyaConnection(
       device.id,
       device.host,
+      devId,
       socket,
       codec,
       _tap,
       (body) {
         if (!_pushes.isClosed) _pushes.add(TuyaPush(device.id, body));
       },
+      _heartbeatEvery,
     );
     _connections[device.id] = connection;
     return connection;
@@ -154,10 +164,12 @@ class _TuyaConnection {
   _TuyaConnection(
     this.deviceId,
     this.host,
+    this._devId,
     this._socket,
     this._codec,
     this._tap,
     this._onPush,
+    this._heartbeatEvery,
   ) {
     _socket.listen(
       _onData,
@@ -167,16 +179,22 @@ class _TuyaConnection {
     );
     // A write the device reset is reported on done; close handles it.
     unawaited(_socket.done.then((_) {}, onError: (Object _) => close()));
+    _heartbeat = Timer.periodic(_heartbeatEvery, (_) => _beat());
   }
 
   final String deviceId;
   final String host;
+  final String _devId;
   final Socket _socket;
   final TuyaCodec _codec;
   final PacketTap? _tap;
   final void Function(Map<String, Object?> body) _onPush;
+  final Duration _heartbeatEvery;
   final _splitter = TuyaFrameSplitter();
   final _waiting = <int, Completer<TuyaFrame>>{};
+  Timer? _heartbeat;
+  var _lastRequest = DateTime.now();
+  var _unanswered = 0;
   var _seq = 0;
   var closed = false;
 
@@ -189,16 +207,8 @@ class _TuyaConnection {
     final waiter = Completer<TuyaFrame>();
     _waiting[command]?.completeError(TimeoutException('superseded'));
     _waiting[command] = waiter;
-    final frame = _codec.encode(seq: ++_seq, command: command, body: body);
-    _tap?.record(
-      CapturedPacket(
-        transport: 'tuya',
-        direction: PacketDirection.outgoing,
-        remote: '$host:${_socket.remotePort}',
-        bytes: frame,
-      ),
-    );
-    _socket.add(frame);
+    _lastRequest = DateTime.now();
+    _send(command, body);
     return waiter.future.timeout(
       timeout,
       onTimeout: () {
@@ -218,24 +228,66 @@ class _TuyaConnection {
           bytes: raw,
         ),
       );
-      final TuyaFrame frame;
       try {
-        frame = _codec.decode(raw);
-      } on TuyaDecodeException {
-        continue;
-      }
-      final waiter = _waiting.remove(frame.command);
-      if (waiter != null && !waiter.isCompleted) {
-        waiter.complete(frame);
-      } else if (frame.command == TuyaCommand.status && frame.body != null) {
-        _onPush(frame.body!);
+        _onFrame(_codec.decode(raw));
+      } on TuyaDecodeException catch (e) {
+        final refused = e.deviceMessage;
+        final waiter = refused == null || e.command == null
+            ? null
+            : _waiting.remove(e.command);
+        if (refused != null && waiter != null && !waiter.isCompleted) {
+          waiter.completeError(
+            CommandFailedException('$deviceId refused the command: $refused'),
+          );
+        }
+      } catch (_) {
+        // One bad frame from the device must not take the engine down.
       }
     }
+  }
+
+  void _onFrame(TuyaFrame frame) {
+    _unanswered = 0;
+    final waiter = _waiting.remove(frame.command);
+    if (waiter != null && !waiter.isCompleted) {
+      waiter.complete(frame);
+    } else if (frame.command == TuyaCommand.status && frame.body != null) {
+      _onPush(frame.body!);
+    }
+  }
+
+  /// A device drops a local connection that stays quiet, and then pushes
+  /// nothing until the next command, so an idle connection sends a
+  /// heartbeat. Two heartbeats in a row with no frame back mean the device
+  /// is gone.
+  void _beat() {
+    if (closed) return;
+    if (_unanswered >= 2) {
+      close();
+      return;
+    }
+    if (DateTime.now().difference(_lastRequest) < _heartbeatEvery) return;
+    _unanswered++;
+    _send(TuyaCommand.heartbeat, {'gwId': _devId, 'devId': _devId});
+  }
+
+  void _send(int command, Map<String, Object?> body) {
+    final frame = _codec.encode(seq: ++_seq, command: command, body: body);
+    _tap?.record(
+      CapturedPacket(
+        transport: 'tuya',
+        direction: PacketDirection.outgoing,
+        remote: '$host:${_socket.remotePort}',
+        bytes: frame,
+      ),
+    );
+    _socket.add(frame);
   }
 
   void close() {
     if (closed) return;
     closed = true;
+    _heartbeat?.cancel();
     for (final w in _waiting.values) {
       if (!w.isCompleted) {
         w.completeError(const SocketException('connection closed'));

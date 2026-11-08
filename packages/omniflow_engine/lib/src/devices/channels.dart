@@ -49,14 +49,15 @@ abstract interface class DriverChannel {
   Future<ChannelReply> send(ChannelRequest request);
 }
 
-/// JSON over UDP, expecting a reply from the device (WiZ and similar).
 /// JSON over UDP, expecting a reply from the device (WiZ, the OmniFlow MCU
 /// protocol and similar).
 ///
 /// With the transport option `"requestId": true` each command gets a fresh
 /// `id` and only the reply carrying that id is accepted, so a late reply to
-/// an earlier command is never mistaken for this one. A reply with an
-/// `error` field, or with `"event": "error"`, fails the command.
+/// an earlier command is never mistaken for this one. For devices that echo
+/// a fixed id (WiZ), `"matchMethod": true` accepts only a reply whose
+/// `method` is the command's. A reply with an `error` field, or with
+/// `"event": "error"`, fails the command.
 class UdpJsonChannel implements DriverChannel {
   UdpJsonChannel(this._udp, {this._renderer = const TemplateRenderer()});
 
@@ -69,14 +70,18 @@ class UdpJsonChannel implements DriverChannel {
     var payload = _renderer.render(request.command, request.context);
     final port = request.device.port ?? request.manifest.transport.port;
     if (port == null) throw ArgumentError('no port for ${request.device.id}');
+    final options = request.manifest.transport.options;
     int? id;
-    if (request.manifest.transport.options['requestId'] == true) {
+    if (options['requestId'] == true) {
       if (payload is! Map) {
         throw ArgumentError('a command with a request id renders to an object');
       }
       id = ++_nextId;
       payload = {...payload, 'id': id};
     }
+    final method = options['matchMethod'] == true && payload is Map
+        ? payload['method']
+        : null;
     final reliability = request.manifest.reliability;
     final reply = await _udp.request(
       InternetAddress(request.device.host),
@@ -84,7 +89,13 @@ class UdpJsonChannel implements DriverChannel {
       utf8.encode(jsonEncode(payload)),
       timeout: Duration(milliseconds: reliability.timeoutMs),
       retries: reliability.retries,
-      accept: id == null ? null : (d) => _tryJson(d.text)?['id'] == id,
+      accept: id == null && method == null
+          ? null
+          : (d) {
+              final json = _tryJson(d.text);
+              return (id == null || json?['id'] == id) &&
+                  (method == null || json?['method'] == method);
+            },
     );
     final decoded = _tryJson(reply.text);
     if (decoded != null && decoded['error'] != null) {

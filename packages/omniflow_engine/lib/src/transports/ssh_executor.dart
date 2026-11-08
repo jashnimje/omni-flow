@@ -86,6 +86,7 @@ class SshExecutor implements HostExecutor {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     if (argv.isEmpty) throw ArgumentError('argv is empty');
+    checkSshArgv(argv);
     final pem = await _secrets.read(privateKeySecret);
     if (pem == null) throw MissingSecretException(privateKeySecret);
     final watch = Stopwatch()..start();

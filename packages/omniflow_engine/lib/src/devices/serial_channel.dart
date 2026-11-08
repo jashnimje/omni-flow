@@ -78,7 +78,8 @@ class SerialChannel implements DriverChannel {
   }
 
   /// Sends `describe` to every USB serial port and returns the boards that
-  /// answer. A port that does not answer within [window] is skipped.
+  /// answer. A port that does not answer within [window] is skipped. A port
+  /// a device holds is asked through that device's open port and stays open.
   Future<List<Map<String, Object?>>> discover(
     DriverManifest manifest, {
     Duration window = const Duration(milliseconds: 1500),
@@ -121,12 +122,20 @@ class SerialChannel implements DriverChannel {
   Future<void> release(String deviceId) async =>
       _ports.remove(deviceId)?.close();
 
+  /// Two readers on one tty split its bytes between them, so a port that is
+  /// already open is shared rather than opened again: by discovery, or by a
+  /// second device with the same path.
   Future<_SerialPort> _open(Device device, int baud) async {
     final existing = _ports[device.id];
     if (existing != null && existing.path == device.host && !existing.closed) {
       return existing;
     }
     await existing?.close();
+    _ports.remove(device.id);
+    final held = _ports.values
+        .where((p) => p.path == device.host && !p.closed)
+        .firstOrNull;
+    if (held != null) return held;
     if (!await File(device.host).exists()) {
       throw TransportTimeoutException(
         'serial port ${device.host} is not present',

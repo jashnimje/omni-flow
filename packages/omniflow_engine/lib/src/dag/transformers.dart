@@ -94,5 +94,6 @@ num rangeMap(num value, Map<String, Object?> config) {
   final outMax = config['outMax'] as num;
   final t = ((value - inMin) / (inMax - inMin)).clamp(0, 1);
   final mapped = outMin + (outMax - outMin) * t;
+  if (config['round'] == true) return mapped.round();
   return mapped == mapped.roundToDouble() ? mapped.round() : mapped;
 }

@@ -1,140 +1,17 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:omniflow_app/api/engine_client.dart';
-import 'package:omniflow_app/state/providers.dart';
-import 'package:omniflow_app/ui/home.dart';
 
-/// Answers core API commands from canned data and records every call.
-class FakeEngine implements EngineClient {
-  final calls = <(String, Map<String, Object?>)>[];
-  final eventsOut = StreamController<Map<String, Object?>>.broadcast();
-  final answers = <String, Map<String, Object?>>{
-    'device.list': {
-      'ok': true,
-      'devices': [
-        {
-          'id': 'desk_lamp',
-          'name': 'Desk lamp',
-          'room': 'Study',
-          'state': {'state': false, 'dimming': 30},
-          'capabilities': [
-            {
-              'id': 'power',
-              'type': 'toggle',
-              'label': 'Power',
-              'stateKey': 'state',
-              'params': {
-                'value': {'type': 'boolean'},
-              },
-            },
-            {
-              'id': 'brightness',
-              'type': 'level',
-              'label': 'Brightness',
-              'stateKey': 'dimming',
-              'params': {
-                'value': {'type': 'number', 'min': 10, 'max': 100, 'unit': '%'},
-              },
-            },
-            {'id': 'wake', 'type': 'action', 'label': 'Wake', 'params': {}},
-          ],
-        },
-      ],
-    },
-    'flow.list': {
-      'ok': true,
-      'flows': [
-        {
-          'id': 'evening',
-          'name': 'Evening desk',
-          'enabled': true,
-          'approved': true,
-          'loaded': true,
-        },
-        {
-          'id': 'wake_mac',
-          'name': 'Wake the Mac',
-          'enabled': true,
-          'approved': false,
-          'loaded': false,
-        },
-      ],
-    },
-    'flow.cards': {
-      'ok': true,
-      'tree': true,
-      'when': [
-        {'node': 'trig', 'type': 'zone_change', 'label': 'Arrived at desk'},
-      ],
-      'then': [
-        {
-          'kind': 'if',
-          'node': 'cond',
-          'type': 'all_of',
-          'label': 'Evening',
-          'then': [
-            {
-              'kind': 'step',
-              'node': 'lamp',
-              'type': 'device_capability',
-              'label': 'Lamp warm',
-            },
-          ],
-          'else': [],
-        },
-      ],
-    },
-    'command.interpret': {
-      'ok': true,
-      'kind': 'call',
-      'command': 'device.invoke',
-      'args': {
-        'id': 'desk_lamp',
-        'capability': 'brightness',
-        'params': {'value': 50},
-      },
-      'summary': 'Desk lamp: 50%',
-    },
-  };
-
-  @override
-  Future<Map<String, Object?>> call(
-    String command, [
-    Map<String, Object?> args = const {},
-  ]) async {
-    calls.add((command, args));
-    return answers[command] ?? const {'ok': true};
-  }
-
-  @override
-  Stream<Map<String, Object?>> get events => eventsOut.stream;
-
-  List<(String, Map<String, Object?>)> callsOf(String command) =>
-      calls.where((c) => c.$1 == command).toList();
-}
+import 'fake_engine.dart';
 
 void main() {
   late FakeEngine engine;
-
-  Future<void> pumpApp(WidgetTester tester) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [engineClientProvider.overrideWithValue(engine)],
-        child: const OmniFlowApp(),
-      ),
-    );
-    await tester.pumpAndSettle();
-  }
 
   setUp(() => engine = FakeEngine());
 
   testWidgets('the dashboard builds controls from capability types', (
     tester,
   ) async {
-    await pumpApp(tester);
+    await pumpApp(tester, engine);
     expect(find.text('Study'), findsOneWidget);
     expect(find.text('Desk lamp'), findsOneWidget);
     expect(find.byType(Switch), findsOneWidget);
@@ -143,7 +20,7 @@ void main() {
   });
 
   testWidgets('flipping the switch invokes the capability', (tester) async {
-    await pumpApp(tester);
+    await pumpApp(tester, engine);
     await tester.tap(find.byType(Switch));
     await tester.pump();
     expect(engine.callsOf('device.invoke').single.$2, {
@@ -153,10 +30,23 @@ void main() {
     });
   });
 
+  testWidgets('releasing the slider invokes the level as a whole number', (
+    tester,
+  ) async {
+    await pumpApp(tester, engine);
+    await tester.drag(find.byType(Slider), const Offset(60, 0));
+    await tester.pumpAndSettle();
+    final call = engine.callsOf('device.invoke').single.$2;
+    expect(call['capability'], 'brightness');
+    final value = (call['params'] as Map)['value'];
+    expect(value, isA<int>());
+    expect(value as int, greaterThan(30));
+  });
+
   testWidgets('a state event moves the switch without a reload', (
     tester,
   ) async {
-    await pumpApp(tester);
+    await pumpApp(tester, engine);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
     engine.eventsOut.add({
       'event': 'device.stateChanged',
@@ -173,7 +63,7 @@ void main() {
   testWidgets(
     'the command bar asks the engine to interpret, then runs the call',
     (tester) async {
-      await pumpApp(tester);
+      await pumpApp(tester, engine);
       await tester.enterText(
         find.byKey(const ValueKey('command-bar')),
         'desk lamp 50%',
@@ -191,29 +81,55 @@ void main() {
     },
   );
 
-  testWidgets('flows show approve and run, and open the card view', (
+  testWidgets('a line the engine half understood shows its explanation', (
     tester,
   ) async {
-    await pumpApp(tester);
-    await tester.tap(find.text('Flows'));
+    engine.answers['command.interpret'] = {
+      'ok': true,
+      'kind': 'ask',
+      'text': 'desk lamp sparkle',
+      'summary': 'Desk lamp cannot sparkle. It can: power, brightness, wake',
+    };
+    await pumpApp(tester, engine);
+    await tester.enterText(
+      find.byKey(const ValueKey('command-bar')),
+      'desk lamp sparkle',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pumpAndSettle();
-    expect(find.text('waiting for approval'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('approve-wake_mac')));
+    expect(
+      find.text('Desk lamp cannot sparkle. It can: power, brightness, wake'),
+      findsOneWidget,
+    );
+    expect(engine.callsOf('device.invoke'), isEmpty);
+  });
+
+  testWidgets('a line nobody understood says the architect is not set up', (
+    tester,
+  ) async {
+    engine.answers['command.interpret'] = {
+      'ok': true,
+      'kind': 'ask',
+      'text': 'make it cosy',
+      'summary': 'Ask the architect',
+    };
+    await pumpApp(tester, engine);
+    await tester.enterText(
+      find.byKey(const ValueKey('command-bar')),
+      'make it cosy',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pumpAndSettle();
-    expect(engine.callsOf('flow.approve').single.$2, {'id': 'wake_mac'});
-    await tester.tap(find.byKey(const ValueKey('run-evening')));
-    await tester.pump();
-    expect(engine.callsOf('flow.run').single.$2, {'id': 'evening'});
-    await tester.tap(find.text('Evening desk'));
-    await tester.pumpAndSettle();
-    expect(find.text('WHEN'), findsOneWidget);
-    expect(find.text('IF'), findsOneWidget);
-    expect(find.text('THEN'), findsOneWidget);
-    expect(find.text('Lamp warm'), findsOneWidget);
+    expect(
+      find.text(
+        'Not a device or flow command. The architect is not set up yet.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('the inspector lists packets from events', (tester) async {
-    await pumpApp(tester);
+    await pumpApp(tester, engine);
     engine.eventsOut.add({
       'event': 'packet.captured',
       'transport': 'udp',
@@ -232,9 +148,18 @@ void main() {
       'ok': false,
       'error': {'type': 'timeout', 'message': 'no reply from desk_lamp'},
     };
-    await pumpApp(tester);
+    await pumpApp(tester, engine);
     await tester.tap(find.widgetWithText(OutlinedButton, 'Wake'));
     await tester.pumpAndSettle();
     expect(find.text('no reply from desk_lamp'), findsOneWidget);
+  });
+
+  testWidgets('a hub that did not start shows a banner', (tester) async {
+    await pumpApp(tester, engine, hubError: 'port 38951 is in use');
+    expect(find.byKey(const ValueKey('hub-error')), findsOneWidget);
+    expect(find.textContaining('port 38951 is in use'), findsOneWidget);
+    await tester.tap(find.text('Dismiss'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('hub-error')), findsNothing);
   });
 }

@@ -134,11 +134,20 @@ void main() {
     expect(linkCode, 0, reason: '$linked');
     expect(linked['name'], 'desk.button toggles desk.relay');
     final (_, links) = await omni(['link', 'list']);
-    expect(
-      (links['links'] as List).single['id'],
-      'link_desk_button_desk_relay_toggle',
-    );
-    final (thresholdCode, threshold) = await omni([
+    final toggleId = linked['id'] as String;
+    expect((links['links'] as List).single['id'], toggleId);
+    final (againCode, again) = await omni([
+      'link',
+      'add',
+      'desk.button',
+      'desk.relay',
+      '--toggle',
+    ]);
+    expect(againCode, 1);
+    expect((again['error'] as Map)['type'], 'exists');
+
+    // An on/off button never crosses a number, so a threshold on it is refused.
+    final (onOffCode, onOff) = await omni([
       'link',
       'add',
       'desk.button',
@@ -148,17 +157,34 @@ void main() {
       '--set',
       'false',
     ]);
-    expect(thresholdCode, 0, reason: '$threshold');
-    final (_, after) = await omni([
-      'link',
-      'remove',
-      'link_desk_button_desk_relay_toggle',
-    ]);
+    expect(onOffCode, 1);
+    expect((onOff['error'] as Map)['type'], 'invalid');
+    expect('${onOff['error']}', contains('Use a toggle or follow link'));
+
+    await omni(['board', 'pin', 'desk', 'knob', '16', 'adc']);
+    Future<(int, Map<String, Object?>)> threshold(String flag, String limit) =>
+        omni([
+          'link',
+          'add',
+          'desk.knob',
+          'desk.relay',
+          '--$flag',
+          limit,
+          '--set',
+          flag == 'below' ? 'true' : 'false',
+        ]);
+    final (belowCode, below) = await threshold('below', '30');
+    expect(belowCode, 0, reason: '$below');
+    final (aboveCode, above) = await threshold('above', '60');
+    expect(aboveCode, 0, reason: '$above');
+    expect(below['id'], isNot(above['id']));
+
+    final (_, after) = await omni(['link', 'remove', toggleId]);
     expect(after['removed'], isTrue);
     final (_, left) = await omni(['link', 'list']);
     expect(
-      (left['links'] as List).single['id'],
-      'link_desk_button_desk_relay_threshold',
+      [for (final l in left['links'] as List) (l as Map)['id']]..sort(),
+      [below['id'], above['id']]..sort(),
     );
 
     final (_, removed) = await omni([
@@ -168,6 +194,6 @@ void main() {
       'relay',
       '--remove',
     ]);
-    expect((removed['board'] as Map)['pins'], ['button']);
+    expect((removed['board'] as Map)['pins'], ['button', 'knob']);
   });
 }

@@ -32,9 +32,16 @@ abstract final class TuyaCommand {
 }
 
 class TuyaDecodeException implements Exception {
-  TuyaDecodeException(this.message);
+  TuyaDecodeException(this.message, {this.command, this.deviceMessage});
 
   final String message;
+
+  /// The frame's command code, when the frame itself was sound.
+  final int? command;
+
+  /// Plain text the device sent instead of JSON (`json obj data unvalid`,
+  /// `data format error`): its way of refusing a command.
+  final String? deviceMessage;
 
   @override
   String toString() => 'TuyaDecodeException: $message';
@@ -165,6 +172,9 @@ class TuyaCodec {
     }
     var payload = Uint8List.sublistView(frame, offset, end);
     if (_startsWith(payload, _version33Header.sublist(0, 3))) {
+      if (payload.length < _version33Header.length) {
+        throw TuyaDecodeException('3.3 header is cut short', command: command);
+      }
       payload = Uint8List.sublistView(payload, _version33Header.length);
     }
     Map<String, Object?>? body;
@@ -173,16 +183,37 @@ class TuyaCodec {
       try {
         plain = _aes(false, payload);
       } catch (_) {
-        throw TuyaDecodeException('payload does not decrypt with this key');
+        throw TuyaDecodeException(
+          'payload does not decrypt with this key',
+          command: command,
+        );
       }
-      final decoded = jsonDecode(utf8.decode(plain, allowMalformed: true));
+      final text = utf8.decode(plain, allowMalformed: true);
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(text);
+      } on FormatException {
+        final printable = _isPrintable(text);
+        throw TuyaDecodeException(
+          printable ? 'device said "$text"' : 'decrypted body is not JSON',
+          command: command,
+          deviceMessage: printable ? text : null,
+        );
+      }
       if (decoded is! Map) {
-        throw TuyaDecodeException('decrypted body is not a JSON object');
+        throw TuyaDecodeException(
+          'decrypted body is not a JSON object',
+          command: command,
+        );
       }
       body = Map<String, Object?>.from(decoded);
     }
     return TuyaFrame(seq: seq, command: command, retcode: retcode, body: body);
   }
+
+  static bool _isPrintable(String text) =>
+      text.trim().isNotEmpty &&
+      text.codeUnits.every((c) => c >= 0x20 && c < 0x7F);
 
   Uint8List _aes(bool encrypt, Uint8List input) {
     final cipher =
@@ -207,7 +238,13 @@ class TuyaCodec {
 }
 
 /// Splits a TCP byte stream into whole Tuya frames, whatever the chunking.
+///
+/// A declared length over [maxFrameLength] is not a real frame (a stray
+/// prefix inside other bytes), so the splitter skips that prefix and looks
+/// for the next one rather than buffering up to 4 GB.
 class TuyaFrameSplitter {
+  static const maxFrameLength = 65536;
+
   final _buffer = BytesBuilder();
 
   /// Adds [chunk] and returns every frame now complete.
@@ -228,6 +265,10 @@ class TuyaFrameSplitter {
         break;
       }
       final length = ByteData.sublistView(data, start).getUint32(12);
+      if (length > maxFrameLength) {
+        data = Uint8List.sublistView(data, start + 4);
+        continue;
+      }
       final total = _headerLength + length;
       if (data.length - start < total) {
         data = Uint8List.sublistView(data, start);

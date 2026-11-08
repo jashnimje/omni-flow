@@ -296,4 +296,112 @@ void main() {
       expect(got, contains('maxIterations: must be between 1 and 1000'));
     });
   });
+
+  group('run modes and references', () {
+    Map<String, Object?> small(
+      String id,
+      List<Map<String, Object?>> nodes, {
+      String mode = 'single',
+    }) => {
+      'schemaVersion': 1,
+      'id': id,
+      'name': id,
+      'mode': mode,
+      'nodes': [
+        {'id': 'go', 'type': 'manual'},
+        ...nodes,
+      ],
+      'edges': [
+        for (var i = 0; i < nodes.length; i++)
+          {
+            'id': 'e$i',
+            'from': {'node': i == 0 ? 'go' : nodes[i - 1]['id'], 'port': 'out'},
+            'to': {'node': nodes[i]['id'], 'port': 'in'},
+          },
+      ],
+    };
+
+    test('a debounce gate needs mode restart or parallel', () {
+      Map<String, Object?> debounced(String mode) => small('d', [
+        {
+          'id': 'quiet',
+          'type': 'debounce',
+          'config': {'ms': 100},
+        },
+        {
+          'id': 'note',
+          'type': 'notify',
+          'config': {'title': 'hi'},
+        },
+      ], mode: mode);
+      for (final mode in ['single', 'queued']) {
+        expect(
+          issues(debounced(mode)).join(),
+          contains(r'$.mode: a debounce gate does not work in'),
+          reason: mode,
+        );
+      }
+      for (final mode in ['restart', 'parallel']) {
+        expect(issues(debounced(mode)), isEmpty, reason: mode);
+      }
+    });
+
+    test('a toggle needs a top-level state key it can read', () {
+      const nested = CapabilitySpec(
+        id: 'power',
+        type: CapabilityType.toggle,
+        label: 'Power',
+        params: {},
+        command: {'cmd': 'power'},
+        stateJsonPath: r'$.result.on',
+      );
+      final got = validateFlow(
+        FlowSpec.parse(
+          small('t', [
+            {
+              'id': 'flip',
+              'type': 'device_toggle',
+              'config': {'deviceId': 'odd', 'capabilityId': 'power'},
+            },
+          ]),
+        ),
+        refs: FlowReferences(
+          devices: const {'odd'},
+          capabilityOf: (_, _) => nested,
+        ),
+      ).join();
+      expect(got, contains('is not an on/off toggle with state'));
+    });
+
+    test('a run_flow chain back to the flow is a cycle', () {
+      Map<String, Object?> calls(String id, String target) => small(id, [
+        {
+          'id': 'call',
+          'type': 'run_flow',
+          'config': {'flowId': target},
+        },
+      ]);
+      List<String> check(
+        Map<String, Object?> json,
+        Map<String, Set<String>> calls,
+      ) => validateFlow(
+        FlowSpec.parse(json),
+        refs: FlowReferences(flows: const {'a', 'b', 'c'}, calls: calls),
+      ).map((i) => i.toString()).toList();
+      expect(check(calls('a', 'a'), {}).join(), contains('cannot run itself'));
+      expect(
+        check(calls('a', 'b'), {
+          'b': {'c'},
+          'c': {'a'},
+        }).join(),
+        contains('running b leads back to a'),
+      );
+      expect(
+        check(calls('a', 'b'), {
+          'b': {'c'},
+        }),
+        isEmpty,
+      );
+    });
+  });
 }

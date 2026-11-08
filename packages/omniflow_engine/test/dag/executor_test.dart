@@ -431,4 +431,129 @@ void main() {
     expect((lamp.output!['result'] as Map)['dryRun'], isTrue);
     expect(dry.toJson()['dryRun'], isTrue);
   });
+
+  group('reloads and queues', () {
+    FlowSpec slow({String mode = 'queued', int cooldown = 0, int ms = 1000}) =>
+        flow(
+          [
+            node('trig', 'manual'),
+            node('wait', 'delay', {'ms': ms}),
+            action('lamp', 'desk_lamp'),
+          ],
+          [edge('trig', 'out', 'wait'), edge('wait', 'out', 'lamp')],
+          mode: mode,
+          cooldown: cooldown,
+        );
+
+    test(
+      'a queued run waiting when the flow is cancelled never acts',
+      () async {
+        final r = runner(slow());
+        final first = r.fire('trig', {});
+        await pump();
+        final second = r.fire('trig', {});
+        await pump();
+        r.cancelAll();
+        await clock.advance(const Duration(seconds: 2));
+        await clock.advance(const Duration(seconds: 2));
+        expect((await first).outcome, RunOutcome.cancelled);
+        expect((await second).reason, 'cancelled');
+        expect(effects.invoked, isEmpty);
+      },
+    );
+
+    test(
+      'a queued run is dropped when the run before it armed the cooldown',
+      () async {
+        final r = runner(slow(cooldown: 60, ms: 100));
+        final first = r.fire('trig', {});
+        await pump();
+        final second = r.fire('trig', {});
+        await pump();
+        await clock.advance(const Duration(milliseconds: 200));
+        await clock.advance(const Duration(milliseconds: 200));
+        expect((await first).outcome, RunOutcome.completed);
+        expect((await second).reason, 'cooldown');
+        expect(effects.invoked, hasLength(1));
+      },
+    );
+  });
+
+  group('run_flow', () {
+    FlowSpec calls(String target) => flow(
+      [
+        node('trig', 'manual'),
+        node('call', 'run_flow', {'flowId': target}),
+      ],
+      [edge('trig', 'out', 'call')],
+    );
+
+    test('a call back into a flow on the call stack fails the node', () async {
+      final self = await runner(calls('test_flow')).fire('trig', {});
+      expect(self.outcome, RunOutcome.failed);
+      expect(self.reason, contains('run_flow cycle'));
+      final back = await runner(calls('a')).fire('trig', {
+        callStackKey: ['a'],
+      });
+      expect(back.reason, contains('a -> test_flow -> a'));
+      expect(effects.ranFlows, isEmpty);
+    });
+
+    test('a call to another flow passes the stack on', () async {
+      final trace = await runner(calls('other')).fire('trig', {});
+      expect(trace.outcome, RunOutcome.completed);
+      expect(effects.ranFlows, ['other']);
+    });
+  });
+
+  group('nothing is left running', () {
+    test('a cancelled delay leaves no timer behind', () async {
+      final timers = <Timer>[];
+      await runZoned(
+        () async {
+          final r = FlowRunner(
+            flow(
+              [
+                node('trig', 'manual'),
+                node('wait', 'delay', {'ms': 3600000}),
+                action('lamp', 'desk_lamp'),
+              ],
+              [edge('trig', 'out', 'wait'), edge('wait', 'out', 'lamp')],
+            ),
+            effects,
+          );
+          final run = r.fire('trig', {});
+          await pump();
+          r.cancelAll();
+          expect((await run).outcome, RunOutcome.cancelled);
+        },
+        zoneSpecification: ZoneSpecification(
+          createTimer: (self, parent, zone, duration, callback) {
+            final t = parent.createTimer(zone, duration, callback);
+            timers.add(t);
+            return t;
+          },
+        ),
+      );
+      expect(timers.where((t) => t.isActive), isEmpty);
+    });
+
+    test('wait_for_event stops listening once it times out', () async {
+      final f = flow(
+        [
+          node('trig', 'manual'),
+          node('wait', 'wait_for_event', {'event': 'door', 'timeoutMs': 500}),
+          action('lamp', 'desk_lamp'),
+        ],
+        [edge('trig', 'out', 'wait'), edge('wait', 'timeout', 'lamp')],
+      );
+      final run = runner(f).fire('trig', {});
+      await pump();
+      expect(effects.eventsOut.hasListener, isTrue);
+      await clock.advance(const Duration(milliseconds: 600));
+      expect((await run).outcome, RunOutcome.completed);
+      expect(effects.invoked, hasLength(1));
+      expect(effects.eventsOut.hasListener, isFalse);
+    });
+  });
 }

@@ -24,6 +24,7 @@ class ParamSpec {
     this.optional = false,
     this.values = const [],
     this.pattern,
+    this.integer = false,
   });
 
   final ParamType type;
@@ -35,6 +36,9 @@ class ParamSpec {
 
   /// For a string param, a regular expression the whole value must match.
   final RegExp? pattern;
+
+  /// For a number param, whether it must be a whole number.
+  final bool integer;
 
   static ParamSpec? parse(Object? json, String path, IssueCollector issues) {
     if (json is! Map) {
@@ -91,6 +95,10 @@ class ParamSpec {
     if (optional != null && optional is! bool) {
       issues.add('$path.optional', 'must be a boolean');
     }
+    final integer = map['integer'];
+    if (integer != null && (integer is! bool || type != ParamType.number)) {
+      issues.add('$path.integer', 'is true or false, for a number param');
+    }
     return ParamSpec(
       type: type,
       min: min is num ? min : null,
@@ -99,6 +107,7 @@ class ParamSpec {
       optional: optional == true,
       values: values,
       pattern: pattern,
+      integer: integer == true,
     );
   }
 
@@ -107,6 +116,9 @@ class ParamSpec {
     switch (type) {
       case ParamType.number:
         if (value is! num) return 'must be a number';
+        if (integer && value != value.roundToDouble()) {
+          return 'must be a whole number';
+        }
         if (min != null && value < min!) return 'must be at least $min';
         if (max != null && value > max!) return 'must be at most $max';
       case ParamType.boolean:

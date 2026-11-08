@@ -179,6 +179,165 @@ void main() {
     expect(device.state, {'state': false, 'dimming': 55, 'temp': 4000});
   });
 
+  test(
+    'a polled reply with none of the state keys leaves state alone',
+    () async {
+      await store.put(lamp());
+      channel.outcomes.add(
+        (_) => const ChannelReply({
+          'method': 'setPilot',
+          'result': {'success': true},
+        }),
+      );
+      final device = await service().refreshState('desk_lamp');
+      expect(device.state, {'state': true, 'dimming': 30, 'temp': 2700});
+      expect((await store.get('desk_lamp'))!.state, device.state);
+    },
+  );
+
+  group('removeDevice', () {
+    test('during a slow command, the device stays gone', () async {
+      await store.put(lamp());
+      final gate = Completer<void>();
+      channel.outcomes.add((_) async {
+        await gate.future;
+        return const ChannelReply({});
+      });
+      final s = service();
+      final events = <DeviceStateChanged>[];
+      s.events.listen(events.add);
+      final slow = s.invoke('desk_lamp', 'brightness', {'value': 40});
+      final queued = s.invoke('desk_lamp', 'brightness', {'value': 60});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(await s.removeDevice('desk_lamp'), isTrue);
+      gate.complete();
+      await slow;
+      await expectLater(queued, throwsA(isA<DeviceNotFoundException>()));
+      expect(await store.get('desk_lamp'), isNull);
+      expect(await s.device('desk_lamp'), isNull);
+      expect(events, isEmpty);
+      expect(channel.requests, hasLength(1));
+    });
+
+    test('a device added again under the same id works', () async {
+      await store.put(lamp());
+      final s = service();
+      await s.removeDevice('desk_lamp');
+      await store.put(lamp());
+      final result = await s.invoke('desk_lamp', 'power', {'value': false});
+      expect(result.device.state['state'], false);
+      expect((await store.get('desk_lamp'))!.state['state'], false);
+    });
+  });
+
+  test('two toggles at once flip the state twice', () async {
+    await store.put(lamp());
+    final s = service();
+    final results = await Future.wait([
+      s.toggle('desk_lamp', 'power'),
+      s.toggle('desk_lamp', 'power'),
+    ]);
+    expect(channel.requests.map((r) => r.context.params['value']), [
+      false,
+      true,
+    ]);
+    expect(results.last.device.state['state'], true);
+    expect((await store.get('desk_lamp'))!.state['state'], true);
+    await expectLater(
+      s.toggle('desk_lamp', 'rgb'),
+      throwsA(isA<ArgumentError>()),
+    );
+  });
+
+  test('a healed address is saved and reported', () async {
+    await store.put(lamp());
+    channel.outcomes.add((_) => throw TransportTimeoutException('no reply'));
+    final s = service(locator: (_, _) async => '10.0.0.77');
+    final events = <DeviceStateChanged>[];
+    s.events.listen(events.add);
+    await s.sendCommand('desk_lamp', const {'method': 'getPilot'});
+    await Future<void>.delayed(Duration.zero);
+    expect(events.single.device.host, '10.0.0.77');
+    expect((await store.get('desk_lamp'))!.host, '10.0.0.77');
+  });
+
+  test('an exec device is never moved by discovery', () async {
+    final exec = FakeChannel();
+    await store.put(
+      const Device(
+        id: 'pi',
+        name: 'Pi',
+        driverId: 'linux_host',
+        host: '192.168.1.30',
+        stableId: 'pi-mac',
+        settings: {'username': 'pi'},
+      ),
+    );
+    exec.outcomes.add((_) => throw TransportTimeoutException('no reply'));
+    var asked = false;
+    final s = DeviceService(
+      registry: DriverRegistry.withBuiltIns(),
+      store: store,
+      channels: {TransportType.exec: exec},
+      locator: (_, _) async {
+        asked = true;
+        return '203.0.113.9';
+      },
+    );
+    await expectLater(
+      s.invoke('pi', 'suspend', const {}),
+      throwsA(isA<TransportTimeoutException>()),
+    );
+    expect(asked, isFalse);
+    expect((await store.get('pi'))!.host, '192.168.1.30');
+  });
+
+  test(
+    'a late reply to an earlier command is not taken as the poll reply',
+    () async {
+      const late = Duration(milliseconds: 700);
+      final bulb = await UdpTransport.bind();
+      var closed = false;
+      bulb.incoming.listen((d) {
+        final request = jsonDecode(d.text) as Map;
+        final method = request['method'];
+        Timer(late, () {
+          if (closed) return;
+          bulb.send(
+            d.address,
+            d.port,
+            utf8.encode(
+              jsonEncode({
+                'method': method,
+                'env': 'pro',
+                'result': method == 'getPilot'
+                    ? {'state': false, 'dimming': 55, 'temp': 4000}
+                    : {'success': true},
+              }),
+            ),
+          );
+        });
+      });
+      final udp = await UdpTransport.bind();
+      addTearDown(() {
+        closed = true;
+        bulb.close();
+        udp.close();
+      });
+      await store.put(
+        lamp(host: InternetAddress.loopbackIPv4.address, port: bulb.localPort),
+      );
+      final s = DeviceService(
+        registry: DriverRegistry.withBuiltIns(),
+        store: store,
+        channels: {TransportType.udp: UdpJsonChannel(udp)},
+      );
+      await s.invoke('desk_lamp', 'brightness', {'value': 80});
+      final polled = await s.refreshState('desk_lamp');
+      expect(polled.state, {'state': false, 'dimming': 55, 'temp': 4000});
+    },
+  );
+
   test('applyPush merges syncPilot and ignores other methods', () async {
     await store.put(lamp());
     final s = service();

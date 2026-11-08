@@ -45,6 +45,33 @@ void main() {
     );
   });
 
+  test('a child left holding stdout does not outlast the timeout', () async {
+    final watch = Stopwatch()..start();
+    final result = await local.run([
+      '/bin/sh',
+      '-c',
+      'sleep 5 & echo hi',
+    ], timeout: const Duration(seconds: 1));
+    expect(watch.elapsed, lessThan(const Duration(seconds: 3)));
+    expect(result.exitCode, 0);
+    expect(result.stdout, 'hi');
+  });
+
+  test('a backslash is refused for SSH and passed through locally', () async {
+    const argv = ['/usr/bin/printf', '%s', r"\';touch /tmp/pwn;echo \"];
+    expect(() => checkSshArgv(argv), throwsArgumentError);
+    final ssh = SshExecutor(
+      host: '127.0.0.1',
+      port: 9,
+      username: 'nobody',
+      privateKeySecret: 'ssh/none',
+      secrets: InMemorySecretStore(),
+    );
+    await expectLater(ssh.run(argv), throwsArgumentError);
+    final result = await local.run(argv);
+    expect(result.stdout, r"\';touch /tmp/pwn;echo \");
+  });
+
   test('renderArgv rejects a template that is not a list of strings', () {
     expect(
       () => renderArgv('osascript -e x', const TemplateContext()),

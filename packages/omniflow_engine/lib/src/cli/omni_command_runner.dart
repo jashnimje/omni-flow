@@ -8,6 +8,7 @@ import 'package:mcp_dart/mcp_dart.dart' show StdioServerTransport;
 
 import '../api/omni_engine.dart';
 import '../mcp/omni_mcp.dart';
+import '../storage/database.dart' show DatabaseInUseException;
 import '../storage/keychain_secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../version.dart';
@@ -178,6 +179,7 @@ class OmniCommandRunner extends CommandRunner<int> {
           'Add or replace a flow from a file.',
           'flow.save',
           key: 'flow',
+          extra: const {'trusted': true},
         ),
         _ApiCommand(
           'list',
@@ -213,26 +215,8 @@ class OmniCommandRunner extends CommandRunner<int> {
           (rest, _) async => {'id': id(rest), 'enabled': false},
           usage: 'ID',
         ),
-        _ApiCommand(
-          'approve',
-          'Approve a high-risk flow that is waiting.',
-          'flow.approve',
-          (rest, _) async => {'id': id(rest)},
-          usage: 'ID',
-        ),
-        _ApiCommand(
-          'run',
-          'Fire a flow\'s manual triggers: omni flow run ID [key=value ...]',
-          'flow.run',
-          (rest, _) async {
-            if (rest.isEmpty) throw UsageException('needs ID', '');
-            return {
-              'id': rest.first,
-              'msg': {'payload': parseKeyValues(rest.skip(1))},
-            };
-          },
-          usage: 'ID [key=value ...]',
-        ),
+        _FlowApprove(),
+        _FlowRun(),
         _FlowDryRun(),
         _ApiCommand(
           'log',
@@ -376,6 +360,35 @@ class OmniCommandRunner extends CommandRunner<int> {
   }
 }
 
+/// Runs the CLI as `bin/omni.dart` does: a failure the user can cause
+/// prints one line on [err] and returns a sysexits code, never a stack
+/// trace.
+Future<int> runOmni(
+  List<String> args, {
+  OmniCommandRunner? runner,
+  StringSink? err,
+}) async {
+  final errors = err ?? stderr;
+  try {
+    return await (runner ?? OmniCommandRunner()).run(args);
+  } on UsageException catch (e) {
+    errors.writeln(e);
+    return 64;
+  } on DatabaseInUseException {
+    errors.writeln(
+      'omni: the database is in use by another omni process (omni hub?)',
+    );
+    return 75;
+  } on FileSystemException catch (e) {
+    final path = e.path == null ? '' : '${e.path}: ';
+    errors.writeln('omni: $path${e.osError?.message ?? e.message}');
+    return 66;
+  } on FormatException catch (e) {
+    errors.writeln('omni: ${e.message}');
+    return 64;
+  }
+}
+
 /// Parses `key=value` pairs. A value that is valid JSON keeps its type
 /// (`value=80` is a number, `value=true` a boolean), anything else is text.
 Map<String, Object?> parseKeyValues(Iterable<String> pairs) {
@@ -457,6 +470,7 @@ class _FileCommand extends _ApiCommand {
     String description,
     String apiCommand, {
     String key = 'manifest',
+    Map<String, Object?> extra = const {},
   }) : super(name, description, apiCommand, (rest, _) async {
          if (rest.length != 1) throw UsageException('needs a $key FILE', '');
          final Object? manifest;
@@ -468,7 +482,7 @@ class _FileCommand extends _ApiCommand {
              '',
            );
          }
-         return {key: manifest};
+         return {key: manifest, ...extra};
        }, usage: 'FILE');
 }
 
@@ -502,6 +516,11 @@ class _DeviceAdd extends _ApiCommand {
       ..addMultiOption(
         'set',
         help: 'A non-secret setting, key=value. Repeatable.',
+      )
+      ..addFlag(
+        'replace',
+        negatable: false,
+        help: 'Replace a device that already has this id.',
       );
   }
 
@@ -512,6 +531,7 @@ class _DeviceAdd extends _ApiCommand {
     final port = a.option('port');
     return {
       'id': id,
+      if (a.flag('replace')) 'replace': true,
       'driver': a.option('driver'),
       'host': a.option('host'),
       if (port != null) 'port': int.tryParse(port) ?? port,
@@ -585,26 +605,19 @@ class _Watch extends Command<int> {
   Future<int> run() async {
     final omni = runner! as OmniCommandRunner;
     final a = argResults!;
+    final wizPort = _port(a, 'wiz-port', usage);
+    final seconds = _seconds(a, usage);
     final tap = a.flag('packets') ? PacketTap() : null;
     final engine = await omni.engineFactory(omni.home, tap: tap);
     final subscription = engine.events.listen(
       (e) => omni.out.writeln(jsonEncode(e)),
     );
     try {
-      final count = await engine.startWizPush(
-        listenPort: int.parse(a.option('wiz-port')!),
-      );
+      final count = await engine.startWizPush(listenPort: wizPort);
       omni.out.writeln(
         jsonEncode({'event': 'watch.started', 'wizBulbs': count}),
       );
-      final seconds = a.option('seconds');
-      if (seconds != null) {
-        await Future<void>.delayed(
-          Duration(milliseconds: (double.parse(seconds) * 1000).round()),
-        );
-      } else {
-        await ProcessSignal.sigint.watch().first;
-      }
+      await _untilStopped(seconds);
       return 0;
     } finally {
       await subscription.cancel();
@@ -627,7 +640,8 @@ class _FlowDryRun extends _ApiCommand {
       ..addOption(
         'trigger',
         help: 'Which trigger node to fire. Default: the first.',
-      );
+      )
+      ..addOption('msg', help: _msgHelp);
   }
 
   @override
@@ -638,8 +652,133 @@ class _FlowDryRun extends _ApiCommand {
       'id': a.rest.first,
       if (a.option('at') != null) 'at': a.option('at'),
       if (a.option('trigger') != null) 'trigger': a.option('trigger'),
-      'msg': {'payload': parseKeyValues(a.rest.skip(1))},
+      'msg': _triggerMsg(a, usage),
     };
+  }
+}
+
+const _msgHelp =
+    'The trigger message as a JSON object, for flows that read msg.value '
+    'and the like: --msg \'{"value": true}\'. key=value pairs go in msg.payload.';
+
+/// key=value pairs as `msg.payload`, with --msg merged on top.
+Map<String, Object?> _triggerMsg(ArgResults a, String usage) {
+  final raw = a.option('msg');
+  Object? extra;
+  if (raw != null) {
+    try {
+      extra = jsonDecode(raw);
+    } on FormatException catch (e) {
+      throw UsageException('--msg is not valid JSON: ${e.message}', usage);
+    }
+    if (extra is! Map) throw UsageException('--msg must be an object', usage);
+  }
+  return {
+    'payload': parseKeyValues(a.rest.skip(1)),
+    ...?(extra as Map?)?.cast<String, Object?>(),
+  };
+}
+
+/// `omni flow run ID [key=value ...] [--msg JSON] [--trigger NODE]`.
+class _FlowRun extends _ApiCommand {
+  _FlowRun()
+    : super(
+        'run',
+        'Fire a flow\'s manual triggers: omni flow run ID [key=value ...]',
+        'flow.run',
+        (_, _) async => {},
+        usage: 'ID [key=value ...]',
+      ) {
+    argParser
+      ..addOption(
+        'trigger',
+        help: 'Fire this trigger node instead of the manual ones.',
+      )
+      ..addOption('msg', help: _msgHelp);
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    if (a.rest.isEmpty) throw UsageException('needs ID', usage);
+    return {
+      'id': a.rest.first,
+      if (a.option('trigger') != null) 'trigger': a.option('trigger'),
+      'msg': _triggerMsg(a, usage),
+    };
+  }
+}
+
+/// `omni flow approve ID [--revision R]`. Approves the revision that
+/// `omni flow get` showed, or the current one when none is given.
+class _FlowApprove extends _ApiCommand {
+  _FlowApprove()
+    : super(
+        'approve',
+        'Approve a high-risk flow that is waiting.',
+        'flow.approve',
+        (_, _) async => {},
+        usage: 'ID',
+      ) {
+    argParser.addOption(
+      'revision',
+      help: 'The revision from omni flow get. Refused if the flow changed.',
+    );
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    final id = OmniCommandRunner._one(a.rest, 'ID');
+    var revision = a.option('revision');
+    if (revision == null) {
+      final engine = await omni.engineFactory(omni.home);
+      try {
+        final got = await engine.handle('flow.get', {'id': id});
+        if (got['ok'] != true) throw UsageException('no flow $id', usage);
+        revision = got['revision'] as String;
+      } finally {
+        await engine.close();
+      }
+    }
+    return {'id': id, 'revision': revision};
+  }
+}
+
+int _port(ArgResults a, String option, String usage) {
+  final port = int.tryParse(a.option(option)!);
+  if (port == null || port < 0 || port > 65535) {
+    throw UsageException('--$option needs a port number', usage);
+  }
+  return port;
+}
+
+Duration? _seconds(ArgResults a, String usage) {
+  final raw = a.option('seconds');
+  if (raw == null) return null;
+  final seconds = double.tryParse(raw);
+  if (seconds == null || seconds < 0) {
+    throw UsageException('--seconds needs a number', usage);
+  }
+  return Duration(milliseconds: (seconds * 1000).round());
+}
+
+/// Waits [duration], or until Ctrl-C or a SIGTERM (launchd, kill), so the
+/// caller's finally still closes the engine and its pending writes land.
+Future<void> _untilStopped(Duration? duration) async {
+  if (duration != null) return Future<void>.delayed(duration);
+  final stopped = Completer<void>();
+  void stop(ProcessSignal _) {
+    if (!stopped.isCompleted) stopped.complete();
+  }
+
+  final subscriptions = [
+    ProcessSignal.sigint.watch().listen(stop),
+    if (!Platform.isWindows) ProcessSignal.sigterm.watch().listen(stop),
+  ];
+  await stopped.future;
+  for (final s in subscriptions) {
+    await s.cancel();
   }
 }
 
@@ -670,26 +809,22 @@ class _Hub extends Command<int> {
   Future<int> run() async {
     final omni = runner! as OmniCommandRunner;
     final a = argResults!;
+    final wizPort = _port(a, 'wiz-port', usage);
+    final seconds = _seconds(a, usage);
     final engine = await omni.engineFactory(omni.home);
     final subscription = engine.events.listen(
       (e) => omni.out.writeln(jsonEncode(e)),
     );
     try {
-      await engine.startHub(wizListenPort: int.parse(a.option('wiz-port')!));
-      omni.out.writeln(
-        jsonEncode({
-          'event': 'hub.started',
-          'flows': engine.flows.loadedFlows.toList(),
-        }),
-      );
-      final seconds = a.option('seconds');
-      if (seconds != null) {
-        await Future<void>.delayed(
-          Duration(milliseconds: (double.parse(seconds) * 1000).round()),
-        );
-      } else {
-        await ProcessSignal.sigint.watch().first;
+      final started = await engine.handle('hub.start', {'wizPort': wizPort});
+      if (started['ok'] != true) {
+        omni.out.writeln(jsonEncode(started));
+        return 1;
       }
+      omni.out.writeln(
+        jsonEncode({'event': 'hub.started', 'flows': started['flows']}),
+      );
+      await _untilStopped(seconds);
       return 0;
     } finally {
       await subscription.cancel();
@@ -884,7 +1019,12 @@ class _LinkAdd extends _ApiCommand {
       ..addFlag('follow', negatable: false, help: 'TO copies FROM, scaled.')
       ..addOption('above', help: 'When FROM goes above this number...')
       ..addOption('below', help: 'When FROM goes below this number...')
-      ..addOption('set', help: '...set TO to this value (true, 80, "warm").');
+      ..addOption('set', help: '...set TO to this value (true, 80, "warm").')
+      ..addFlag(
+        'replace',
+        negatable: false,
+        help: 'Save the link again when the same link exists.',
+      );
   }
 
   @override
@@ -914,6 +1054,8 @@ class _LinkAdd extends _ApiCommand {
     return {
       'from': a.rest[0],
       'to': a.rest[1],
+      'trusted': true,
+      if (a.flag('replace')) 'replace': true,
       'mode': modes.single,
       'above': ?number('above'),
       'below': ?number('below'),

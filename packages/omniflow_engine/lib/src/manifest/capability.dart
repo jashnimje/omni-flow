@@ -57,6 +57,7 @@ class CapabilitySpec {
     required this.params,
     required this.command,
     this.stateJsonPath,
+    this.onOff,
   });
 
   final String id;
@@ -67,6 +68,27 @@ class CapabilitySpec {
   /// The structured command template, null for a sensor.
   final Object? command;
   final String? stateJsonPath;
+
+  /// For a toggle whose device has its own words for on and off (`"ON"`,
+  /// `"OFF"`): what `true` and `false` are sent as, and read back from.
+  final (Object, Object)? onOff;
+
+  /// [value] as the device says it, for a toggle with [onOff].
+  Object? toDevice(Object? value) =>
+      onOff == null || value is! bool ? value : (value ? onOff!.$1 : onOff!.$2);
+
+  /// A device value read back as `true` or `false` when it is one of the
+  /// [onOff] words (case does not matter), unchanged otherwise.
+  Object? fromDevice(Object? value) {
+    final words = onOff;
+    if (words == null || value is bool) return value;
+    bool same(Object word) => word is String && value is String
+        ? word.toLowerCase() == value.toLowerCase()
+        : word == value;
+    if (same(words.$1)) return true;
+    if (same(words.$2)) return false;
+    return value;
+  }
 
   static CapabilitySpec? parse(
     Object? json,
@@ -113,6 +135,19 @@ class CapabilitySpec {
     }
     final stateJsonPath = issues.optionalString(map, 'stateJsonPath', path);
     issues.jsonPath(stateJsonPath, '$path.stateJsonPath');
+    final rawOnOff = map['onOff'];
+    (Object, Object)? onOff;
+    if (rawOnOff != null) {
+      if (type != CapabilityType.toggle) {
+        issues.add('$path.onOff', 'is only for a toggle');
+      } else if (rawOnOff is! List ||
+          rawOnOff.length != 2 ||
+          rawOnOff.any((v) => v == null || v is Map || v is List)) {
+        issues.add('$path.onOff', 'must be [on, off], two plain values');
+      } else {
+        onOff = (rawOnOff[0] as Object, rawOnOff[1] as Object);
+      }
+    }
     if (issues.issues.length > before || id == null || type == null) {
       return null;
     }
@@ -123,6 +158,7 @@ class CapabilitySpec {
       params: params,
       command: command,
       stateJsonPath: stateJsonPath,
+      onOff: onOff,
     );
   }
 
@@ -176,6 +212,11 @@ class CapabilitySpec {
       }
     }
     if (issues.isNotEmpty) throw ValidationException('params for $id', issues);
-    return Map.unmodifiable(input);
+    // 80.0 from a slider or a scaled link renders as "80.0", which a device
+    // taking whole numbers refuses.
+    return Map.unmodifiable({
+      for (final MapEntry(:key, :value) in input.entries)
+        key: params[key]!.integer && value is double ? value.round() : value,
+    });
   }
 }

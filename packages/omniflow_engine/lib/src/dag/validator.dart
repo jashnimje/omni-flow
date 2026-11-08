@@ -158,8 +158,53 @@ List<ValidationIssue> validateFlow(
     }
   }
 
+  // 5. A debounce gate waits while its run stays active, so single mode
+  // drops every later event and queued mode never suppresses one.
+  if ((flow.mode == RunMode.single || flow.mode == RunMode.queued) &&
+      flow.nodes.any((n) => n.type == 'debounce')) {
+    issues.add(
+      r'$.mode',
+      'a debounce gate does not work in ${flow.mode.name} mode. Use mode restart',
+    );
+  }
+
+  // 6. No run_flow chain leads back here: the waiting run would never end.
+  final calls = {...refs.calls, flow.id: runFlowTargets(flow)};
+  bool leadsBack(String start) {
+    final seen = <String>{};
+    final stack = [start];
+    while (stack.isNotEmpty) {
+      final id = stack.removeLast();
+      if (id == flow.id) return true;
+      if (seen.add(id)) stack.addAll(calls[id] ?? const {});
+    }
+    return false;
+  }
+
+  for (var i = 0; i < flow.nodes.length; i++) {
+    final n = flow.nodes[i];
+    final target = n.config['flowId'];
+    if (n.type != 'run_flow' || target is! String) continue;
+    if (leadsBack(target)) {
+      issues.add(
+        r'$.nodes['
+        '$i].config.flowId',
+        target == flow.id
+            ? 'a flow cannot run itself'
+            : 'running $target leads back to ${flow.id}, a cycle that never finishes',
+      );
+    }
+  }
+
   return issues.issues;
 }
+
+/// The flows [flow] starts with `run_flow` nodes.
+Set<String> runFlowTargets(FlowSpec flow) => {
+  for (final n in flow.nodes)
+    if (n.type == 'run_flow' && n.config['flowId'] is String)
+      n.config['flowId'] as String,
+};
 
 /// Parses and validates, throwing a [ValidationException] with every issue.
 FlowSpec parseAndValidateFlow(

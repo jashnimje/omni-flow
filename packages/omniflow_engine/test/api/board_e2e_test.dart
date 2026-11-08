@@ -3,6 +3,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:omniflow_engine/omniflow_engine.dart';
@@ -13,16 +14,21 @@ import '../support/virtual_board.dart';
 /// The engine against the real firmware protocol core, built natively with
 /// simulated pins, over loopback UDP (a board on Wi-Fi) and a
 /// pseudo-terminal (a board on USB).
-void main() {
+Future<void> main() async {
+  // Decided before any test is declared: a skip in setUpAll would only skip
+  // the setUpAll itself, and every test would then fail on the missing build.
+  final noCompiler = await VirtualBoard.build() == null;
+  group(
+    'virtual board',
+    () => boardTests(),
+    skip: noCompiler ? 'no C++ compiler for the virtual board' : null,
+  );
+}
+
+void boardTests() {
   late Directory home;
   late OmniEngine engine;
   final boards = <VirtualBoard>[];
-
-  setUpAll(() async {
-    if (await VirtualBoard.build() == null) {
-      markTestSkipped('no C++ compiler for the virtual board');
-    }
-  });
 
   setUp(() async {
     home = await Directory.systemTemp.createTemp('omni_board');
@@ -178,6 +184,89 @@ void main() {
     });
     expect(changed['ok'], isFalse);
     expect('${changed['error']}', contains('cannot do adc'));
+    final kept = await ok('device.get', {'id': 'desk'});
+    expect(((kept['device'] as Map)['settings'] as Map)['pins'], {
+      'relay': {'pin': 25, 'mode': 'out'},
+    });
+  });
+
+  test('pins saved while a setup runs reach the board', () async {
+    final b = await board(node: 'desk_board');
+    await ok('device.add', {
+      'id': 'desk',
+      'driver': 'omniflow_board',
+      'host': '127.0.0.1',
+      'port': b.udpPort,
+      'provision': false,
+      'settings': {
+        'pins': {
+          'relay': {'pin': 2, 'mode': 'out'},
+        },
+      },
+    });
+    final running = engine.provisionBoard('desk');
+    final changed = await ok('board.pins', {
+      'id': 'desk',
+      'pins': {
+        'relay': {'pin': 2, 'mode': 'out'},
+        'fan': {'pin': 4, 'mode': 'pwm'},
+      },
+    });
+    await running;
+    expect((changed['board'] as Map)['pins'], ['relay', 'fan']);
+  });
+
+  test('a board renamed over USB keeps its events', () async {
+    final b = await VirtualBoard.start(
+      node: 'desk_board',
+      pty: true,
+      udp: true,
+    );
+    boards.add(b);
+    await ok('device.add', {
+      'id': 'desk',
+      'driver': 'omniflow_board',
+      'host': '127.0.0.1',
+      'port': b.udpPort,
+      'settings': {'pins': pins},
+    });
+    await ok('board.setup', {'port': b.tty, 'name': 'study_board'});
+    final renamed = await ok('device.get', {'id': 'desk'});
+    expect((renamed['device'] as Map)['stableId'], 'study_board');
+    await sim('desk', 3, 1);
+    await stateOf('desk', (s) => s['button'] == false);
+  });
+
+  test('a hello for a known board does not move it while it answers', () async {
+    final helloPort = await VirtualBoard.freePort();
+    await engine.startHub(wizListenPort: 0, boardHelloPort: helloPort);
+    final b = await board(node: 'hall_board');
+    await ok('device.add', {
+      'id': 'hall',
+      'driver': 'omniflow_board',
+      'host': '127.0.0.1',
+      'port': b.udpPort,
+    });
+    final spoof = await UdpTransport.bind();
+    addTearDown(spoof.close);
+    final probed = <String>[];
+    spoof.incoming.listen((d) => probed.add(d.text));
+    spoof.send(
+      InternetAddress.loopbackIPv4,
+      helloPort,
+      utf8.encode(
+        jsonEncode({
+          'node': 'hall_board',
+          'event': 'hello',
+          'port': spoof.localPort,
+          'set': 1,
+        }),
+      ),
+    );
+    await Future<void>.delayed(const Duration(seconds: 1));
+    final device = (await ok('device.get', {'id': 'hall'}))['device'] as Map;
+    expect(device['port'], b.udpPort);
+    expect(probed, isEmpty);
   });
 
   test('a USB board over a serial port works the same way', () async {
@@ -371,13 +460,39 @@ void main() {
       expect(await pinOnLamp(2), 0);
 
       final bad = await engine.handle('link.create', {
-        'from': 'desk.knob',
+        'from': 'desk.button',
         'to': 'lamp.arm',
         'mode': 'toggle',
       });
       expect(
         '${bad['error']}',
         contains('only an on/off toggle can be toggled'),
+      );
+      final fromNumber = await engine.handle('link.create', {
+        'from': 'desk.knob',
+        'to': 'lamp.relay',
+        'mode': 'toggle',
+      });
+      expect(
+        '${fromNumber['error']}',
+        contains('is a number, so it is never on'),
+      );
+      final options = await ok('link.options', {'from': 'desk.knob'});
+      expect(options['modes'], ['follow', 'threshold']);
+      final targets = {
+        for (final t in (options['targets'] as List).cast<Map>())
+          t['to']: t['modes'],
+      };
+      expect(targets['lamp.arm'], ['follow', 'threshold']);
+      expect(targets['lamp.relay'], ['threshold']);
+      final mismatch = await engine.handle('link.create', {
+        'from': 'desk.button',
+        'to': 'lamp.arm',
+        'mode': 'follow',
+      });
+      expect(
+        '${mismatch['error']}',
+        contains('one is on/off and the other a number'),
       );
       final unknown = await engine.handle('link.create', {
         'from': 'desk.door',
@@ -390,4 +505,65 @@ void main() {
       );
     },
   );
+
+  test('a board refuses setup commands over Wi-Fi', () async {
+    final b = await board(node: 'shed_board');
+    final udp = await UdpTransport.bind();
+    addTearDown(udp.close);
+    final reply = await udp.request(
+      InternetAddress.loopbackIPv4,
+      b.udpPort!,
+      utf8.encode('{"cmd":"wifi.set","ssid":"evil","password":"x","id":7}'),
+      timeout: const Duration(seconds: 2),
+    );
+    expect(reply.text, contains('setup commands are only taken over USB'));
+  });
+
+  test('device messages count only from local networks', () {
+    for (final local in [
+      '127.0.0.1',
+      '10.1.2.3',
+      '172.20.0.5',
+      '192.168.1.40',
+      '169.254.3.4',
+      'fd00::1',
+    ]) {
+      expect(
+        isLocalNetworkAddress(InternetAddress(local)),
+        isTrue,
+        reason: local,
+      );
+    }
+    for (final remote in [
+      '8.8.8.8',
+      '172.32.0.1',
+      '100.64.0.1',
+      '2001:db8::1',
+    ]) {
+      expect(
+        isLocalNetworkAddress(InternetAddress(remote)),
+        isFalse,
+        reason: remote,
+      );
+    }
+  });
+
+  test('a pin removed from the setting is released on the board', () async {
+    final b = await board(node: 'bench_board');
+    await ok('device.add', {
+      'id': 'bench',
+      'driver': 'omniflow_board',
+      'host': '127.0.0.1',
+      'port': b.udpPort,
+      'settings': {'pins': pins},
+    });
+    await ok('board.pins', {
+      'id': 'bench',
+      'pins': {'relay': pins['relay']},
+    });
+    final describe = (await engine.devices.sendCommand('bench', {
+      'cmd': 'describe',
+    })).json!;
+    expect(pinsSetOnBoard(describe), [2]);
+  });
 }

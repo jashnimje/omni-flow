@@ -70,9 +70,25 @@ class DeviceService {
   final DeviceLocator? _locator;
   final DateTime Function() _clock;
   final _queues = <String, Future<void>>{};
+
+  /// Devices removed while commands to them were still queued or running.
+  /// Those commands never write the device back.
+  final _removed = <String>{};
   final _events = StreamController<DeviceStateChanged>.broadcast();
 
   Stream<DeviceStateChanged> get events => _events.stream;
+
+  /// The stored device, or null when there is none or it was just removed.
+  Future<Device?> device(String deviceId) async =>
+      _removed.contains(deviceId) ? null : _store.get(deviceId);
+
+  /// Deletes the device at once, without waiting for commands to it.
+  Future<bool> removeDevice(String deviceId) async {
+    _removed.add(deviceId);
+    final removed = await _store.remove(deviceId);
+    unawaited(_serialised(deviceId, () async => _removed.remove(deviceId)));
+    return removed;
+  }
 
   /// Validates [params] against the capability, renders and sends the
   /// command, and records the resulting state.
@@ -82,47 +98,88 @@ class DeviceService {
     Map<String, Object?> params,
   ) => _serialised(deviceId, () async {
     final (device, manifest) = await _resolve(deviceId);
-    final capability = manifest.capability(capabilityId);
-    if (capability == null) {
-      throw DeviceNotFoundException(
+    return _invoke(
+      device,
+      manifest,
+      _capability(manifest, capabilityId),
+      params,
+    );
+  });
+
+  /// Sends the opposite of the toggle's current state. The state is read in
+  /// order with the other commands to the device, so two toggles at once
+  /// flip it twice.
+  Future<InvokeResult> toggle(String deviceId, String capabilityId) =>
+      _serialised(deviceId, () async {
+        final (device, manifest) = await _resolve(deviceId);
+        final capability = _capability(manifest, capabilityId);
+        final key = stateKeyOf(capability.stateJsonPath);
+        if (key == null) {
+          throw ArgumentError('$deviceId.$capabilityId cannot be toggled');
+        }
+        return _invoke(device, manifest, capability, {
+          'value': device.state[key] != true,
+        });
+      });
+
+  CapabilitySpec _capability(DriverManifest manifest, String capabilityId) =>
+      manifest.capability(capabilityId) ??
+      (throw DeviceNotFoundException(
         '${manifest.id} has no capability $capabilityId',
-      );
-    }
+      ));
+
+  Future<InvokeResult> _invoke(
+    Device device,
+    DriverManifest manifest,
+    CapabilitySpec capability,
+    Map<String, Object?> params,
+  ) async {
     final validated = capability.validateParams(params);
     final (current, reply) = await _sendHealing(
       device,
       manifest,
       capability.command,
-      validated,
+      {...validated, 'value': ?capability.toDevice(validated['value'])},
     );
     final state = _optimisticState(current.state, capability, validated);
     final updated = current.copyWith(state: state, lastSeen: _clock());
     await _save(updated);
     return InvokeResult(updated, reply);
-  });
+  }
 
-  /// Runs the driver's poll command and replaces the device state with what it returns.
-  Future<Device> refreshState(String deviceId) =>
-      _serialised(deviceId, () async {
-        final (device, manifest) = await _resolve(deviceId);
-        final poll = manifest.statePoll;
-        if (poll == null || poll['command'] == null) {
-          throw DeviceNotFoundException('${manifest.id} has no statePoll');
-        }
-        final (current, reply) = await _sendHealing(
-          device,
-          manifest,
-          poll['command'],
-          const {},
-        );
-        final polled = _extractObject(reply.json, poll['jsonPath'] as String?);
-        final updated = current.copyWith(
-          state: polled ?? current.state,
-          lastSeen: _clock(),
-        );
-        await _save(updated);
-        return updated;
-      });
+  /// Runs the driver's poll command and replaces the device state with what
+  /// it returns. A reply with none of the keys the capabilities read is not
+  /// this device's state (a late ack to an earlier command), so the state
+  /// stays as it was.
+  Future<Device> refreshState(String deviceId) => _serialised(
+    deviceId,
+    () async {
+      final (device, manifest) = await _resolve(deviceId);
+      final poll = manifest.statePoll;
+      if (poll == null || poll['command'] == null) {
+        throw DeviceNotFoundException('${manifest.id} has no statePoll');
+      }
+      final (current, reply) = await _sendHealing(
+        device,
+        manifest,
+        poll['command'],
+        const {},
+      );
+      final polled = _extractObject(reply.json, poll['jsonPath'] as String?);
+      final keys = {
+        for (final c in manifest.capabilities) ?stateKeyOf(c.stateJsonPath),
+      };
+      if (polled != null && keys.isNotEmpty && !keys.any(polled.containsKey)) {
+        return current;
+      }
+      final updated = current.copyWith(
+        state: polled == null ? current.state : _readBack(manifest, polled),
+        lastSeen: _clock(),
+      );
+      await _save(updated);
+      return updated;
+    },
+  );
 
   /// Sends one literal command (no capability) and returns the reply. The
   /// board setup uses it for `describe`, `pin.mode` and `pin.watch`.
@@ -137,7 +194,6 @@ class DeviceService {
       command,
       const {},
     );
-    if (!identical(current, device)) await _store.put(current);
     return reply;
   });
 
@@ -147,7 +203,7 @@ class DeviceService {
     String deviceId,
     Device Function(Device) change,
   ) => _serialised(deviceId, () async {
-    final device = await _store.get(deviceId);
+    final device = await this.device(deviceId);
     if (device == null) throw DeviceNotFoundException('no device $deviceId');
     final updated = change(device);
     await _save(updated);
@@ -177,12 +233,28 @@ class DeviceService {
         final pushed = _extractObject(message, push['jsonPath'] as String?);
         if (pushed == null) return null;
         final updated = device.copyWith(
-          state: {...device.state, ...pushed},
+          state: {...device.state, ..._readBack(manifest, pushed)},
           lastSeen: _clock(),
         );
         await _save(updated);
         return updated;
       });
+
+  /// Device words for on and off (`"ON"`) become `true` and `false` under
+  /// each toggle's state key, so dashboards and links see one shape.
+  Map<String, Object?> _readBack(
+    DriverManifest manifest,
+    Map<String, Object?> state,
+  ) {
+    final out = {...state};
+    for (final c in manifest.capabilities) {
+      final key = stateKeyOf(c.stateJsonPath);
+      if (c.onOff != null && key != null && out.containsKey(key)) {
+        out[key] = c.fromDevice(out[key]);
+      }
+    }
+    return out;
+  }
 
   Future<T> _serialised<T>(String deviceId, Future<T> Function() task) {
     final previous = _queues[deviceId] ?? Future<void>.value();
@@ -196,7 +268,7 @@ class DeviceService {
   }
 
   Future<(Device, DriverManifest)> _resolve(String deviceId) async {
-    final device = await _store.get(deviceId);
+    final device = await this.device(deviceId);
     if (device == null) throw DeviceNotFoundException('no device $deviceId');
     final manifest = manifestFor(_registry, device);
     if (manifest == null) {
@@ -234,11 +306,16 @@ class DeviceService {
     } on TransportTimeoutException {
       final locator = _locator;
       final stableId = device.stableId;
-      if (locator == null || stableId == null) rethrow;
+      // An exec host is an address the user typed, never a discovery reply.
+      if (locator == null ||
+          stableId == null ||
+          manifest.transport.type == TransportType.exec) {
+        rethrow;
+      }
       final host = await locator(manifest, stableId);
       if (host == null || host == device.host) rethrow;
       final moved = device.copyWith(host: host);
-      await _store.put(moved);
+      await _save(moved);
       return (moved, await channel.send(requestFor(moved)));
     }
   }
@@ -269,6 +346,7 @@ class DeviceService {
   }
 
   Future<void> _save(Device device) async {
+    if (_removed.contains(device.id)) return;
     await _store.put(device);
     if (!_events.isClosed) _events.add(DeviceStateChanged(device));
   }

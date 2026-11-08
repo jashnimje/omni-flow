@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
+import '../support/tuya_frames.dart';
+
 /// Golden frames from tinytuya: tool/gen_tuya_vectors.py.
 final vectors = jsonDecode(
   File('test/fixtures/tuya_v33_vectors.json').readAsStringSync(),
@@ -147,5 +149,67 @@ void main() {
     }
     expect(frames.map(toHex), [toHex(a), toHex(b)]);
     expect(codec.decode(frames[1], fromDevice: false).seq, 9);
+  });
+
+  test('the splitter skips a prefix with an impossible length', () {
+    final good = hex(vector('statusReply')['frameHex'] as String);
+    final bogus =
+        (ByteData(16)
+              ..setUint32(0, 0x000055AA)
+              ..setUint32(12, 0x7FFFFFFF))
+            .buffer
+            .asUint8List();
+    final frames = TuyaFrameSplitter().add([...bogus, ...good]);
+    expect(frames.map(toHex), [toHex(good)]);
+  });
+
+  group('a malformed device reply is a decode error, never a crash', () {
+    final key = vectors['localKey'] as String;
+
+    test('a 3.3 header cut short', () {
+      final frame = rawTuyaFrame(TuyaCommand.status, [
+        ...tuyaRetcode(0),
+        ...ascii.encode('3.3'),
+        0,
+        0,
+      ]);
+      expect(() => codec.decode(frame), throwsA(isA<TuyaDecodeException>()));
+    });
+
+    test('plain text where JSON should be is the device refusing', () {
+      final frame = rawTuyaFrame(TuyaCommand.control, [
+        ...tuyaRetcode(0),
+        ...tuyaEncrypt(key, utf8.encode('json obj data unvalid')),
+      ]);
+      expect(
+        () => codec.decode(frame),
+        throwsA(
+          isA<TuyaDecodeException>()
+              .having(
+                (e) => e.deviceMessage,
+                'deviceMessage',
+                'json obj data unvalid',
+              )
+              .having((e) => e.command, 'command', TuyaCommand.control),
+        ),
+      );
+    });
+
+    test('binary that is not JSON carries no device message', () {
+      final frame = rawTuyaFrame(TuyaCommand.status, [
+        ...tuyaRetcode(0),
+        ...tuyaEncrypt(key, [0x01, 0xFE, 0x7B, 0x00]),
+      ]);
+      expect(
+        () => codec.decode(frame),
+        throwsA(
+          isA<TuyaDecodeException>().having(
+            (e) => e.deviceMessage,
+            'deviceMessage',
+            isNull,
+          ),
+        ),
+      );
+    });
   });
 }

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "mqtt_switch",
+  "name": "MQTT switch (ESPHome, Home Assistant style, any ON/OFF topic)",
+  "category": "power",
+  "icon": "power",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "commandTopic", "label": "Command topic, for ESPHome <node>/switch/<name>/command" },
+    { "key": "stateTopic", "label": "State topic, for ESPHome <node>/switch/<name>/state" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "state" }] },
+  "reliability": { "timeoutMs": 3000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["ON", "OFF"],
+      "command": { "topic": "{{device.commandTopic}}", "payload": "{{value}}" },
+      "stateJsonPath": "$.state"
+    }
+  ]
+}

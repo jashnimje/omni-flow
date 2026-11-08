@@ -9,8 +9,7 @@ OmniFlow is a local-first automation studio. It controls LAN smart devices, desk
 - `packages/omniflow_engine/` - pure Dart engine and the `omni` CLI (from M0)
 - `packages/omniflow_app/` - Android app (from M0)
 - `drivers/` - built-in driver manifests (from M1)
-- `schemas/` - JSON Schemas for manifests and flows (from M1)
-- `firmware/` - Pico W MicroPython and the Arduino sketch
+- `firmware/omniflow_node/` - one Arduino sketch for ESP32, ESP8266, Pico W and Uno, and its native virtual board
 - `docs/` - design (`DESIGN.md`) and roadmap with checks (`ROADMAP.md`)
 
 ## Conventions

@@ -20,7 +20,12 @@ class WizFirstBeat {
 /// `registration` with this machine's IP and a made-up MAC to each bulb's port
 /// 38899, renew it every 20 seconds, and listen on 38900 for `syncPilot` and
 /// `firstBeat`. A `syncPilot` is routed to the device whose stable id is the
-/// bulb's MAC. Pushes get no reply.
+/// bulb's MAC, and only when it comes from that device's current address.
+/// Pushes get no reply.
+///
+/// The manager keeps device ids, not devices: every renewal and push reads
+/// the device from [DeviceService], so a bulb that moved is registered at its
+/// new address and a removed one is dropped.
 class WizPushManager {
   WizPushManager._(
     this._socket,
@@ -28,6 +33,7 @@ class WizPushManager {
     this._localAddressFor,
     this._renewEvery,
     this._bulbPort,
+    this._acceptFrom,
   ) {
     _socket.incoming.listen(_onDatagram);
   }
@@ -39,6 +45,7 @@ class WizPushManager {
     Duration renewEvery = const Duration(seconds: 20),
     Future<String?> Function(String bulbHost)? localAddressFor,
     PacketTap? tap,
+    bool Function(InternetAddress from) acceptFrom = isLocalNetworkAddress,
   }) async {
     final socket = await UdpTransport.bind(port: listenPort, tap: tap);
     return WizPushManager._(
@@ -47,6 +54,7 @@ class WizPushManager {
       localAddressFor ?? lanAddressFor,
       renewEvery,
       bulbPort,
+      acceptFrom,
     );
   }
 
@@ -55,33 +63,66 @@ class WizPushManager {
   final Future<String?> Function(String bulbHost) _localAddressFor;
   final Duration _renewEvery;
   final int _bulbPort;
+  final bool Function(InternetAddress from) _acceptFrom;
   final _phoneMac = _randomMac();
-  final _bulbs = <String, Device>{};
+
+  /// Device id by lower-case MAC.
+  final _bulbs = <String, String>{};
   final _firstBeats = StreamController<WizFirstBeat>.broadcast();
+  final _errors = StreamController<Object>.broadcast();
   Timer? _timer;
 
   int get listenPort => _socket.localPort;
 
   Stream<WizFirstBeat> get firstBeats => _firstBeats.stream;
 
+  /// Failures handling a push or a renewal. They never stop the manager.
+  Stream<Object> get errors => _errors.stream;
+
   /// Registers with [bulbs] now and every renewal interval after that.
   Future<void> watch(Iterable<Device> bulbs) async {
-    _bulbs
-      ..clear()
-      ..addEntries(
-        bulbs
-            .where((d) => d.stableId != null)
-            .map((d) => MapEntry(d.stableId!.toLowerCase(), d)),
-      );
+    _bulbs.clear();
+    for (final d in bulbs) {
+      _track(d);
+    }
     await _registerAll();
     _timer?.cancel();
     _timer = Timer.periodic(_renewEvery, (_) => _registerAll());
   }
 
+  /// Starts registering with one more bulb, now and at every renewal.
+  Future<void> add(Device bulb) async {
+    if (!_track(bulb)) return;
+    await _register(bulb.id);
+  }
+
+  /// Stops registering with [deviceId] and ignores its pushes.
+  void remove(String deviceId) => _bulbs.removeWhere((_, id) => id == deviceId);
+
+  bool _track(Device d) {
+    final mac = d.stableId?.toLowerCase();
+    if (mac == null) return false;
+    remove(d.id);
+    _bulbs[mac] = d.id;
+    return true;
+  }
+
   Future<void> _registerAll() async {
-    for (final bulb in _bulbs.values) {
+    for (final id in _bulbs.values.toList()) {
+      await _register(id);
+    }
+  }
+
+  Future<void> _register(String deviceId) async {
+    try {
+      final bulb = await _devices.device(deviceId);
+      if (bulb == null || bulb.stableId == null) {
+        remove(deviceId);
+        return;
+      }
+      _track(bulb);
       final ip = await _localAddressFor(bulb.host);
-      if (ip == null) continue;
+      if (ip == null) return;
       try {
         _socket.send(
           InternetAddress(bulb.host),
@@ -91,37 +132,58 @@ class WizPushManager {
       } on SocketException {
         // Unreachable right now: the next renewal tries again.
       }
+    } catch (e) {
+      _report(e);
     }
   }
 
   Future<void> _onDatagram(UdpDatagram d) async {
-    final text = d.text;
-    if (text == 'test') return;
-    final Object? json;
     try {
-      json = jsonDecode(text);
-    } on FormatException {
-      return;
+      if (!_acceptFrom(d.address)) return;
+      final text = d.text;
+      if (text == 'test') return;
+      final Object? json;
+      try {
+        json = jsonDecode(text);
+      } on FormatException {
+        return;
+      }
+      if (json is! Map) return;
+      final message = Map<String, Object?>.from(json);
+      final params = message['params'];
+      final mac = params is Map
+          ? params['mac']?.toString().toLowerCase()
+          : null;
+      switch (message['method']) {
+        case 'syncPilot':
+          final id = mac == null ? null : _bulbs[mac];
+          if (id == null) return;
+          final bulb = await _devices.device(id);
+          if (bulb == null) {
+            remove(id);
+            return;
+          }
+          if (bulb.host != d.address.address) return;
+          await _devices.applyPush(id, message);
+        case 'firstBeat':
+          if (!_firstBeats.isClosed) {
+            _firstBeats.add(WizFirstBeat(d.address.address, mac));
+          }
+      }
+    } catch (e) {
+      _report(e);
     }
-    if (json is! Map) return;
-    final message = Map<String, Object?>.from(json);
-    final params = message['params'];
-    final mac = params is Map ? params['mac']?.toString().toLowerCase() : null;
-    switch (message['method']) {
-      case 'syncPilot':
-        final bulb = mac == null ? null : _bulbs[mac];
-        if (bulb != null) await _devices.applyPush(bulb.id, message);
-      case 'firstBeat':
-        if (!_firstBeats.isClosed) {
-          _firstBeats.add(WizFirstBeat(d.address.address, mac));
-        }
-    }
+  }
+
+  void _report(Object error) {
+    if (!_errors.isClosed) _errors.add(error);
   }
 
   Future<void> stop() async {
     _timer?.cancel();
     _socket.close();
     await _firstBeats.close();
+    await _errors.close();
   }
 }
 

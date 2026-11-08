@@ -15,23 +15,55 @@ class VirtualBoard {
 
   static String? _binary;
 
-  /// Builds the virtual board once per test run. Returns null when no C++
-  /// compiler is available, so callers can skip.
+  static const _flags = ['-std=c++11', '-O1', '-Wall', '-Wextra', '-Werror'];
+
+  /// Builds the virtual board, with the warning flags `check.sh` uses.
+  /// Returns null when no C++ compiler is available, so callers can skip.
+  ///
+  /// The binary is named after a hash of the firmware sources and flags, so
+  /// test isolates and runs share one build and a source change rebuilds.
+  /// Each build writes a temporary name and renames it into place, so two
+  /// isolates building at once never run a half-written file.
   static Future<String?> build() async {
     if (_binary != null) return _binary;
-    final firmware = Directory('../../firmware/omniflow_node').absolute.path;
-    final out = '${Directory.systemTemp.path}/omniflow_host_board_$pid';
-    final result = await Process.run('c++', [
-      '-std=c++11',
-      '-O1',
-      '-o',
-      out,
-      '$firmware/host/host_board.cpp',
-      '$firmware/omni_core.cpp',
-    ]);
-    if (result.exitCode != 0) {
-      stderr.writeln('host_board build failed: ${result.stderr}');
-      return null;
+    final firmware = Directory('../../firmware/omniflow_node').absolute;
+    final sources = [
+      for (final entity in firmware.listSync(recursive: true))
+        if (entity is File && RegExp(r'\.(cpp|h)$').hasMatch(entity.path))
+          entity,
+    ]..sort((a, b) => a.path.compareTo(b.path));
+    var hash = 0xcbf29ce484222325;
+    for (final bytes in [
+      utf8.encode(_flags.join(' ')),
+      for (final f in sources) ...[utf8.encode(f.path), f.readAsBytesSync()],
+    ]) {
+      for (final b in bytes) {
+        hash = (hash ^ b) * 0x100000001b3;
+      }
+    }
+    final name = [
+      hash >>> 32,
+      hash & 0xFFFFFFFF,
+    ].map((h) => h.toRadixString(16).padLeft(8, '0')).join();
+    final out = '${Directory.systemTemp.path}/omniflow_host_board_$name';
+    if (File(out).existsSync()) return _binary = out;
+    final scratch = Directory.systemTemp.createTempSync('omniflow_board');
+    try {
+      final built = '${scratch.path}/host_board';
+      final result = await Process.run('c++', [
+        ..._flags,
+        '-o',
+        built,
+        '${firmware.path}/host/host_board.cpp',
+        '${firmware.path}/omni_core.cpp',
+      ]);
+      if (result.exitCode != 0) {
+        stderr.writeln('host_board build failed: ${result.stderr}');
+        return null;
+      }
+      File(built).renameSync(out);
+    } finally {
+      scratch.deleteSync(recursive: true);
     }
     return _binary = out;
   }

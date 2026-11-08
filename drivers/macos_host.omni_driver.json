@@ -34,7 +34,10 @@
       "id": "run_shortcut",
       "type": "text_command",
       "label": "Run a Mac shortcut",
-      "params": { "stdin": { "type": "string", "optional": true } },
+      "params": {
+        "value": { "type": "string", "pattern": "[^\\\\'\"\\-][^\\\\'\"]{0,99}" },
+        "stdin": { "type": "string", "optional": true }
+      },
       "command": ["shortcuts", "run", "{{value}}"]
     }
   ]

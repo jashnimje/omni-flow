@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
+import 'flows_screen.dart';
 
 /// One input for device commands and running flows. The engine interprets
 /// the line (command.interpret), so the CLI and the app read it the same way.
@@ -20,10 +21,16 @@ class _CommandBarState extends ConsumerState<CommandBar> {
     if (text.trim().isEmpty) return;
     final read = await callEngine(ref, 'command.interpret', {'text': text});
     if (read['ok'] != true) return;
+    if (!mounted) return;
     if (read['kind'] == 'ask') {
+      // The engine explains a line it half understood (a known device, an
+      // unknown word). Its generic answer points at the architect, which
+      // the app does not have yet.
+      final summary = read['summary'];
       setState(
-        () => _summary =
-            'Not a device or flow command. The architect is not set up yet.',
+        () => _summary = summary is String && summary != 'Ask the architect'
+            ? summary
+            : 'Not a device or flow command. The architect is not set up yet.',
       );
       return;
     }
@@ -32,6 +39,10 @@ class _CommandBarState extends ConsumerState<CommandBar> {
       read['command'] as String,
       Map<String, Object?>.from(read['args'] as Map),
     );
+    if (!mounted) return;
+    if (read['command'] == 'flow.run' && result['ok'] == true) {
+      showMessage(runSummary(read['summary'], result));
+    }
     setState(
       () => _summary = result['ok'] == true ? '${read['summary']}' : null,
     );

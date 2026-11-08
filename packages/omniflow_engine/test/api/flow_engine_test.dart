@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -27,8 +28,14 @@ Future<(UdpTransport, List<Map>)> fakeBulb() async {
   return (bulb, received);
 }
 
-Future<void> settle([int ms = 150]) =>
-    Future<void>.delayed(Duration(milliseconds: ms));
+/// Waits until [done] holds, failing after five seconds.
+Future<void> until(FutureOr<bool> Function() done) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (!await done()) {
+    if (DateTime.now().isAfter(deadline)) fail('timed out waiting');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
 
 Map<String, Object?> edge(String from, String port, String to) => {
   'id': '$from-$to',
@@ -128,14 +135,18 @@ void main() {
         'at': start.add(Duration(milliseconds: 250 * i)).toIso8601String(),
       });
     }
-    await settle();
+    await until(() => bulbReceived.isNotEmpty);
     expect(bulbReceived.single, {
       'id': 1,
       'method': 'setPilot',
       'params': {'state': true, 'temp': 3000, 'dimming': 80},
     });
-    final log = await ok('flow.log', {'id': 'evening_desk'});
-    expect(((log['runs'] as List).single as Map)['outcome'], 'completed');
+    late List runs;
+    await until(() async {
+      runs = (await ok('flow.log', {'id': 'evening_desk'}))['runs'] as List;
+      return runs.isNotEmpty;
+    });
+    expect((runs.single as Map)['outcome'], 'completed');
     expect(
       ((await ok('var.list', {}))['variables'] as Map)['Zone_desk'],
       isTrue,
@@ -196,7 +207,7 @@ void main() {
       },
     });
     await ok('device.refresh', {'id': 'pico'});
-    await settle(300);
+    await until(() => bulbReceived.isNotEmpty);
     expect(bulbReceived.map((m) => m['method']), ['setState']);
   });
 
@@ -206,7 +217,8 @@ void main() {
       await ok('device.add', {
         'id': 'mac_mini',
         'driver': 'macos_host',
-        'host': 'local',
+        // TEST-NET: a broken guard fails to connect instead of running here.
+        'host': '192.0.2.1',
       });
       final flow = {
         'schemaVersion': 1,
@@ -231,7 +243,16 @@ void main() {
         (await engine.handle('flow.run', {'id': 'wake_mac'}))['ok'],
         isFalse,
       );
-      await ok('flow.approve', {'id': 'wake_mac'});
+      final shown = await ok('flow.get', {'id': 'wake_mac'});
+      final stale = await engine.handle('flow.approve', {
+        'id': 'wake_mac',
+        'revision': 'not-what-was-shown',
+      });
+      expect((stale['error'] as Map)['type'], 'conflict');
+      await ok('flow.approve', {
+        'id': 'wake_mac',
+        'revision': shown['revision'],
+      });
       expect(
         (((await ok('flow.list', {}))['flows'] as List).single
             as Map)['loaded'],
@@ -282,8 +303,14 @@ void main() {
       'value': 3000,
       'brightness': 80,
     });
-    await settle();
-    expect(bulbReceived, isEmpty);
+    // A real command afterwards is the only one the bulb gets.
+    await ok('device.invoke', {
+      'id': 'desk_lamp',
+      'capability': 'power',
+      'params': {'value': false},
+    });
+    await until(() => bulbReceived.isNotEmpty);
+    expect(bulbReceived.map((m) => m['method']), ['setState']);
   });
 
   test('globals, flows and zones survive a restart', () async {

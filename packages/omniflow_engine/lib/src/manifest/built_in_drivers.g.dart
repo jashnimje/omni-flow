@@ -20,15 +20,15 @@ const builtInDriverSources = <String, String>{
       "id": "service_restart",
       "type": "text_command",
       "label": "Restart a systemd service (needs passwordless sudo for it)",
-      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@_][A-Za-z0-9@._-]*" } },
       "command": ["sudo", "-n", "systemctl", "restart", "{{value}}"]
     },
     {
       "id": "user_service_restart",
       "type": "text_command",
       "label": "Restart a user systemd service",
-      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@._-]+" } },
-      "command": ["systemctl", "--user", "restart", "{{value}}"]
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9@_][A-Za-z0-9@._-]*" } },
+      "command": ["systemctl", "--user", "restart", "--", "{{value}}"]
     },
     {
       "id": "suspend",
@@ -76,8 +76,56 @@ const builtInDriverSources = <String, String>{
       "id": "run_shortcut",
       "type": "text_command",
       "label": "Run a Mac shortcut",
-      "params": { "stdin": { "type": "string", "optional": true } },
+      "params": {
+        "value": { "type": "string", "pattern": "[^\\\\'\"\\-][^\\\\'\"]{0,99}" },
+        "stdin": { "type": "string", "optional": true }
+      },
       "command": ["shortcuts", "run", "{{value}}"]
+    }
+  ]
+}
+''',
+  'mqtt_sensor.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "mqtt_sensor",
+  "name": "MQTT sensor (any topic with a number or text)",
+  "category": "sensor",
+  "icon": "gauge",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "stateTopic", "label": "Topic the sensor publishes on" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "value" }] },
+  "capabilities": [{ "id": "value", "type": "sensor", "label": "Value", "stateJsonPath": "$.value" }]
+}
+''',
+  'mqtt_switch.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "mqtt_switch",
+  "name": "MQTT switch (ESPHome, Home Assistant style, any ON/OFF topic)",
+  "category": "power",
+  "icon": "power",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "commandTopic", "label": "Command topic, for ESPHome <node>/switch/<name>/command" },
+    { "key": "stateTopic", "label": "State topic, for ESPHome <node>/switch/<name>/state" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "state" }] },
+  "reliability": { "timeoutMs": 3000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["ON", "OFF"],
+      "command": { "topic": "{{device.commandTopic}}", "payload": "{{value}}" },
+      "stateJsonPath": "$.state"
     }
   ]
 }
@@ -124,7 +172,7 @@ const builtInDriverSources = <String, String>{
   "name": "Philips WiZ Light (local UDP)",
   "category": "lighting",
   "icon": "lightbulb",
-  "transport": { "type": "udp", "port": 38899, "listenPort": 38900, "payload": "json" },
+  "transport": { "type": "udp", "port": 38899, "listenPort": 38900, "payload": "json", "matchMethod": true },
   "discovery": [
     {
       "method": "udp_broadcast",
@@ -149,7 +197,7 @@ const builtInDriverSources = <String, String>{
       "id": "brightness",
       "type": "level",
       "label": "Brightness",
-      "params": { "value": { "type": "number", "min": 10, "max": 100, "unit": "%" } },
+      "params": { "value": { "type": "number", "integer": true, "min": 10, "max": 100, "unit": "%" } },
       "command": { "id": 1, "method": "setPilot", "params": { "state": true, "dimming": "{{value}}" } },
       "stateJsonPath": "$.dimming"
     },
@@ -158,8 +206,8 @@ const builtInDriverSources = <String, String>{
       "type": "color_temp",
       "label": "White temperature",
       "params": {
-        "value": { "type": "number", "min": 2200, "max": 6500, "unit": "K" },
-        "brightness": { "type": "number", "min": 10, "max": 100, "optional": true }
+        "value": { "type": "number", "integer": true, "min": 2200, "max": 6500, "unit": "K" },
+        "brightness": { "type": "number", "integer": true, "min": 10, "max": 100, "optional": true }
       },
       "command": {
         "id": 1,
@@ -172,7 +220,7 @@ const builtInDriverSources = <String, String>{
       "id": "rgb",
       "type": "color_rgb",
       "label": "Colour",
-      "params": { "brightness": { "type": "number", "min": 10, "max": 100, "optional": true } },
+      "params": { "brightness": { "type": "number", "integer": true, "min": 10, "max": 100, "optional": true } },
       "command": {
         "id": 1,
         "method": "setPilot",
@@ -203,6 +251,48 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
+  'tasmota_mqtt.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "tasmota_mqtt",
+  "name": "Tasmota device (MQTT)",
+  "category": "power",
+  "icon": "power",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "topic", "label": "Tasmota topic (Configuration, MQTT, Topic)" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": {
+    "topics": [
+      { "topic": "stat/{{device.topic}}/RESULT" },
+      { "topic": "tele/{{device.topic}}/STATE" },
+      { "topic": "stat/{{device.topic}}/POWER", "key": "POWER" }
+    ],
+    "refresh": { "topic": "cmnd/{{device.topic}}/STATE", "payload": "" }
+  },
+  "reliability": { "timeoutMs": 3000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["ON", "OFF"],
+      "command": { "topic": "cmnd/{{device.topic}}/POWER", "payload": "{{value}}" },
+      "stateJsonPath": "$.POWER"
+    },
+    {
+      "id": "dimmer",
+      "type": "level",
+      "label": "Brightness",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 100, "unit": "%" } },
+      "command": { "topic": "cmnd/{{device.topic}}/Dimmer", "payload": "{{value}}" },
+      "stateJsonPath": "$.Dimmer"
+    }
+  ]
+}
+''',
   'tuya_plug.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -226,6 +316,50 @@ const builtInDriverSources = <String, String>{
       "command": { "cmd": "control", "dps": { "1": "{{value}}" } },
       "stateJsonPath": "$['1']"
     }
+  ]
+}
+''',
+  'zigbee2mqtt_device.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "zigbee2mqtt_device",
+  "name": "Zigbee device (Zigbee2MQTT)",
+  "category": "zigbee",
+  "icon": "zigbee",
+  "transport": { "type": "mqtt", "port": 1883 },
+  "settings": [
+    { "key": "friendlyName", "label": "Friendly name in Zigbee2MQTT" },
+    { "key": "baseTopic", "label": "Base topic, zigbee2mqtt unless changed" },
+    { "key": "username", "label": "Broker user" },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+  ],
+  "statePush": {
+    "topics": [{ "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}" }],
+    "refresh": { "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}/get", "payload": { "state": "" } }
+  },
+  "reliability": { "timeoutMs": 3000, "retries": 0 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["ON", "OFF"],
+      "command": { "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}/set", "payload": { "state": "{{value}}" } },
+      "stateJsonPath": "$.state"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "Brightness",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 254 } },
+      "command": { "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}/set", "payload": { "brightness": "{{value}}" } },
+      "stateJsonPath": "$.brightness"
+    },
+    { "id": "temperature", "type": "sensor", "label": "Temperature", "stateJsonPath": "$.temperature" },
+    { "id": "humidity", "type": "sensor", "label": "Humidity", "stateJsonPath": "$.humidity" },
+    { "id": "occupancy", "type": "sensor", "label": "Motion", "stateJsonPath": "$.occupancy" },
+    { "id": "contact", "type": "sensor", "label": "Contact (closed)", "stateJsonPath": "$.contact" },
+    { "id": "battery", "type": "sensor", "label": "Battery", "stateJsonPath": "$.battery" }
   ]
 }
 ''',

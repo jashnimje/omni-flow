@@ -1,7 +1,7 @@
 // OmniFlow node protocol v2 core (docs/DESIGN.md, "Universal board runtime").
 //
 // Plain C++ with no Arduino headers, no STL and no heap, so the same code runs
-// on an Uno with 2 KB of RAM, on ESP32, BOARD_ESP8266 and Pico W, and natively on a
+// on an Uno with 2 KB of RAM, on ESP32, ESP8266 and Pico W, and natively on a
 // desktop as the virtual board the engine tests talk to.
 #ifndef OMNI_CORE_H
 #define OMNI_CORE_H
@@ -25,11 +25,13 @@ enum Cap : uint8_t {
   CAP_PWM = 4,
   CAP_SERVO = 8,
   CAP_ADC = 16,
+  CAP_PULLUP = 32,  // an internal pull-up, for in_pullup
 };
 
 enum Mode : uint8_t { MODE_NONE, MODE_IN, MODE_IN_PULLUP, MODE_OUT, MODE_PWM, MODE_SERVO, MODE_ADC };
 
-#ifdef __AVR__
+// OMNI_SMALL builds the AVR limits natively, so the tests cover them too.
+#if defined(__AVR__) || defined(OMNI_SMALL)
 const int MAX_PINS = 20;
 const int MAX_WATCHES = 6;
 const int MAX_ARGS = 6;
@@ -39,11 +41,17 @@ const int MAX_WATCHES = 12;
 const int MAX_ARGS = 8;
 #endif
 #ifndef OMNI_TEXT_MAX
-#ifdef __AVR__
+#if defined(__AVR__) || defined(OMNI_SMALL)
 #define OMNI_TEXT_MAX 24
 #else
-#define OMNI_TEXT_MAX 72  // a Wi-Fi password is up to 63 characters
+#define OMNI_TEXT_MAX 72  // a Wi-Fi password is up to 64 characters
 #endif
+#endif
+// The Uno is the only supported board without Wi-Fi.
+#ifdef __AVR__
+#define OMNI_HAS_WIFI 0
+#else
+#define OMNI_HAS_WIFI 1
 #endif
 
 // One parsed command: a flat JSON object of string, number and boolean
@@ -63,7 +71,8 @@ struct Args {
   bool num(const char* key, long* out) const;
 };
 
-bool parseArgs(const char* line, Args& args);
+// Returns 0 when the line parsed, otherwise the error to report (an OMNI_P literal).
+const char* parseArgs(const char* line, Args& args);
 // Compares a command name with a literal made with OMNI_P.
 bool named(const char* cmd, const char* literal);
 
@@ -91,7 +100,9 @@ extern const BoardProfile BOARD_HOST;
 class Hal {
  public:
   virtual ~Hal() {}
-  virtual void setMode(int pin, Mode mode) = 0;
+  // Returns false, with the pin left in its old mode, when no PWM or servo
+  // channel is free. MODE_NONE releases the pin to a plain input.
+  virtual bool setMode(int pin, Mode mode) = 0;
   virtual void writeDigital(int pin, int value) = 0;
   virtual int readDigital(int pin) = 0;
   virtual int readAnalogPercent(int pin) = 0;
@@ -135,8 +146,9 @@ class Core {
  public:
   Core(const char* node, const char* firmware, const BoardProfile& board, Hal& hal);
 
-  // Handles one command line and writes the reply line.
-  void handleLine(const char* line, Out& out);
+  // Handles one command line and writes the reply line. Returns true for a
+  // describe, which is how a host on the network subscribes to events.
+  bool handleLine(const char* line, Out& out);
   // Checks watched pins and writes a pin.changed line for each change. Call often.
   void poll(Out& out);
   // The hello announcement, with the UDP port the board listens on.
@@ -147,6 +159,12 @@ class Core {
   void setExtension(Extension* extension) { extension_ = extension; }
   const char* node() const { return node_; }
   void setNode(const char* node) { node_ = node; }
+  const BoardProfile& board() const { return board_; }
+  // The IR LED pin is kept from pin commands and describe; -1 for none.
+  void setIrPin(int pin) { irPin_ = pin; }
+  // What a pin offers to pin commands: its profile capabilities, or none for
+  // the IR pin and pins outside the profile.
+  uint8_t capsOf(int pin) const;
 
   void error(Out& out, long id, const char* message);
   void ack(Out& out, long id, const char* cmd, int pin, bool hasValue, int value);
@@ -163,15 +181,69 @@ class Core {
   int readValue(int pin);
   void describe(Out& out, long id);
   Watch* findWatch(int pin);
+  void setPinMode(Out& out, long id, int pin, Mode mode);
 
   const char* node_;
   const char* firmware_;
   const BoardProfile& board_;
   Hal& hal_;
   Extension* extension_ = 0;
+  int irPin_ = -1;
   Mode modes_[MAX_PINS];
   int written_[MAX_PINS];
   Watch watches_[MAX_WATCHES];
+};
+
+// What the board keeps in flash. The field order is the stored layout.
+struct Settings {
+  uint32_t magic;
+#if OMNI_HAS_WIFI
+  char ssid[33];
+  char password[65];
+#endif
+  char node[24];
+  int8_t irPin;
+};
+
+// A node name is a lower case letter, then up to 22 lower case letters,
+// digits, _ or -, so it never needs escaping in JSON.
+bool validNodeName(const char* name);
+// Makes settings read back from flash safe to use: terminates the strings and
+// drops a node name that is not valid, so the board builds its default again.
+void sanitizeSettings(Settings& settings);
+
+// What the setup commands need from the board.
+class SetupHal {
+ public:
+  virtual ~SetupHal() {}
+  virtual void saveSettings() = 0;
+#if OMNI_HAS_WIFI
+  virtual void startWifi() = 0;
+  virtual void stopWifi() = 0;
+  virtual bool wifiConnected() = 0;
+  virtual void localIp(uint8_t ip[4]) = 0;
+  virtual int rssi() = 0;
+#endif
+  // Lets the virtual board add test-only fields to wifi.status.
+  virtual void statusExtra(Out&) {}
+};
+
+// The setup commands: wifi.set, wifi.clear, wifi.status, node.set, ir.pin.
+// All but wifi.status change how the board joins the network or what it is
+// called, so they are taken only from USB serial, never from the Wi-Fi.
+class Setup : public Extension {
+ public:
+  Setup(Core& core, Settings& settings, SetupHal& hal, int udpPort);
+  bool handle(const char* cmd, const Args& args, long id, Out& out) override;
+  void wifiStatus(Out& out, long id);
+  // Set while a serial line is handled.
+  bool fromSerial = false;
+
+ private:
+  Core& core_;
+  Settings& settings_;
+  SetupHal& hal_;
+  int udpPort_;
 };
 
 }  // namespace omni

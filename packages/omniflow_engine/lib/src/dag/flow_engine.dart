@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../zones/zones.dart';
+import 'canonical.dart';
 import 'executor.dart';
 import 'flow.dart';
 
@@ -38,7 +39,7 @@ class FlowEngine implements FlowEffects {
   final _runners = <String, FlowRunner>{};
   final _timers = <String, List<Timer>>{};
   late final StreamSubscription<Map<String, Object?>> _subscription;
-  ZoneTracker _zones = ZoneTracker(const []);
+  final ZoneTracker _zones = ZoneTracker(const []);
   bool _timersOn = false;
   final _pending = <Future<void>>{};
 
@@ -61,26 +62,60 @@ class FlowEngine implements FlowEffects {
 
   Iterable<String> get loadedFlows => _runners.keys;
 
-  /// Replaces the running set of flows. Disabled flows are not loaded.
-  void load(Iterable<FlowSpec> flows) {
-    for (final r in _runners.values) {
-      r.cancelAll();
+  /// Makes [flows] the running set. Disabled flows are not loaded. A flow
+  /// whose spec is unchanged keeps its runner, so its in-flight runs, gate
+  /// and cooldown state and timer countdowns carry on. Returns the flows
+  /// that could not be loaded, by id, with the reason.
+  Map<String, String> load(Iterable<FlowSpec> flows) {
+    final wanted = {for (final f in flows.where((f) => f.enabled)) f.id: f};
+    for (final id in _runners.keys.toList()) {
+      final next = wanted[id];
+      if (next != null &&
+          canonicalJson(next.toJson()) ==
+              canonicalJson(_runners[id]!.flow.toJson())) {
+        continue;
+      }
+      _runners.remove(id)!.cancelAll();
+      _cancelTimers(id);
     }
-    _runners.clear();
-    _cancelTimers();
-    for (final f in flows.where((f) => f.enabled)) {
-      _runners[f.id] = FlowRunner(f, this, clock: _clock, onTrace: _onTrace);
+    final failures = <String, String>{};
+    for (final f in wanted.values) {
+      if (_runners.containsKey(f.id)) continue;
+      try {
+        final runner = FlowRunner(f, this, clock: _clock, onTrace: _onTrace);
+        _runners[f.id] = runner;
+        if (_timersOn) _startTimers(runner);
+      } catch (e) {
+        _runners.remove(f.id);
+        _cancelTimers(f.id);
+        failures[f.id] = e is ArgumentError ? '${e.message}' : '$e';
+      }
     }
-    if (_timersOn) _startTimers();
+    return failures;
   }
 
-  void setZones(Iterable<ZoneSpec> zones) => _zones = ZoneTracker(zones);
+  void setZones(Iterable<ZoneSpec> zones) => _zones.update(zones);
 
   /// Starts time_of_day and interval triggers (the hub calls this).
   void startTimers() {
+    if (_timersOn) return;
     _timersOn = true;
-    _startTimers();
+    for (final r in _runners.values) {
+      _startTimers(r);
+    }
   }
+
+  /// Stops time_of_day and interval triggers until [startTimers] again.
+  void stopTimers() {
+    _timersOn = false;
+    _cancelTimers();
+  }
+
+  final _dropped = <String, int>{};
+
+  /// How many runs of each flow were dropped (running, cooldown, queue
+  /// full) since the engine started. Dropped runs are not in the run log.
+  Map<String, int> get droppedRuns => Map.unmodifiable(_dropped);
 
   /// Fires the manual triggers of [flowId], or [triggerId] when given.
   Future<List<RunTrace>> run(
@@ -196,6 +231,10 @@ class FlowEngine implements FlowEffects {
           if (n.config['deviceId'] != id) continue;
           final key = n.config['key'] as String?;
           if (key != null && before[key] == state[key]) continue;
+          // Heartbeats and polls save the device with nothing changed.
+          if (key == null && canonicalJson(before) == canonicalJson(state)) {
+            continue;
+          }
           _fire(r, n, {
             'payload': state,
             'deviceId': id,
@@ -256,8 +295,13 @@ class FlowEngine implements FlowEffects {
   }
 
   void _onTrace(RunTrace trace) {
-    final json = trace.toJson();
-    _track(_host.saveTrace(json));
+    // A busy trigger on a single-mode flow would otherwise push real runs
+    // out of the bounded log.
+    if (trace.outcome == RunOutcome.dropped) {
+      _dropped[trace.flowId] = (_dropped[trace.flowId] ?? 0) + 1;
+    } else {
+      _track(_host.saveTrace(trace.toJson()));
+    }
     _host.emit({
       'event': 'run.finished',
       'flow': trace.flowId,
@@ -267,16 +311,17 @@ class FlowEngine implements FlowEffects {
     });
   }
 
-  void _startTimers() {
-    _cancelTimers();
-    for (final (r, n) in _triggers('interval')) {
-      final every = Duration(seconds: n.config['seconds'] as int);
-      _timers
-          .putIfAbsent(r.flow.id, () => [])
-          .add(Timer.periodic(every, (_) => _fire(r, n, {})));
-    }
-    for (final (r, n) in _triggers('time_of_day')) {
-      _scheduleDaily(r, n);
+  void _startTimers(FlowRunner r) {
+    _cancelTimers(r.flow.id);
+    for (final n in r.flow.nodes) {
+      if (n.type == 'interval') {
+        final every = Duration(seconds: n.config['seconds'] as int);
+        _timers
+            .putIfAbsent(r.flow.id, () => [])
+            .add(Timer.periodic(every, (_) => _fire(r, n, {})));
+      } else if (n.type == 'time_of_day') {
+        _scheduleDaily(r, n);
+      }
     }
   }
 
@@ -293,23 +338,27 @@ class FlowEngine implements FlowEffects {
     _timers.putIfAbsent(r.flow.id, () => []).add(timer);
   }
 
-  void _cancelTimers() {
-    for (final list in _timers.values) {
-      for (final t in list) {
+  /// Cancels the timers of [flowId], or of every flow.
+  void _cancelTimers([String? flowId]) {
+    for (final id in flowId == null ? _timers.keys.toList() : [flowId]) {
+      for (final t in _timers.remove(id) ?? const <Timer>[]) {
         t.cancel();
       }
     }
-    _timers.clear();
   }
 
   Future<void> close() async {
     _cancelTimers();
+    _timersOn = false;
     for (final r in _runners.values) {
       r.cancelAll();
     }
     await _subscription.cancel();
+    // One failed trace write must not stop close() from finishing.
     while (_pending.isNotEmpty) {
-      await Future.wait(List.of(_pending));
+      await Future.wait([
+        for (final p in List.of(_pending)) p.catchError((Object _) {}),
+      ]);
     }
   }
 }

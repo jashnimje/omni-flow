@@ -1,5 +1,6 @@
 import '../manifest/capability.dart';
 import '../manifest/param_spec.dart';
+import 'canonical.dart';
 
 /// How a link connects its two ends.
 enum LinkMode {
@@ -68,8 +69,11 @@ class LinkRequest {
   /// The source value that counts as a press for a toggle.
   final Object? onValue;
 
+  /// A hash of everything that makes two links different, so a hysteresis
+  /// pair (below 30 on, above 60 off) is two links, and `desk.button_a`
+  /// never collides with `desk_button.a`.
   String get id =>
-      'link_${from.deviceId}_${from.key}_${to.deviceId}_${to.key}_${mode.name}';
+      'link_${sha256Hex(canonicalJson({'from': '$from', 'to': '$to', 'mode': mode.name, 'above': above, 'below': below, 'set': set})).substring(0, 12)}';
 
   String get name => switch (mode) {
     LinkMode.toggle => '$from toggles $to',
@@ -148,6 +152,9 @@ class LinkRequest {
               'inMax': fromMax,
               'outMin': value.min,
               'outMax': value.max,
+              // A whole-number target (WiZ brightness, Tasmota dimmer)
+              // refuses 63.5.
+              if (value.integer) 'round': true,
             },
           }, 'out');
         }

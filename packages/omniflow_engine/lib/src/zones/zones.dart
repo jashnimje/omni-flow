@@ -1,3 +1,4 @@
+import '../dag/canonical.dart';
 import '../manifest/validation.dart';
 
 enum ZoneTransition { entered, exited }
@@ -245,7 +246,26 @@ class ZoneSpec {
 /// entered while the Wi-Fi matches.
 class ZoneTracker {
   ZoneTracker(Iterable<ZoneSpec> zones) {
-    for (final z in zones) {
+    update(zones);
+  }
+
+  /// Makes [zones] the tracked set. A zone whose spec is unchanged keeps
+  /// whether it is inside and its beacon filter, so saving another zone
+  /// does not re-enter it. New and edited zones start outside.
+  void update(Iterable<ZoneSpec> zones) {
+    final next = {for (final z in zones) z.id: z};
+    for (final id in _zones.keys.toList()) {
+      final spec = next[id];
+      if (spec != null &&
+          canonicalJson(spec.toJson()) == canonicalJson(_zones[id]!.toJson())) {
+        continue;
+      }
+      _zones.remove(id);
+      _ble.remove(id);
+      _inside.remove(id);
+    }
+    for (final z in next.values) {
+      if (_zones.containsKey(z.id)) continue;
       _zones[z.id] = z;
       if (z.ble != null) _ble[z.id] = BleTracker(z.ble!);
       _inside[z.id] = false;

@@ -6,7 +6,7 @@ OmniFlow, a local-first automation studio: driver manifests, transports and a fl
 
 ## What this repo is
 
-The engine (`packages/omniflow_engine/`) owns all logic and has no Flutter dependency. The app (`packages/omniflow_app/`) is Android only. It runs the engine inside a foreground service, talks to it only through command and event messages, and supplies the plugin-only sensors (BLE, NFC, Wi-Fi, notifications) through engine interfaces. The `omni` CLI exposes the same core API. `docs/ROADMAP.md` tracks milestones and status. The original spec set is folded into `docs/DESIGN.md`.
+The engine (`packages/omniflow_engine/`) owns all logic and has no Flutter dependency. The app (`packages/omniflow_app/`) is Android only. It runs the engine in its own process through `InProcessEngineClient` and talks to it only through command and event messages. The foreground service that will own the engine, and the BLE, NFC, Wi-Fi and notification adapters behind engine interfaces, are planned for M4. Either way the app holds no logic. The `omni` CLI exposes the same core API. `docs/ROADMAP.md` tracks milestones and status. The original spec set is folded into `docs/DESIGN.md`.
 
 ## Rules for agents
 
@@ -21,6 +21,6 @@ The engine (`packages/omniflow_engine/`) owns all logic and has no Flutter depen
 
 - `packages/omniflow_engine/lib/src/` - engine modules
 - `packages/omniflow_engine/bin/omni.dart` - CLI
-- `drivers/`, `schemas/` - built-in manifests and JSON Schemas
+- `drivers/` - built-in manifests, embedded into `lib/src/manifest/built_in_drivers.g.dart` by `dart run tool/embed_drivers.dart`
 - `firmware/omniflow_node/` - the one board firmware (ESP32, ESP8266, Pico W, Uno) and its native virtual board; `./check.sh` tests and compiles it
 - Workspace map and sibling repos: `dotfiles/agents/rules/workspace-map.md`

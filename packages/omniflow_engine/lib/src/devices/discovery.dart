@@ -29,12 +29,20 @@ class DiscoveredDevice {
 /// Finds devices by broadcasting a driver's `udp_broadcast` probe and
 /// collecting the replies that match its `matchJsonPath`.
 class UdpDiscovery {
-  UdpDiscovery(this._udp, {this._targets});
+  UdpDiscovery(
+    this._udp, {
+    this._targets,
+    this._acceptFrom = isLocalNetworkAddress,
+  });
 
   final UdpTransport _udp;
 
   /// Where probes go. Defaults to [broadcastTargets].
   final Future<List<InternetAddress>> Function()? _targets;
+
+  /// Which senders a reply is taken from. A reply becomes a device address
+  /// (and, through healing, where commands go), so only the local network.
+  final bool Function(InternetAddress from) _acceptFrom;
 
   Future<List<DiscoveredDevice>> discover(
     DriverManifest driver, {
@@ -54,7 +62,7 @@ class UdpDiscovery {
 
     final found = <String, DiscoveredDevice>{};
     final subscription = _udp.incoming.listen((d) {
-      if (d.port != port) return;
+      if (d.port != port || !_acceptFrom(d.address)) return;
       final Object? json;
       try {
         json = jsonDecode(d.text);

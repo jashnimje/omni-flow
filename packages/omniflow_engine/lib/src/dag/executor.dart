@@ -20,11 +20,21 @@ class SystemFlowClock implements FlowClock {
   @override
   DateTime now() => DateTime.now();
 
+  /// A cancelled sleep cancels its timer, so a cancelled long delay does not
+  /// keep the process alive.
   @override
-  Future<void> sleep(Duration duration, CancelToken token) => Future.any([
-    Future<void>.delayed(duration),
-    token.whenCancelled.then((_) => throw RunCancelled()),
-  ]);
+  Future<void> sleep(Duration duration, CancelToken token) {
+    if (token.isCancelled) return Future.error(RunCancelled());
+    final done = Completer<void>();
+    final timer = Timer(duration, () {
+      if (!done.isCompleted) done.complete();
+    });
+    token.whenCancelled.then((_) {
+      timer.cancel();
+      if (!done.isCompleted) done.completeError(RunCancelled());
+    });
+    return done.future;
+  }
 }
 
 /// A dry run's clock: fixed time, and every wait finishes at once.
@@ -43,6 +53,9 @@ class InstantFlowClock implements FlowClock {
 }
 
 class RunCancelled implements Exception {}
+
+/// The msg key carrying the flows a `run_flow` chain has passed through.
+const callStackKey = '_callStack';
 
 class CancelToken {
   final _cancelled = Completer<void>();
@@ -186,7 +199,17 @@ class FlowRunner {
   final _debounceTokens = <String, Object>{};
   var _runCounter = 0;
 
+  /// Bumped by [cancelAll], so a queued run enqueued before it never starts.
+  var _generation = 0;
+
   int get activeRuns => _active.length;
+
+  bool _inCooldown(FlowClock clock) {
+    final cooldown = flow.cooldownSeconds;
+    return cooldown > 0 &&
+        _cooldownArmedAt != null &&
+        clock.now().difference(_cooldownArmedAt!) < Duration(seconds: cooldown);
+  }
 
   /// Fires [triggerNodeId] with [msg]. Returns the finished trace. A dry run
   /// stubs every effect and ignores run mode and cooldown.
@@ -197,24 +220,20 @@ class FlowRunner {
     FlowClock? clock,
   }) {
     final runClock = clock ?? _clock;
+    final now = runClock.now();
+    // The time prefix keeps ids unique across runners of the same flow.
     final trace = RunTrace(
-      '${flow.id}-${++_runCounter}',
+      '${flow.id}-${DateTime.now().microsecondsSinceEpoch}-${++_runCounter}',
       flow.id,
       triggerNodeId,
-      runClock.now(),
+      now,
       dryRun: dryRun,
     );
     if (dryRun) {
       return _execute(_Run(trace, true), triggerNodeId, msg, runClock);
     }
 
-    final cooldown = flow.cooldownSeconds;
-    if (cooldown > 0 &&
-        _cooldownArmedAt != null &&
-        runClock.now().difference(_cooldownArmedAt!) <
-            Duration(seconds: cooldown)) {
-      return Future.value(_drop(trace, 'cooldown'));
-    }
+    if (_inCooldown(runClock)) return Future.value(_drop(trace, 'cooldown'));
     switch (flow.mode) {
       case RunMode.single:
         if (_active.isNotEmpty) return Future.value(_drop(trace, 'running'));
@@ -231,9 +250,13 @@ class FlowRunner {
           return Future.value(_drop(trace, 'queue_full'));
         }
         _queued++;
+        final generation = _generation;
         final previous = _queueTail;
-        final done = previous.then((_) {
+        final done = previous.then<RunTrace>((_) {
           _queued--;
+          if (generation != _generation) return _drop(trace, 'cancelled');
+          // An earlier queued run may have armed the cooldown meanwhile.
+          if (_inCooldown(runClock)) return _drop(trace, 'cooldown');
           return _execute(_Run(trace, false), triggerNodeId, msg, runClock);
         });
         _queueTail = done.then((_) {}, onError: (_) {});
@@ -244,6 +267,7 @@ class FlowRunner {
 
   /// Cancels every running run (the flow was disabled or removed).
   void cancelAll() {
+    _generation++;
     for (final r in _active) {
       r.token.cancel();
     }
@@ -413,12 +437,32 @@ class FlowRunner {
         if (run.dryRun) return ('timeout', msg);
         final name = node.config['event'] as String;
         final timeout = Duration(milliseconds: node.config['timeoutMs'] as int);
-        final event = _effects.events.firstWhere((e) => e['event'] == name);
-        final timer = clock.sleep(timeout, run.token).then((_) => null);
-        final got = await Future.any<Map<String, Object?>?>([event, timer]);
-        return got == null
-            ? ('timeout', msg)
-            : ('event', {...msg, 'event': got});
+        // Whichever loses, the event subscription and the timer both end.
+        final got = Completer<Map<String, Object?>?>();
+        final waiting = CancelToken();
+        run.token.whenCancelled.then((_) => waiting.cancel());
+        final subscription = _effects.events.listen((e) {
+          if (e['event'] == name && !got.isCompleted) got.complete(e);
+        });
+        clock
+            .sleep(timeout, waiting)
+            .then(
+              (_) {
+                if (!got.isCompleted) got.complete(null);
+              },
+              onError: (Object e) {
+                if (!got.isCompleted) got.completeError(e);
+              },
+            );
+        try {
+          final event = await got.future;
+          return event == null
+              ? ('timeout', msg)
+              : ('event', {...msg, 'event': event});
+        } finally {
+          waiting.cancel();
+          await subscription.cancel();
+        }
       case 'repeat':
         final times = node.config['maxIterations'] as int;
         for (var i = 0; i < times; i++) {
@@ -492,7 +536,18 @@ class FlowRunner {
         }
         return msg;
       case 'run_flow':
-        if (!run.dryRun) await _effects.runFlow(c['flowId'] as String, msg);
+        final target = c['flowId'] as String;
+        // A queued flow that calls itself, directly or through others,
+        // would wait on its own run forever.
+        final callers = [...?(msg[callStackKey] as List?), flow.id];
+        if (callers.contains(target)) {
+          throw StateError(
+            'run_flow cycle: ${[...callers, target].join(' -> ')}',
+          );
+        }
+        if (!run.dryRun) {
+          await _effects.runFlow(target, {...msg, callStackKey: callers});
+        }
         return msg;
       case 'notify' || 'speak':
         final payload = Map<String, Object?>.from(

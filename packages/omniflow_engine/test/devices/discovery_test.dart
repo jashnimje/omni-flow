@@ -61,6 +61,31 @@ void main() {
     },
   );
 
+  test('a reply from outside the local network is not a device', () async {
+    final udp = await UdpTransport.bind();
+    final bulb = await fakeWiz('a8bb50aabbcc');
+    addTearDown(() {
+      udp.close();
+      bulb.close();
+    });
+    final asked = <String>[];
+    final discovery = UdpDiscovery(
+      udp,
+      targets: () async => loopback,
+      acceptFrom: (from) {
+        asked.add(from.address);
+        return false;
+      },
+    );
+    final found = await discovery.discover(
+      wiz,
+      window: const Duration(milliseconds: 200),
+      portOverride: bulb.localPort,
+    );
+    expect(asked, contains('127.0.0.1'));
+    expect(found, isEmpty);
+  });
+
   test('a driver without udp_broadcast discovery finds nothing', () async {
     final udp = await UdpTransport.bind();
     addTearDown(udp.close);
