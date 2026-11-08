@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'command_bar.dart';
+import '../devices/board.dart';
 import '../devices/channels.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
@@ -14,6 +15,7 @@ import '../dag/cards.dart';
 import '../dag/expression.dart';
 import '../dag/flow.dart';
 import '../dag/flow_engine.dart';
+import '../dag/links.dart';
 import '../dag/node_types.dart';
 import '../dag/validator.dart';
 import '../devices/wiz_push.dart';
@@ -70,7 +72,7 @@ class OmniEngine {
         return;
       }
       if (json is Map && json['node'] is String && json['event'] is String) {
-        _boardEvent(Map<String, Object?>.from(json), null);
+        _boardEvent(Map<String, Object?>.from(json), null, d.address.address);
       }
     });
     devices.events.listen(
@@ -110,12 +112,14 @@ class OmniEngine {
     final tuya = TuyaChannel(secrets, tap: tap);
     final serial = SerialChannel(tap: tap);
     final discovery = UdpDiscovery(udp, targets: discoveryTargets);
+    final udpJson = UdpJsonChannel(udp);
     final devices = DeviceService(
       registry: registry,
       store: DriftDeviceStore(db),
       locator: discovery.locator,
       channels: {
-        TransportType.udp: UdpJsonChannel(udp),
+        TransportType.udp: udpJson,
+        TransportType.omniflow: BoardChannel(udp: udpJson, serial: serial),
         TransportType.tuya: tuya,
         TransportType.http: HttpChannel(tap: tap),
         TransportType.serial: serial,
@@ -152,8 +156,14 @@ class OmniEngine {
   final _hubTimers = <Timer>[];
 
   /// Unsolicited board lines (button presses, knob turns) become
-  /// `board.event`. Replies (ack, error, describe) are not events.
-  void _boardEvent(Map<String, Object?> json, String? deviceId) {
+  /// `board.event`. Replies (ack, error, describe) are not events. A pin
+  /// change, a hello or a boot from an OmniFlow board also updates that
+  /// board's device. [from] is the sender's address for a UDP message.
+  void _boardEvent(
+    Map<String, Object?> json,
+    String? deviceId, [
+    String? from,
+  ]) {
     final type = json['event'];
     if (type is! String || const {'ack', 'error', 'describe'}.contains(type)) {
       return;
@@ -165,6 +175,161 @@ class OmniEngine {
       'deviceId': ?deviceId,
       'payload': json,
     });
+    _track(_onBoardMessage(json, deviceId, from));
+  }
+
+  final _pending = <Future<void>>{};
+
+  /// Runs background work so a failure becomes an event, and so close()
+  /// waits for it instead of closing the database under it.
+  void _track(Future<void> work) {
+    final tracked = work.catchError((Object e) {
+      _emit({'event': 'board.error', 'error': '$e'});
+    });
+    _pending.add(tracked);
+    tracked.whenComplete(() => _pending.remove(tracked));
+  }
+
+  Future<void> _onBoardMessage(
+    Map<String, Object?> json,
+    String? deviceId,
+    String? from,
+  ) async {
+    final type = json['event'];
+    final device = deviceId != null
+        ? await DriftDeviceStore(_db).get(deviceId)
+        : await _boardByNode(json['node']);
+    if (type == 'hello') return _onHello(json, device, from);
+    if (device == null) return;
+    final manifest = registry[device.driverId];
+    if (!isBoardDriver(manifest)) return;
+    if (type == 'boot') {
+      await provisionBoard(device.id);
+    } else if (type == 'pin.changed') {
+      final value = json['value'];
+      final pin = boardPinsOf(
+        device,
+        manifest!,
+      ).where((p) => p.pin == json['pin']).firstOrNull;
+      if (pin == null || value is! num) return;
+      await devices.mergeState(device.id, {pin.name: pin.stateValue(value)});
+    }
+  }
+
+  Future<Device?> _boardByNode(Object? node) async {
+    if (node is! String) return null;
+    for (final d in await DriftDeviceStore(_db).all()) {
+      if (isBoardDriver(registry[d.driverId]) &&
+          d.stableId?.toLowerCase() == node.toLowerCase()) {
+        return d;
+      }
+    }
+    return null;
+  }
+
+  final _provisioned = <String>{};
+  final _boardUptime = <String, int>{};
+  final _provisioning = <String, Future<Map<String, Object?>>>{};
+
+  /// A board says hello at boot and every 30 seconds. A new board is
+  /// reported as `board.found`. A known one gets its address updated if it
+  /// moved, and its pins set up again when this engine has not set it up yet
+  /// or the board has lost its setup (it reports how many pins are `set`, 0
+  /// after a reboot). Otherwise a describe keeps this engine its event target.
+  Future<void> _onHello(
+    Map<String, Object?> json,
+    Device? device,
+    String? from,
+  ) async {
+    if (from == null) return;
+    final port = json['port'] is int ? json['port'] as int : null;
+    if (device == null) {
+      _emit({
+        'event': 'board.found',
+        'node': json['node'],
+        'board': json['board'],
+        'host': from,
+        'port': ?port,
+      });
+      return;
+    }
+    var d = device;
+    final defaultPort = registry[d.driverId]?.transport.port;
+    final wantPort = port == defaultPort ? null : port;
+    if (!isSerialHost(d.host) && (d.host != from || d.port != wantPort)) {
+      d = await devices.updateDevice(
+        d.id,
+        (old) => Device(
+          id: old.id,
+          name: old.name,
+          driverId: old.driverId,
+          host: from,
+          port: wantPort,
+          room: old.room,
+          stableId: old.stableId,
+          settings: old.settings,
+          state: old.state,
+          lastSeen: old.lastSeen,
+        ),
+      );
+    }
+    final up = json['up'];
+    final before = _boardUptime[d.id];
+    if (up is int) _boardUptime[d.id] = up;
+    final lostSetup =
+        json['set'] == 0 && boardPinsOf(d, registry[d.driverId]!).isNotEmpty;
+    final rebooted = up is int && before != null && up < before;
+    if (!_provisioned.contains(d.id) || lostSetup || rebooted) {
+      await provisionBoard(d.id);
+    } else {
+      await devices.sendCommand(d.id, const {'cmd': 'describe'});
+      await devices.mergeState(d.id, const {});
+    }
+  }
+
+  /// Brings a board to its configured pins: checks them against what the
+  /// board offers, sets each mode, restores outputs from the remembered
+  /// state, starts watching inputs, and seeds their state. Safe to repeat.
+  Future<Map<String, Object?>> provisionBoard(String id) =>
+      _provisioning[id] ??= _provision(id).whenComplete(() {
+        _provisioning.remove(id);
+      });
+
+  Future<Map<String, Object?>> _provision(String id) async {
+    final device = await _device(id);
+    final manifest = registry[device.driverId];
+    if (!isBoardDriver(manifest)) {
+      throw ApiError('invalid', '$id is not an OmniFlow board');
+    }
+    final pins = boardPinsOf(device, manifest!);
+    final describe =
+        (await devices.sendCommand(id, const {'cmd': 'describe'})).json ??
+        const {};
+    final problems = pinsUnsupportedBy(pins, describe);
+    if (problems.isNotEmpty) throw ApiError('invalid', problems.join('; '));
+    final node = describe['node'];
+    if (device.stableId == null && node is String) {
+      await devices.updateDevice(id, (d) => d.copyWith(stableId: node));
+    }
+    final current = await _device(id);
+    final seeded = <String, Object?>{};
+    for (final command in pinSetupCommands(pins, current.state)) {
+      final reply = (await devices.sendCommand(id, command)).json;
+      final value = reply?['value'];
+      if (command['cmd'] == 'pin.watch' && value is num) {
+        final pin = pins.firstWhere((p) => p.pin == command['pin']);
+        seeded[pin.name] = pin.stateValue(value);
+      }
+    }
+    final updated = await devices.mergeState(id, seeded);
+    _provisioned.add(id);
+    return {
+      'id': id,
+      'board': describe['board'],
+      'fw': describe['fw'],
+      'pins': [for (final p in pins) p.name],
+      'state': updated.state,
+    };
   }
 
   Future<void> _loadFlowState() async {
@@ -187,7 +352,8 @@ class OmniEngine {
 
   Future<FlowReferences> _references() async {
     final devices = {
-      for (final d in await DriftDeviceStore(_db).all()) d.id: d.driverId,
+      for (final d in await DriftDeviceStore(_db).all())
+        d.id: manifestFor(registry, d),
     };
     return FlowReferences(
       devices: devices.keys.toSet(),
@@ -197,7 +363,7 @@ class OmniEngine {
       flows: {
         for (final f in await DriftFlowStore(_db).all()) f.json['id'] as String,
       },
-      capabilityOf: (d, c) => registry[devices[d] ?? '']?.capability(c),
+      capabilityOf: (d, c) => devices[d]?.capability(c),
     );
   }
 
@@ -208,15 +374,22 @@ class OmniEngine {
     };
     return flow.nodes.any(
       (n) =>
-          n.type == 'device_capability' &&
+          (n.type == 'device_capability' || n.type == 'device_toggle') &&
           (registry[devices[n.config['deviceId']] ?? '']?.isHighRisk ?? false),
     );
   }
 
   /// Runs flows on their own: WiZ pushes, time and interval triggers, a zone
   /// tick every second, and each device's state poll. `omni hub` calls this.
-  Future<void> startHub({int wizListenPort = 38900}) async {
+  Future<void> startHub({
+    int wizListenPort = 38900,
+    int boardHelloPort = 38951,
+  }) async {
     await startWizPush(listenPort: wizListenPort);
+    if (boardHelloPort > 0) await _listenForHellos(boardHelloPort);
+    for (final d in await DriftDeviceStore(_db).all()) {
+      if (isBoardDriver(registry[d.driverId])) _track(_provisionQuietly(d.id));
+    }
     flows.startTimers();
     _hubTimers.add(
       Timer.periodic(
@@ -242,6 +415,35 @@ class OmniEngine {
         }),
       );
     }
+  }
+
+  Future<void> _provisionQuietly(String id) async {
+    try {
+      await provisionBoard(id);
+    } catch (e) {
+      _emit({'event': 'board.offline', 'device': id, 'error': '$e'});
+    }
+  }
+
+  UdpTransport? _helloSocket;
+
+  /// Listens for the hello every OmniFlow board on Wi-Fi broadcasts.
+  Future<void> _listenForHellos(int port) async {
+    final socket = _helloSocket ??= await UdpTransport.bind(
+      port: port,
+      tap: _tap,
+    );
+    socket.incoming.listen((d) {
+      final Object? json;
+      try {
+        json = jsonDecode(d.text);
+      } on FormatException {
+        return;
+      }
+      if (json is Map && json['event'] == 'hello') {
+        _boardEvent(Map<String, Object?>.from(json), null, d.address.address);
+      }
+    });
   }
 
   final _events = StreamController<Map<String, Object?>>.broadcast();
@@ -308,6 +510,8 @@ class OmniEngine {
       return {'id': m.id, 'highRisk': m.isHighRisk};
     },
     'device.add': _addDevice,
+    ..._boardCommands,
+    ..._linkCommands,
     ..._flowCommands,
     'device.discover': (args) async {
       final driverId = _string(args, 'driver');
@@ -317,6 +521,12 @@ class OmniEngine {
       if (manifest.transport.type == TransportType.serial) {
         return {'found': await serial.discover(manifest)};
       }
+      final onUsb = isBoardDriver(manifest) && args['serial'] != false
+          ? await serial.discover(
+              manifest,
+              window: const Duration(milliseconds: 3000),
+            )
+          : const <Map<String, Object?>>[];
       final found = await discovery.discover(
         manifest,
         window: Duration(milliseconds: windowMs is int ? windowMs : 2000),
@@ -329,11 +539,11 @@ class OmniEngine {
       };
       return {
         'found': [
-          for (final f in found)
+          for (final f in [...onUsb, for (final f in found) f.toJson()])
             {
-              ...f.toJson(),
-              if (known[f.stableId?.toLowerCase()] != null)
-                'knownAs': known[f.stableId?.toLowerCase()],
+              ...f,
+              if (known['${f['stableId']}'.toLowerCase()] != null)
+                'knownAs': known['${f['stableId']}'.toLowerCase()],
             },
         ],
       };
@@ -345,7 +555,7 @@ class OmniEngine {
             {
               ..._deviceJson(d),
               if (args['withCapabilities'] == true)
-                'capabilities': _capabilitiesJson(d.driverId),
+                'capabilities': _capabilitiesJson(d),
             },
       ],
     },
@@ -452,6 +662,12 @@ class OmniEngine {
         );
       }
     }
+    if (isBoardDriver(manifest)) {
+      parseBoardPins(
+        settings['pins'],
+        reserved: {for (final c in manifest.capabilities) c.id},
+      );
+    }
     final port = args['port'];
     if (port != null && (port is! int || port < 1 || port > 65535)) {
       throw ApiError('invalid', 'port must be 1 to 65535');
@@ -471,9 +687,20 @@ class OmniEngine {
       for (final s in manifest.settings.where((s) => s.secret))
         if (await _secrets.read(deviceSecretKey(id, s.key)) == null) s.key,
     ];
+    Map<String, Object?>? board;
+    String? boardError;
+    if (isBoardDriver(manifest) && args['provision'] != false) {
+      try {
+        board = await provisionBoard(id);
+      } catch (e) {
+        boardError = e is ApiError ? e.message : '$e';
+      }
+    }
     return {
-      'device': _deviceJson(device),
+      'device': _deviceJson(await _device(id)),
       if (missingSecrets.isNotEmpty) 'missingSecrets': missingSecrets,
+      'provisioned': ?board,
+      'provisionError': ?boardError,
     };
   }
 
@@ -483,15 +710,16 @@ class OmniEngine {
     return device;
   }
 
-  /// Each capability of a driver with the params it accepts, for UIs and agents.
-  List<Map<String, Object?>> _capabilitiesJson(String driverId) => [
+  /// Each capability of a device with the params it accepts, for UIs and agents.
+  List<Map<String, Object?>> _capabilitiesJson(Device device) => [
     for (final c
-        in registry[driverId]?.capabilities ?? const <CapabilitySpec>[])
+        in manifestFor(registry, device)?.capabilities ??
+            const <CapabilitySpec>[])
       {
         'id': c.id,
         'type': c.type.wireName,
         'label': c.label,
-        'highRisk': registry[driverId]!.isHighRisk,
+        'highRisk': registry[device.driverId]!.isHighRisk,
         if (stateKeyOf(c.stateJsonPath) != null)
           'stateKey': stateKeyOf(c.stateJsonPath),
         'params': {
@@ -674,8 +902,8 @@ class OmniEngine {
     'command.interpret': (args) async {
       final devices = [
         for (final d in await DriftDeviceStore(_db).all())
-          if (registry[d.driverId] != null)
-            CommandDevice(d.id, d.name, registry[d.driverId]!),
+          if (manifestFor(registry, d) case final manifest?)
+            CommandDevice(d.id, d.name, manifest),
       ];
       final flowList = [
         for (final f in await DriftFlowStore(_db).all())
@@ -745,10 +973,204 @@ class OmniEngine {
     },
   };
 
+  Map<String, Future<Map<String, Object?>> Function(Map<String, Object?> args)>
+  get _boardCommands => {
+    'board.provision': (args) async => {
+      'board': await provisionBoard(_string(args, 'id')),
+    },
+    'board.pins': (args) async {
+      final id = _string(args, 'id');
+      final device = await _device(id);
+      final manifest = registry[device.driverId];
+      if (!isBoardDriver(manifest)) {
+        throw ApiError('invalid', '$id is not an OmniFlow board');
+      }
+      final pins = _object(args, 'pins');
+      parseBoardPins(
+        pins,
+        reserved: {for (final c in manifest!.capabilities) c.id},
+      );
+      await devices.updateDevice(
+        id,
+        (d) => d.copyWith(settings: {...d.settings, 'pins': pins}),
+      );
+      try {
+        return {'board': await provisionBoard(id)};
+      } on ApiError {
+        rethrow;
+      } catch (e) {
+        return {
+          'device': _deviceJson(await _device(id)),
+          'provisionError': '$e',
+        };
+      }
+    },
+    'board.setup': _setupBoard,
+  };
+
+  Map<String, Future<Map<String, Object?>> Function(Map<String, Object?> args)>
+  get _linkCommands => {
+    'link.create': (args) async {
+      final from = LinkEnd.parse(_string(args, 'from'), 'from');
+      final to = LinkEnd.parse(_string(args, 'to'), 'to');
+      final mode = LinkMode.values
+          .where((m) => m.name == args['mode'])
+          .firstOrNull;
+      if (mode == null) {
+        throw ApiError('invalid', 'mode must be toggle, follow or threshold');
+      }
+      final source = await _device(from.deviceId);
+      final sourceManifest = manifestFor(registry, source);
+      final sourceCapability = sourceManifest?.capabilities
+          .where((c) => stateKeyOf(c.stateJsonPath) == from.key)
+          .firstOrNull;
+      final knownKeys = {
+        ...source.state.keys,
+        for (final c
+            in sourceManifest?.capabilities ?? const <CapabilitySpec>[])
+          ?stateKeyOf(c.stateJsonPath),
+      };
+      if (!knownKeys.contains(from.key)) {
+        throw ApiError(
+          'not_found',
+          '${from.deviceId} has no state ${from.key} (it has ${(knownKeys.toList()..sort()).join(', ')})',
+        );
+      }
+      final target = manifestFor(
+        registry,
+        await _device(to.deviceId),
+      )?.capability(to.key);
+      if (target == null) {
+        throw ApiError(
+          'not_found',
+          '${to.deviceId} has no capability ${to.key}',
+        );
+      }
+      final range = sourceCapability?.params['value'];
+      num bound(String key, num? fromCapability, num fallback) =>
+          args[key] is num ? args[key] as num : fromCapability ?? fallback;
+      final request = LinkRequest(
+        from: from,
+        to: to,
+        mode: mode,
+        target: target,
+        above: args['above'] as num?,
+        below: args['below'] as num?,
+        set: args['set'],
+        fromMin: bound('fromMin', range?.min, 0),
+        fromMax: bound('fromMax', range?.max, 100),
+        onValue: args.containsKey('onValue') ? args['onValue'] : true,
+      );
+      final Map<String, Object?> flow;
+      try {
+        flow = request.toFlow();
+      } on ArgumentError catch (e) {
+        throw ApiError('invalid', '${e.message}');
+      }
+      final saved = await _commands['flow.save']!({
+        'flow': flow,
+        'trusted': args['trusted'] != false,
+      });
+      return {...saved, 'name': request.name};
+    },
+    'link.list': (_) async => {
+      'links': [
+        for (final r in await DriftFlowStore(_db).all())
+          if ((r.json['id'] as String).startsWith('link_'))
+            {
+              'id': r.json['id'],
+              'name': r.json['name'],
+              'enabled': r.enabled,
+              'approved': r.approved,
+            },
+      ],
+    },
+    'link.remove': (args) async {
+      final id = _string(args, 'id');
+      if (!id.startsWith('link_')) {
+        throw ApiError('invalid', '$id is not a link');
+      }
+      return _commands['flow.remove']!({'id': id});
+    },
+  };
+
+  /// Sets up a board on a USB serial port: Wi-Fi, node name and IR pin, all
+  /// kept in the board's flash. With Wi-Fi it waits until the board joins
+  /// and returns its address. The password goes to the board only.
+  Future<Map<String, Object?>> _setupBoard(Map<String, Object?> args) async {
+    final port = _string(args, 'port');
+    final manifest = registry['omniflow_board']!;
+    final probe = Device(
+      id: '_setup_${port.hashCode.abs()}',
+      name: port,
+      driverId: manifest.id,
+      host: port,
+    );
+    Future<Map<String, Object?>> send(Map<String, Object?> command) async =>
+        (await serial.send(
+          ChannelRequest(
+            device: probe,
+            manifest: manifest,
+            command: command,
+            context: const TemplateContext(),
+          ),
+        )).json ??
+        const {};
+    try {
+      // Opening the port resets an Uno or an ESP32, so the first describe
+      // can go unanswered while the board boots.
+      Map<String, Object?>? describe;
+      for (var attempt = 0; describe == null; attempt++) {
+        try {
+          describe = await send(const {'cmd': 'describe'});
+        } on TransportTimeoutException {
+          if (attempt == 1) rethrow;
+        }
+      }
+      if (args['name'] is String) {
+        await send({'cmd': 'node.set', 'name': args['name']});
+      }
+      if (args['irPin'] is int) {
+        await send({'cmd': 'ir.pin', 'pin': args['irPin']});
+      }
+      var wifi = await send(const {'cmd': 'wifi.status'});
+      if (args['ssid'] is String) {
+        await send({
+          'cmd': 'wifi.set',
+          'ssid': args['ssid'],
+          'password': args['password'] is String ? args['password'] : '',
+        });
+        final timeoutMs = args['timeoutMs'] is int
+            ? args['timeoutMs'] as int
+            : 20000;
+        final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+        do {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          wifi = await send(const {'cmd': 'wifi.status'});
+        } while (wifi['connected'] != true &&
+            DateTime.now().isBefore(deadline));
+      }
+      return {
+        'node': wifi['node'] ?? describe['node'],
+        'board': describe['board'],
+        'fw': describe['fw'],
+        'wifi': {
+          'configured': wifi['configured'] == true,
+          'connected': wifi['connected'] == true,
+          'ip': ?wifi['ip'],
+        },
+      };
+    } finally {
+      await serial.release(probe.id);
+    }
+  }
+
   Future<void> close() async {
     for (final t in _hubTimers) {
       t.cancel();
     }
+    await Future.wait([..._pending]);
+    _helloSocket?.close();
     await flows.close();
     await _wizPush?.stop();
     for (final close in _closers) {
@@ -772,6 +1194,26 @@ class _EngineFlowHost implements FlowHost {
     Map<String, Object?> params,
   ) async =>
       (await _engine.devices.invoke(deviceId, capabilityId, params)).reply.json;
+
+  @override
+  Future<Map<String, Object?>?> toggleDevice(
+    String deviceId,
+    String capabilityId,
+  ) async {
+    final device = await _engine._device(deviceId);
+    final capability = manifestFor(
+      _engine.registry,
+      device,
+    )?.capability(capabilityId);
+    final key = stateKeyOf(capability?.stateJsonPath);
+    if (capability == null || key == null) {
+      throw ApiError('invalid', '$deviceId.$capabilityId cannot be toggled');
+    }
+    final on = device.state[key] == true;
+    return (await _engine.devices.invoke(deviceId, capabilityId, {
+      'value': !on,
+    })).reply.json;
+  }
 
   @override
   Future<void> saveGlobal(String name, Object? value) =>

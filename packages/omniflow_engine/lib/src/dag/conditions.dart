@@ -15,11 +15,14 @@ class EvalContext {
   final Map<String, Object?> msg;
   final Map<String, Map<String, Object?>> deviceStates;
 
-  /// `$Name` reads a global, `%name` a run variable.
+  /// `$Name` reads a global, `%name` a run variable, and `msg.key` the
+  /// message that reached the condition (`msg.value`, `msg.previous`).
   Object? variable(String name) => name.startsWith(r'$')
       ? globals[name.substring(1)]
       : name.startsWith('%')
       ? flowVars[name.substring(1)]
+      : name.startsWith('msg.')
+      ? msg[name.substring(4)]
       : null;
 }
 

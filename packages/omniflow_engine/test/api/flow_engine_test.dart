@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
+import '../support/v1_drivers.dart';
+
 /// A loopback WiZ bulb that records every command.
 Future<(UdpTransport, List<Map>)> fakeBulb() async {
   final received = <Map>[];
@@ -159,6 +161,9 @@ void main() {
           jsonEncode({'node': 'pico', 'event': 'button_press', 'gpio': 14}),
         ),
       );
+    });
+    await ok('driver.register', {
+      'manifest': jsonDecode(v1DriverSources['v1_board_udp.omni_driver.json']!),
     });
     await ok('device.add', {
       'id': 'pico',

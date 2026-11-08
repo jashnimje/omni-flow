@@ -1,8 +1,0 @@
-{
-  "node_id": "pico_desk_01",
-  "ble_name": "OMNI_PICO_DESK",
-  "ssid": "your-2.4GHz-wifi",
-  "password": "your-wifi-password",
-  "udp_port": 38950,
-  "out_pins": [16, 17, 18]
-}

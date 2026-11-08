@@ -53,7 +53,7 @@ void main() {
     Map<String, dynamic> args = const {},
   ]) => client.callTool(CallToolRequest(name: name, arguments: args));
 
-  test('lists the eight tools', () async {
+  test('lists the ten tools', () async {
     final tools = (await client.listTools()).tools.map((t) => t.name).toSet();
     expect(tools, {
       'discover_devices_and_capabilities',
@@ -64,6 +64,8 @@ void main() {
       'simulate_flow_dry_run',
       'sniff_live_packets',
       'generate_mcu_firmware',
+      'link_devices',
+      'configure_board_pins',
     });
   });
 
@@ -184,24 +186,26 @@ void main() {
   });
 
   test(
-    'firmware config refuses radio pins and fills in a valid config',
+    'firmware steps name the board, its flash command and the USB setup',
     () async {
-      final bad = await call('generate_mcu_firmware', {
-        'nodeId': 'desk',
-        'outPins': [16, 25],
-      });
+      final bad = await call('generate_mcu_firmware', {'board': 'zx81'});
       expect(bad.isError, isTrue);
-      expect(
-        ((body(bad)['error'] as Map)['message'] as String),
-        contains('[25]'),
-      );
       final good = await call('generate_mcu_firmware', {
-        'nodeId': 'desk',
-        'outPins': [16, 17],
+        'board': 'pico_w',
+        'name': 'desk',
+        'port': '/dev/cu.usbmodem1101',
       });
-      final config = ((body(good)['files'] as Map)['config.json'] as Map);
-      expect((config['node_id'], config['ble_name']), ('desk', 'OMNI_DESK'));
-      expect(config['out_pins'], [16, 17]);
+      final steps = (body(good)['steps'] as List).join('\n');
+      expect(body(good)['fqbn'], 'rp2040:rp2040:rpipicow');
+      expect(
+        steps,
+        contains(
+          '--fqbn rp2040:rp2040:rpipicow --upload --port /dev/cu.usbmodem1101',
+        ),
+      );
+      expect(steps, contains('omni board setup /dev/cu.usbmodem1101 --ssid'));
+      final uno = await call('generate_mcu_firmware', {'board': 'uno'});
+      expect((body(uno)['steps'] as List).join(), isNot(contains('--ssid')));
     },
   );
 
@@ -279,7 +283,7 @@ void main() {
             .firstWhere((l) => l.contains('"id":2'))
             .timeout(const Duration(seconds: 20)),
       ) as Map;
-      expect(((list['result'] as Map)['tools'] as List), hasLength(8));
+      expect(((list['result'] as Map)['tools'] as List), hasLength(10));
       await process.stdin.close();
       expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
     },

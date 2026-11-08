@@ -159,6 +159,10 @@ final Map<String, NodeType> builtInNodeTypes = {
       'out',
       'error',
     ], _checkDeviceAction),
+    NodeType('device_toggle', NodeCategory.action, [
+      'out',
+      'error',
+    ], _checkToggle),
     NodeType('set_variable', NodeCategory.action, ['out', 'error'], (
       c,
       p,
@@ -189,6 +193,30 @@ final Map<String, NodeType> builtInNodeTypes = {
 };
 
 final _variable = RegExp(r'^[$%][A-Za-z_][A-Za-z0-9_]*$');
+
+/// A toggle flips a device's on/off capability, so the capability must be
+/// a toggle that reports its state.
+void _checkToggle(
+  Map<String, Object?> c,
+  String p,
+  IssueCollector i,
+  FlowReferences r,
+) {
+  final deviceId = _ref(c, 'deviceId', r.devices, 'device', p, i);
+  final capabilityId = _string(c, 'capabilityId', p, i);
+  if (deviceId == null || capabilityId == null) return;
+  if (!r.devices.contains(deviceId)) return;
+  final capability = r.capabilityOf(deviceId, capabilityId);
+  if (capability == null) {
+    i.add('$p.capabilityId', '$deviceId has no capability $capabilityId');
+  } else if (capability.type != CapabilityType.toggle ||
+      capability.stateJsonPath == null) {
+    i.add(
+      '$p.capabilityId',
+      '$capabilityId is not an on/off toggle with state',
+    );
+  }
+}
 
 void _checkDeviceAction(
   Map<String, Object?> c,
@@ -276,10 +304,12 @@ void checkRule(Object? rule, String p, IssueCollector i, FlowReferences r) {
   }
 }
 
+final _msgField = RegExp(r'^msg\.[A-Za-z_][A-Za-z0-9_]*$');
+
 void _variableName(Map<String, Object?> c, String p, IssueCollector i) {
   final name = _string(c, 'name', p, i);
-  if (name != null && !_variable.hasMatch(name)) {
-    i.add('$p.name', r'must be $Name or %name');
+  if (name != null && !_variable.hasMatch(name) && !_msgField.hasMatch(name)) {
+    i.add('$p.name', r'must be $Name, %name or msg.key');
   }
 }
 

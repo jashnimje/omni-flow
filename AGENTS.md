@@ -2,7 +2,7 @@
 
 <!-- Per-repo agent contract (workspace-hardening R17.1, R25.4). -->
 
-OmniFlow, a local-first automation studio: driver manifests, transports and a flow engine in pure Dart, with a Flutter app on top and firmware for Pico W and Arduino. Design: `docs/DESIGN.md`.
+OmniFlow, a local-first automation studio: driver manifests, transports and a flow engine in pure Dart, with a Flutter app on top and one firmware for ESP32, ESP8266, Pico W and Uno boards. Design: `docs/DESIGN.md`.
 
 ## What this repo is
 
@@ -22,5 +22,5 @@ The engine (`packages/omniflow_engine/`) owns all logic and has no Flutter depen
 - `packages/omniflow_engine/lib/src/` - engine modules
 - `packages/omniflow_engine/bin/omni.dart` - CLI
 - `drivers/`, `schemas/` - built-in manifests and JSON Schemas
-- `firmware/pico_w/main.py`, `firmware/arduino_serial_bridge/` - board firmware
+- `firmware/omniflow_node/` - the one board firmware (ESP32, ESP8266, Pico W, Uno) and its native virtual board; `./check.sh` tests and compiles it
 - Workspace map and sibling repos: `dotfiles/agents/rules/workspace-map.md`

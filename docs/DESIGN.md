@@ -120,7 +120,7 @@ OmniFlow starts with no account. It runs on one Android phone, and the CLI's dat
 - `packages/omniflow_app/` - Flutter client: the service channel client, sensor adapters, the Android foreground service, UI.
 - `drivers/` - built-in `*.omni_driver.json` manifests. `tool/embed_drivers.dart` generates a Dart file of string constants from them, so the manifests load the same way in the CLI, in tests and in an AOT-compiled app.
 - `schemas/` - JSON Schemas for driver manifests and flow graphs, used by the validator, the CLI and the MCP tools.
-- `firmware/` - Pico W MicroPython and the Arduino sketch.
+- `firmware/omniflow_node/` - the one board firmware and its native virtual board.
 
 ## Driver manifests
 
@@ -241,7 +241,7 @@ The original spec's flow passed `brightness: 80` to a template that read only `s
   - a gated `exec` for anything else
 - `linux_host` - systemctl and shell over SSH.
 - `windows_host` - PowerShell over SSH (OpenSSH server on Windows), after the macOS and Linux drivers.
-- `omniflow_mcu_node` - Pico W or Arduino speaking the OmniFlow NDJSON protocol.
+- `omniflow_board` - any board running the OmniFlow firmware (ESP32, ESP8266, Pico W, Uno), over USB serial or Wi-Fi. Its capabilities come from the pins the user names.
 - `android_tv_adb` - keycodes, app launch, deep links, Wake-on-LAN.
 - Later: Hue CLIP v2 (M6).
 
@@ -292,32 +292,55 @@ Frame layout for v3.3, big-endian:
 
 - 115200 baud, 8N1, no flow control, newline-delimited JSON.
 - The reader decodes with a streaming UTF-8 decoder and a line splitter with a maximum line length. Decoding each chunk separately corrupts characters split across reads.
-- Desktop uses libserialport through FFI. Android OTG needs its own adapter behind the same interface, in the app.
+- On macOS and Linux the port is set to raw mode with `stty` and read through a `cat` subprocess, so it needs no native library and closing a port never hangs on a blocked read. Android OTG needs its own adapter behind the same interface, in the app.
+- Opening the port resets an Uno and most ESP32 boards, so the first command after opening is retried while the board boots.
 
-### OmniFlow MCU protocol (NDJSON v1)
+### Universal board runtime (protocol v2)
 
-One JSON object per line over serial, or one per datagram over UDP. The Pico W listens on UDP port 38950 by default. The Wi-Fi credentials and the port come from a `config.json` on the board's flash.
+A board runs one OmniFlow firmware for its whole life. The engine tells it at runtime what each pin is for, so wiring a relay, a button, a servo or a sensor to a board needs no new firmware: the user names the pin once and it appears as a switch, slider or sensor on the dashboard and in flows.
 
-Host to board:
+- **[Approved] A JSON pin runtime over newline-delimited JSON.** Readable in the packet inspector, the same over USB serial and Wi-Fi UDP, and validated against a board profile on both ends.
+- **[Rejected] Firmata.** A binary protocol designed for serial only, with no discovery, no request ids and no readable traffic.
+- **[Rejected] A firmware per project, generated from flows.** Every change means reflashing, which is exactly the friction this tool removes.
+- **[Approved] One firmware, in Arduino C++.** `firmware/omniflow_node/` builds for ESP32, ESP8266, Raspberry Pi Pico W (arduino-pico core) and Arduino Uno. Its protocol core (`omni_core.cpp`) uses no Arduino headers, no heap and no STL, so it fits the Uno's 2 KB of RAM and also compiles natively into the virtual board the engine tests talk to.
+- **[Rejected] A MicroPython variant for the Pico W.** The Arduino sketch runs on the Pico W too, and a second implementation of the protocol would have to be kept in step and tested twice. The earlier MicroPython firmware (protocol v1) was retired.
 
-- `{"cmd":"describe","id":1}` - the board answers with its identity, capabilities and commands. The host sends it on connect, because a boot event sent before the host opened the port is lost. Over UDP it also registers the sender as the receiver of unsolicited events, so the host repeats it after the phone changes address. Over serial, every event goes to the port.
-- `{"cmd":"ir_send","protocol":"NEC","address":4,"command":8,"id":2}` - a standard NEC frame from its 8-bit address and command.
-- `{"cmd":"ir_send","protocol":"NEC","hex":"0x20DF10EF","id":2}` - a 32-bit code in the older most-significant-bit-first form.
-- `{"cmd":"gpio_write","pin":16,"value":1,"id":3}` - only pins on the board's output allowlist, which is set in `config.json` and can never include the radio pins or the pins the firmware itself uses.
-- Board-specific commands are listed in its `describe` answer. The Pico has `led` for the onboard LED. The Arduino bridge has `relay_on` and `relay_off`.
-- A reply carries the request's `id`, so the host can match it to the command.
+One JSON object per line over serial at 115200 baud, or one per datagram over UDP port 38950. Every command may carry an `id`, and the reply echoes it, so a late reply is never taken for the wrong command. A reply is an `ack` or an `error` with a message the user can read.
 
-Board to host:
+Commands, host to board:
 
-- `{"node":"pico_desk_01","event":"describe","fw":"omniflow-pico/1","capabilities":["ble_beacon","nec_ir","button","adc_knob"],"pins":{"out":[16,17,18]}}`
-- `{"node":"...","event":"ack","id":2,"cmd":"ir_send"}` and `{"node":"...","event":"error","id":3,"message":"pin not allowed"}`
-- Unsolicited events: `button_press`, `knob_change` (Pico) or `analog_change` (Arduino), `boot`.
+- `describe` - `{"event":"describe","proto":2,"fw":...,"board":"esp32","ir":true,"pins":[{"pin":4,"caps":["in","out","pwm","servo"]},{"pin":34,"caps":["in","adc"]}]}`. Over UDP it also makes the sender the receiver of the board's events. Over serial every event goes to the port.
+- `pin.mode` `{"pin":4,"mode":"out"}` - modes `in`, `in_pullup`, `out`, `pwm`, `servo`, `adc`. Refused when the board profile does not give that pin that capability. Setting the mode a pin already has changes nothing, so the host can resend its whole setup at any time without switching an output off.
+- `pin.write` `{"pin":4,"value":1}`, `pwm.write` `{"pin":5,"value":0..100}` (percent), `servo.write` `{"pin":13,"value":0..180}` (degrees). Each needs the matching mode first.
+- `pin.read` `{"pin":34}` - the reply carries `value` (0 or 1, or 0..100 percent for `adc`).
+- `pin.watch` `{"pin":0,"ms":50,"delta":0}` - the board then sends `{"event":"pin.changed","pin":0,"value":...}` whenever the value moves by more than `delta`, checking every `ms` (10 to 60000). `{"pin":0,"off":true}` stops it. Only input pins can be watched.
+- `ir.send` `{"address":4,"command":8}` or `{"hex":"0x20DF10EF"}` - NEC only, on the pin set with `ir.pin`.
+- Setup, kept in the board's flash: `wifi.set` `{"ssid":...,"password":...}`, `wifi.status`, `node.set` `{"name":...}`, `ir.pin` `{"pin":4}` (or -1 for none).
+- `gpio_write` from protocol v1 still works and sets the pin to output on first use.
 
-NEC sends each byte least significant bit first, in the order address, inverted address, command, inverted command, with a 9 ms burst, a 4.5 ms space, 560 us bursts and a 38 kHz carrier at a 1/3 duty cycle. The `address` and `command` form builds exactly that. Many published code lists (old Arduino-IRremote, LIRC) use a 32-bit value written most significant bit first, such as LG's `0x20DF10EF`. The `hex` form sends that value as written, the same as IRremote's `sendNECMSB()`, so those lists work unchanged.
+NEC sends each byte least significant bit first, in the order address, inverted address, command, inverted command, with a 9 ms burst, a 4.5 ms space, 562 us bursts and a 38 kHz carrier. The `address` and `command` form builds exactly that. Many published code lists (old Arduino-IRremote, LIRC) use a 32-bit value written most significant bit first, such as LG's `0x20DF10EF`. The `hex` form sends that value as written, the same as IRremote's `sendNECMSB()`, so those lists work unchanged. The carrier is bit-banged, which receivers tolerate.
 
-On the Pico W, GPIO 23, 24, 25 and 29 belong to the CYW43 wireless chip, and GPIO 25 is its SPI chip select. Writing GPIO 25, the original firmware's default pin, can break Wi-Fi and BLE. The allowlist excludes those pins, and the onboard LED is driven through `Pin("LED")`.
+Board profiles, the pins a user may configure:
 
-Firmware for NFC readers, rotary encoders and 433 MHz radios is not written yet. The spec described it, and it is added to the firmware only when built.
+- `esp32`: GPIO 0 to 33 except 6 to 11 (SPI flash) and 20, 24, 28 to 31 (not bonded out) for digital, PWM and servo; 34 to 39 are input only. Analog input is offered on 32 to 39 only, because the ADC2 pins cannot be read while Wi-Fi is on, and this firmware always runs Wi-Fi.
+- `esp8266`: GPIO 0, 2, 4, 5, 12 to 15 for any digital mode, 16 digital only (6 to 11 are flash, 1 and 3 serial); A0 (17) is `adc` only.
+- `pico_w`: GPIO 0 to 22 for any mode, 26 to 28 also `adc`; 23, 24, 25 and 29 belong to the CYW43 radio and are never offered. GPIO 25 is the radio's SPI chip select, and writing it breaks Wi-Fi.
+- `uno`: 2 to 13 (`pwm` on 3, 5, 6, 9, 10, 11), A0 to A5 as 14 to 19 with `adc`; 0 and 1 are the USB serial port. The Uno has no Wi-Fi and stays on USB.
+
+Announcing: a board on Wi-Fi broadcasts `{"event":"hello","node":...,"board":...,"proto":2,"port":38950,"up":<seconds>,"set":<pins with a mode>}` to UDP 38951 when it joins and every 30 seconds, and registers `_omniflow._udp` over mDNS. `omni device discover --driver omniflow_board` broadcasts a `describe` and also asks every USB serial port, so a new board shows up without typing its address.
+
+Setting a board up needs no file and no credentials in source: `omni board setup <port> --ssid <network> --name <name>` sends `wifi.set`, `node.set` and `ir.pin` over USB and waits until the board reports its IP. The password is read from stdin, hidden on a terminal, never taken from the command line, and the packet inspector shows it as `***`.
+
+On the engine side, `omniflow_board` uses the `omniflow` transport, which picks USB serial when the device host is a port path and Wi-Fi UDP otherwise. A device's `pins` setting names its pins:
+
+    {"relay": {"pin": 4, "mode": "out"},
+     "fan":   {"pin": 5, "mode": "pwm"},
+     "door":  {"pin": 0, "mode": "in_pullup"},
+     "light": {"pin": 34, "mode": "adc", "watch": {"ms": 1000, "delta": 3}}}
+
+Each pin becomes one capability after the driver's own: `out` a toggle, `pwm` a 0 to 100 level, `servo` a 0 to 180 level, `in`, `in_pullup` and `adc` a sensor. Inputs are watched by default, every 50 ms for digital and every second with a delta of 2 for `adc`, and `"watch": false` turns that off. A digital input reads true when the pin is high, except `in_pullup`, which is active low, so a button wired to ground reads true while pressed (`"invert": false` turns that off). `omni board pin <device> <name> <pin> <mode>` names one pin at a time.
+
+The engine sets a board up when it is added, when its pins change, at hub start, and whenever a hello shows the board has lost its setup (`"set":0`) or this engine has not set it up yet. Setting up checks every pin against the board's `describe` and names each one the board cannot do, sets the modes, writes back the output values the device state remembers so a relay comes back on after a power cut, starts the watches, and seeds input state from the watch replies. A hello from a known board at a new address updates the device. A hello from an unknown board is reported as a `board.found` event. Every `pin.changed` becomes device state under the pin's name, which drives the dashboard, links and the `device_state` trigger.
 
 ### Android Debug Bridge
 
@@ -388,11 +411,11 @@ A flow is saved and run only if it passes all of these. The CLI, the UI and the 
 Each node type registers its category, ports, config schema and evaluator. New types are added to the registry, never special-cased in the executor.
 
 - **Triggers:** schedule (cron, time of day, sunrise and sunset with offset), zone change, Wi-Fi network change, NFC tag, UDP packet match, serial line match, MCU event, MQTT topic, webhook (desktop only), notification posted with regex filters on title and body (Android), app foreground (Android), charging, screen lock and unlock, clipboard changed (desktop), global hotkey (desktop), boot, manual run.
-- **Conditions** (ports `true` and `false`): all_of, any_of, xor, not, time_window, var_equals, var_compare, device_state.
+- **Conditions** (ports `true` and `false`): all_of, any_of, xor, not, time_window, var_equals, var_compare, device_state. `var_equals` and `var_compare` read a global (`$Name`), a run variable (`%name`) or a field of the message that reached them (`msg.value`). A `device_state` trigger puts the new value in `msg.value` and the one before it in `msg.previous`.
 - **Gates:** cooldown (no pass within N seconds of the last pass), debounce (pass only after the input has been quiet for N ms), hold (pass only if a condition has held for N ms).
 - **Transformers:** JSONPath extract, regex extract, range map (`minIn..maxIn -> minOut..maxOut`), math expression.
 - **Flow control:** delay, wait_for_event with timeout (ports `event` and `timeout`), repeat (runs its `body` port up to `maxIterations` times, then continues on `done`).
-- **Actions** (ports `out` and `error`): device_capability, exec (gated), HTTP request, MQTT publish, set_variable, run_flow, notify (rich notification with action buttons), speak (text to speech).
+- **Actions** (ports `out` and `error`): device_capability, device_toggle (sets an on/off capability to the opposite of the device's state), exec (gated), HTTP request, MQTT publish, set_variable, run_flow, notify (rich notification with action buttons), speak (text to speech).
 
 The original spec called the engine Turing-complete and listed a Loop node, which contradicts acyclic graphs. Repeat keeps the graph acyclic and bounds every loop.
 
@@ -423,6 +446,16 @@ A trigger can fire while an earlier run of the same flow is still waiting on a d
 - Built-in bindings keep a few globals current from sensors: `$WifiSsid`, `$HomeWifiConnected` (true while the SSID is in the user's home list), `$Charging`, `$BatteryPercent`, and `$Zone.<id>` (true while inside that zone).
 - `time_window` handles windows that cross midnight: 18:00 to 05:00 matches 23:00 and 02:00. Times are local time in the phone's time zone, and a DST change does not skip or repeat a schedule trigger.
 - Sunrise and sunset need a latitude and longitude, set once in settings, so no location permission is needed for them.
+
+## Links
+
+A link is the shortest way to connect two things. It is a flow the engine writes from one line, validated and stored like any other, so it shows in the flow list, the card view and the run log. The source is a device state key and the target a capability: `device.key`.
+
+- `toggle` - each time the source turns on, flip the target: `omni link add desk_board.button lamp.power --toggle`. The flow checks `msg.value` is true and runs a `device_toggle` node, which reads the target's current state and writes the opposite. Runs are queued, so two quick presses toggle twice.
+- `follow` - the target copies the source, scaled from the source's range (0 to 100 for an analog pin, or the source capability's own range) into the target's: `omni link add desk_board.knob desk_board.arm --follow` puts a servo at 90 degrees for a knob at 50%. Runs restart, so the last value always wins.
+- `threshold` - when the source crosses a number, set the target to a value: `omni link add desk_board.light hall_plug.power --below 30 --set true`. It fires on the crossing only, by comparing `msg.value` with `msg.previous`, so a light level hovering below 30 does not resend the command.
+
+A link's id is `link_<from>_<to>_<mode>`, so different links between the same two ends do not replace each other. A `toggle` is refused for a target that is not an on/off toggle, and a source key the device does not have is refused with the keys it does have. `omni link list` and `omni link remove` manage them, and agents use the `link_devices` tool.
 
 ## Zones and presence
 
@@ -467,7 +500,8 @@ Secrets sit behind a `SecretStore` interface. The app uses the OS keychain or ke
 One tool registry inside the engine serves two surfaces:
 
 - `omni mcp` runs an MCP server over stdio, so Claude Code or Claude Desktop starts it as a subprocess. It opens no network listener. It drives the CLI's engine and database on the Mac, not the phone's, until accounts and sync exist.
-- The in-app architect (the command bar) calls the same tools in-process from an LLM tool-use loop. The provider and model are chosen at M5. The API key lives in the secret store. The architect is the only part of OmniFlow that needs the internet, and every flow it produces runs locally afterwards.
+- **[Approved] The architect is Claude through `omni mcp`** (Claude Code or Claude Desktop), working on the same tools. The app keeps no API key, and every flow the architect writes goes through validation and approval.
+- **[Rejected for now] An LLM call inside the app.** It needs an API key on the phone and an internet connection for the one part of OmniFlow that is not local.
 
 Tools:
 
@@ -478,9 +512,11 @@ Tools:
 - `list_flows` - flows with whether they are enabled, approved and loaded.
 - `simulate_flow_dry_run` - dry run at a chosen time with a chosen message, returning the trace.
 - `sniff_live_packets` - a capture of 1 to 10 seconds from the packet tap.
-- `generate_mcu_firmware` - the `config.json` for a Pico W running `firmware/pico_w`, from a node id, beacon name and output pins, refusing the radio and firmware pins. Flashing stays a manual step from a desktop (`mpremote`).
+- `generate_mcu_firmware` - every board runs the same firmware, so nothing is generated: for a board type it returns the arduino-cli flash command, the `omni board setup` and `omni device add` commands, and the pins the board offers. Flashing stays a manual step from a desktop.
+- `link_devices` - creates a toggle, follow or threshold link. It is saved untrusted, like a flow from `deploy_automation_flow_dag`.
+- `configure_board_pins` - names a board's pins and sets them up on the board.
 
-Each tool is a thin call into the core API, so an agent can do nothing the CLI cannot. Device state as subscribable MCP resources, and an Arduino sketch template, are not built yet.
+Each tool is a thin call into the core API, so an agent can do nothing the CLI cannot. Device state as subscribable MCP resources is not built yet.
 
 A tool returns validation failures as an MCP error result with the full error list, so the agent can correct and retry. The original spec threw an exception and checked only that a flow had at least one node.
 
@@ -543,7 +579,6 @@ App: flutter_riverpod, flutter_secure_storage, vyuh_node_flow, universal_ble, nf
 ## Open items
 
 - Accounts and sync: deferred, with the choices recorded above.
-- LLM provider and model for the in-app architect (M5).
 - Tuya protocol version of each of the user's devices, and whether v3.5 is needed in M1.
 - Each WiZ bulb's white range from `getModelConfig`, instead of the fixed 2200 to 6500 K.
 - The vyuh_node_flow 0.32 and mcp_dart 2.4 APIs (M3, M5).

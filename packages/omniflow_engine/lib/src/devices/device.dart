@@ -38,6 +38,9 @@ class Device {
 
   Device copyWith({
     String? host,
+    int? port,
+    String? stableId,
+    Map<String, Object?>? settings,
     Map<String, Object?>? state,
     DateTime? lastSeen,
   }) => Device(
@@ -45,10 +48,10 @@ class Device {
     name: name,
     driverId: driverId,
     host: host ?? this.host,
-    port: port,
+    port: port ?? this.port,
     room: room,
-    stableId: stableId,
-    settings: settings,
+    stableId: stableId ?? this.stableId,
+    settings: settings ?? this.settings,
     state: state ?? this.state,
     lastSeen: lastSeen ?? this.lastSeen,
   );

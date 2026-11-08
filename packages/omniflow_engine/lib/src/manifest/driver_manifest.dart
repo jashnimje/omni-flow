@@ -13,7 +13,12 @@ enum TransportType {
   mqtt('mqtt'),
   exec('exec'),
   serial('serial'),
-  adb('adb');
+  adb('adb'),
+
+  /// An OmniFlow board (protocol v2): USB serial when the device host is a
+  /// serial port path, Wi-Fi UDP otherwise. Its devices also get one
+  /// capability per pin named in their `pins` setting.
+  omniflow('omniflow');
 
   const TransportType(this.wireName);
 
@@ -112,6 +117,24 @@ class DriverManifest {
 
   CapabilitySpec? capability(String id) =>
       capabilities.where((c) => c.id == id).firstOrNull;
+
+  /// This manifest with [extra] capabilities after its own, for drivers whose
+  /// capabilities depend on the device (an OmniFlow board's pins).
+  DriverManifest withCapabilities(List<CapabilitySpec> extra) => extra.isEmpty
+      ? this
+      : DriverManifest(
+          id: id,
+          name: name,
+          category: category,
+          icon: icon,
+          transport: transport,
+          discovery: discovery,
+          settings: settings,
+          statePush: statePush,
+          statePoll: statePoll,
+          reliability: reliability,
+          capabilities: List.unmodifiable([...capabilities, ...extra]),
+        );
 
   /// High risk when any capability, or the transport itself, executes commands on a host.
   bool get isHighRisk =>

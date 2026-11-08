@@ -117,6 +117,10 @@ class SerialChannel implements DriverChannel {
     return found;
   }
 
+  /// Closes the port held for [deviceId], if any.
+  Future<void> release(String deviceId) async =>
+      _ports.remove(deviceId)?.close();
+
   Future<_SerialPort> _open(Device device, int baud) async {
     final existing = _ports[device.id];
     if (existing != null && existing.path == device.host && !existing.closed) {
@@ -198,12 +202,16 @@ class _SerialPort {
     if (closed) throw const FileSystemException('serial port closed');
     final waiter = _waiting.putIfAbsent(id, Completer.new);
     final bytes = Uint8List.fromList(encodeNdjson(payload));
+    // A Wi-Fi password never reaches the packet inspector.
+    final shown = payload.containsKey('password')
+        ? Uint8List.fromList(encodeNdjson({...payload, 'password': '***'}))
+        : bytes;
     _tap?.record(
       CapturedPacket(
         transport: 'serial',
         direction: PacketDirection.outgoing,
         remote: path,
-        bytes: bytes,
+        bytes: shown,
       ),
     );
     await _writer.writeFrom(bytes);

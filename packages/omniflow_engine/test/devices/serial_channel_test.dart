@@ -7,6 +7,8 @@ import 'dart:io';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
+import '../support/v1_drivers.dart';
+
 void main() {
   late Process board;
   late String tty;
@@ -28,7 +30,7 @@ void main() {
     channel = SerialChannel();
     store = InMemoryDeviceStore();
     service = DeviceService(
-      registry: DriverRegistry.withBuiltIns(),
+      registry: v1Registry(),
       store: store,
       channels: {TransportType.serial: channel},
     );
@@ -70,7 +72,7 @@ void main() {
         host: tty,
       ),
     );
-    final registry = DriverRegistry.withBuiltIns()
+    final registry = v1Registry()
       ..register({
         'schemaVersion': 1,
         'id': 'raw_board',
@@ -105,7 +107,7 @@ void main() {
   test(
     'discover finds the board that answers describe and skips other ports',
     () async {
-      final manifest = DriverRegistry.withBuiltIns()['omniflow_mcu_serial']!;
+      final manifest = v1Registry()['omniflow_mcu_serial']!;
       final found = await channel.discover(
         manifest,
         ports: () async => ['/dev/cu.not-there', tty],

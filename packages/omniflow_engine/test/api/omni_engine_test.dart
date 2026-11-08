@@ -50,7 +50,7 @@ void main() {
           'philips_wiz_udp',
           'tuya_plug',
           'macos_host',
-          'omniflow_mcu_node',
+          'omniflow_board',
         ]),
       );
     });

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "omniflow_board",
+  "name": "OmniFlow board (ESP32, ESP8266, Pico W, Uno)",
+  "category": "microcontroller",
+  "icon": "cpu",
+  "transport": { "type": "omniflow", "port": 38950, "payload": "json", "requestId": true, "baud": 115200 },
+  "discovery": [
+    { "method": "udp_broadcast", "port": 38950, "probe": { "cmd": "describe" }, "matchJsonPath": "$.pins", "idJsonPath": "$.node" },
+    { "method": "serial" }
+  ],
+  "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
+  "reliability": { "timeoutMs": 800, "retries": 2 },
+  "capabilities": [
+    {
+      "id": "ir_nec",
+      "type": "action",
+      "label": "Send NEC IR (address and command)",
+      "params": {
+        "address": { "type": "number", "min": 0, "max": 65535 },
+        "command": { "type": "number", "min": 0, "max": 255 }
+      },
+      "command": { "cmd": "ir.send", "address": "{{address}}", "command": "{{command}}" }
+    },
+    {
+      "id": "ir_code",
+      "type": "text_command",
+      "label": "Send NEC IR (32-bit code, MSB first)",
+      "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
+      "command": { "cmd": "ir.send", "hex": "{{value}}" }
+    }
+  ]
+}

@@ -11,6 +11,10 @@ abstract interface class FlowHost {
     String capabilityId,
     Map<String, Object?> params,
   );
+  Future<Map<String, Object?>?> toggleDevice(
+    String deviceId,
+    String capabilityId,
+  );
   Future<void> saveGlobal(String name, Object? value);
   Future<void> saveTrace(Map<String, Object?> trace);
   void emit(Map<String, Object?> event);
@@ -136,6 +140,12 @@ class FlowEngine implements FlowEffects {
   ) => _host.invokeDevice(deviceId, capabilityId, params);
 
   @override
+  Future<Map<String, Object?>?> toggleDevice(
+    String deviceId,
+    String capabilityId,
+  ) => _host.toggleDevice(deviceId, capabilityId);
+
+  @override
   Future<void> runFlow(String flowId, Map<String, Object?> msg) async {
     await run(flowId, msg: {'from': 'run_flow', ...msg});
   }
@@ -190,6 +200,7 @@ class FlowEngine implements FlowEffects {
             'payload': state,
             'deviceId': id,
             if (key != null) 'value': state[key],
+            if (key != null) 'previous': before[key],
           });
         }
       case 'zone.changed':

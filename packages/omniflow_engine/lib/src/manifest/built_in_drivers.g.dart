@@ -82,21 +82,20 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
-  'omniflow_mcu_node.omni_driver.json': r'''
+  'omniflow_board.omni_driver.json': r'''
 {
   "schemaVersion": 1,
-  "id": "omniflow_mcu_node",
-  "name": "OmniFlow board (Pico W over Wi-Fi)",
+  "id": "omniflow_board",
+  "name": "OmniFlow board (ESP32, ESP8266, Pico W, Uno)",
   "category": "microcontroller",
   "icon": "cpu",
-  "transport": { "type": "udp", "port": 38950, "payload": "json", "requestId": true },
+  "transport": { "type": "omniflow", "port": 38950, "payload": "json", "requestId": true, "baud": 115200 },
   "discovery": [
-    { "method": "ble", "nameMatch": "^OMNI_" },
-    { "method": "serial", "usbVendorId": 11914 }
+    { "method": "udp_broadcast", "port": 38950, "probe": { "cmd": "describe" }, "matchJsonPath": "$.pins", "idJsonPath": "$.node" },
+    { "method": "serial" }
   ],
-  "statePush": { "jsonPath": "$" },
-  "statePoll": { "intervalSeconds": 120, "command": { "cmd": "describe" } },
-  "reliability": { "timeoutMs": 600, "retries": 2 },
+  "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
+  "reliability": { "timeoutMs": 800, "retries": 2 },
   "capabilities": [
     {
       "id": "ir_nec",
@@ -106,72 +105,15 @@ const builtInDriverSources = <String, String>{
         "address": { "type": "number", "min": 0, "max": 65535 },
         "command": { "type": "number", "min": 0, "max": 255 }
       },
-      "command": { "cmd": "ir_send", "protocol": "NEC", "address": "{{address}}", "command": "{{command}}" }
+      "command": { "cmd": "ir.send", "address": "{{address}}", "command": "{{command}}" }
     },
     {
-      "id": "ir_send",
+      "id": "ir_code",
       "type": "text_command",
       "label": "Send NEC IR (32-bit code, MSB first)",
       "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
-      "command": { "cmd": "ir_send", "protocol": "NEC", "hex": "{{value}}" }
-    },
-    {
-      "id": "led",
-      "type": "toggle",
-      "label": "Onboard LED",
-      "command": { "cmd": "led", "value": "{{value}}" }
-    },
-    {
-      "id": "gpio_write",
-      "type": "action",
-      "label": "Set an output pin",
-      "params": {
-        "pin": { "type": "number", "min": 0, "max": 28 },
-        "value": { "type": "boolean" }
-      },
-      "command": { "cmd": "gpio_write", "pin": "{{pin}}", "value": "{{value}}" }
+      "command": { "cmd": "ir.send", "hex": "{{value}}" }
     }
-  ]
-}
-''',
-  'omniflow_mcu_serial.omni_driver.json': r'''
-{
-  "schemaVersion": 1,
-  "id": "omniflow_mcu_serial",
-  "name": "OmniFlow board (Pico or Arduino over USB serial)",
-  "category": "microcontroller",
-  "icon": "usb",
-  "transport": { "type": "serial", "baud": 115200, "requestId": true },
-  "discovery": [{ "method": "serial", "usbVendorId": 11914 }],
-  "statePush": { "jsonPath": "$" },
-  "statePoll": { "intervalSeconds": 120, "command": { "cmd": "describe" } },
-  "reliability": { "timeoutMs": 800, "retries": 1 },
-  "capabilities": [
-    {
-      "id": "ir_nec",
-      "type": "action",
-      "label": "Send NEC IR (address and command)",
-      "params": {
-        "address": { "type": "number", "min": 0, "max": 65535 },
-        "command": { "type": "number", "min": 0, "max": 255 }
-      },
-      "command": { "cmd": "ir_send", "protocol": "NEC", "address": "{{address}}", "command": "{{command}}" }
-    },
-    {
-      "id": "ir_send",
-      "type": "text_command",
-      "label": "Send NEC IR (32-bit code, MSB first)",
-      "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
-      "command": { "cmd": "ir_send", "protocol": "NEC", "hex": "{{value}}" }
-    },
-    {
-      "id": "led",
-      "type": "toggle",
-      "label": "Onboard LED (Pico)",
-      "command": { "cmd": "led", "value": "{{value}}" }
-    },
-    { "id": "relay_on", "type": "action", "label": "Relay on (Arduino)", "command": { "cmd": "relay_on" } },
-    { "id": "relay_off", "type": "action", "label": "Relay off (Arduino)", "command": { "cmd": "relay_off" } }
   ]
 }
 ''',

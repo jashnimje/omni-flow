@@ -7,9 +7,32 @@ import '../api/omni_engine.dart';
 import '../manifest/driver_manifest.dart';
 import '../version.dart';
 
-/// Pins a Pico W must never be given as outputs: the CYW43 radio (23, 24, 25,
-/// 29) and the pins the firmware itself uses (IR 15, button 14, knob 26).
-const _reservedPicoPins = {14, 15, 23, 24, 25, 26, 29};
+typedef _Board = ({String fqbn, bool wifi, String pins});
+
+/// The boards firmware/omniflow_node builds for, and the pins each offers
+/// (the board profiles in omni_core.cpp).
+const Map<String, _Board> _boards = {
+  'esp32': (
+    fqbn: 'esp32:esp32:esp32',
+    wifi: true,
+    pins: 'GPIO 0-5, 12-19, 21-23, 25-27, 32, 33 any mode; 34-39 input only; analog on 32-39',
+  ),
+  'esp8266': (
+    fqbn: 'esp8266:esp8266:nodemcuv2',
+    wifi: true,
+    pins: 'GPIO 0, 2, 4, 5, 12-15 any mode; 16 digital only; A0 (17) analog',
+  ),
+  'pico_w': (
+    fqbn: 'rp2040:rp2040:rpipicow',
+    wifi: true,
+    pins: 'GPIO 0-22 any mode; 26-28 also analog; 23, 24, 25, 29 belong to the radio',
+  ),
+  'uno': (
+    fqbn: 'arduino:avr:uno',
+    wifi: false,
+    pins: 'D2-D13 (pwm on 3, 5, 6, 9, 10, 11); A0-A5 as 14-19 with analog',
+  ),
+};
 
 /// The MCP server: one tool per core API need, each a thin call into
 /// [OmniEngine.handle], so an agent can do nothing the CLI cannot.
@@ -127,6 +150,50 @@ McpServer createOmniMcpServer(OmniEngine engine) {
   );
 
   server.registerTool(
+    'link_devices',
+    description:
+        'Connects two devices in one step, saved as a flow. mode "toggle": each time from turns on '
+        '(a button press) flip to. "follow": to copies from, scaled to its range. "threshold": when '
+        'from goes above or below a number, set to to "set". from is device.stateKey, to is '
+        'device.capability, for example desk_board.button and lamp.power.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'from': JsonSchema.string(),
+        'to': JsonSchema.string(),
+        'mode': JsonSchema.string(
+          enumValues: ['toggle', 'follow', 'threshold'],
+        ),
+        'above': JsonSchema.number(),
+        'below': JsonSchema.number(),
+        // Any JSON value: true, a number, a string.
+        'set': JsonSchema.fromJson(const {}),
+      },
+      required: ['from', 'to', 'mode'],
+    ),
+    callback: (args, _) async =>
+        reply(await engine.handle('link.create', {...args, 'trusted': false})),
+  );
+
+  server.registerTool(
+    'configure_board_pins',
+    description:
+        'Names the pins of an OmniFlow board device and sets them up on the board. pins maps a '
+        'name to {"pin": GPIO, "mode": "in" | "in_pullup" | "out" | "pwm" | "servo" | "adc"}, '
+        'optionally "watch": {"ms", "delta"} or false. Each pin becomes a capability: out a toggle, '
+        'pwm 0 to 100, servo 0 to 180, inputs a sensor in the device state. Replaces all pins.',
+    inputSchema: JsonSchema.object(
+      properties: {'deviceId': JsonSchema.string(), 'pins': freeObject},
+      required: ['deviceId', 'pins'],
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('board.pins', {
+        'id': args['deviceId'],
+        'pins': args['pins'],
+      }),
+    ),
+  );
+
+  server.registerTool(
     'list_flows',
     description:
         'Lists flows with whether they are enabled, approved and running.',
@@ -182,50 +249,54 @@ McpServer createOmniMcpServer(OmniEngine engine) {
   server.registerTool(
     'generate_mcu_firmware',
     description:
-        'Produces the config.json for a Pico W running firmware/pico_w (main.py and nec.py), '
-        'from a node id, beacon name and output pins. Radio and firmware pins are refused. Flashing stays manual.',
+        'How to put OmniFlow on a board. Every board runs the same firmware (firmware/omniflow_node), '
+        'so nothing is generated: this returns the flash command for the board type, the USB setup '
+        'command, and the pins the board offers. board is esp32, esp8266, pico_w or uno.',
     inputSchema: JsonSchema.object(
       properties: {
-        'nodeId': JsonSchema.string(),
-        'bleName': JsonSchema.string(),
-        'outPins': JsonSchema.array(items: JsonSchema.integer()),
-        'udpPort': JsonSchema.integer(),
+        'board': JsonSchema.string(enumValues: _boards.keys.toList()),
+        'name': JsonSchema.string(),
+        'port': JsonSchema.string(),
       },
-      required: ['nodeId'],
+      required: ['board'],
     ),
     callback: (args, _) async {
-      final nodeId = args['nodeId'];
-      if (nodeId is! String || !RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(nodeId)) {
-        return refuse('invalid', 'nodeId must be lower snake case');
-      }
-      final pins = (args['outPins'] as List? ?? const [16, 17, 18])
-          .map((p) => p as num)
-          .map((p) => p.toInt())
-          .toList();
-      final bad = pins
-          .where((p) => p < 0 || p > 28 || _reservedPicoPins.contains(p))
-          .toList();
-      if (bad.isNotEmpty) {
+      final board = _boards[args['board']];
+      if (board == null) {
         return refuse(
           'invalid',
-          'pins $bad are reserved (radio 23, 24, 25, 29; firmware 14, 15, 26) or out of range',
+          'board must be one of ${_boards.keys.join(', ')}',
         );
       }
-      final config = {
-        'node_id': nodeId,
-        'ble_name': args['bleName'] ?? 'OMNI_${nodeId.toUpperCase()}',
-        'ssid': '<your 2.4 GHz Wi-Fi>',
-        'password': '<your Wi-Fi password>',
-        'udp_port': args['udpPort'] ?? 38950,
-        'out_pins': pins,
-      };
+      final name = args['name'];
+      if (name != null &&
+          (name is! String ||
+              !RegExp(r'^[a-z][a-z0-9_]{0,22}$').hasMatch(name))) {
+        return refuse(
+          'invalid',
+          'name is lower snake case, at most 23 characters',
+        );
+      }
+      final port = args['port'] is String
+          ? args['port'] as String
+          : '<USB port>';
+      final id = name ?? 'my_board';
       return reply({
         'ok': true,
-        'files': {'config.json': config},
+        'board': args['board'],
+        'fqbn': board.fqbn,
+        'pins': board.pins,
         'steps': [
-          'Fill in ssid and password in config.json.',
-          'Copy firmware/pico_w/main.py, firmware/pico_w/nec.py and config.json to the Pico W (mpremote cp).',
-          'Add it: omni device add $nodeId --driver omniflow_mcu_node --host <its IP>',
+          'Install arduino-cli and the board core (firmware/omniflow_node/README.md).',
+          'arduino-cli compile --fqbn ${board.fqbn} --upload --port $port firmware/omniflow_node',
+          if (board.wifi)
+            'omni board setup $port --ssid <Wi-Fi name> --name $id   (asks for the password)'
+          else
+            'omni board setup $port --name $id   (no Wi-Fi: it stays on USB)',
+          board.wifi
+              ? 'omni device add $id --driver omniflow_board --host <IP from setup> --stable-id $id'
+              : 'omni device add $id --driver omniflow_board --host $port --stable-id $id',
+          'omni board pin $id relay <pin> out   (one line per pin)',
         ],
       });
     },

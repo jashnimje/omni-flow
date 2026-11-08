@@ -1,6 +1,6 @@
 # OmniFlow Roadmap
 
-> Status: active. M1 code is complete and tested against emulated devices, except MQTT (deferred) and Tuya v3.4 or v3.5 (waiting on the scan). Next: the M1 live exit test on real hardware, then M2. Design: `docs/DESIGN.md`.
+> Status: active. M1, M2 and M5 are complete in code, M3 in part. M7 (universal boards and links) is complete in the engine, CLI, MCP and firmware; MQTT, mDNS and the app sheets remain. Live hardware tests and the Android service wait on hardware and the Android SDK. Design: `docs/DESIGN.md`.
 
 Android is the only app target. Headless-first vertical slices: the engine is proven from the CLI on the Mac before the app wraps it. Every milestone ends with a test that runs against real hardware where it is available. Live hardware: Philips WiZ, Tuya/Wipro, Pico W and Arduino. The Android TV is owned but not yet available, so ADB is tested against fixtures until it is.
 
@@ -62,6 +62,23 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 - [ ] In-app architect on the command bar, with a diff and approval before anything is saved.
 - [ ] Firmware: Pico W `config.json` generation with the pin allowlist (done). An Arduino template is not built.
 
+## M7 - Universal boards and links
+
+The pass that makes OmniFlow the tool for microcontrollers and smart things: any board, any pin, any ecosystem, linked in one line. Design: "Universal board runtime" and "Links" in `docs/DESIGN.md`.
+
+- [x] Protocol v2 core in plain C++ (`firmware/omniflow_node/omni_core.*`) with board profiles, and a native virtual board (`host/host_board.cpp`, stdin, `--pty` or UDP) for tests. Native core tests pass.
+- [x] Arduino sketch for ESP32, ESP8266, Pico W and Uno over that core (serial, Wi-Fi UDP, hello broadcast, mDNS, Wi-Fi and IR setup kept in flash). `./check.sh` compiles it for all four with arduino-cli: Uno 896 of 2048 bytes RAM, ESP32 72% of flash. Not yet run on a board.
+- [x] ~~MicroPython Pico W firmware on protocol v2~~ dropped: the Arduino sketch runs on the Pico W, and the MicroPython v1 firmware and its two drivers were retired.
+- [x] `omniflow_board` driver over the `omniflow` transport (serial or UDP by host): named pins become capabilities, pins are set up on add, on pin changes, at hub start and on a hello without setup, outputs are restored, `pin.changed` becomes state, a moved board is followed.
+- [x] Board discovery: describe broadcast and USB serial probe in `device discover`, `board.found` from hellos in the hub.
+- [x] Engine end-to-end tests against the virtual board over a pseudo-terminal and UDP, and a CLI test from USB setup to named pins.
+- [x] `omni board setup | pin | pins | provision`, with the Wi-Fi password read from stdin and masked in the packet inspector.
+- [ ] MQTT channel, with Tasmota, ESPHome and generic MQTT drivers, tested against an in-test broker.
+- [ ] mDNS discovery for ESPHome and Shelly.
+- [x] `device_toggle` node and links (`omni link add | list | remove`, `link.create`, MCP `link_devices` and `configure_board_pins`), tested across two virtual boards.
+- [ ] Link sheet and board pin sheet in the app.
+- [ ] Full end-to-end pass: engine, CLI, MCP, app and firmware, recorded in the log.
+
 ## M6 - Optional
 
 - [ ] Accounts and sync as recorded in `docs/DESIGN.md`: Google sign-in, an encrypted change log in the user's Drive, and first-wins flow claims over home Wi-Fi.
@@ -75,8 +92,7 @@ Android is the only app target. Headless-first vertical slices: the engine is pr
 2. **WiZ.** Find the bulb's IP in the router or the WiZ app. From the Mac, `echo '{"method":"getPilot","params":{}}' | nc -u -w1 <ip> 38899` should print a JSON reply. Note the `moduleName` from `getSystemConfig`.
 3. **Tuya and Wipro.** Check that the Wipro devices pair with the Smart Life app, since OEM apps can lock devices to their own cloud. Create a Tuya IoT developer project, link the Smart Life account, then run `python -m tinytuya wizard` (mise python) for the local keys and `python -m tinytuya scan` for each device's protocol version. The versions decide whether v3.5 is in M1. Close the vendor app while testing, because the device takes one local connection.
 4. **Mac.** System Settings, General, Sharing, Remote Login on, and note the username. Over SSH from another machine, try `osascript -e 'output volume of (get volume settings)'`, `caffeinate -u -t 2` with the display asleep, and `shortcuts run <name>`. The last two may need a logged-in GUI session, and the result decides which `macos_host` capabilities work from the phone.
-5. **Pico W.** MicroPython version on the board, `mpremote` installed (mise python), IR LED on GPIO 15 through a transistor driver, button on GPIO 14, potentiometer on GPIO 26.
-6. **Arduino.** Board model, `arduino-cli` installed, button on pin 2, relay on pin 4.
+5. **Boards.** Flash `firmware/omniflow_node` (README there), then `omni board setup <port> --ssid <network> --name <name>`. Wiring is free: name each pin with `omni board pin`. On a Pico W keep off GPIO 23, 24, 25 and 29. An IR LED needs a transistor driver.
 7. **Phone.** Model, Android version and maker, because some makers kill background services beyond what stock Android does. Developer options and USB debugging on, for installing builds.
 8. **Android TV, when available.** Developer options, network or ADB debugging on, the IP noted, and whether port 5555 stays open after a reboot.
 
@@ -135,7 +151,7 @@ What the code and design assume, checked on 2026-11-06 against primary sources. 
 
 - Engine: `dart analyze`, `dart format --set-exit-if-changed .`, `dart test`. Live tests: `dart test --tags live`, opt-in, against real devices.
 - App: `flutter analyze`, `flutter test`, then runs on a real Android phone, with screenshots.
-- Firmware: `python3 -I firmware/pico_w/test_nec.py` on the host, then `mpremote` on the Pico W with a `describe` and `ir_send` round trip, and `arduino-cli compile` for the sketch.
+- Firmware: `firmware/omniflow_node/check.sh` (native core tests, the virtual board, and `arduino-cli compile` for Uno, ESP8266, Pico W and ESP32), then on a real board a `describe`, `omni board setup` and a pin round trip.
 
 ## Log
 
@@ -146,3 +162,4 @@ What the code and design assume, checked on 2026-11-06 against primary sources. 
 - 2026-11-06: M1 engine batches landed: template renderer, manifests, registry, UDP, Tuya codec and channel, host exec, SSH, NDJSON, device runtime, storage, core API, CLI and WiZ discovery. 130 tests pass. The first `omni device discover --driver philips_wiz_udp` on the real LAN found no bulbs, not yet diagnosed (bulb power, network, or the Mac Local Network permission for the terminal).
 - 2026-11-06: Checked the build against primary references (tinytuya, pywizlight, SB-Projects NEC, pico-sdk, RFC 9535, Android and macOS docs, dartssh2 source). Two fixes landed: the WiZ discovery probe and NEC bit order. Findings are in the table above.
 - 2026-11-06: M1 completed in code: WiZ push, engine events and `omni watch`, the HTTP channel with Shelly and Linux drivers, USB serial with discovery. 148 engine tests pass. Live hardware test still to run.
+- 2026-11-07: M7 boards and links landed. One firmware core with board profiles, tested natively, and an Arduino sketch that compiles for Uno, ESP8266, Pico W and ESP32. The `omniflow_board` driver, board setup over USB, pin naming, hello handling and links are tested end to end against the firmware core built as a virtual board, over a pty and UDP. Fixed on the way: profile names clashing with core macros (`ESP8266`), Uno RAM at 101% (literals moved to flash), a provisioning future that awaited itself, a reboot missed by whole-second uptime (hello now reports `set`), and two links between the same ends sharing an id. The MicroPython firmware was retired. 245 engine tests pass. Nothing has run on a physical board yet.

@@ -123,6 +123,44 @@ class OmniCommandRunner extends CommandRunner<int> {
         ),
       ]),
     );
+    addCommand(
+      _Group('board', 'Set up OmniFlow boards and name their pins.', [
+        _BoardSetup(),
+        _BoardPin(),
+        _ApiCommand(
+          'pins',
+          'Replace all pins: omni board pins desk \'{"relay":{"pin":4,"mode":"out"}}\'',
+          'board.pins',
+          (rest, _) async {
+            if (rest.length != 2) {
+              throw UsageException('needs ID and PINS (JSON or a file)', '');
+            }
+            return {'id': rest[0], 'pins': await _jsonArg(rest[1])};
+          },
+          usage: 'ID PINS',
+        ),
+        _ApiCommand(
+          'provision',
+          'Send the pin setup to a board again.',
+          'board.provision',
+          (rest, _) async => {'id': _one(rest, 'ID')},
+          usage: 'ID',
+        ),
+      ]),
+    );
+    addCommand(
+      _Group('link', 'Connect one device to another in one line.', [
+        _LinkAdd(),
+        _ApiCommand('list', 'List links.', 'link.list', (_, _) async => {}),
+        _ApiCommand(
+          'remove',
+          'Remove a link.',
+          'link.remove',
+          (rest, _) async => {'id': _one(rest, 'ID')},
+          usage: 'ID',
+        ),
+      ]),
+    );
     addCommand(_Watch());
     addCommand(_Hub());
     addCommand(_Mcp());
@@ -480,8 +518,14 @@ class _DeviceAdd extends _ApiCommand {
       if (a.option('name') != null) 'name': a.option('name'),
       if (a.option('room') != null) 'room': a.option('room'),
       if (a.option('stable-id') != null) 'stableId': a.option('stable-id'),
-      'settings': parseKeyValues(a.multiOption('set'))
-          .map((k, v) => MapEntry(k, v is String ? v : jsonEncode(v))),
+      // Objects (a board's pins) stay structured; scalars stay text, so a
+      // user name like 1234 is not turned into a number.
+      'settings': parseKeyValues(a.multiOption('set')).map(
+        (k, v) => MapEntry(
+          k,
+          v is Map || v is List || v is String ? v : jsonEncode(v),
+        ),
+      ),
     };
   }
 }
@@ -682,5 +726,198 @@ class _Mcp extends Command<int> {
     } finally {
       await engine.close();
     }
+  }
+}
+
+/// Inline JSON, or the path of a JSON file.
+Future<Object?> _jsonArg(String value) async {
+  final text =
+      value.trimLeft().startsWith('{') || value.trimLeft().startsWith('[')
+      ? value
+      : await File(value).readAsString();
+  try {
+    return jsonDecode(text);
+  } on FormatException catch (e) {
+    throw UsageException('not valid JSON: ${e.message}', '');
+  }
+}
+
+/// `omni board setup /dev/cu.usbmodem1101 --ssid Home --name desk_board`.
+/// The Wi-Fi password is read from stdin (hidden when it is a terminal),
+/// never from the command line, where other processes could see it.
+class _BoardSetup extends _ApiCommand {
+  _BoardSetup()
+    : super(
+        'setup',
+        'Set up a board on USB: Wi-Fi, name and IR pin, kept in its flash.',
+        'board.setup',
+        (_, _) async => {},
+        usage: 'PORT',
+      ) {
+    argParser
+      ..addOption('ssid', help: 'Wi-Fi network to join (2.4 GHz).')
+      ..addOption('name', help: 'Board name, lower snake case.')
+      ..addOption('ir-pin', help: 'GPIO of the IR LED, or -1 for none.');
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    final ssid = a.option('ssid');
+    String? password;
+    if (ssid != null) {
+      final terminal = identical(omni.input, stdin) && stdin.hasTerminal;
+      if (terminal) {
+        stderr.write('Wi-Fi password for $ssid (empty for an open network): ');
+        stdin.echoMode = false;
+      }
+      try {
+        password = await omni.input
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .first
+            .catchError((Object _) => '');
+      } finally {
+        if (terminal) {
+          stdin.echoMode = true;
+          stderr.writeln();
+        }
+      }
+    }
+    final irPin = a.option('ir-pin');
+    return {
+      'port': OmniCommandRunner._one(a.rest, 'PORT'),
+      'ssid': ?ssid,
+      'password': ?password,
+      if (a.option('name') != null) 'name': a.option('name'),
+      if (irPin != null) 'irPin': int.tryParse(irPin) ?? irPin,
+    };
+  }
+}
+
+/// `omni board pin desk relay 4 out` names one pin and sets it up;
+/// `omni board pin desk relay --remove` forgets it.
+class _BoardPin extends _ApiCommand {
+  _BoardPin()
+    : super(
+        'pin',
+        'Name one pin: omni board pin desk relay 4 out (modes: in, in_pullup, out, pwm, servo, adc)',
+        'board.pins',
+        (_, _) async => {},
+        usage: 'ID NAME [PIN MODE]',
+      ) {
+    argParser
+      ..addFlag('remove', negatable: false, help: 'Forget this pin.')
+      ..addOption('watch-ms', help: 'How often an input is checked.')
+      ..addOption('delta', help: 'Ignore analog changes this small.')
+      ..addFlag(
+        'no-watch',
+        negatable: false,
+        help: 'Do not report input changes.',
+      );
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    final rest = a.rest;
+    final remove = a.flag('remove');
+    if (rest.length != (remove ? 2 : 4)) {
+      throw UsageException(
+        remove ? 'needs ID and NAME' : 'needs ID, NAME, PIN and MODE',
+        usage,
+      );
+    }
+    final engine = await omni.engineFactory(omni.home);
+    final Map<String, Object?> current;
+    try {
+      final got = await engine.handle('device.get', {'id': rest[0]});
+      if (got['ok'] != true) {
+        throw UsageException('no device ${rest[0]}', '');
+      }
+      final settings = (got['device'] as Map)['settings'] as Map;
+      current = Map<String, Object?>.from(settings['pins'] as Map? ?? const {});
+    } finally {
+      await engine.close();
+    }
+    if (remove) {
+      current.remove(rest[1]);
+    } else {
+      final pin = int.tryParse(rest[2]);
+      if (pin == null) throw UsageException('PIN is a GPIO number', usage);
+      final watchMs = a.option('watch-ms');
+      final delta = a.option('delta');
+      current[rest[1]] = {
+        'pin': pin,
+        'mode': rest[3],
+        if (a.flag('no-watch'))
+          'watch': false
+        else if (watchMs != null || delta != null)
+          'watch': {
+            if (watchMs != null) 'ms': int.tryParse(watchMs) ?? watchMs,
+            if (delta != null) 'delta': int.tryParse(delta) ?? delta,
+          },
+      };
+    }
+    return {'id': rest[0], 'pins': current};
+  }
+}
+
+/// `omni link add desk_board.button lamp.power --toggle`,
+/// `omni link add desk_board.knob lamp.brightness --follow`,
+/// `omni link add desk_board.light hall_plug.power --below 30 --set true`.
+class _LinkAdd extends _ApiCommand {
+  _LinkAdd()
+    : super(
+        'add',
+        'Link FROM (device.state) to TO (device.capability).',
+        'link.create',
+        (_, _) async => {},
+        usage: 'FROM TO',
+      ) {
+    argParser
+      ..addFlag(
+        'toggle',
+        negatable: false,
+        help: 'Each press of FROM flips TO.',
+      )
+      ..addFlag('follow', negatable: false, help: 'TO copies FROM, scaled.')
+      ..addOption('above', help: 'When FROM goes above this number...')
+      ..addOption('below', help: 'When FROM goes below this number...')
+      ..addOption('set', help: '...set TO to this value (true, 80, "warm").');
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    if (a.rest.length != 2) throw UsageException('needs FROM and TO', usage);
+    final threshold = a.option('above') != null || a.option('below') != null;
+    final modes = [
+      if (a.flag('toggle')) 'toggle',
+      if (a.flag('follow')) 'follow',
+      if (threshold) 'threshold',
+    ];
+    if (modes.length != 1) {
+      throw UsageException(
+        'pick one of --toggle, --follow, or --above/--below with --set',
+        usage,
+      );
+    }
+    num? number(String key) {
+      final v = a.option(key);
+      if (v == null) return null;
+      return num.tryParse(v) ??
+          (throw UsageException('--$key needs a number', usage));
+    }
+
+    final set = a.option('set');
+    return {
+      'from': a.rest[0],
+      'to': a.rest[1],
+      'mode': modes.single,
+      'above': ?number('above'),
+      'below': ?number('below'),
+      if (set != null) 'set': parseKeyValues(['v=$set'])['v'],
+    };
   }
 }

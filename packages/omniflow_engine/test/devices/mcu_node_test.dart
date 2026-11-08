@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
+import '../support/v1_drivers.dart';
+
 /// A loopback board speaking the OmniFlow MCU protocol v1, like firmware/pico_w.
 class FakeBoard {
   FakeBoard._(this.udp) {
@@ -55,7 +57,7 @@ void main() {
     udp = await UdpTransport.bind();
     store = InMemoryDeviceStore();
     service = DeviceService(
-      registry: DriverRegistry.withBuiltIns(),
+      registry: v1Registry(),
       store: store,
       channels: {TransportType.udp: UdpJsonChannel(udp)},
     );

@@ -1,8 +1,10 @@
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
+import '../support/v1_drivers.dart';
+
 void main() {
-  final registry = DriverRegistry.withBuiltIns();
+  final registry = v1Registry();
   final devices = [
     CommandDevice('desk_lamp', 'Desk lamp', registry['philips_wiz_udp']!),
     CommandDevice('desk', 'Desk', registry['tuya_plug']!),

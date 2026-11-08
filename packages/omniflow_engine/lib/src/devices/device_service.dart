@@ -7,6 +7,7 @@ import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../template/template_renderer.dart';
 import '../transports/udp_transport.dart';
+import 'board.dart';
 import 'channels.dart';
 import 'device.dart';
 
@@ -123,6 +124,48 @@ class DeviceService {
         return updated;
       });
 
+  /// Sends one literal command (no capability) and returns the reply. The
+  /// board setup uses it for `describe`, `pin.mode` and `pin.watch`.
+  Future<ChannelReply> sendCommand(
+    String deviceId,
+    Map<String, Object?> command,
+  ) => _serialised(deviceId, () async {
+    final (device, manifest) = await _resolve(deviceId);
+    final (current, reply) = await _sendHealing(
+      device,
+      manifest,
+      command,
+      const {},
+    );
+    if (!identical(current, device)) await _store.put(current);
+    return reply;
+  });
+
+  /// Applies [change] to the stored device (a new host, new settings), in
+  /// order with the commands to it.
+  Future<Device> updateDevice(
+    String deviceId,
+    Device Function(Device) change,
+  ) => _serialised(deviceId, () async {
+    final device = await _store.get(deviceId);
+    if (device == null) throw DeviceNotFoundException('no device $deviceId');
+    final updated = change(device);
+    await _save(updated);
+    return updated;
+  });
+
+  /// Merges [values] into the device state and marks it seen now.
+  Future<Device> mergeState(String deviceId, Map<String, Object?> values) =>
+      _serialised(deviceId, () async {
+        final (device, _) = await _resolve(deviceId);
+        final updated = device.copyWith(
+          state: {...device.state, ...values},
+          lastSeen: _clock(),
+        );
+        await _save(updated);
+        return updated;
+      });
+
   /// Merges a pushed state packet (WiZ syncPilot) into the device state.
   Future<Device?> applyPush(String deviceId, Map<String, Object?> message) =>
       _serialised(deviceId, () async {
@@ -155,7 +198,7 @@ class DeviceService {
   Future<(Device, DriverManifest)> _resolve(String deviceId) async {
     final device = await _store.get(deviceId);
     if (device == null) throw DeviceNotFoundException('no device $deviceId');
-    final manifest = _registry[device.driverId];
+    final manifest = manifestFor(_registry, device);
     if (manifest == null) {
       throw DeviceNotFoundException(
         'device $deviceId uses unknown driver ${device.driverId}',

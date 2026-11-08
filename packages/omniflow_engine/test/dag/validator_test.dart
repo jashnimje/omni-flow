@@ -252,7 +252,7 @@ void main() {
         ],
       };
       final got = issues(json).join('\n');
-      expect(got, contains(r'must be $Name or %name'));
+      expect(got, contains(r'must be $Name, %name or msg.key'));
       expect(got, contains('must be one of <, <=, >, >=, ==, !='));
       expect(got, contains('value: must be a number'));
     });

@@ -66,6 +66,15 @@ class FakeEffects implements FlowEffects {
   }
 
   @override
+  Future<Map<String, Object?>?> toggleDevice(
+    String deviceId,
+    String capabilityId,
+  ) async {
+    invoked.add((deviceId, capabilityId, const {'toggle': true}));
+    return {'ok': true};
+  }
+
+  @override
   Future<void> runFlow(String flowId, Map<String, Object?> msg) async =>
       ranFlows.add(flowId);
 

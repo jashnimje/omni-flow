@@ -67,6 +67,12 @@ abstract interface class FlowEffects {
     String capabilityId,
     Map<String, Object?> params,
   );
+
+  /// Sets a toggle capability to the opposite of the device's current state.
+  Future<Map<String, Object?>?> toggleDevice(
+    String deviceId,
+    String capabilityId,
+  );
   Future<void> runFlow(String flowId, Map<String, Object?> msg);
   void announce(Map<String, Object?> payload);
   Future<void> setGlobal(String name, Object? value);
@@ -459,6 +465,23 @@ class FlowRunner {
           params,
         );
         return {...msg, 'result': reply};
+      case 'device_toggle':
+        if (run.dryRun) {
+          return {
+            ...msg,
+            'result': {
+              'dryRun': true,
+              'deviceId': c['deviceId'],
+              'capabilityId': c['capabilityId'],
+              'toggle': true,
+            },
+          };
+        }
+        final toggled = await _effects.toggleDevice(
+          c['deviceId'] as String,
+          c['capabilityId'] as String,
+        );
+        return {...msg, 'result': toggled};
       case 'set_variable':
         final name = c['name'] as String;
         final value = renderer.render(c['value'], context);
