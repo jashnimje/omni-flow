@@ -6,17 +6,39 @@ import 'package:mcp_dart/mcp_dart.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
+import '../devices/tv/fake_tvs.dart';
+
 Map<String, Object?> body(CallToolResult r) =>
     jsonDecode((r.content.single as TextContent).text) as Map<String, Object?>;
 
 void main() {
+  group('in process', () => _tools(viaHub: false));
+  // The same tools and refusals, with the engine in a hub and the MCP
+  // server reaching it through the hub's control socket.
+  group(
+    'through a running hub',
+    () => _tools(viaHub: true),
+    testOn: 'mac-os || linux',
+  );
+  _stdio();
+}
+
+void _tools({required bool viaHub}) {
   late Directory home;
   late OmniEngine engine;
+  late PacketTap tap;
   late McpClient client;
+  LocalServer? server;
+  EngineConnection? connection;
 
   setUp(() async {
     home = await Directory.systemTemp.createTemp('omni_mcp');
-    engine = await OmniEngine.open(home: home, secrets: InMemorySecretStore());
+    tap = PacketTap();
+    engine = await OmniEngine.open(
+      home: home,
+      secrets: InMemorySecretStore(),
+      tap: tap,
+    );
     await engine.handle('device.add', {
       'id': 'desk_lamp',
       'driver': 'philips_wiz_udp',
@@ -31,9 +53,17 @@ void main() {
     });
     final toServer = StreamController<List<int>>();
     final toClient = StreamController<List<int>>();
-    await createOmniMcpServer(
-      engine,
-    ).connect(IOStreamTransport(stream: toServer.stream, sink: toClient.sink));
+    final McpServer mcp;
+    if (viaHub) {
+      server = await LocalServer.start(engine, home: home);
+      connection = await LocalClient.connect(server!.path);
+      mcp = createOmniMcpServerFor(connection!);
+    } else {
+      mcp = createOmniMcpServer(engine);
+    }
+    await mcp.connect(
+      IOStreamTransport(stream: toServer.stream, sink: toClient.sink),
+    );
     client = McpClient(
       const Implementation(name: 'test', version: '1'),
       options: const McpClientOptions(capabilities: ClientCapabilities()),
@@ -45,6 +75,10 @@ void main() {
 
   tearDown(() async {
     await client.close();
+    await connection?.close();
+    connection = null;
+    await server?.close();
+    server = null;
     await engine.close();
     await home.delete(recursive: true);
   });
@@ -54,7 +88,42 @@ void main() {
     Map<String, dynamic> args = const {},
   ]) => client.callTool(CallToolRequest(name: name, arguments: args));
 
-  test('lists the ten tools', () async {
+  test(
+    'an agent-made link to a host-command device waits for approval',
+    () async {
+      await engine.devices.mergeState('desk_lamp', {'dimming': 40});
+      final result = await call('link_devices', {
+        'from': 'desk_lamp.dimming',
+        'to': 'mac_mini.volume',
+        'mode': 'threshold',
+        'above': 50,
+        'set': 30,
+      });
+      expect(result.isError, isFalse, reason: '${body(result)}');
+      expect(
+        (body(result)['highRisk'], body(result)['approved']),
+        (true, false),
+      );
+      expect(engine.flows.loadedFlows, isEmpty);
+    },
+  );
+
+  test('the packet sniffer sees the engine\'s packets', () async {
+    final sniffing = call('sniff_live_packets', {'seconds': 1});
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    tap.record(
+      CapturedPacket(
+        transport: 'udp',
+        direction: PacketDirection.outgoing,
+        remote: '127.0.0.1:38899',
+        bytes: utf8.encode('{"method":"getPilot"}'),
+      ),
+    );
+    final packets = body(await sniffing)['packets'] as List;
+    expect((packets.single as Map)['text'], '{"method":"getPilot"}');
+  });
+
+  test('lists the thirteen tools', () async {
     final tools = (await client.listTools()).tools.map((t) => t.name).toSet();
     expect(tools, {
       'discover_devices_and_capabilities',
@@ -67,7 +136,18 @@ void main() {
       'generate_mcu_firmware',
       'link_devices',
       'configure_board_pins',
+      'describe_board',
+      'pair_device',
+      'trust_ssh_host_key',
     });
+  });
+
+  test('configure_board_pins tells an agent to keep active-low pins', () async {
+    final pins = (await client.listTools()).tools.firstWhere(
+      (t) => t.name == 'configure_board_pins',
+    );
+    expect(pins.description, contains('"invert": true'));
+    expect(pins.description, contains('active low'));
   });
 
   test(
@@ -157,6 +237,91 @@ void main() {
     });
     expect(result.isError, isTrue);
     expect((body(result)['error'] as Map)['type'], 'needs_user');
+  });
+
+  test(
+    'an agent uses a TV like any device but never starts its pairing',
+    () async {
+      final tv = await FakeWebOsTv.start();
+      addTearDown(tv.close);
+      await engine.handle('device.add', {
+        'id': 'lounge_tv',
+        'driver': 'lg_webos_tv',
+        'host': '127.0.0.1',
+        'port': tv.port,
+      });
+      final unpaired = await call('invoke_device_capability', {
+        'deviceId': 'lounge_tv',
+        'capabilityId': 'mute',
+        'params': {'value': true},
+      });
+      expect(unpaired.isError, isTrue);
+      final error = body(unpaired)['error'] as Map;
+      expect(error['type'], 'needs_user');
+      // The app's Pair button pairs the phone's engine, not this one.
+      expect(error['message'], contains('omni device pair lounge_tv'));
+      expect(error['message'], isNot(contains('in the app')));
+      expect(tv.prompts, 0, reason: 'no prompt appeared on the TV');
+
+      final pair = body(await call('pair_device', {'deviceId': 'lounge_tv'}));
+      expect((pair['error'] as Map)['message'], isNot(contains('in the app')));
+      expect(
+        (pair['error'] as Map)['message'],
+        contains('omni device pair lounge_tv'),
+      );
+
+      expect(
+        (await engine.handle('device.pair', {'id': 'lounge_tv'}))['ok'],
+        isTrue,
+      );
+      final paired = await call('invoke_device_capability', {
+        'deviceId': 'lounge_tv',
+        'capabilityId': 'mute',
+        'params': {'value': true},
+      });
+      expect(paired.isError, isFalse, reason: '${body(paired)}');
+      expect(tv.prompts, 1);
+    },
+  );
+
+  test('pairing and host keys stay with the user', () async {
+    for (final (tool, command) in [
+      ('pair_device', 'omni secret set mac_mini sshPrivateKey'),
+      ('trust_ssh_host_key', 'omni device hostkey mac_mini'),
+    ]) {
+      final result = await call(tool, {'deviceId': 'mac_mini'});
+      expect(result.isError, isTrue, reason: tool);
+      final error = body(result)['error'] as Map;
+      expect(error['type'], 'needs_user');
+      expect(error['message'], contains(command));
+    }
+  });
+
+  test(
+    'pair_device gives the secret command to drivers with no pairing',
+    () async {
+      await engine.handle('device.add', {
+        'id': 'plug',
+        'driver': 'tuya_plug',
+        'host': '127.0.0.1',
+        'settings': {'devId': 'bf00'},
+      });
+      final plug = body(await call('pair_device', {'deviceId': 'plug'}));
+      expect(
+        (plug['error'] as Map)['message'],
+        contains('omni secret set plug localKey'),
+      );
+      expect((plug['error'] as Map)['message'], isNot(contains('device pair')));
+
+      final bulb = body(await call('pair_device', {'deviceId': 'desk_lamp'}));
+      expect((bulb['error'] as Map)['type'], 'invalid');
+    },
+  );
+
+  test('describe_board refuses a device that is not a board', () async {
+    final result = await call('describe_board', {'deviceId': 'desk_lamp'});
+    expect(result.isError, isTrue);
+    expect((body(result)['error'] as Map)['type'], 'invalid');
   });
 
   test('an agent cannot register a driver that runs host commands, but can register others', () async {
@@ -295,7 +460,9 @@ void main() {
     final result = await call('simulate_flow_dry_run', {'flowId': 'on'});
     expect(((body(result)['run'] as Map)['outcome']), 'completed');
   });
+}
 
+void _stdio() {
   test(
     'omni mcp speaks MCP over real stdio',
     () async {
@@ -339,7 +506,7 @@ void main() {
             .firstWhere((l) => l.contains('"id":2'))
             .timeout(const Duration(seconds: 20)),
       ) as Map;
-      expect(((list['result'] as Map)['tools'] as List), hasLength(10));
+      expect(((list['result'] as Map)['tools'] as List), hasLength(13));
       await process.stdin.close();
       expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
     },

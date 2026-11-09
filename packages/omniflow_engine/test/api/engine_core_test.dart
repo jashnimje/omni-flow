@@ -7,6 +7,8 @@ import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 
+import '../devices/fake_mdns.dart';
+
 /// Waits until [done] holds, failing after five seconds.
 Future<void> until(FutureOr<bool> Function() done) async {
   final deadline = DateTime.now().add(const Duration(seconds: 5));
@@ -128,7 +130,11 @@ void main() {
   late InMemorySecretStore secrets;
   late OmniEngine engine;
 
-  Future<OmniEngine> open() => OmniEngine.open(home: home, secrets: secrets);
+  Future<OmniEngine> open() => OmniEngine.open(
+    home: home,
+    secrets: secrets,
+    mdns: MdnsDiscovery(client: () => FakeMdns(const [])),
+  );
 
   setUp(() async {
     home = await Directory.systemTemp.createTemp('omni_core');

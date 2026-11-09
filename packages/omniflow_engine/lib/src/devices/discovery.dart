@@ -4,26 +4,204 @@ import 'dart:io';
 
 import 'package:json_path/json_path.dart';
 
+import '../api/api_error.dart';
 import '../manifest/driver_manifest.dart';
 import '../transports/udp_transport.dart';
 import 'device_service.dart';
+import 'discovery/mdns_discovery.dart';
+import 'discovery/tuya_broadcast.dart';
 
 class DiscoveredDevice {
   const DiscoveredDevice({
     required this.host,
     required this.reply,
     this.stableId,
+    this.port,
+    this.name,
+    this.method,
   });
 
   final String host;
   final String? stableId;
   final Map<String, Object?> reply;
 
+  /// The service port, when discovery reports one (mDNS SRV).
+  final int? port;
+
+  /// A name the device announced (an mDNS instance name).
+  final String? name;
+
+  /// The manifest discovery method that found it.
+  final String? method;
+
   Map<String, Object?> toJson() => {
     'host': host,
     if (stableId != null) 'stableId': stableId,
+    if (port != null) 'port': port,
+    if (name != null) 'name': name,
+    if (method != null) 'method': method,
     'reply': reply,
   };
+}
+
+/// Runs every network discovery method a driver declares and merges the
+/// results: `udp_broadcast`, `tuya_broadcast` and `mdns`. Serial discovery
+/// stays with the serial channel, which owns the ports.
+class DeviceDiscovery {
+  DeviceDiscovery({
+    required this.udp,
+    TuyaDiscovery? tuya,
+    MdnsDiscovery? mdns,
+    this.tuyaMinimumWindow = const Duration(seconds: 6),
+    this.tuyaLocateWindow = const Duration(seconds: 8),
+  }) : tuya = tuya ?? TuyaDiscovery(),
+       mdns = mdns ?? MdnsDiscovery();
+
+  final UdpDiscovery udp;
+  final TuyaDiscovery tuya;
+  final MdnsDiscovery mdns;
+
+  /// Tuya devices announce on a timer of several seconds rather than in
+  /// answer to a probe, so a short window often hears nothing.
+  final Duration tuyaMinimumWindow;
+
+  /// How long healing listens for a moved Tuya device. It returns as soon
+  /// as the device is heard.
+  final Duration tuyaLocateWindow;
+
+  /// [portOverride] applies to `udp_broadcast` only. A spec's `windowMs`
+  /// lengthens [window] for that method.
+  Future<List<DiscoveredDevice>> discover(
+    DriverManifest driver, {
+    Duration window = const Duration(seconds: 2),
+    int? portOverride,
+  }) async {
+    final runs = <Future<List<DiscoveredDevice>>>[];
+    final failures = <String>[];
+    void add(String method, Future<List<DiscoveredDevice>> run) => runs.add(
+      run.catchError((Object e) {
+        failures.add(_cannotListen(method, e as SocketException));
+        return const <DiscoveredDevice>[];
+      }, test: (e) => e is SocketException),
+    );
+    for (final spec in driver.discovery) {
+      final specWindow = _longer(window, spec.config['windowMs']);
+      switch (spec.method) {
+        case 'udp_broadcast':
+          add(
+            spec.method,
+            udp
+                .discover(
+                  driver,
+                  window: specWindow,
+                  portOverride: portOverride,
+                )
+                .then(
+                  (found) => [
+                    for (final f in found)
+                      DiscoveredDevice(
+                        host: f.host,
+                        stableId: f.stableId,
+                        reply: f.reply,
+                        method: spec.method,
+                      ),
+                  ],
+                ),
+          );
+        case tuyaBroadcastMethod:
+          add(
+            spec.method,
+            tuya
+                .discover(window: _atLeast(specWindow, tuyaMinimumWindow))
+                .then((found) => [for (final s in found) _fromTuya(s)]),
+          );
+        case mdnsMethod:
+          final service = spec.config['service'];
+          if (service is! String) continue;
+          final idTxt = spec.config['idTxt'] as String?;
+          final idInstance = spec.config['idInstance'] == true;
+          add(
+            spec.method,
+            mdns
+                .browse(service, window: specWindow)
+                .then(
+                  (found) => [
+                    for (final s in found) _fromMdns(s, idTxt, idInstance),
+                  ],
+                ),
+          );
+      }
+    }
+    final results = await Future.wait(runs);
+    if (runs.isNotEmpty && failures.length == runs.length) {
+      throw ApiError('unavailable', failures.join('. '));
+    }
+    final merged = <String, DiscoveredDevice>{};
+    for (final found in results) {
+      for (final d in found) {
+        merged[(d.stableId ?? 'host:${d.host}').toLowerCase()] ??= d;
+      }
+    }
+    return merged.values.toList();
+  }
+
+  static String _cannotListen(String method, SocketException e) =>
+      method == tuyaBroadcastMethod
+      ? 'cannot listen on UDP ${tuyaBroadcastPorts.join(' or ')} for Tuya '
+            'announcements (${e.message}). Another program holds the ports'
+      : '$method discovery cannot open its socket (${e.message})';
+
+  /// A [DeviceLocator] for address healing. A Tuya driver listens until the
+  /// device with that `gwId` is heard; other methods discover and match the
+  /// stable id.
+  DeviceLocator get locator => (driver, stableId) async {
+    final methods = {for (final d in driver.discovery) d.method};
+    if (methods.contains(tuyaBroadcastMethod)) {
+      final host = await tuya.locate(stableId, window: tuyaLocateWindow);
+      if (host != null) return host;
+    }
+    if (!methods.contains('udp_broadcast') && !methods.contains(mdnsMethod)) {
+      return null;
+    }
+    final hits = await discover(driver);
+    return hits
+        .where((h) => h.stableId?.toLowerCase() == stableId.toLowerCase())
+        .firstOrNull
+        ?.host;
+  };
+
+  static DiscoveredDevice _fromTuya(TuyaSighting s) => DiscoveredDevice(
+    host: s.host,
+    stableId: s.broadcast.gwId,
+    reply: s.broadcast.json,
+    method: tuyaBroadcastMethod,
+  );
+
+  /// The stable id is the TXT value [idTxt] names, or the instance label
+  /// when [idInstance] (a board registers under its node name, a Shelly
+  /// under its device id).
+  static DiscoveredDevice _fromMdns(
+    MdnsService s,
+    String? idTxt,
+    bool idInstance,
+  ) => DiscoveredDevice(
+    host: s.host,
+    port: s.port,
+    name: s.instance,
+    stableId: idInstance
+        ? s.instance
+        : idTxt == null
+        ? null
+        : s.txt[idTxt.toLowerCase()],
+    reply: s.toJson(),
+    method: mdnsMethod,
+  );
+
+  static Duration _longer(Duration window, Object? windowMs) => windowMs is int
+      ? _atLeast(window, Duration(milliseconds: windowMs))
+      : window;
+
+  static Duration _atLeast(Duration a, Duration b) => a > b ? a : b;
 }
 
 /// Finds devices by broadcasting a driver's `udp_broadcast` probe and

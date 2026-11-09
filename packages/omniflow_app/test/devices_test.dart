@@ -31,7 +31,11 @@ void main() {
       engine.answers['device.discover'] = {
         'ok': true,
         'found': [
-          {'host': '192.168.1.40', 'stableId': 'a8bb50000001', 'knownAs': 'x'},
+          {
+            'host': '192.168.1.40',
+            'stableId': 'a8bb50000001',
+            'knownAs': 'desk_lamp',
+          },
           {'host': '192.168.1.41', 'stableId': 'a8bb50aa'},
         ],
       };
@@ -47,7 +51,14 @@ void main() {
       expect(engine.callsOf('device.discover').single.$2, {
         'driver': 'philips_wiz_udp',
       });
-      expect(find.byKey(const ValueKey('found-192.168.1.40')), findsNothing);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('found-known-192.168.1.40')),
+            )
+            .data,
+        'Already used by Desk lamp',
+      );
       await tester.tap(find.byKey(const ValueKey('found-192.168.1.41')));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -68,6 +79,69 @@ void main() {
         'stableId': 'a8bb50aa',
       });
       expect(find.text('Added Hall lamp.'), findsOneWidget);
+    });
+
+    testWidgets('a bridge already used by one light is offered for the next', (
+      tester,
+    ) async {
+      engine.answers['driver.list'] = {
+        'ok': true,
+        'drivers': [
+          {
+            'id': 'philips_hue_light',
+            'name': 'Philips Hue light',
+            'pairing': 'hue_bridge',
+            'settings': [
+              {'key': 'lightId', 'label': 'Light number on the bridge'},
+            ],
+          },
+        ],
+      };
+      engine.answers['device.discover'] = {
+        'ok': true,
+        'found': [
+          {
+            'host': '192.168.1.20',
+            'stableId': 'ecb5fafffe000001',
+            'knownAs': 'desk_lamp',
+          },
+        ],
+      };
+      await pumpApp(tester, engine);
+      await tester.tap(find.byKey(const ValueKey('add-device')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('add-driver')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Philips Hue light').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('add-scan')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nothing'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('found-192.168.1.20')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('add-name')))
+            .controller!
+            .text,
+        isEmpty,
+      );
+      await tester.enterText(find.byKey(const ValueKey('add-name')), 'Hall');
+      await tester.enterText(
+        find.byKey(const ValueKey('add-setting-lightId')),
+        '2',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('add-save')));
+      await tester.pumpAndSettle();
+      expect(engine.callsOf('device.add').single.$2, {
+        'id': 'hall',
+        'name': 'Hall',
+        'driver': 'philips_hue_light',
+        'host': '192.168.1.20',
+        'stableId': 'ecb5fafffe000001',
+        'settings': {'lightId': '2'},
+      });
     });
 
     testWidgets('rename keeps the device and replaces its name and room', (

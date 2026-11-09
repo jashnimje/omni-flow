@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "samsung_tizen_tv",
+  "name": "Samsung Tizen TV (local remote control over secure WebSocket)",
+  "category": "media",
+  "icon": "tv",
+  "transport": {
+    "type": "websocket",
+    "port": 8002,
+    "protocol": "tizen",
+    "clientName": "OmniFlow",
+    "pairingTimeoutMs": 60000
+  },
+  "settings": [
+    { "key": "token", "label": "Pairing token (issued when you allow OmniFlow on the TV)", "secret": true },
+    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect)", "secret": true }
+  ],
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "remote",
+      "type": "dpad_remote",
+      "label": "Remote",
+      "command": {
+        "key": "{{value}}",
+        "keyMap": {
+          "up": "KEY_UP",
+          "down": "KEY_DOWN",
+          "left": "KEY_LEFT",
+          "right": "KEY_RIGHT",
+          "ok": "KEY_ENTER",
+          "back": "KEY_RETURN",
+          "home": "KEY_HOME"
+        }
+      }
+    },
+    { "id": "volume_up", "type": "action", "label": "Volume up", "command": { "key": "KEY_VOLUP" } },
+    { "id": "volume_down", "type": "action", "label": "Volume down", "command": { "key": "KEY_VOLDOWN" } },
+    { "id": "mute", "type": "action", "label": "Mute", "command": { "key": "KEY_MUTE" } },
+    { "id": "power", "type": "action", "label": "Power key", "command": { "key": "KEY_POWER" } },
+    {
+      "id": "launch_app",
+      "type": "action",
+      "label": "Launch app",
+      "params": { "app": { "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._]{1,127}" } },
+      "command": { "launch": "{{app}}", "actionType": "DEEP_LINK" }
+    }
+  ]
+}

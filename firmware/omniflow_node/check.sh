@@ -16,12 +16,17 @@ c++ "${flags[@]}" -DOMNI_SMALL -o "$out/core_test_small" host/core_test.cpp omni
 c++ "${flags[@]}" -o "$out/host_board" host/host_board.cpp omni_core.cpp
 # The virtual board keeps the firmware's line limit and records the password.
 long_line="$(printf 'x%.0s' {1..250})"
+# It also reports RF sends, and an output can start high (an active-low relay).
 printf '%s\n' "$long_line" '{"cmd":"sim.set"}' \
-  '{"cmd":"wifi.set","ssid":"net","password":"password1","id":1}' '{"cmd":"wifi.status","id":2}' |
+  '{"cmd":"wifi.set","ssid":"net","password":"password1","id":1}' '{"cmd":"wifi.status","id":2}' \
+  '{"cmd":"pin.mode","pin":4,"mode":"out","value":1,"id":3}' '{"cmd":"rf.send","code":5393,"bits":24,"id":4}' |
   "$out/host_board" --node bench > "$out/host_board.out"
 grep -q '"message":"line too long"' "$out/host_board.out"
 grep -q '"event":"sim.ack"' "$out/host_board.out"
 grep -q '"connected":true,"ip":"127.0.0.1".*"passwordLength":9,"id":2' "$out/host_board.out"
+grep -q '"cmd":"pin.mode","pin":4,"value":1,"id":3' "$out/host_board.out"
+grep -q '"event":"sim.rf","protocol":1,"code":5393,"bits":24,"repeat":10' "$out/host_board.out"
+grep -q '"cmd":"rf.send","id":4' "$out/host_board.out"
 echo "host board checks passed"
 
 for fqbn in arduino:avr:uno esp8266:esp8266:nodemcuv2 rp2040:rp2040:rpipicow esp32:esp32:esp32; do

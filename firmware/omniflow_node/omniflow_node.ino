@@ -1,14 +1,19 @@
 // OmniFlow node firmware: one sketch for ESP32, ESP8266, Pico W and Uno.
 //
 // Flash it once and set it up with `omni board setup` over USB: Wi-Fi, node
-// name and IR pin are sent as commands and kept in flash, so no credentials
-// are ever compiled in. The protocol lives in omni_core.cpp.
+// name, IR and RF pins are sent as commands and kept in flash, so no
+// credentials are ever compiled in. The protocol lives in omni_core.cpp.
 //
 //   USB serial  115200 baud, one JSON command per line
 //   Wi-Fi UDP   port 38950, taken only from the board's own subnet; replies
 //               go to the sender, events to up to 3 hosts that sent describe
-//               in the last 90 s; hello broadcast to 38951 every 30 s;
-//               mDNS service _omniflow._udp
+//               in the last 90 s; hello broadcast to 38951 on every join
+//               and every 30 s; mDNS service _omniflow._udp
+//
+//   IR (NEC, 38 kHz carrier) and 433 MHz RF (RCSwitch protocols 1 to 3):
+//     ESP32   RMT for both, carrier in hardware
+//     Uno     IR on pin 3: Timer2 drives OC2B; other pins and RF: busy-wait
+//     ESP8266, Pico W  busy-wait on the CPU cycle counter, direct pin writes
 #include <EEPROM.h>
 
 #include "omni_core.h"
@@ -17,6 +22,9 @@
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <driver/gpio.h>
+#include <esp32-hal-periman.h>
+#include <esp32-hal-rmt.h>
 #include <esp_mac.h>
 #include <lwip/sockets.h>
 #define OMNI_BOARD omni::BOARD_ESP32
@@ -58,28 +66,35 @@ using omni::Mode;
 static const uint16_t UDP_PORT = 38950;
 static const uint16_t HELLO_PORT = 38951;
 static const unsigned long HELLO_EVERY_MS = 30000;
-static const uint32_t SETTINGS_MAGIC = 0x4F4D4E32;  // "OMN2"
+static const uint32_t SETTINGS_MAGIC = 0x4F4D4E33;  // "OMN3"
+// Version 2 had no rfPin; that byte was struct padding (zero) or unwritten.
+static const uint32_t SETTINGS_MAGIC_V2 = 0x4F4D4E32;
 
 static omni::Settings settings;
-
-static void loadSettings() {
-#if !defined(ARDUINO_ARCH_AVR)
-  EEPROM.begin(sizeof(settings));
-#endif
-  EEPROM.get(0, settings);
-  if (settings.magic != SETTINGS_MAGIC) {
-    memset(&settings, 0, sizeof(settings));
-    settings.magic = SETTINGS_MAGIC;
-    settings.irPin = -1;
-  }
-  omni::sanitizeSettings(settings);
-}
 
 static void saveSettings() {
   EEPROM.put(0, settings);
 #if !defined(ARDUINO_ARCH_AVR)
   EEPROM.commit();
 #endif
+}
+
+static void loadSettings() {
+#if !defined(ARDUINO_ARCH_AVR)
+  EEPROM.begin(sizeof(settings));
+#endif
+  EEPROM.get(0, settings);
+  if (settings.magic == SETTINGS_MAGIC_V2) {
+    settings.magic = SETTINGS_MAGIC;
+    settings.rfPin = -1;
+    saveSettings();
+  } else if (settings.magic != SETTINGS_MAGIC) {
+    memset(&settings, 0, sizeof(settings));
+    settings.magic = SETTINGS_MAGIC;
+    settings.irPin = -1;
+    settings.rfPin = -1;
+  }
+  omni::sanitizeSettings(settings, OMNI_BOARD);
 }
 
 // ---------------------------------------------------------------- hardware
@@ -96,6 +111,265 @@ static Servo servos[SERVO_SLOTS];
 static int8_t servoPins[SERVO_SLOTS];  // the pin each one drives, -1 when free
 #endif
 
+// ---------------------------------------------------------------- IR and RF
+
+#if defined(ARDUINO_ARCH_ESP32)
+// The RMT peripheral times every mark and space and adds the carrier, so
+// neither Wi-Fi interrupts nor task switches can bend a frame. One tick is 1 us.
+static const uint32_t RMT_TICK_HZ = 1000000;
+
+// Puts the RMT on pin, first releasing the pin it held before (owned), so
+// moving ir.pin or rf.pin never leaks a channel.
+static bool rmtOn(int8_t& owned, int pin) {
+  if (owned >= 0 && owned != pin && perimanGetPinBusType(owned) == ESP32_BUS_TYPE_RMT_TX) rmtDeinit(owned);
+  owned = (int8_t)pin;
+  // rmtInit returns at once when the pin already has this channel.
+  return rmtInit(pin, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, RMT_TICK_HZ);
+}
+
+static rmt_data_t rmtSymbol(uint16_t highUs, uint16_t lowUs) {
+  rmt_data_t symbol;
+  symbol.level0 = 1;
+  symbol.duration0 = highUs;
+  symbol.level1 = 0;
+  symbol.duration1 = lowUs ? lowUs : 1;  // a zero duration would end the frame early
+  return symbol;
+}
+
+static int8_t irRmtPin = -1;
+static int8_t rfRmtPin = -1;
+
+static void transmitIr(int pin, uint32_t bits) {
+  if (!rmtOn(irRmtPin, pin)) return;
+  // The carrier goes on the high level: rmtSetCarrier's carrier_level is
+  // passed to IDF as polarity_active_low, so false is the non-inverted carrier.
+  if (!rmtSetCarrier(pin, true, false, omni::IR_CARRIER_HZ, 0.33f)) return;
+  rmt_data_t frame[omni::NEC_PULSES];
+  for (int i = 0; i < omni::NEC_PULSES; i++) {
+    uint16_t mark, space;
+    omni::necPulse(bits, i, &mark, &space);
+    frame[i] = rmtSymbol(mark, space);
+  }
+  rmtWrite(pin, frame, omni::NEC_PULSES, 200);
+}
+
+static void transmitRf(int pin, const omni::RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) {
+  if (!rmtOn(rfRmtPin, pin)) return;
+  rmt_data_t frame[33];
+  for (int i = 0; i <= bits; i++) {
+    uint16_t high, low;
+    omni::rfPulse(protocol, code, bits, i, &high, &low);
+    frame[i] = rmtSymbol(high, low);
+  }
+  for (int r = 0; r < repeat; r++) rmtWrite(pin, frame, bits + 1, 200);
+}
+
+#else
+// Everywhere else the CPU busy-waits on one absolute timeline, so the time a
+// pin write or an interrupt takes never adds up over a frame: a late edge
+// only shortens the wait that follows it. (A struct, because the sketch
+// builder would declare free functions above the typedef.)
+struct Clock {
+#if defined(ARDUINO_ARCH_AVR)
+  typedef unsigned long Ticks;  // micros(), which counts in steps of 4 us
+  static Ticks now() { return micros(); }
+  static Ticks perUs() { return 1; }
+#else
+  // The CPU cycle counter: CCOUNT on the ESP8266, SysTick extended by the
+  // core on the RP2040.
+  typedef uint32_t Ticks;
+#if defined(ARDUINO_ARCH_ESP8266)
+  static Ticks now() { return ESP.getCycleCount(); }
+  static Ticks perUs() { return ESP.getCpuFreqMHz(); }
+#else
+  static Ticks now() { return rp2040.getCycleCount(); }
+  static Ticks perUs() { return (Ticks)rp2040.f_cpu() / 1000000; }
+#endif
+#endif
+  static void waitUntil(Ticks at) {
+    while ((long)(now() - at) < 0) {
+    }
+  }
+};
+typedef Clock::Ticks Ticks;
+
+#if defined(ARDUINO_ARCH_AVR)
+// A cycle-counted carrier for pins without Timer2: each loop pass is exactly
+// one 38 kHz period (421 cycles at 16 MHz, 38.005 kHz), toggling the pin
+// through its PINx register, a single store that never races an interrupt
+// changing other pins of the port. The waits leave room for the loop's own
+// instructions, counted in the avr-gcc 7.3 listing: the delay borrows r31, so
+// each store is movw (1) then st (2), and the pass ends with subi, sbc and a
+// taken brne (4). Interrupts stay on, so the Timer0 tick (about 5 us every
+// 1024 us) stretches one period in 39, about 0.5% low on average.
+static const uint16_t AVR_PERIOD_CYCLES = (F_CPU + omni::IR_CARRIER_HZ / 2) / omni::IR_CARRIER_HZ;
+static const uint16_t AVR_HIGH_CYCLES = AVR_PERIOD_CYCLES / 3;
+static const uint16_t AVR_LOOP_HIGH = 1 + 2;  // movw and st that end the high part
+static const uint16_t AVR_LOOP_LOW = 4 + 1 + 2;  // the loop, then movw and st that start the next period
+static void __attribute__((noinline)) softCarrier(volatile uint8_t* toggle, uint8_t mask, uint16_t periods) {
+  do {
+    *toggle = mask;
+    __builtin_avr_delay_cycles(AVR_HIGH_CYCLES - AVR_LOOP_HIGH);
+    *toggle = mask;
+    __builtin_avr_delay_cycles(AVR_PERIOD_CYCLES - AVR_HIGH_CYCLES - AVR_LOOP_LOW);
+  } while (--periods);
+}
+
+// Pin 3 is OC2B: Timer2 makes the carrier in phase correct PWM with TOP in
+// OCR2A, as IRremote does, and a mark only connects OC2B to the pin. The
+// timer is put back afterwards, so analogWrite on 11 resumes; PWM on 11 is
+// paused while a frame is sent.
+static const uint8_t TIMER2_TOP = F_CPU / 2 / omni::IR_CARRIER_HZ;  // 210: 38.1 kHz
+#endif
+
+class Pulses {
+ public:
+  Pulses(int pin, bool ir) : pin_(pin) {
+    digitalWrite(pin, LOW);
+    pinMode(pin, OUTPUT);
+    perUs_ = Clock::perUs();
+#if defined(ARDUINO_ARCH_AVR)
+    timer2_ = ir && pin == 3;
+    if (timer2_) {
+      savedA_ = TCCR2A;
+      savedB_ = TCCR2B;
+      savedTop_ = OCR2A;
+      savedDuty_ = OCR2B;
+      TCCR2A = _BV(WGM20);
+      TCCR2B = _BV(WGM22) | _BV(CS20);
+      OCR2A = TIMER2_TOP;
+      OCR2B = TIMER2_TOP / 3;
+      TCNT2 = 0;
+    }
+    toggle_ = portInputRegister(digitalPinToPort(pin));
+    mask_ = digitalPinToBitMask(pin);
+#else
+    (void)ir;
+    // One carrier period in cycles: 80 MHz / 2105 = 38.005 kHz on an ESP8266
+    // (160 MHz / 4211 = 37.996 kHz), 200 MHz / 5263 = 38.001 kHz on a Pico W
+    // (133 MHz / 3500 = 38.000 kHz).
+    period_ = (perUs_ * 1000000UL + omni::IR_CARRIER_HZ / 2) / omni::IR_CARRIER_HZ;
+#endif
+    at_ = Clock::now();
+  }
+  ~Pulses() {
+#if defined(ARDUINO_ARCH_AVR)
+    if (timer2_) {
+      TCCR2B = savedB_;
+      TCCR2A = savedA_ & ~(_BV(COM2B1) | _BV(COM2B0));
+      OCR2A = savedTop_;
+      OCR2B = savedDuty_;
+    }
+#endif
+    digitalWrite(pin_, LOW);
+  }
+  // A 38 kHz burst at about a third duty, as whole carrier periods.
+  void carrier(uint16_t us) {
+    Ticks end = at_ + us * perUs_;
+#if defined(ARDUINO_ARCH_AVR)
+    if (timer2_) {
+      TCCR2A |= _BV(COM2B1);
+      Clock::waitUntil(end);
+      TCCR2A &= ~_BV(COM2B1);
+    } else {
+      uint16_t periods = (uint16_t)(((uint32_t)us * omni::IR_CARRIER_HZ + 500000UL) / 1000000UL);
+      if (periods) softCarrier(toggle_, mask_, periods);
+    }
+#else
+    Ticks high = period_ / 3;
+    Ticks edge = at_;
+    for (uint32_t n = ((uint32_t)us * omni::IR_CARRIER_HZ + 500000UL) / 1000000UL; n; n--) {
+      write(true);
+      edge += high;
+      Clock::waitUntil(edge);
+      write(false);
+      edge += period_ - high;
+      Clock::waitUntil(edge);
+    }
+#endif
+    at_ = end;
+  }
+  void level(bool high, uint16_t us) {
+    write(high);
+    at_ += us * perUs_;
+    Clock::waitUntil(at_);
+  }
+
+ private:
+  inline void write(bool high) {
+#if defined(ARDUINO_ARCH_ESP8266)
+    if (pin_ < 16) {
+      if (high) {
+        GPOS = 1UL << pin_;
+      } else {
+        GPOC = 1UL << pin_;
+      }
+    } else {
+      GP16O = high ? 1 : 0;
+    }
+#elif defined(ARDUINO_RASPBERRY_PI_PICO_W)
+    gpio_put(pin_, high);
+#else
+    digitalWrite(pin_, high ? HIGH : LOW);
+#endif
+  }
+
+  int pin_;
+  Ticks perUs_;
+  Ticks at_;
+#if defined(ARDUINO_ARCH_AVR)
+  bool timer2_;
+  uint8_t savedA_, savedB_, savedTop_, savedDuty_;
+  volatile uint8_t* toggle_;
+  uint8_t mask_;
+#else
+  Ticks period_;
+#endif
+};
+
+static void transmitIr(int pin, uint32_t bits) {
+  Pulses tx(pin, true);
+  for (int i = 0; i < omni::NEC_PULSES; i++) {
+    uint16_t mark, space;
+    omni::necPulse(bits, i, &mark, &space);
+    tx.carrier(mark);
+    tx.level(false, space);
+  }
+}
+
+static void transmitRf(int pin, const omni::RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) {
+  Pulses tx(pin, false);
+  for (int r = 0; r < repeat; r++) {
+    for (int i = 0; i <= bits; i++) {
+      uint16_t high, low;
+      omni::rfPulse(protocol, code, bits, i, &high, &low);
+      tx.level(true, high);
+      tx.level(false, low);
+    }
+  }
+}
+#endif
+
+// ---------------------------------------------------------------- pins
+
+// Sets the output latch while the pin is still an input, so an output starts
+// at level from its first instant.
+static void presetLevel(int pin, int level) {
+#if defined(ARDUINO_ARCH_ESP32)
+  // digitalWrite refuses a pin the GPIO driver has not claimed yet;
+  // gpio_set_level writes the output register in any mode.
+  gpio_set_level((gpio_num_t)pin, level);
+#elif defined(ARDUINO_RASPBERRY_PI_PICO_W)
+  // digitalWrite on an in_pullup pin only switches its direction, and
+  // in_pullup cleared the latch; gpio_put sets the latch in any mode.
+  gpio_put(pin, level);
+#else
+  // AVR and ESP8266 digitalWrite set the latch without enabling the output
+  // (on AVR, HIGH also turns the pull-up on until the pin is an output).
+  digitalWrite(pin, level ? HIGH : LOW);
+#endif
+}
+
 class BoardHal : public omni::Hal {
  public:
   BoardHal() {
@@ -104,12 +378,15 @@ class BoardHal : public omni::Hal {
     for (int i = 0; i < SERVO_SLOTS; i++) servoPins[i] = -1;
 #endif
   }
-  bool setMode(int pin, Mode mode) override {
+  bool setMode(int pin, Mode mode, int level) override {
     if (!allowed(pin, mode)) return false;
     Mode old = modes[pin];
-    release(pin);
-    if (!apply(pin, mode)) {
-      apply(pin, old);
+    // Set the level first too, so detaching PWM or a servo hands the pin
+    // over at that level.
+    if (mode == omni::MODE_OUT) presetLevel(pin, level);
+    release(pin, mode);
+    if (!apply(pin, mode, level)) {
+      apply(pin, old, 0);
       return false;
     }
     modes[pin] = mode;
@@ -143,16 +420,11 @@ class BoardHal : public omni::Hal {
   }
   bool hasIr() override { return settings.irPin >= 0; }
   void sendIr(uint32_t bits) override {
-    int pin = settings.irPin;
-    if (pin < 0) return;
-    pinMode(pin, OUTPUT);
-    mark(pin, 9000);
-    space(4500);
-    for (int i = 0; i < 32; i++) {
-      mark(pin, 562);
-      space((bits >> i) & 1 ? 1687 : 562);
-    }
-    mark(pin, 562);
+    if (settings.irPin >= 0) transmitIr(settings.irPin, bits);
+  }
+  bool hasRf() override { return settings.rfPin >= 0; }
+  void sendRf(const omni::RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) override {
+    if (settings.rfPin >= 0) transmitRf(settings.rfPin, protocol, code, bits, repeat);
   }
   unsigned long millis() override { return ::millis(); }
 
@@ -171,13 +443,13 @@ class BoardHal : public omni::Hal {
     return true;
   }
   // Returns false when no PWM or servo channel is free.
-  bool apply(int pin, Mode mode) {
+  bool apply(int pin, Mode mode, int level) {
     switch (mode) {
       case omni::MODE_IN: pinMode(pin, INPUT); return true;
       case omni::MODE_IN_PULLUP: pinMode(pin, INPUT_PULLUP); return true;
       case omni::MODE_OUT:
+        presetLevel(pin, level);
         pinMode(pin, OUTPUT);
-        digitalWrite(pin, LOW);
         return true;
       case omni::MODE_PWM:
 #if defined(ARDUINO_ARCH_ESP32)
@@ -197,11 +469,14 @@ class BoardHal : public omni::Hal {
       default: pinMode(pin, INPUT); return true;  // MODE_ADC, and MODE_NONE releases the pin
     }
   }
-  void release(int pin) {
+  // next is the mode that follows. A pin going from PWM to an output goes
+  // straight to its preset level, not through a low on the way.
+  void release(int pin, Mode next) {
 #if defined(ARDUINO_ARCH_ESP32)
+    (void)next;
     if (modes[pin] == omni::MODE_PWM || modes[pin] == omni::MODE_SERVO) ledcDetach(pin);
 #else
-    if (modes[pin] == omni::MODE_PWM) analogWrite(pin, 0);
+    if (modes[pin] == omni::MODE_PWM && next != omni::MODE_OUT) analogWrite(pin, 0);
     int slot = servoSlot(pin);
     if (slot >= 0) {
       servos[slot].detach();
@@ -239,22 +514,6 @@ class BoardHal : public omni::Hal {
     TCCR1B = _BV(CS11) | _BV(CS10);
   }
 #endif
-  // A 38 kHz carrier burst; IR receivers tolerate the few percent of drift
-  // that bit-banging gives.
-  static void mark(int pin, unsigned long us) {
-    unsigned long start = micros();
-    while (micros() - start < us) {
-      digitalWrite(pin, HIGH);
-      delayMicroseconds(9);
-      digitalWrite(pin, LOW);
-      delayMicroseconds(15);
-    }
-  }
-  static void space(unsigned long us) {
-    unsigned long start = micros();
-    while (micros() - start < us) {
-    }
-  }
 };
 
 // ---------------------------------------------------------------- outputs
@@ -452,7 +711,21 @@ static omni::Core core("omniflow", OMNI_FW, OMNI_BOARD, hal);
 static SerialOut serialOut;
 static EventOut events;
 #if OMNI_WIFI
-static bool udpStarted = false;
+static omni::Link netLink(HELLO_EVERY_MS);
+static bool mdnsStarted = false;
+
+static void stopMdns() {
+  if (mdnsStarted) MDNS.end();
+  mdnsStarted = false;
+}
+
+// Ends the old responder first: ESP32's MDNS.begin fails while one runs, and
+// LEAmDNS keeps the old host name's services.
+static void startMdns() {
+  stopMdns();
+  mdnsStarted = MDNS.begin(settings.node);
+  if (mdnsStarted) MDNS.addService("omniflow", "udp", UDP_PORT);
+}
 #endif
 
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
@@ -484,10 +757,13 @@ static void defaultNodeName() {
 static void startWifi() {
 #if OMNI_WIFI
   if (!settings.ssid[0]) return;
-  udpStarted = false;
+  stopMdns();
+  netLink.reset();
   WiFi.mode(WIFI_STA);
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
-  // begin() also waits for DHCP, for up to 30 s; this waits only for the join.
+  // begin() also waits for DHCP, for up to 30 s. beginNoBlock skips that wait
+  // but is not fully non-blocking: CYW43::begin (lwIP_CYW43 CYW43shim.cpp)
+  // still polls until the radio has joined or WiFi's 15 s timeout passes.
   WiFi.beginNoBlock(settings.ssid, settings.password);
   wifiTriedAt = millis();
 #else
@@ -502,8 +778,9 @@ class BoardSetupHal : public omni::SetupHal {
 #if OMNI_WIFI
   void startWifi() override { ::startWifi(); }
   void stopWifi() override {
-    if (udpStarted) udp.stop();
-    udpStarted = false;
+    stopMdns();
+    udp.stop();
+    netLink.reset();
     for (int i = 0; i < MAX_PEERS; i++) peers[i].port = 0;
 #if defined(ARDUINO_ARCH_ESP32)
     WiFi.disconnect(true, true);  // also erases the network the core keeps
@@ -519,6 +796,7 @@ class BoardSetupHal : public omni::SetupHal {
     for (int i = 0; i < 4; i++) ip[i] = local[i];
   }
   int rssi() override { return (int)WiFi.RSSI(); }
+  void nodeRenamed() override { netLink.renamed(); }
 #endif
 };
 
@@ -541,6 +819,7 @@ void setup() {
   defaultNodeName();
   core.setNode(settings.node);
   core.setIrPin(settings.irPin);
+  core.setRfPin(settings.rfPin);
   core.setExtension(&setupCommands);
   core.boot(serialOut);
   startWifi();
@@ -571,8 +850,6 @@ static void readSerial() {
 }
 
 #if OMNI_WIFI
-static unsigned long lastHello = 0;
-
 static void sendHello() {
   IPAddress ip = WiFi.localIP();
   IPAddress mask = WiFi.subnetMask();
@@ -580,7 +857,6 @@ static void sendHello() {
   for (int i = 0; i < 4; i++) hello.ip[i] = ip[i] | (uint8_t)~mask[i];
   hello.port = HELLO_PORT;
   core.hello(hello, UDP_PORT);
-  lastHello = millis();
 }
 
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
@@ -600,17 +876,19 @@ static void serviceWifi() {
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
   retryWifi();
 #endif
-  if (WiFi.status() != WL_CONNECTED) return;
-  if (!udpStarted) {
-    udp.begin(UDP_PORT);
-    MDNS.begin(settings.node);
-    MDNS.addService("omniflow", "udp", UDP_PORT);
-    udpStarted = true;
+  bool connected = settings.ssid[0] && WiFi.status() == WL_CONNECTED;
+  // A join or a rejoin after a drop starts everything again and says hello
+  // at once, so a hub does not wait up to 30 s to see the board back.
+  uint8_t todo = netLink.update(connected, millis());
+  if (todo & omni::Link::START_UDP) {
+    udp.begin(UDP_PORT);  // closes the old socket first
     setupCommands.wifiStatus(serialOut, -1);
-    sendHello();
   }
+  if (todo & omni::Link::START_MDNS) startMdns();
+  if (todo & omni::Link::HELLO) sendHello();
+  if (!connected) return;
 #if !defined(ARDUINO_ARCH_ESP32)
-  MDNS.update();
+  if (mdnsStarted) MDNS.update();
 #endif
   char buf[sizeof(line)];
   UdpOut reply;
@@ -620,7 +898,6 @@ static void serviceWifi() {
     while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = 0;
     if (core.handleLine(buf, reply)) addPeer(reply.ip, reply.port);
   }
-  if (millis() - lastHello >= HELLO_EVERY_MS) sendHello();
 }
 #endif
 

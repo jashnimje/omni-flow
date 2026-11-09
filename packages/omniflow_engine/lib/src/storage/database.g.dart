@@ -929,6 +929,21 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
     ),
     defaultValue: const Constant(true),
   );
+  static const VerificationMeta _trustedMeta = const VerificationMeta(
+    'trusted',
+  );
+  @override
+  late final GeneratedColumn<bool> trusted = GeneratedColumn<bool>(
+    'trusted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("trusted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -946,6 +961,7 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
     flowJson,
     enabled,
     approved,
+    trusted,
     updatedAt,
   ];
   @override
@@ -985,6 +1001,12 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
         approved.isAcceptableOrUnknown(data['approved']!, _approvedMeta),
       );
     }
+    if (data.containsKey('trusted')) {
+      context.handle(
+        _trustedMeta,
+        trusted.isAcceptableOrUnknown(data['trusted']!, _trustedMeta),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -1018,6 +1040,10 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
         DriftSqlType.bool,
         data['${effectivePrefix}approved'],
       )!,
+      trusted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}trusted'],
+      )!,
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
@@ -1039,12 +1065,17 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
   /// False while a flow from MCP, the AI architect or an import waits for
   /// the user to approve its high-risk parts.
   final bool approved;
+
+  /// True when the user saved or approved this version of the flow, so a
+  /// later rise in its risk does not revoke the approval.
+  final bool trusted;
   final DateTime updatedAt;
   const FlowRow({
     required this.id,
     required this.flowJson,
     required this.enabled,
     required this.approved,
+    required this.trusted,
     required this.updatedAt,
   });
   @override
@@ -1054,6 +1085,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     map['flow_json'] = Variable<String>(flowJson);
     map['enabled'] = Variable<bool>(enabled);
     map['approved'] = Variable<bool>(approved);
+    map['trusted'] = Variable<bool>(trusted);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
@@ -1064,6 +1096,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       flowJson: Value(flowJson),
       enabled: Value(enabled),
       approved: Value(approved),
+      trusted: Value(trusted),
       updatedAt: Value(updatedAt),
     );
   }
@@ -1078,6 +1111,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       flowJson: serializer.fromJson<String>(json['flowJson']),
       enabled: serializer.fromJson<bool>(json['enabled']),
       approved: serializer.fromJson<bool>(json['approved']),
+      trusted: serializer.fromJson<bool>(json['trusted']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
@@ -1089,6 +1123,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       'flowJson': serializer.toJson<String>(flowJson),
       'enabled': serializer.toJson<bool>(enabled),
       'approved': serializer.toJson<bool>(approved),
+      'trusted': serializer.toJson<bool>(trusted),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
@@ -1098,12 +1133,14 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     String? flowJson,
     bool? enabled,
     bool? approved,
+    bool? trusted,
     DateTime? updatedAt,
   }) => FlowRow(
     id: id ?? this.id,
     flowJson: flowJson ?? this.flowJson,
     enabled: enabled ?? this.enabled,
     approved: approved ?? this.approved,
+    trusted: trusted ?? this.trusted,
     updatedAt: updatedAt ?? this.updatedAt,
   );
   FlowRow copyWithCompanion(FlowsCompanion data) {
@@ -1112,6 +1149,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       flowJson: data.flowJson.present ? data.flowJson.value : this.flowJson,
       enabled: data.enabled.present ? data.enabled.value : this.enabled,
       approved: data.approved.present ? data.approved.value : this.approved,
+      trusted: data.trusted.present ? data.trusted.value : this.trusted,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -1123,13 +1161,15 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
           ..write('flowJson: $flowJson, ')
           ..write('enabled: $enabled, ')
           ..write('approved: $approved, ')
+          ..write('trusted: $trusted, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, flowJson, enabled, approved, updatedAt);
+  int get hashCode =>
+      Object.hash(id, flowJson, enabled, approved, trusted, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1138,6 +1178,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
           other.flowJson == this.flowJson &&
           other.enabled == this.enabled &&
           other.approved == this.approved &&
+          other.trusted == this.trusted &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -1146,6 +1187,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
   final Value<String> flowJson;
   final Value<bool> enabled;
   final Value<bool> approved;
+  final Value<bool> trusted;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
   const FlowsCompanion({
@@ -1153,6 +1195,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     this.flowJson = const Value.absent(),
     this.enabled = const Value.absent(),
     this.approved = const Value.absent(),
+    this.trusted = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -1161,6 +1204,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     required String flowJson,
     this.enabled = const Value.absent(),
     this.approved = const Value.absent(),
+    this.trusted = const Value.absent(),
     required DateTime updatedAt,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -1171,6 +1215,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     Expression<String>? flowJson,
     Expression<bool>? enabled,
     Expression<bool>? approved,
+    Expression<bool>? trusted,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
   }) {
@@ -1179,6 +1224,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
       if (flowJson != null) 'flow_json': flowJson,
       if (enabled != null) 'enabled': enabled,
       if (approved != null) 'approved': approved,
+      if (trusted != null) 'trusted': trusted,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -1189,6 +1235,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     Value<String>? flowJson,
     Value<bool>? enabled,
     Value<bool>? approved,
+    Value<bool>? trusted,
     Value<DateTime>? updatedAt,
     Value<int>? rowid,
   }) {
@@ -1197,6 +1244,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
       flowJson: flowJson ?? this.flowJson,
       enabled: enabled ?? this.enabled,
       approved: approved ?? this.approved,
+      trusted: trusted ?? this.trusted,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -1217,6 +1265,9 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     if (approved.present) {
       map['approved'] = Variable<bool>(approved.value);
     }
+    if (trusted.present) {
+      map['trusted'] = Variable<bool>(trusted.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
@@ -1233,6 +1284,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
           ..write('flowJson: $flowJson, ')
           ..write('enabled: $enabled, ')
           ..write('approved: $approved, ')
+          ..write('trusted: $trusted, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2106,6 +2158,279 @@ class ExecutionLogCompanion extends UpdateCompanion<LogRow> {
   }
 }
 
+class $BoardDescribesTable extends BoardDescribes
+    with TableInfo<$BoardDescribesTable, BoardDescribeRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $BoardDescribesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _deviceIdMeta = const VerificationMeta(
+    'deviceId',
+  );
+  @override
+  late final GeneratedColumn<String> deviceId = GeneratedColumn<String>(
+    'device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _describeJsonMeta = const VerificationMeta(
+    'describeJson',
+  );
+  @override
+  late final GeneratedColumn<String> describeJson = GeneratedColumn<String>(
+    'describe_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _seenAtMeta = const VerificationMeta('seenAt');
+  @override
+  late final GeneratedColumn<DateTime> seenAt = GeneratedColumn<DateTime>(
+    'seen_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [deviceId, describeJson, seenAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'board_describes';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<BoardDescribeRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('device_id')) {
+      context.handle(
+        _deviceIdMeta,
+        deviceId.isAcceptableOrUnknown(data['device_id']!, _deviceIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_deviceIdMeta);
+    }
+    if (data.containsKey('describe_json')) {
+      context.handle(
+        _describeJsonMeta,
+        describeJson.isAcceptableOrUnknown(
+          data['describe_json']!,
+          _describeJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_describeJsonMeta);
+    }
+    if (data.containsKey('seen_at')) {
+      context.handle(
+        _seenAtMeta,
+        seenAt.isAcceptableOrUnknown(data['seen_at']!, _seenAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_seenAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {deviceId};
+  @override
+  BoardDescribeRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return BoardDescribeRow(
+      deviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}device_id'],
+      )!,
+      describeJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}describe_json'],
+      )!,
+      seenAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}seen_at'],
+      )!,
+    );
+  }
+
+  @override
+  $BoardDescribesTable createAlias(String alias) {
+    return $BoardDescribesTable(attachedDatabase, alias);
+  }
+}
+
+class BoardDescribeRow extends DataClass
+    implements Insertable<BoardDescribeRow> {
+  final String deviceId;
+  final String describeJson;
+  final DateTime seenAt;
+  const BoardDescribeRow({
+    required this.deviceId,
+    required this.describeJson,
+    required this.seenAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['device_id'] = Variable<String>(deviceId);
+    map['describe_json'] = Variable<String>(describeJson);
+    map['seen_at'] = Variable<DateTime>(seenAt);
+    return map;
+  }
+
+  BoardDescribesCompanion toCompanion(bool nullToAbsent) {
+    return BoardDescribesCompanion(
+      deviceId: Value(deviceId),
+      describeJson: Value(describeJson),
+      seenAt: Value(seenAt),
+    );
+  }
+
+  factory BoardDescribeRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return BoardDescribeRow(
+      deviceId: serializer.fromJson<String>(json['deviceId']),
+      describeJson: serializer.fromJson<String>(json['describeJson']),
+      seenAt: serializer.fromJson<DateTime>(json['seenAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'deviceId': serializer.toJson<String>(deviceId),
+      'describeJson': serializer.toJson<String>(describeJson),
+      'seenAt': serializer.toJson<DateTime>(seenAt),
+    };
+  }
+
+  BoardDescribeRow copyWith({
+    String? deviceId,
+    String? describeJson,
+    DateTime? seenAt,
+  }) => BoardDescribeRow(
+    deviceId: deviceId ?? this.deviceId,
+    describeJson: describeJson ?? this.describeJson,
+    seenAt: seenAt ?? this.seenAt,
+  );
+  BoardDescribeRow copyWithCompanion(BoardDescribesCompanion data) {
+    return BoardDescribeRow(
+      deviceId: data.deviceId.present ? data.deviceId.value : this.deviceId,
+      describeJson: data.describeJson.present
+          ? data.describeJson.value
+          : this.describeJson,
+      seenAt: data.seenAt.present ? data.seenAt.value : this.seenAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BoardDescribeRow(')
+          ..write('deviceId: $deviceId, ')
+          ..write('describeJson: $describeJson, ')
+          ..write('seenAt: $seenAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(deviceId, describeJson, seenAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is BoardDescribeRow &&
+          other.deviceId == this.deviceId &&
+          other.describeJson == this.describeJson &&
+          other.seenAt == this.seenAt);
+}
+
+class BoardDescribesCompanion extends UpdateCompanion<BoardDescribeRow> {
+  final Value<String> deviceId;
+  final Value<String> describeJson;
+  final Value<DateTime> seenAt;
+  final Value<int> rowid;
+  const BoardDescribesCompanion({
+    this.deviceId = const Value.absent(),
+    this.describeJson = const Value.absent(),
+    this.seenAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  BoardDescribesCompanion.insert({
+    required String deviceId,
+    required String describeJson,
+    required DateTime seenAt,
+    this.rowid = const Value.absent(),
+  }) : deviceId = Value(deviceId),
+       describeJson = Value(describeJson),
+       seenAt = Value(seenAt);
+  static Insertable<BoardDescribeRow> custom({
+    Expression<String>? deviceId,
+    Expression<String>? describeJson,
+    Expression<DateTime>? seenAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (deviceId != null) 'device_id': deviceId,
+      if (describeJson != null) 'describe_json': describeJson,
+      if (seenAt != null) 'seen_at': seenAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  BoardDescribesCompanion copyWith({
+    Value<String>? deviceId,
+    Value<String>? describeJson,
+    Value<DateTime>? seenAt,
+    Value<int>? rowid,
+  }) {
+    return BoardDescribesCompanion(
+      deviceId: deviceId ?? this.deviceId,
+      describeJson: describeJson ?? this.describeJson,
+      seenAt: seenAt ?? this.seenAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (deviceId.present) {
+      map['device_id'] = Variable<String>(deviceId.value);
+    }
+    if (describeJson.present) {
+      map['describe_json'] = Variable<String>(describeJson.value);
+    }
+    if (seenAt.present) {
+      map['seen_at'] = Variable<DateTime>(seenAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BoardDescribesCompanion(')
+          ..write('deviceId: $deviceId, ')
+          ..write('describeJson: $describeJson, ')
+          ..write('seenAt: $seenAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$OmniDatabase extends GeneratedDatabase {
   _$OmniDatabase(QueryExecutor e) : super(e);
   $OmniDatabaseManager get managers => $OmniDatabaseManager(this);
@@ -2119,6 +2444,7 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
     this,
   );
   late final $ExecutionLogTable executionLog = $ExecutionLogTable(this);
+  late final $BoardDescribesTable boardDescribes = $BoardDescribesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2130,6 +2456,7 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
     zones,
     globalVariables,
     executionLog,
+    boardDescribes,
   ];
 }
 
@@ -2611,6 +2938,7 @@ typedef $$FlowsTableCreateCompanionBuilder = FlowsCompanion Function({
   required String flowJson,
   Value<bool> enabled,
   Value<bool> approved,
+  Value<bool> trusted,
   required DateTime updatedAt,
   Value<int> rowid,
 });
@@ -2619,6 +2947,7 @@ typedef $$FlowsTableUpdateCompanionBuilder = FlowsCompanion Function({
   Value<String> flowJson,
   Value<bool> enabled,
   Value<bool> approved,
+  Value<bool> trusted,
   Value<DateTime> updatedAt,
   Value<int> rowid,
 });
@@ -2648,6 +2977,11 @@ class $$FlowsTableFilterComposer extends Composer<_$OmniDatabase, $FlowsTable> {
 
   ColumnFilters<bool> get approved => $composableBuilder(
     column: $table.approved,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get trusted => $composableBuilder(
+    column: $table.trusted,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2686,6 +3020,11 @@ class $$FlowsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get trusted => $composableBuilder(
+    column: $table.trusted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
@@ -2712,6 +3051,9 @@ class $$FlowsTableAnnotationComposer
 
   GeneratedColumn<bool> get approved =>
       $composableBuilder(column: $table.approved, builder: (column) => column);
+
+  GeneratedColumn<bool> get trusted =>
+      $composableBuilder(column: $table.trusted, builder: (column) => column);
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
@@ -2749,6 +3091,7 @@ class $$FlowsTableTableManager
                 Value<String> flowJson = const Value.absent(),
                 Value<bool> enabled = const Value.absent(),
                 Value<bool> approved = const Value.absent(),
+                Value<bool> trusted = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => FlowsCompanion(
@@ -2756,6 +3099,7 @@ class $$FlowsTableTableManager
                 flowJson: flowJson,
                 enabled: enabled,
                 approved: approved,
+                trusted: trusted,
                 updatedAt: updatedAt,
                 rowid: rowid,
               ),
@@ -2765,6 +3109,7 @@ class $$FlowsTableTableManager
                 required String flowJson,
                 Value<bool> enabled = const Value.absent(),
                 Value<bool> approved = const Value.absent(),
+                Value<bool> trusted = const Value.absent(),
                 required DateTime updatedAt,
                 Value<int> rowid = const Value.absent(),
               }) => FlowsCompanion.insert(
@@ -2772,6 +3117,7 @@ class $$FlowsTableTableManager
                 flowJson: flowJson,
                 enabled: enabled,
                 approved: approved,
+                trusted: trusted,
                 updatedAt: updatedAt,
                 rowid: rowid,
               ),
@@ -3328,6 +3674,185 @@ typedef $$ExecutionLogTableProcessedTableManager =
       LogRow,
       PrefetchHooks Function()
     >;
+typedef $$BoardDescribesTableCreateCompanionBuilder =
+    BoardDescribesCompanion Function({
+      required String deviceId,
+      required String describeJson,
+      required DateTime seenAt,
+      Value<int> rowid,
+    });
+typedef $$BoardDescribesTableUpdateCompanionBuilder =
+    BoardDescribesCompanion Function({
+      Value<String> deviceId,
+      Value<String> describeJson,
+      Value<DateTime> seenAt,
+      Value<int> rowid,
+    });
+
+class $$BoardDescribesTableFilterComposer
+    extends Composer<_$OmniDatabase, $BoardDescribesTable> {
+  $$BoardDescribesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get describeJson => $composableBuilder(
+    column: $table.describeJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get seenAt => $composableBuilder(
+    column: $table.seenAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$BoardDescribesTableOrderingComposer
+    extends Composer<_$OmniDatabase, $BoardDescribesTable> {
+  $$BoardDescribesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get describeJson => $composableBuilder(
+    column: $table.describeJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get seenAt => $composableBuilder(
+    column: $table.seenAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$BoardDescribesTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $BoardDescribesTable> {
+  $$BoardDescribesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get deviceId =>
+      $composableBuilder(column: $table.deviceId, builder: (column) => column);
+
+  GeneratedColumn<String> get describeJson => $composableBuilder(
+    column: $table.describeJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get seenAt =>
+      $composableBuilder(column: $table.seenAt, builder: (column) => column);
+}
+
+class $$BoardDescribesTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $BoardDescribesTable,
+          BoardDescribeRow,
+          $$BoardDescribesTableFilterComposer,
+          $$BoardDescribesTableOrderingComposer,
+          $$BoardDescribesTableAnnotationComposer,
+          $$BoardDescribesTableCreateCompanionBuilder,
+          $$BoardDescribesTableUpdateCompanionBuilder,
+          (
+            BoardDescribeRow,
+            BaseReferences<
+              _$OmniDatabase,
+              $BoardDescribesTable,
+              BoardDescribeRow
+            >,
+          ),
+          BoardDescribeRow,
+          PrefetchHooks Function()
+        > {
+  $$BoardDescribesTableTableManager(
+    _$OmniDatabase db,
+    $BoardDescribesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$BoardDescribesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$BoardDescribesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$BoardDescribesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> deviceId = const Value.absent(),
+                Value<String> describeJson = const Value.absent(),
+                Value<DateTime> seenAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => BoardDescribesCompanion(
+                deviceId: deviceId,
+                describeJson: describeJson,
+                seenAt: seenAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String deviceId,
+                required String describeJson,
+                required DateTime seenAt,
+                Value<int> rowid = const Value.absent(),
+              }) => BoardDescribesCompanion.insert(
+                deviceId: deviceId,
+                describeJson: describeJson,
+                seenAt: seenAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$BoardDescribesTable, BoardDescribeRow>(table),
+                  BaseReferences<
+                    _$OmniDatabase,
+                    $BoardDescribesTable,
+                    BoardDescribeRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$BoardDescribesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $BoardDescribesTable,
+      BoardDescribeRow,
+      $$BoardDescribesTableFilterComposer,
+      $$BoardDescribesTableOrderingComposer,
+      $$BoardDescribesTableAnnotationComposer,
+      $$BoardDescribesTableCreateCompanionBuilder,
+      $$BoardDescribesTableUpdateCompanionBuilder,
+      (
+        BoardDescribeRow,
+        BaseReferences<_$OmniDatabase, $BoardDescribesTable, BoardDescribeRow>,
+      ),
+      BoardDescribeRow,
+      PrefetchHooks Function()
+    >;
 
 class $OmniDatabaseManager {
   final _$OmniDatabase _db;
@@ -3344,4 +3869,6 @@ class $OmniDatabaseManager {
       $$GlobalVariablesTableTableManager(_db, _db.globalVariables);
   $$ExecutionLogTableTableManager get executionLog =>
       $$ExecutionLogTableTableManager(_db, _db.executionLog);
+  $$BoardDescribesTableTableManager get boardDescribes =>
+      $$BoardDescribesTableTableManager(_db, _db.boardDescribes);
 }

@@ -38,8 +38,19 @@ Future<Json> callClient(
   return result;
 }
 
-String errorMessage(Json result) =>
-    '${(result['error'] as Map? ?? const {})['message'] ?? 'failed'}';
+/// The error's message and, for a validation error, each issue, since the
+/// message alone only names what was invalid.
+String errorMessage(Json result) {
+  final error = result['error'] as Map? ?? const {};
+  return [
+    '${error['message'] ?? 'failed'}',
+    for (final issue in (error['issues'] as List? ?? const []))
+      switch (issue) {
+        {'path': final path, 'message': final message} => '$path: $message',
+        _ => '$issue',
+      },
+  ].join('\n');
+}
 
 /// Devices with their capabilities, kept current from engine events. A
 /// device the engine reports unreachable carries `online: false` and the

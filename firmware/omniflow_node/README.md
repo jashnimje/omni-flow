@@ -39,13 +39,38 @@ Plug the board in over USB and run `omni board setup <port>`. It sends these com
 - `{"cmd":"wifi.clear"}` forgets the network
 - `{"cmd":"node.set","name":"desk_board"}` names the board: a lower case letter, then up to 22 lower case letters, digits, `_` or `-`
 - `{"cmd":"ir.pin","pin":4}` sets the IR LED pin, or `-1` for none. The pin must have no mode, and it is kept from pin commands after that.
+- `{"cmd":"rf.pin","pin":5}` sets the 433 MHz transmitter's data pin, or `-1` for none, with the same rules as `ir.pin`. It cannot be the IR pin.
 - `{"cmd":"wifi.status"}` reports the IP once connected
 
-After that the board announces itself on Wi-Fi with a hello broadcast to UDP 38951 every 30 seconds and registers `_omniflow._udp` over mDNS. A running `omni hub`, or the app while it is open, picks up the hello and offers the board as `board.found`. `omni device discover --driver omniflow_board` finds it at any time. It answers only hosts on its own subnet, and sends events to up to three hosts that sent `describe` in the last 90 seconds.
+After that the board announces itself on Wi-Fi with a hello broadcast to UDP 38951 as soon as it joins, again at once after every rejoin, and every 30 seconds, and registers `_omniflow._udp` over mDNS under its node name. `node.set` restarts mDNS under the new name and sends a hello at once. `wifi.set` and `wifi.clear` stop mDNS, and it starts again on the next join. A running `omni hub`, or the app while it is open, picks up the hello and offers the board as `board.found`. `omni device discover --driver omniflow_board` finds it at any time. It answers only hosts on its own subnet, and sends events to up to three hosts that sent `describe` in the last 90 seconds.
 
 ## Pins
 
-`describe` lists every pin the board offers with its capabilities (`in`, `pullup`, `out`, `pwm`, `servo`, `adc`), how many pins it can watch (`watches`), and the pins that have a mode now (`set`). `pin.mode` with mode `none` releases a pin to a plain input and stops its watch. On the Uno, servos take Timer1, so pins 9 and 10 offer no servo, and PWM on them is refused while any servo is attached.
+`describe` lists every pin the board offers with its capabilities (`in`, `pullup`, `out`, `pwm`, `servo`, `adc`), whether IR and RF pins are set (`"ir"`, `"rf"`), how many pins it can watch (`watches`), and the pins that have a mode now (`set`). `pin.mode` with mode `none` releases a pin to a plain input and stops its watch.
+
+`pin.mode` with mode `out` takes an optional `"value"` of 0 or 1, the level the pin drives from the instant it becomes an output, so an active-low relay is given 1 and never clicks on during setup. The board sets the output latch while the pin is still an input, then switches it to output. Sending the same `out` mode again with a value changes the level only while no `pin.write` has set it since the mode was set, so a resent setup never undoes a level the host chose. The ack carries `"value"` (the level now) whenever a value was sent. A value with any other mode is refused.
+
+## IR and RF
+
+`{"cmd":"ir.send","address":4,"command":8}` (or `"hex":"0x20DF10EF"`) sends one NEC frame on the IR pin. `{"cmd":"rf.send","code":5393,"bits":24,"protocol":1,"repeat":10}` sends an OOK code on the RF pin the way RCSwitch's `send()` does: the code most significant bit first, then the sync pulse, the whole frame `repeat` times. `code` is a whole number 0 to 4294967295 that fits in `bits` (1 to 32), `protocol` is 1 to 3 (default 1) and `repeat` 1 to 20 (default 10). Both acks come after the signal has gone out; ten repeats of a 24-bit code take about 0.45 s.
+
+| Protocol | Pulse | Sync (high, low) | Zero | One |
+| --- | --- | --- | --- | --- |
+| 1 | 350 us | 1, 31 | 1, 3 | 3, 1 |
+| 2 | 650 us | 1, 10 | 1, 2 | 2, 1 |
+| 3 | 100 us | 30, 71 | 4, 11 | 9, 6 |
+
+How each board makes the signals:
+
+| Board | IR carrier | Marks, spaces and RF pulses |
+| --- | --- | --- |
+| ESP32 | RMT carrier, 38 kHz at 33% | RMT, 1 us ticks, so Wi-Fi and task switches cannot bend them |
+| Uno, IR on pin 3 | Timer2 PWM on OC2B, 38.1 kHz at 33%, connected for each mark (the IRremote way) | busy-wait on `micros()` |
+| Uno, any other pin | cycle-counted loop, 421 cycles = 38.0 kHz at 33% | busy-wait on `micros()` |
+| ESP8266 | busy-wait on the CPU cycle counter with direct register writes, 38.0 kHz at 33% | the same |
+| Pico W | busy-wait on the SysTick cycle counter with `gpio_put`, 38.0 kHz at 33% | the same |
+
+The busy-wait boards keep one absolute timeline per frame, so the time a pin write or an interrupt takes never adds up. On the Uno, Timer2 also drives the PWM on pin 11, which pauses while an IR frame on pin 3 is sent, and the Timer0 interrupt stays on, so the cycle-counted carrier runs about 0.5% low. Whether real receivers accept each board's signals is unproven until they are tested on hardware. On the Uno, servos take Timer1, so pins 9 and 10 offer no servo, and PWM on them is refused while any servo is attached.
 
 ## Check
 

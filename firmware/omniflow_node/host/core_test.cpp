@@ -28,21 +28,42 @@ class FakeHal : public Hal {
   int servo[MAX_PINS] = {0};
   Mode modes[MAX_PINS] = {MODE_NONE};
   std::vector<uint32_t> ir;
+  struct RfSend {
+    RfProtocol protocol;
+    uint32_t code;
+    uint8_t bits, repeat;
+  };
+  std::vector<RfSend> rf;
+  // Every level each output pin was driven at, in order, from the moment it
+  // became an output.
+  std::vector<int> levels[MAX_PINS];
   unsigned long now = 1000;
   // Set to act like a board with no free PWM or servo channel.
   bool refuse = false;
-  bool setMode(int pin, Mode mode) override {
+  bool setMode(int pin, Mode mode, int level) override {
     if (refuse) return false;
     modes[pin] = mode;
+    if (mode == MODE_OUT) {
+      digital[pin] = level;
+      levels[pin].push_back(level);
+    }
     return true;
   }
-  void writeDigital(int pin, int value) override { digital[pin] = value; }
+  void writeDigital(int pin, int value) override {
+    digital[pin] = value;
+    levels[pin].push_back(value);
+  }
   int readDigital(int pin) override { return digital[pin]; }
   int readAnalogPercent(int pin) override { return analog[pin]; }
   void writePwmPercent(int pin, int percent) override { pwm[pin] = percent; }
   void writeServo(int pin, int degrees) override { servo[pin] = degrees; }
   void sendIr(uint32_t bits) override { ir.push_back(bits); }
   bool hasIr() override { return true; }
+  void sendRf(const RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) override {
+    rf.push_back({protocol, code, bits, repeat});
+  }
+  bool hasRf() override { return rfPresent; }
+  bool rfPresent = true;
   unsigned long millis() override { return now; }
 };
 
@@ -204,8 +225,10 @@ class FakeSetupHal : public SetupHal {
   int saves = 0;
   int starts = 0;
   int stops = 0;
+  int renames = 0;
   bool ackedBeforeStart = false;
   void saveSettings() override { saves++; }
+  void nodeRenamed() override { renames++; }
   void startWifi() override {
     starts++;
     ackedBeforeStart = out && has(out->text, "\"event\":\"ack\"");
@@ -226,6 +249,7 @@ static void testSetup() {
   Settings settings;
   memset(&settings, 0, sizeof(settings));
   settings.irPin = -1;
+  settings.rfPin = -1;
   strcpy(settings.node, "fresh");
   Core core(settings.node, "fw", BOARD_HOST, hal);
   FakeSetupHal setupHal;
@@ -237,7 +261,7 @@ static void testSetup() {
   // Nothing that changes the setup is taken over the network.
   const char* setupLines[] = {"{\"cmd\":\"wifi.set\",\"ssid\":\"net\",\"password\":\"longenough\"}",
                               "{\"cmd\":\"wifi.clear\"}", "{\"cmd\":\"node.set\",\"name\":\"evil\"}",
-                              "{\"cmd\":\"ir.pin\",\"pin\":3}"};
+                              "{\"cmd\":\"ir.pin\",\"pin\":3}", "{\"cmd\":\"rf.pin\",\"pin\":3}"};
   for (unsigned i = 0; i < sizeof(setupLines) / sizeof(setupLines[0]); i++) {
     CHECK(has(run(core, setupLines[i]), "setup commands are only taken over USB"));
   }
@@ -287,14 +311,27 @@ static void testSetup() {
   // A stored name that is not valid is dropped, so the board makes a new one.
   Settings stored;
   memset(&stored, 'x', sizeof(stored));
-  sanitizeSettings(stored);
+  sanitizeSettings(stored, BOARD_HOST);
   CHECK(strlen(stored.node) == sizeof(stored.node) - 1);
+  CHECK(stored.irPin == -1 && stored.rfPin == -1);  // 'x' is pin 120
   strcpy(stored.node, "Bad\"Name");
-  sanitizeSettings(stored);
+  sanitizeSettings(stored, BOARD_HOST);
   CHECK(stored.node[0] == 0);
   strcpy(stored.node, "good_name");
-  sanitizeSettings(stored);
+  sanitizeSettings(stored, BOARD_HOST);
   CHECK(strcmp(stored.node, "good_name") == 0);
+  // Stored IR and RF pins must be outputs, and not the same pin.
+  stored.irPin = 4;
+  stored.rfPin = 4;
+  sanitizeSettings(stored, BOARD_HOST);
+  CHECK(stored.irPin == 4 && stored.rfPin == -1);
+  stored.irPin = 16;  // input only on the host profile
+  stored.rfPin = 5;
+  sanitizeSettings(stored, BOARD_HOST);
+  CHECK(stored.irPin == -1 && stored.rfPin == 5);
+  stored.rfPin = 1;  // the Uno's serial port
+  sanitizeSettings(stored, BOARD_UNO);
+  CHECK(stored.rfPin == -1);
 
   // The IR pin is kept from pin commands, and only a free output pin can be it.
   run(core, "{\"cmd\":\"pin.mode\",\"pin\":6,\"mode\":\"out\"}");
@@ -309,6 +346,258 @@ static void testSetup() {
   CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":-1}"), "\"cmd\":\"ir.pin\""));
   CHECK(settings.irPin == -1);
   CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":3,\"mode\":\"in\"}"), "\"event\":\"ack\""));
+
+  // The RF pin works the same way, and never shares a pin with IR.
+  CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":3}"), "set pin.mode none first"));
+  CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":16}"), "pin must be an output pin"));
+  CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":7,\"id\":20}"), "\"cmd\":\"rf.pin\",\"pin\":7,\"id\":20"));
+  CHECK(settings.rfPin == 7 && core.rfPin() == 7);
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":7,\"mode\":\"out\"}"), "pin not available"));
+  CHECK(!has(run(core, "{\"cmd\":\"describe\"}"), "{\"pin\":7,"));
+  CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":7}"), "that pin is the RF pin"));
+  CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":8}"), "\"cmd\":\"ir.pin\",\"pin\":8"));
+  CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":8}"), "that pin is the IR pin"));
+  CHECK(settings.rfPin == 7);
+  setup.fromSerial = false;
+  CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":-1}"), "setup commands are only taken over USB"));
+  setup.fromSerial = true;
+  CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":-1}"), "\"cmd\":\"rf.pin\""));
+  CHECK(settings.rfPin == -1 && core.rfPin() == -1);
+
+  // A rename tells the board to restart mDNS; the same name does not.
+  int renames = setupHal.renames;
+  run(core, "{\"cmd\":\"node.set\",\"name\":\"desk_board-2\"}");
+  CHECK(setupHal.renames == renames);
+  run(core, "{\"cmd\":\"node.set\",\"name\":\"hall\"}");
+  CHECK(setupHal.renames == renames + 1);
+}
+
+// An output can start at the level an active-low relay needs, so it never
+// clicks on while the board is set up.
+static void testStartLevel() {
+  FakeHal hal;
+  Core core("test_node", "fw", BOARD_HOST, hal);
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"out\",\"value\":1,\"id\":1}"),
+            "\"cmd\":\"pin.mode\",\"pin\":4,\"value\":1,\"id\":1"));
+  CHECK(hal.levels[4] == std::vector<int>({1}));
+  CHECK(has(run(core, "{\"cmd\":\"pin.read\",\"pin\":4}"), "\"value\":1"));
+  // Without a value an output starts low, and the ack carries no value.
+  std::string r = run(core, "{\"cmd\":\"pin.mode\",\"pin\":5,\"mode\":\"out\"}");
+  CHECK(has(r, "\"cmd\":\"pin.mode\",\"pin\":5}"));
+  CHECK(hal.levels[5] == std::vector<int>({0}));
+  // Until pin.write chooses a level, a resent mode with a value sets it...
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":5,\"mode\":\"out\",\"value\":true}"), "\"value\":1"));
+  CHECK(hal.digital[5] == 1);
+  // ...and resending the level it already has writes nothing.
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"out\",\"value\":1}");
+  CHECK(hal.levels[4].size() == 1);
+  // After pin.write, a resent setup keeps the level the host chose.
+  run(core, "{\"cmd\":\"pin.write\",\"pin\":4,\"value\":0}");
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"out\",\"value\":1,\"id\":2}"),
+            "\"pin\":4,\"value\":0,\"id\":2"));
+  CHECK(hal.levels[4] == std::vector<int>({1, 0}));
+  // A new mode forgets the choice: out again starts at the given level.
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"in\"}");
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"out\",\"value\":1}");
+  CHECK(hal.levels[4] == std::vector<int>({1, 0, 1}));
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"out\",\"value\":0}");
+  CHECK(hal.digital[4] == 0);
+
+  const char* bad[] = {"2", "-1", "\"1\"", "null", "0.5x"};
+  for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+    std::string line = std::string("{\"cmd\":\"pin.mode\",\"pin\":6,\"mode\":\"out\",\"value\":") + bad[i] + "}";
+    CHECK(has(run(core, line.c_str()), "\"event\":\"error\""));
+  }
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":6,\"mode\":\"out\",\"value\":2}"), "value is 0 or 1"));
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":6,\"mode\":\"pwm\",\"value\":1}"), "value is only taken with mode out"));
+  CHECK(hal.modes[6] == MODE_NONE && hal.levels[6].empty());
+
+  // v1 gpio_write starts the output at the level it writes.
+  run(core, "{\"cmd\":\"gpio_write\",\"pin\":9,\"value\":1}");
+  CHECK(hal.levels[9][0] == 1);
+}
+
+// NEC timing: 9 ms + 4.5 ms header, 562 us marks, 562 or 1687 us spaces.
+static void testNecTiming() {
+  uint32_t bits = necFrame(4, 8);
+  uint16_t mark, space;
+  necPulse(bits, 0, &mark, &space);
+  CHECK(mark == 9000 && space == 4500);
+  unsigned long total = 0;
+  for (int i = 0; i < NEC_PULSES; i++) {
+    necPulse(bits, i, &mark, &space);
+    if (i > 0) CHECK(mark == 562);
+    if (i >= 1 && i <= 32) CHECK(space == (((bits >> (i - 1)) & 1) ? 1687 : 562));
+    total += mark + space;
+  }
+  necPulse(bits, NEC_PULSES - 1, &mark, &space);
+  CHECK(space == 0);
+  // Address 4 and command 8 have 16 one bits, as any NEC frame has.
+  CHECK(total == 9000 + 4500 + 33UL * 562 + 16UL * 1687 + 16UL * 562);
+}
+
+// RCSwitch::send, written out independently: the code most significant bit
+// first as one or zero pulses, then the sync, in units of the pulse length.
+static std::vector<int> rcswitchUnits(const char* bitString, int one[2], int zero[2], int sync[2]) {
+  std::vector<int> units;
+  for (const char* p = bitString; *p; p++) {
+    int* pair = *p == '1' ? one : zero;
+    units.push_back(pair[0]);
+    units.push_back(pair[1]);
+  }
+  units.push_back(sync[0]);
+  units.push_back(sync[1]);
+  return units;
+}
+
+// RCSwitch::sendTriState: 0 is 00, F is 01 and 1 is 11.
+static uint32_t triState(const char* word) {
+  uint32_t code = 0;
+  for (const char* p = word; *p; p++) code = (code << 2) | (*p == '1' ? 3 : *p == 'F' ? 1 : 0);
+  return code;
+}
+
+static void testRfEncoding() {
+  // RCSwitch's SendDemo sends one code three ways, and its type A switchOn
+  // for group 11111 and device 00010 builds the same word.
+  CHECK(triState("00000FFF0F0F") == 5393);
+  CHECK(triState("00000FFF0FF0") == 5396);
+
+  RfProtocol p;
+  CHECK(!rfProtocol(0, &p) && !rfProtocol(4, &p) && !rfProtocol(-1, &p));
+  // RCSwitch.cpp proto[]: pulse, sync, zero, one.
+  CHECK(rfProtocol(1, &p) && p.number == 1 && p.pulseUs == 350 && p.syncHigh == 1 && p.syncLow == 31 &&
+        p.zeroHigh == 1 && p.zeroLow == 3 && p.oneHigh == 3 && p.oneLow == 1);
+  CHECK(rfProtocol(2, &p) && p.pulseUs == 650 && p.syncHigh == 1 && p.syncLow == 10 && p.zeroHigh == 1 &&
+        p.zeroLow == 2 && p.oneHigh == 2 && p.oneLow == 1);
+  CHECK(rfProtocol(3, &p) && p.pulseUs == 100 && p.syncHigh == 30 && p.syncLow == 71 && p.zeroHigh == 4 &&
+        p.zeroLow == 11 && p.oneHigh == 9 && p.oneLow == 6);
+
+  struct Case {
+    int protocol;
+    uint32_t code;
+    uint8_t bits;
+    const char* bitString;
+  } cases[] = {
+      {1, 5393, 24, "000000000001010100010001"},
+      {1, 5396, 24, "000000000001010100010100"},
+      {2, 5393, 24, "000000000001010100010001"},
+      {3, 0xA5, 8, "10100101"},
+      {1, 1, 1, "1"},
+      {1, 0xFFFFFFFFUL, 32, "11111111111111111111111111111111"},
+      {2, 0x80000001UL, 32, "10000000000000000000000000000001"},
+  };
+  for (unsigned c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+    CHECK(rfProtocol(cases[c].protocol, &p));
+    int one[2] = {p.oneHigh, p.oneLow}, zero[2] = {p.zeroHigh, p.zeroLow}, sync[2] = {p.syncHigh, p.syncLow};
+    std::vector<int> want = rcswitchUnits(cases[c].bitString, one, zero, sync);
+    std::vector<int> got;
+    for (int i = 0; i <= cases[c].bits; i++) {
+      uint16_t high, low;
+      rfPulse(p, cases[c].code, cases[c].bits, i, &high, &low);
+      got.push_back(high / p.pulseUs);
+      got.push_back(low / p.pulseUs);
+      CHECK(high % p.pulseUs == 0 && low % p.pulseUs == 0);
+    }
+    CHECK(got == want);
+  }
+  // Protocol 1 for 5393: a zero is 350 us high and 1050 us low, the sync
+  // 350 us high and 10850 us low.
+  rfProtocol(1, &p);
+  uint16_t high, low;
+  rfPulse(p, 5393, 24, 0, &high, &low);
+  CHECK(high == 350 && low == 1050);
+  rfPulse(p, 5393, 24, 23, &high, &low);
+  CHECK(high == 1050 && low == 350);
+  rfPulse(p, 5393, 24, 24, &high, &low);
+  CHECK(high == 350 && low == 10850);
+}
+
+static void testRfSend() {
+  FakeHal hal;
+  Core core("test_node", "fw", BOARD_HOST, hal);
+  CHECK(has(run(core, "{\"cmd\":\"rf.send\",\"code\":5393,\"bits\":24,\"id\":3}"), "\"cmd\":\"rf.send\",\"id\":3"));
+  CHECK(hal.rf.size() == 1 && hal.rf[0].code == 5393 && hal.rf[0].bits == 24 && hal.rf[0].repeat == 10 &&
+        hal.rf[0].protocol.number == 1 && hal.rf[0].protocol.pulseUs == 350);
+  run(core, "{\"cmd\":\"rf.send\",\"code\":4294967295,\"bits\":32,\"protocol\":3,\"repeat\":20}");
+  CHECK(hal.rf.size() == 2 && hal.rf[1].code == 0xFFFFFFFFUL && hal.rf[1].protocol.number == 3 && hal.rf[1].repeat == 20);
+  run(core, "{\"cmd\":\"rf.send\",\"code\":0,\"bits\":1,\"protocol\":2,\"repeat\":1}");
+  CHECK(hal.rf.size() == 3 && hal.rf[2].protocol.pulseUs == 650 && hal.rf[2].repeat == 1);
+
+  struct Bad {
+    const char* args;
+    const char* error;
+  } bad[] = {
+      {"\"bits\":24", "needs code"},
+      {"\"code\":5393", "needs code"},
+      {"\"code\":-1,\"bits\":24", "needs code"},
+      {"\"code\":4294967296,\"bits\":32", "needs code"},
+      {"\"code\":12.5,\"bits\":24", "needs code"},
+      {"\"code\":\"5393\",\"bits\":24", "needs code"},
+      {"\"code\":5393,\"bits\":0", "bits is 1 to 32"},
+      {"\"code\":5393,\"bits\":33", "bits is 1 to 32"},
+      {"\"code\":256,\"bits\":8", "code has more bits than bits"},
+      {"\"code\":1,\"bits\":8,\"protocol\":4", "protocol is 1 to 3"},
+      {"\"code\":1,\"bits\":8,\"protocol\":0", "protocol is 1 to 3"},
+      {"\"code\":1,\"bits\":8,\"repeat\":0", "repeat is 1 to 20"},
+      {"\"code\":1,\"bits\":8,\"repeat\":21", "repeat is 1 to 20"},
+  };
+  for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+    std::string line = std::string("{\"cmd\":\"rf.send\",") + bad[i].args + ",\"id\":5}";
+    std::string r = run(core, line.c_str());
+    if (!has(r, bad[i].error) || !has(r, "\"id\":5}")) printf("rf.send %s -> %s", bad[i].args, r.c_str());
+    CHECK(has(r, bad[i].error) && has(r, "\"id\":5}"));
+  }
+  CHECK(hal.rf.size() == 3);
+
+  CHECK(has(run(core, "{\"cmd\":\"describe\"}"), "\"ir\":true,\"rf\":true,\"watches\":"));
+  hal.rfPresent = false;
+  CHECK(has(run(core, "{\"cmd\":\"describe\"}"), "\"rf\":false"));
+  CHECK(has(run(core, "{\"cmd\":\"rf.send\",\"code\":1,\"bits\":8}"), "this board has no RF output"));
+}
+
+static void testU32() {
+  Args a;
+  uint32_t v = 7;
+  CHECK(parseArgs("{\"a\":4294967295,\"b\":0,\"c\":-3,\"d\":1.5}", a) == 0);
+  CHECK(a.u32("a", &v) && v == 0xFFFFFFFFUL);
+  CHECK(a.u32("b", &v) && v == 0);
+  CHECK(!a.u32("c", &v) && !a.u32("d", &v) && !a.u32("missing", &v));
+  CHECK(parseArgs("{\"e\":true,\"f\":\"9\",\"g\":4294967296}", a) == 0);
+  CHECK(!a.u32("e", &v) && !a.u32("f", &v) && !a.u32("g", &v));
+}
+
+// A hello goes out on every join and rejoin, and on a rename.
+static void testLink() {
+  Link link(30000);
+  CHECK(link.update(false, 0) == 0);
+  CHECK(link.update(true, 100) == (Link::START_UDP | Link::START_MDNS | Link::HELLO));
+  CHECK(link.update(true, 200) == 0);
+  CHECK(link.update(true, 30099) == 0);
+  CHECK(link.update(true, 30100) == Link::HELLO);
+  // A drop and a rejoin start everything again at once, not 30 s later.
+  CHECK(link.update(false, 31000) == 0);
+  CHECK(link.update(true, 32000) == (Link::START_UDP | Link::START_MDNS | Link::HELLO));
+  CHECK(link.update(true, 33000) == 0);
+  link.renamed();
+  CHECK(link.update(true, 34000) == (Link::START_MDNS | Link::HELLO));
+  CHECK(link.update(true, 35000) == 0);
+  CHECK(link.update(true, 64000) == Link::HELLO);
+  // wifi.set or wifi.clear: the next join is a fresh start, even if the
+  // radio never reported a drop.
+  link.reset();
+  CHECK(link.update(true, 65000) == (Link::START_UDP | Link::START_MDNS | Link::HELLO));
+  // A rename while down is covered by the start on the next join.
+  link.renamed();
+  CHECK(link.update(false, 66000) == 0);
+  CHECK(link.update(true, 67000) == (Link::START_UDP | Link::START_MDNS | Link::HELLO));
+  CHECK(link.update(true, 68000) == 0);
+  // millis() wraps (after 49 days on a board); the period still holds.
+  Link wrap(30000);
+  unsigned long nearEnd = (unsigned long)-1 - 0xFFF;
+  wrap.update(true, nearEnd);
+  CHECK(wrap.update(true, nearEnd + 0x2000) == 0);
+  CHECK(wrap.update(true, nearEnd + 30000) == Link::HELLO);
 }
 
 #ifndef OMNI_SMALL
@@ -461,6 +750,12 @@ int main() {
   testParser();
   testPinModes();
   testSetup();
+  testStartLevel();
+  testNecTiming();
+  testRfEncoding();
+  testRfSend();
+  testU32();
+  testLink();
 #ifndef OMNI_SMALL
   testPicoCore();
   testDescribeFits();

@@ -114,6 +114,7 @@ class DeviceCard extends ConsumerWidget {
                   tooltip: 'More for ${device['name']}',
                   onSelected: (choice) => switch (choice) {
                     'edit' => showEditDevice(context, device),
+                    'pair' => showPairDevice(context, device),
                     'remove' => confirmRemoveDevice(context, ref, device),
                     _ => showModalBottomSheet<void>(
                       context: context,
@@ -126,6 +127,8 @@ class DeviceCard extends ConsumerWidget {
                   itemBuilder: (_) => [
                     if (device['board'] == true)
                       const PopupMenuItem(value: 'pins', child: Text('Pins')),
+                    if (pairsInApp(device))
+                      const PopupMenuItem(value: 'pair', child: Text('Pair')),
                     const PopupMenuItem(
                       value: 'link',
                       child: Text('Link to...'),

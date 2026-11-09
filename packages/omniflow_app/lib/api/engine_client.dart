@@ -5,9 +5,10 @@ import 'package:omniflow_engine/omniflow_engine.dart';
 /// The app's only way into the engine: core API commands and the event
 /// stream. The app holds no device, flow or protocol logic of its own.
 ///
-/// Today the engine runs in the app process. On Android the plan is for it
-/// to live in a foreground service, with a client that sends the same
-/// messages over the service channel.
+/// On Android the engine lives in a foreground service's isolate and the UI
+/// uses `ServiceEngineClient`, which sends the same messages over the
+/// service's data channel. [InProcessEngineClient] is the engine in the
+/// calling isolate: the service uses it, and so do tests.
 abstract interface class EngineClient {
   Future<Map<String, Object?>> call(
     String command, [

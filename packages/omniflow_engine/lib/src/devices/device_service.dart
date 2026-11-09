@@ -95,32 +95,37 @@ class DeviceService {
   Future<InvokeResult> invoke(
     String deviceId,
     String capabilityId,
-    Map<String, Object?> params,
-  ) => _serialised(deviceId, () async {
+    Map<String, Object?> params, {
+    bool allowPairing = true,
+  }) => _serialised(deviceId, () async {
     final (device, manifest) = await _resolve(deviceId);
     return _invoke(
       device,
       manifest,
       _capability(manifest, capabilityId),
       params,
+      allowPairing: allowPairing,
     );
   });
 
   /// Sends the opposite of the toggle's current state. The state is read in
   /// order with the other commands to the device, so two toggles at once
   /// flip it twice.
-  Future<InvokeResult> toggle(String deviceId, String capabilityId) =>
-      _serialised(deviceId, () async {
-        final (device, manifest) = await _resolve(deviceId);
-        final capability = _capability(manifest, capabilityId);
-        final key = stateKeyOf(capability.stateJsonPath);
-        if (key == null) {
-          throw ArgumentError('$deviceId.$capabilityId cannot be toggled');
-        }
-        return _invoke(device, manifest, capability, {
-          'value': device.state[key] != true,
-        });
-      });
+  Future<InvokeResult> toggle(
+    String deviceId,
+    String capabilityId, {
+    bool allowPairing = true,
+  }) => _serialised(deviceId, () async {
+    final (device, manifest) = await _resolve(deviceId);
+    final capability = _capability(manifest, capabilityId);
+    final key = stateKeyOf(capability.stateJsonPath);
+    if (key == null) {
+      throw ArgumentError('$deviceId.$capabilityId cannot be toggled');
+    }
+    return _invoke(device, manifest, capability, {
+      'value': device.state[key] != true,
+    }, allowPairing: allowPairing);
+  });
 
   CapabilitySpec _capability(DriverManifest manifest, String capabilityId) =>
       manifest.capability(capabilityId) ??
@@ -132,14 +137,16 @@ class DeviceService {
     Device device,
     DriverManifest manifest,
     CapabilitySpec capability,
-    Map<String, Object?> params,
-  ) async {
+    Map<String, Object?> params, {
+    bool allowPairing = true,
+  }) async {
     final validated = capability.validateParams(params);
     final (current, reply) = await _sendHealing(
       device,
       manifest,
       capability.command,
       {...validated, 'value': ?capability.toDevice(validated['value'])},
+      allowPairing: allowPairing,
     );
     final state = _optimisticState(current.state, capability, validated);
     final updated = current.copyWith(state: state, lastSeen: _clock());
@@ -151,35 +158,39 @@ class DeviceService {
   /// it returns. A reply with none of the keys the capabilities read is not
   /// this device's state (a late ack to an earlier command), so the state
   /// stays as it was.
-  Future<Device> refreshState(String deviceId) => _serialised(
-    deviceId,
-    () async {
-      final (device, manifest) = await _resolve(deviceId);
-      final poll = manifest.statePoll;
-      if (poll == null || poll['command'] == null) {
-        throw DeviceNotFoundException('${manifest.id} has no statePoll');
-      }
-      final (current, reply) = await _sendHealing(
-        device,
-        manifest,
-        poll['command'],
-        const {},
-      );
-      final polled = _extractObject(reply.json, poll['jsonPath'] as String?);
-      final keys = {
-        for (final c in manifest.capabilities) ?stateKeyOf(c.stateJsonPath),
-      };
-      if (polled != null && keys.isNotEmpty && !keys.any(polled.containsKey)) {
-        return current;
-      }
-      final updated = current.copyWith(
-        state: polled == null ? current.state : _readBack(manifest, polled),
-        lastSeen: _clock(),
-      );
-      await _save(updated);
-      return updated;
-    },
-  );
+  ///
+  /// With [allowPairing] false a device that is not paired yet fails with
+  /// [PairingRequiredException] instead of raising a prompt on its screen.
+  Future<Device> refreshState(String deviceId, {bool allowPairing = true}) =>
+      _serialised(deviceId, () async {
+        final (device, manifest) = await _resolve(deviceId);
+        final poll = manifest.statePoll;
+        if (poll == null || poll['command'] == null) {
+          throw DeviceNotFoundException('${manifest.id} has no statePoll');
+        }
+        final (current, reply) = await _sendHealing(
+          device,
+          manifest,
+          poll['command'],
+          const {},
+          allowPairing: allowPairing,
+        );
+        final polled = _extractObject(reply.json, poll['jsonPath'] as String?);
+        final keys = {
+          for (final c in manifest.capabilities) ?stateKeyOf(c.stateJsonPath),
+        };
+        if (polled != null &&
+            keys.isNotEmpty &&
+            !keys.any(polled.containsKey)) {
+          return current;
+        }
+        final updated = current.copyWith(
+          state: polled == null ? current.state : _readBack(manifest, polled),
+          lastSeen: _clock(),
+        );
+        await _save(updated);
+        return updated;
+      });
 
   /// Sends one literal command (no capability) and returns the reply. The
   /// board setup uses it for `describe`, `pin.mode` and `pin.watch`.
@@ -283,8 +294,9 @@ class DeviceService {
     Device device,
     DriverManifest manifest,
     Object? command,
-    Map<String, Object?> params,
-  ) async {
+    Map<String, Object?> params, {
+    bool allowPairing = true,
+  }) async {
     final channel = _channels[manifest.transport.type];
     if (channel == null) {
       throw UnsupportedError(
@@ -295,6 +307,7 @@ class DeviceService {
       device: d,
       manifest: manifest,
       command: command,
+      allowPairing: allowPairing,
       context: TemplateContext(
         params: params,
         state: d.state,
@@ -314,11 +327,27 @@ class DeviceService {
       }
       final host = await locator(manifest, stableId);
       if (host == null || host == device.host) rethrow;
+      if (!_healsBlind(manifest)) {
+        throw TransportTimeoutException(
+          'no reply from ${device.id} at ${device.host}. A device announcing '
+          'its id answers at $host, but ${device.id} sends secrets with its '
+          'commands, and an announced id proves nothing. If that is the '
+          'device, add ${device.id} again with host $host',
+        );
+      }
       final moved = device.copyWith(host: host);
       await _save(moved);
       return (moved, await channel.send(requestFor(moved)));
     }
   }
+
+  /// Whether a device may follow a discovery reply to a new address
+  /// unchecked. Any LAN host can copy the id a device announces, so only a
+  /// driver without secrets moves blindly. A Tuya local key only encrypts
+  /// and never goes on the wire, so a Tuya device moves too.
+  static bool _healsBlind(DriverManifest manifest) =>
+      manifest.transport.type == TransportType.tuya ||
+      !manifest.settings.any((s) => s.secret);
 
   /// Writes the commanded value into state where the capability reads it,
   /// when that is a simple `$.key` path. The next push or poll corrects it.

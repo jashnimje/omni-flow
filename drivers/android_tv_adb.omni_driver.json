@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "android_tv_adb",
+  "name": "Android TV or Fire TV (network ADB)",
+  "category": "media",
+  "icon": "tv",
+  "transport": { "type": "adb", "port": 5555 },
+  "settings": [
+    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" }
+  ],
+  "reliability": { "timeoutMs": 5000, "retries": 0 },
+  "capabilities": [
+    { "id": "wake", "type": "action", "label": "Wake", "command": { "op": "key", "key": "wakeup" } },
+    { "id": "sleep", "type": "action", "label": "Sleep", "command": { "op": "key", "key": "sleep" } },
+    { "id": "power", "type": "action", "label": "Power key", "command": { "op": "key", "key": "power" } },
+    { "id": "remote", "type": "dpad_remote", "label": "Remote", "command": { "op": "key", "key": "{{value}}" } },
+    { "id": "volume_up", "type": "action", "label": "Volume up", "command": { "op": "key", "key": "volume_up" } },
+    { "id": "volume_down", "type": "action", "label": "Volume down", "command": { "op": "key", "key": "volume_down" } },
+    { "id": "mute", "type": "action", "label": "Mute", "command": { "op": "key", "key": "mute" } },
+    { "id": "play_pause", "type": "action", "label": "Play or pause", "command": { "op": "key", "key": "play_pause" } },
+    {
+      "id": "launch_app",
+      "type": "action",
+      "label": "Launch app",
+      "params": {
+        "package": { "type": "string", "pattern": "[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+" }
+      },
+      "command": { "op": "launch", "package": "{{package}}" }
+    },
+    {
+      "id": "open_url",
+      "type": "action",
+      "label": "Open link",
+      "params": {
+        "url": { "type": "string", "pattern": "https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!$&()*+,;=%]+" }
+      },
+      "command": { "op": "open_url", "url": "{{url}}" }
+    },
+    { "id": "wake_on_lan", "type": "action", "label": "Wake-on-LAN", "command": { "op": "wake_on_lan" } }
+  ]
+}

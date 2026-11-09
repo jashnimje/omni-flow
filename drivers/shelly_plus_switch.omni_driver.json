@@ -5,6 +5,7 @@
   "category": "power",
   "icon": "plug",
   "transport": { "type": "http", "port": 80 },
+  "discovery": [{ "method": "mdns", "service": "_shelly._tcp", "idInstance": true }],
   "statePoll": { "intervalSeconds": 60, "command": { "path": "/rpc/Switch.GetStatus", "query": { "id": 0 } } },
   "reliability": { "timeoutMs": 2000, "retries": 1 },
   "capabilities": [

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "lg_webos_tv",
+  "name": "LG webOS TV (local SSAP over WebSocket)",
+  "category": "media",
+  "icon": "tv",
+  "transport": {
+    "type": "websocket",
+    "port": 3001,
+    "protocol": "webos",
+    "pairingTimeoutMs": 60000,
+    "permissions": ["CONTROL_AUDIO", "CONTROL_POWER", "LAUNCH", "WRITE_NOTIFICATION_TOAST"]
+  },
+  "settings": [
+    { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true },
+    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true }
+  ],
+  "statePoll": { "intervalSeconds": 60, "command": { "uri": "ssap://audio/getVolume" } },
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "volume",
+      "type": "level",
+      "label": "Volume",
+      "params": { "value": { "type": "number", "min": 0, "max": 100, "integer": true } },
+      "command": { "uri": "ssap://audio/setVolume", "payload": { "volume": "{{value}}" } },
+      "stateJsonPath": "$.volume"
+    },
+    {
+      "id": "mute",
+      "type": "toggle",
+      "label": "Mute",
+      "command": { "uri": "ssap://audio/setMute", "payload": { "mute": "{{value}}" } },
+      "stateJsonPath": "$.muted"
+    },
+    {
+      "id": "power_off",
+      "type": "action",
+      "label": "Turn off",
+      "command": { "uri": "ssap://system/turnOff" }
+    },
+    {
+      "id": "launch_app",
+      "type": "action",
+      "label": "Open app or input",
+      "params": { "app": { "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,127}" } },
+      "command": { "uri": "ssap://system.launcher/launch", "payload": { "id": "{{app}}" } }
+    },
+    {
+      "id": "toast",
+      "type": "action",
+      "label": "Show a message",
+      "params": { "message": { "type": "string", "pattern": "[^\\x00-\\x1f\\x7f]{1,100}" } },
+      "command": { "uri": "ssap://system.notifications/createToast", "payload": { "message": "{{message}}" } }
+    }
+  ]
+}

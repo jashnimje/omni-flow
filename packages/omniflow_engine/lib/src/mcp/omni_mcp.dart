@@ -3,8 +3,8 @@ import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
 
+import '../api/local_client.dart';
 import '../api/omni_engine.dart';
-import '../manifest/driver_manifest.dart';
 import '../version.dart';
 
 typedef _Board = ({String fqbn, bool wifi, String pins});
@@ -36,13 +36,20 @@ const Map<String, _Board> _boards = {
   ),
 };
 
+/// The MCP server over an engine opened in this process.
+McpServer createOmniMcpServer(OmniEngine engine) =>
+    createOmniMcpServerFor(InProcessConnection(engine));
+
 /// The MCP server: one tool per core API need, each a thin call into
-/// [OmniEngine.handle], so an agent can do nothing the CLI cannot.
+/// [EngineConnection.handle], so an agent can do nothing the CLI cannot,
+/// whether the engine is in this process or in a running hub.
 ///
 /// An agent is not the user. Flows it deploys are saved untrusted, so a flow
 /// that drives a host-command driver waits for approval, and it cannot
-/// register a driver that runs host commands at all.
-McpServer createOmniMcpServer(OmniEngine engine) {
+/// register a driver that runs host commands at all. Pairing a device and
+/// trusting an SSH host key are the user's steps: an invoke never starts a
+/// pairing prompt, and the tools for both refuse with `needs_user`.
+McpServer createOmniMcpServerFor(EngineConnection engine) {
   final server = McpServer(
     const Implementation(name: 'omniflow', version: omniflowEngineVersion),
     options: const McpServerOptions(
@@ -91,20 +98,27 @@ McpServer createOmniMcpServer(OmniEngine engine) {
       required: ['deviceId', 'capabilityId'],
     ),
     callback: (args, _) async {
-      final manifest = await _driverOf(engine, args['deviceId']);
-      if (manifest?.isHighRisk ?? false) {
+      final drivers = await engine.handle('driver.list', {});
+      if (drivers['ok'] != true) return reply(drivers);
+      final driver = _driverEntry(drivers, await _driverIdOf(engine, args));
+      if (driver?['highRisk'] == true) {
         return refuse(
           'needs_user',
           '${args['deviceId']} runs host commands. Ask the user to run it, or deploy a flow for approval',
         );
       }
-      return reply(
-        await engine.handle('device.invoke', {
-          'id': args['deviceId'],
-          'capability': args['capabilityId'],
-          'params': args['params'] ?? const {},
-        }),
-      );
+      final result = await engine.handle('device.invoke', {
+        'id': args['deviceId'],
+        'capability': args['capabilityId'],
+        'params': args['params'] ?? const {},
+        'allowPairing': false,
+      });
+      // The engine's own message also offers Pair in the app, which pairs
+      // the phone's engine, not this one.
+      if (result['error'] case {'type': 'needs_user'}) {
+        return refuse('needs_user', _pairCommandFor('${args['deviceId']}'));
+      }
+      return reply(result);
     },
   );
 
@@ -131,7 +145,10 @@ McpServer createOmniMcpServer(OmniEngine engine) {
       // Replacing a user driver changes what that user's devices and
       // approved flows do, so that is the user's call too.
       final id = checked['id'] as String;
-      if (engine.registry[id] != null && !engine.registry.isBuiltIn(id)) {
+      final drivers = await engine.handle('driver.list', {});
+      if (drivers['ok'] != true) return reply(drivers);
+      final existing = _driverEntry(drivers, id);
+      if (existing != null && existing['builtIn'] != true) {
         return refuse(
           'needs_user',
           'a user driver $id exists. Only the user can replace it (omni driver register)',
@@ -192,8 +209,11 @@ McpServer createOmniMcpServer(OmniEngine engine) {
     description:
         'Names the pins of an OmniFlow board device and sets them up on the board. pins maps a '
         'name to {"pin": GPIO, "mode": "in" | "in_pullup" | "out" | "pwm" | "servo" | "adc"}, '
-        'optionally "watch": {"ms", "delta"} or false. Each pin becomes a capability: out a toggle, '
-        'pwm 0 to 100, servo 0 to 180, inputs a sensor in the device state. Replaces all pins.',
+        'optionally "watch": {"ms", "delta"} or false, and "invert": true for an out pin that is '
+        'active low (a relay module that switches on at LOW), or false for an in_pullup pin that '
+        'reads true when high. Each pin becomes a capability: out a toggle, pwm 0 to 100, servo 0 '
+        'to 180, inputs a sensor in the device state. Replaces all pins, so start from the device\'s '
+        'pins setting in discover_devices_and_capabilities and keep each "invert".',
     inputSchema: JsonSchema.object(
       properties: {'deviceId': JsonSchema.string(), 'pins': freeObject},
       required: ['deviceId', 'pins'],
@@ -203,6 +223,80 @@ McpServer createOmniMcpServer(OmniEngine engine) {
         'id': args['deviceId'],
         'pins': args['pins'],
       }),
+    ),
+  );
+
+  server.registerTool(
+    'describe_board',
+    description:
+        'What an OmniFlow board offers: each GPIO with its capabilities (in, pullup, out, pwm, '
+        'servo, adc), whether IR and RF outputs are set, the pins set now, and warnings for '
+        'strapping pins. An offline board gives the last describe it sent (live: false).',
+    inputSchema: JsonSchema.object(
+      properties: {'deviceId': JsonSchema.string()},
+      required: ['deviceId'],
+    ),
+    callback: (args, _) async =>
+        reply(await engine.handle('board.describe', {'id': args['deviceId']})),
+  );
+
+  server.registerTool(
+    'pair_device',
+    description:
+        'Pairing a TV, a Hue bridge or a Home Assistant token is done by the user, because it '
+        'needs someone at the device. This tool never pairs. It returns the command for the '
+        'user to run on this computer, omni device pair for a TV or Hue bridge and omni secret '
+        'set for a token or key. Call it when a device fails with needs_user or missing_secret.',
+    inputSchema: JsonSchema.object(
+      properties: {'deviceId': JsonSchema.string()},
+      required: ['deviceId'],
+    ),
+    callback: (args, _) async {
+      final id = args['deviceId'];
+      if (id is! String) return refuse('invalid', 'deviceId is a string');
+      final got = await engine.handle('device.get', {'id': id});
+      if (got['ok'] != true) return reply(got);
+      final drivers = await engine.handle('driver.list', {});
+      if (drivers['ok'] != true) return reply(drivers);
+      final driver = _driverEntry(
+        drivers,
+        (got['device'] as Map)['driver'] as String?,
+      );
+      final pairing = driver?['pairing'];
+      if (pairing != null && pairing != 'secret') {
+        return refuse('needs_user', _pairCommandFor(id));
+      }
+      final secrets = [
+        for (final s in (driver?['settings'] as List? ?? const []).cast<Map>())
+          if (s['secret'] == true) s['key'] as String,
+      ];
+      if (secrets.isEmpty) {
+        return refuse('invalid', '$id needs no pairing and no secret');
+      }
+      return refuse(
+        'needs_user',
+        'only the user can store a secret for $id: ask them to run '
+            '${secrets.map((k) => 'omni secret set $id $k').join(' and ')} '
+            'on this computer',
+      );
+    },
+  );
+
+  server.registerTool(
+    'trust_ssh_host_key',
+    description:
+        'Accepting or clearing a host\'s SSH host key is a trust decision for the user. This '
+        'tool never changes a pin: it returns the command for the user. Call it when a host '
+        'device fails with host_key.',
+    inputSchema: JsonSchema.object(
+      properties: {'deviceId': JsonSchema.string()},
+      required: ['deviceId'],
+    ),
+    callback: (args, _) async => refuse(
+      'needs_user',
+      'only the user can trust a host key: ask them to run '
+          'omni device hostkey ${args['deviceId']}, check the key, then '
+          'omni device hostkey ${args['deviceId']} --accept <fingerprint>',
     ),
   );
 
@@ -248,7 +342,13 @@ McpServer createOmniMcpServer(OmniEngine engine) {
       final seconds = (args['seconds'] is num ? args['seconds'] as num : 3)
           .clamp(1, 10);
       final packets = <Map<String, Object?>>[];
-      final sub = engine.events
+      final Stream<Map<String, Object?>> events;
+      try {
+        events = await engine.events(packets: true);
+      } on LocalSocketException catch (e) {
+        return refuse('unavailable', e.message);
+      }
+      final sub = events
           .where((e) => e['event'] == 'packet.captured')
           .listen(packets.add);
       await Future<void>.delayed(
@@ -318,9 +418,28 @@ McpServer createOmniMcpServer(OmniEngine engine) {
   return server;
 }
 
-Future<DriverManifest?> _driverOf(OmniEngine engine, Object? deviceId) async {
+Future<String?> _driverIdOf(
+  EngineConnection engine,
+  Map<String, dynamic> args,
+) async {
+  final deviceId = args['deviceId'];
   if (deviceId is! String) return null;
   final got = await engine.handle('device.get', {'id': deviceId});
   if (got['ok'] != true) return null;
-  return engine.registry[(got['device'] as Map)['driver'] as String];
+  return (got['device'] as Map)['driver'] as String?;
+}
+
+/// Where the user pairs a device for the engine this MCP server drives. The
+/// app's Pair button pairs the phone's own engine, so it is not offered.
+String _pairCommandFor(String deviceId) =>
+    '$deviceId is not paired with this OmniFlow engine yet. Only the user '
+    'can pair it: ask them to run omni device pair $deviceId on this computer';
+
+/// The `driver.list` entry for [id], which carries `builtIn` and `highRisk`.
+Map<String, Object?>? _driverEntry(Map<String, Object?> list, String? id) {
+  if (id == null) return null;
+  for (final d in (list['drivers'] as List).cast<Map>()) {
+    if (d['id'] == id) return Map<String, Object?>.from(d);
+  }
+  return null;
 }

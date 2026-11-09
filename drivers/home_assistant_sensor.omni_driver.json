@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "home_assistant_sensor",
+  "name": "Home Assistant sensor (REST API)",
+  "category": "sensor",
+  "icon": "gauge",
+  "transport": {
+    "type": "http",
+    "port": 8123,
+    "auth": { "header": "Authorization", "scheme": "Bearer", "secret": "token" },
+    "flattenReply": "attributes"
+  },
+  "discovery": [{ "method": "mdns", "service": "_home-assistant._tcp", "idTxt": "uuid" }],
+  "pairing": {
+    "method": "secret",
+    "secret": "token",
+    "instructions": "In Home Assistant open your profile, then Security, and create a long-lived access token"
+  },
+  "settings": [
+    { "key": "entityId", "label": "Entity id, such as sensor.living_room_temperature" },
+    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
+  ],
+  "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "value",
+      "type": "sensor",
+      "label": "Value",
+      "stateJsonPath": "$.state"
+    }
+  ]
+}

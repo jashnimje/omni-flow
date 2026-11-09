@@ -165,6 +165,71 @@ void main() {
         throwsA(isA<TransportTimeoutException>()),
       );
     });
+
+    test(
+      'a device that sends secrets does not follow an announced id',
+      () async {
+        final http = FakeChannel();
+        await store.put(
+          const Device(
+            id: 'ha_lamp',
+            name: 'HA lamp',
+            driverId: 'home_assistant_entity',
+            host: '192.168.1.20',
+            stableId: 'ha-uuid-1',
+            settings: {'entityId': 'light.desk'},
+          ),
+        );
+        http.outcomes.add((_) => throw TransportTimeoutException('no reply'));
+        final s = DeviceService(
+          registry: DriverRegistry.withBuiltIns(),
+          store: store,
+          channels: {TransportType.http: http},
+          locator: (_, _) async => '192.168.1.66',
+        );
+        await expectLater(
+          s.refreshState('ha_lamp'),
+          throwsA(
+            isA<TransportTimeoutException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('192.168.1.66'), contains('add ha_lamp again')),
+            ),
+          ),
+        );
+        expect(http.requests.map((r) => r.device.host), ['192.168.1.20']);
+        expect((await store.get('ha_lamp'))!.host, '192.168.1.20');
+      },
+    );
+
+    test(
+      'a Tuya device still heals, since its key never goes on the wire',
+      () async {
+        final tuya = FakeChannel();
+        await store.put(
+          const Device(
+            id: 'plug',
+            name: 'Plug',
+            driverId: 'tuya_plug',
+            host: '192.168.1.40',
+            stableId: 'bf0123456789abcdefgh',
+            settings: {'devId': 'bf0123456789abcdefgh'},
+          ),
+        );
+        tuya.outcomes.add((_) => throw TransportTimeoutException('no reply'));
+        final s = DeviceService(
+          registry: DriverRegistry.withBuiltIns(),
+          store: store,
+          channels: {TransportType.tuya: tuya},
+          locator: (_, _) async => '192.168.1.41',
+        );
+        await s.invoke('plug', 'power', {'value': true});
+        expect(tuya.requests.map((r) => r.device.host), [
+          '192.168.1.40',
+          '192.168.1.41',
+        ]);
+      },
+    );
   });
 
   test('refreshState replaces state with the polled object', () async {

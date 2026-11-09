@@ -37,6 +37,22 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
   final _host = TextEditingController();
   final _name = TextEditingController();
   final _room = TextEditingController();
+  final _settings = <String, TextEditingController>{};
+
+  /// The driver's settings typed as text: not secrets, which go through
+  /// pairing or omni secret set, and not a board's pins, which the pin
+  /// sheet sets.
+  List<Json> get _settingFields {
+    final driver = _drivers?.where((d) => d['id'] == _driver).firstOrNull;
+    if (driver == null || driver['board'] == true) return const [];
+    return [
+      for (final s in (driver['settings'] as List? ?? const []))
+        if ((s as Map)['secret'] != true) Map<String, Object?>.from(s),
+    ];
+  }
+
+  TextEditingController _settingField(String key) =>
+      _settings.putIfAbsent(key, TextEditingController.new);
 
   @override
   void initState() {
@@ -60,6 +76,9 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
     _host.dispose();
     _name.dispose();
     _room.dispose();
+    for (final c in _settings.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -72,24 +91,40 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
       'driver': _driver,
     });
     if (!mounted) return;
+    final found = [
+      for (final f in (result['found'] as List? ?? const []))
+        Map<String, Object?>.from(f as Map),
+    ];
+    // Known entries stay listed: a Hue bridge or Home Assistant instance has
+    // one stable id for every device behind it.
     setState(() {
       _scanning = false;
       _found = [
-        for (final f in (result['found'] as List? ?? const []))
-          if ((f as Map)['knownAs'] == null) Map<String, Object?>.from(f),
+        ...found.where((f) => f['knownAs'] == null),
+        ...found.where((f) => f['knownAs'] != null),
       ];
     });
   }
 
+  String _deviceName(String id) =>
+      '${ref.read(devicesProvider).value?.where((d) => d['id'] == id).firstOrNull?['name'] ?? id}';
+
   void _pick(Json found) => setState(() {
     _host.text = '${found['host']}';
     _stableId = found['stableId'] as String?;
-    if (_name.text.isEmpty && _stableId != null) _name.text = _stableId!;
+    if (_name.text.isEmpty && _stableId != null && found['knownAs'] == null) {
+      _name.text = _stableId!;
+    }
   });
 
   Future<void> _add() async {
     final devices = ref.read(devicesProvider.notifier);
     final name = _name.text.trim();
+    final settings = {
+      for (final f in _settingFields)
+        if (_settingField('${f['key']}').text.trim().isNotEmpty)
+          '${f['key']}': _settingField('${f['key']}').text.trim(),
+    };
     setState(() => _adding = true);
     final result = await callEngine(ref, 'device.add', {
       'id': deviceIdFor(name),
@@ -98,16 +133,22 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
       'host': _host.text.trim(),
       if (_room.text.trim().isNotEmpty) 'room': _room.text.trim(),
       'stableId': ?_stableId,
+      if (settings.isNotEmpty) 'settings': settings,
     });
     if (mounted) setState(() => _adding = false);
     if (result['ok'] != true) return;
     await devices.refresh();
     if (mounted) Navigator.of(context).pop();
-    final missing = (result['missingSecrets'] as List? ?? const []).join(', ');
+    final missing = [
+      ...(result['missingSettings'] as List? ?? const []),
+      ...(result['missingSecrets'] as List? ?? const []),
+    ].join(', ');
     showMessage(
       [
         'Added $name.',
         if (missing.isNotEmpty) 'It still needs: $missing.',
+        if (pairsInApp(result['device'] as Map? ?? const {}))
+          'Pair it from its menu.',
         if (result['provisionError'] != null)
           'The board is offline: ${result['provisionError']}',
       ].join(' '),
@@ -175,7 +216,7 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
             if (found != null && found.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('Nothing new found. Type its address below.'),
+                child: Text('Nothing found. Type its address below.'),
               ),
             if (found != null)
               for (final f in found)
@@ -189,9 +230,14 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
                         : Icons.radio_button_unchecked,
                   ),
                   title: Text('${f['host']}'),
-                  subtitle: f['stableId'] == null
-                      ? null
-                      : Text('${f['stableId']}'),
+                  subtitle: switch ((f['stableId'], f['knownAs'])) {
+                    (_, final String known) => Text(
+                      'Already used by ${_deviceName(known)}',
+                      key: ValueKey('found-known-${f['host']}'),
+                    ),
+                    (final String id, _) => Text(id),
+                    _ => null,
+                  },
                   onTap: () => _pick(f),
                 ),
             TextField(
@@ -223,6 +269,12 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
                 hintText: 'Study',
               ),
             ),
+            for (final f in _settingFields)
+              TextField(
+                key: ValueKey('add-setting-${f['key']}'),
+                controller: _settingField('${f['key']}'),
+                decoration: InputDecoration(labelText: '${f['label']}'),
+              ),
             const SizedBox(height: 12),
             FilledButton(
               key: const ValueKey('add-save'),
@@ -365,3 +417,103 @@ Future<bool> confirm(
       ),
     ) ==
     true;
+
+/// Whether the Pair dialog can finish pairing [device]. A `secret` pairing
+/// ends with the user storing a token, and the app has no secret entry yet,
+/// so it is left out rather than offered as a step that cannot complete.
+bool pairsInApp(Map device) => switch (device['pairing']) {
+  {'method': 'secret'} => false,
+  Map() => true,
+  _ => false,
+};
+
+/// Pairs a device the way its driver needs (a TV prompt, a Hue link
+/// button). The engine says what the user does: the prompt comes from the
+/// device's `pairing`, the outcome from device.pair.
+Future<void> showPairDevice(BuildContext context, Json device) =>
+    showDialog<void>(
+      context: context,
+      builder: (_) => PairDeviceDialog(device: device),
+    );
+
+class PairDeviceDialog extends ConsumerStatefulWidget {
+  const PairDeviceDialog({super.key, required this.device});
+
+  final Json device;
+
+  @override
+  ConsumerState<PairDeviceDialog> createState() => _PairDeviceDialogState();
+}
+
+class _PairDeviceDialogState extends ConsumerState<PairDeviceDialog> {
+  var _pairing = false;
+  var _paired = false;
+  String? _outcome;
+
+  Future<void> _pair() async {
+    final devices = ref.read(devicesProvider.notifier);
+    setState(() {
+      _pairing = true;
+      _outcome = null;
+    });
+    final result = await callEngine(ref, 'device.pair', {
+      'id': widget.device['id'],
+    });
+    if (result['ok'] == true) await devices.refresh();
+    if (!mounted) return;
+    setState(() {
+      _pairing = false;
+      _paired = result['ok'] == true && result['paired'] == true;
+      _outcome = result['ok'] == true
+          ? '${result['message']}'
+          : errorMessage(result);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pairing = widget.device['pairing'] as Map? ?? const {};
+    return AlertDialog(
+      title: Text('Pair ${widget.device['name']}'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${pairing['prompt'] ?? ''}',
+            key: const ValueKey('pair-prompt'),
+          ),
+          if (_pairing)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: LinearProgressIndicator(),
+            ),
+          if (_outcome != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(_outcome!, key: const ValueKey('pair-outcome')),
+            ),
+        ],
+      ),
+      actions: [
+        if (_paired)
+          FilledButton(
+            key: const ValueKey('pair-done'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Done'),
+          )
+        else ...[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+          FilledButton(
+            key: const ValueKey('pair-start'),
+            onPressed: _pairing ? null : _pair,
+            child: Text(_outcome == null ? 'Start pairing' : 'Try again'),
+          ),
+        ],
+      ],
+    );
+  }
+}

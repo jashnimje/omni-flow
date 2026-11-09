@@ -43,6 +43,59 @@ void main() {
     return (code, jsonDecode(out.toString()) as Map<String, Object?>);
   }
 
+  test('board pin keeps an active-low relay active low', () async {
+    final engine = await OmniEngine.open(home: home, secrets: secrets);
+    final unused = await RawDatagramSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    addTearDown(unused.close);
+    final added = await engine.handle('device.add', {
+      'id': 'desk',
+      'driver': 'omniflow_board',
+      'host': '127.0.0.1',
+      'port': unused.port,
+      'provision': false,
+      'settings': {
+        'pins': {
+          'relay': {'pin': 4, 'mode': 'out', 'invert': true},
+        },
+      },
+    });
+    expect(added['ok'], isTrue, reason: '$added');
+    await engine.close();
+
+    Future<Map> pins() async {
+      final engine = await OmniEngine.open(home: home, secrets: secrets);
+      try {
+        final got = await engine.handle('device.get', {'id': 'desk'});
+        return ((got['device'] as Map)['settings'] as Map)['pins'] as Map;
+      } finally {
+        await engine.close();
+      }
+    }
+
+    await omni(['board', 'pin', 'desk', 'relay', '4', 'out']);
+    expect((await pins())['relay'], {'pin': 4, 'mode': 'out', 'invert': true});
+
+    await omni([
+      'board',
+      'pin',
+      'desk',
+      'relay',
+      '4',
+      'out',
+      '--no-active-low',
+    ]);
+    expect((await pins())['relay'], {'pin': 4, 'mode': 'out', 'invert': false});
+
+    await omni(['board', 'pin', 'desk', 'relay', '4', 'out', '--active-low']);
+    expect((await pins())['relay'], {'pin': 4, 'mode': 'out', 'invert': true});
+
+    await omni(['board', 'pin', 'desk', 'relay', '4', 'in_pullup']);
+    expect((await pins())['relay'], {'pin': 4, 'mode': 'in_pullup'});
+  });
+
   test('setup over USB, add over Wi-Fi, then name pins', () async {
     if (await VirtualBoard.build() == null) {
       markTestSkipped('no C++ compiler for the virtual board');
@@ -112,6 +165,14 @@ void main() {
       'value=true',
     ]);
     expect(invokeCode, 0);
+
+    final (describeCode, described) = await omni(['board', 'describe', 'desk']);
+    expect(describeCode, 0, reason: '$described');
+    expect(described['live'], isTrue);
+    final describe = described['describe'] as Map;
+    expect(describe['node'], 'desk_board');
+    expect(describe['set'], anyElement(equals({'pin': 2, 'mode': 'out'})));
+    expect(described['warnings'], isA<List>());
 
     final (badCode, bad) = await omni([
       'board',

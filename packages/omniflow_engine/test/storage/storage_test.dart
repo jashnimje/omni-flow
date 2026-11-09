@@ -61,6 +61,16 @@ void deviceStoreContract(String name, Future<DeviceStore> Function() create) {
   });
 }
 
+/// The schema at version 2, as drift created it.
+const v2Schema = [
+  'CREATE TABLE "driver_manifests" ("id" TEXT NOT NULL, "manifest_json" TEXT NOT NULL, "updated_at" INTEGER NOT NULL, PRIMARY KEY ("id"))',
+  'CREATE TABLE "devices" ("id" TEXT NOT NULL, "name" TEXT NOT NULL, "driver_id" TEXT NOT NULL, "host" TEXT NOT NULL, "port" INTEGER NULL, "room" TEXT NULL, "stable_id" TEXT NULL, "settings_json" TEXT NOT NULL DEFAULT \'{}\', "state_json" TEXT NOT NULL DEFAULT \'{}\', "last_seen" INTEGER NULL, PRIMARY KEY ("id"))',
+  'CREATE TABLE "flows" ("id" TEXT NOT NULL, "flow_json" TEXT NOT NULL, "enabled" INTEGER NOT NULL DEFAULT 1 CHECK ("enabled" IN (0, 1)), "approved" INTEGER NOT NULL DEFAULT 1 CHECK ("approved" IN (0, 1)), "updated_at" INTEGER NOT NULL, PRIMARY KEY ("id"))',
+  'CREATE TABLE "zones" ("id" TEXT NOT NULL, "zone_json" TEXT NOT NULL, PRIMARY KEY ("id"))',
+  'CREATE TABLE "global_variables" ("name" TEXT NOT NULL, "value_json" TEXT NOT NULL, "updated_at" INTEGER NOT NULL, PRIMARY KEY ("name"))',
+  'CREATE TABLE "execution_log" ("id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "run_id" TEXT NOT NULL, "flow_id" TEXT NOT NULL, "outcome" TEXT NOT NULL, "started_at" INTEGER NOT NULL, "trace_json" TEXT NOT NULL)',
+];
+
 void main() {
   deviceStoreContract('InMemoryDeviceStore', () async => InMemoryDeviceStore());
   deviceStoreContract('DriftDeviceStore', () async {
@@ -87,53 +97,157 @@ void main() {
     await db.close();
   });
 
-  test('a v1 database migrates to v2 and keeps its devices', () async {
-    final dir = await Directory.systemTemp.createTemp('omni_migrate');
-    addTearDown(() => dir.delete(recursive: true));
-    // The v1 tables, exactly as drift creates them (unchanged in v2).
-    final reference = OmniDatabase.memory();
-    await DriftDeviceStore(reference).all();
-    final ddl = [
-      for (final row
-          in await reference
-              .customSelect(
-                "SELECT sql FROM sqlite_master WHERE name IN ('devices', 'driver_manifests')",
-              )
-              .get())
-        row.read<String>('sql'),
-    ];
-    await reference.close();
-    expect(ddl, hasLength(2));
-    final file = File('${dir.path}/omniflow.sqlite');
-    final v1 = sqlite3.open(file.path);
-    for (final statement in ddl) {
-      v1.execute(statement);
-    }
-    v1.execute(
-      "INSERT INTO devices (id, name, driver_id, host) VALUES ('desk_lamp', 'Desk lamp', 'philips_wiz_udp', '10.0.0.5')",
-    );
-    v1.execute('PRAGMA user_version = 1');
-    v1.close();
+  test(
+    'a v1 database migrates to the current schema and keeps its devices',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('omni_migrate');
+      addTearDown(() => dir.delete(recursive: true));
+      // The v1 tables, exactly as drift creates them (unchanged since).
+      final reference = OmniDatabase.memory();
+      await DriftDeviceStore(reference).all();
+      final ddl = [
+        for (final row
+            in await reference
+                .customSelect(
+                  "SELECT sql FROM sqlite_master WHERE name IN ('devices', 'driver_manifests')",
+                )
+                .get())
+          row.read<String>('sql'),
+      ];
+      await reference.close();
+      expect(ddl, hasLength(2));
+      final file = File('${dir.path}/omniflow.sqlite');
+      final v1 = sqlite3.open(file.path);
+      for (final statement in ddl) {
+        v1.execute(statement);
+      }
+      v1.execute(
+        "INSERT INTO devices (id, name, driver_id, host) VALUES ('desk_lamp', 'Desk lamp', 'philips_wiz_udp', '10.0.0.5')",
+      );
+      v1.execute('PRAGMA user_version = 1');
+      v1.close();
 
-    final db = OmniDatabase.file(file);
+      final db = OmniDatabase.file(file);
+      addTearDown(db.close);
+      expect((await DriftDeviceStore(db).get('desk_lamp'))!.host, '10.0.0.5');
+      await DriftFlowStore(db).put(
+        'f',
+        {'id': 'f'},
+        enabled: true,
+        approved: true,
+        at: DateTime.utc(2026),
+      );
+      await DriftZoneStore(db).put('desk', {'id': 'desk'});
+      await DriftGlobalStore(db).put('HomeMode', 'home', DateTime.utc(2026));
+      expect((await DriftFlowStore(db).get('f'))!.approved, isTrue);
+      expect(await DriftZoneStore(db).all(), [
+        {'id': 'desk'},
+      ]);
+      expect(await DriftGlobalStore(db).all(), {'HomeMode': 'home'});
+      final version = await db.customSelect('PRAGMA user_version').getSingle();
+      expect(version.read<int>('user_version'), 3);
+    },
+  );
+
+  test(
+    'a v2 database moves each flow trust mark into the trusted column',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('omni_migrate_v2');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/omniflow.sqlite');
+      final v2 = sqlite3.open(file.path);
+      // The version 2 schema, frozen as drift created it.
+      for (final statement in v2Schema) {
+        v2.execute(statement);
+      }
+      void flow(String id, String json) => v2.execute(
+        'INSERT INTO flows (id, flow_json, enabled, approved, updated_at) '
+        'VALUES (?, ?, 1, 1, 0)',
+        [id, json],
+      );
+      flow('mine', '{"id":"mine","nodes":[],"_trusted":true}');
+      flow('theirs', '{"id":"theirs","nodes":[]}');
+      flow('marked_false', '{"id":"marked_false","_trusted":false}');
+      v2.execute(
+        "INSERT INTO devices (id, name, driver_id, host) VALUES ('desk_lamp', 'Desk lamp', 'philips_wiz_udp', '10.0.0.5')",
+      );
+      v2.execute('PRAGMA user_version = 2');
+      v2.close();
+
+      final db = OmniDatabase.file(file);
+      addTearDown(db.close);
+      final flows = {
+        for (final r in await DriftFlowStore(db).all()) r.json['id']: r,
+      };
+      expect(flows['mine']!.trusted, isTrue);
+      expect(flows['mine']!.json, {'id': 'mine', 'nodes': <Object?>[]});
+      expect(flows['theirs']!.trusted, isFalse);
+      expect(flows['marked_false']!.trusted, isFalse);
+      expect(flows['marked_false']!.json, {'id': 'marked_false'});
+      for (final r in flows.values) {
+        expect(r.approved, isTrue);
+        expect(r.enabled, isTrue);
+      }
+      expect((await DriftDeviceStore(db).get('desk_lamp'))!.host, '10.0.0.5');
+      await DriftBoardDescribeStore(db)
+          .put('desk', const {'board': 'esp32'}, DateTime.utc(2026));
+      expect((await DriftBoardDescribeStore(db).get('desk'))!.describe, {
+        'board': 'esp32',
+      });
+      final version = await db.customSelect('PRAGMA user_version').getSingle();
+      expect(version.read<int>('user_version'), 3);
+    },
+  );
+
+  test('a flow keeps its trusted flag, false unless put says so', () async {
+    final db = OmniDatabase.memory();
     addTearDown(db.close);
-    expect((await DriftDeviceStore(db).get('desk_lamp'))!.host, '10.0.0.5');
-    await DriftFlowStore(db).put(
-      'f',
-      {'id': 'f'},
+    final store = DriftFlowStore(db);
+    await store.put(
+      'a',
+      {'id': 'a'},
+      enabled: true,
+      approved: true,
+      trusted: true,
+      at: DateTime.utc(2026),
+    );
+    await store.put(
+      'b',
+      {'id': 'b'},
+      enabled: true,
+      approved: false,
+      at: DateTime.utc(2026),
+    );
+    expect((await store.get('a'))!.trusted, isTrue);
+    expect((await store.get('b'))!.trusted, isFalse);
+    await store.put(
+      'a',
+      {'id': 'a'},
       enabled: true,
       approved: true,
       at: DateTime.utc(2026),
     );
-    await DriftZoneStore(db).put('desk', {'id': 'desk'});
-    await DriftGlobalStore(db).put('HomeMode', 'home', DateTime.utc(2026));
-    expect((await DriftFlowStore(db).get('f'))!.approved, isTrue);
-    expect(await DriftZoneStore(db).all(), [
-      {'id': 'desk'},
-    ]);
-    expect(await DriftGlobalStore(db).all(), {'HomeMode': 'home'});
-    final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 2);
+    expect((await store.get('a'))!.trusted, isFalse);
+  });
+
+  test('the last describe of each board is kept and replaced', () async {
+    final db = OmniDatabase.memory();
+    addTearDown(db.close);
+    final store = DriftBoardDescribeStore(db);
+    expect(await store.get('desk'), isNull);
+    await store.put('desk', const {
+      'board': 'esp32',
+      'watches': 8,
+    }, DateTime.utc(2026, 11, 7));
+    await store.put('desk', const {
+      'board': 'esp8266',
+    }, DateTime.utc(2026, 11, 8));
+    final kept = (await store.get('desk'))!;
+    expect(kept.describe, {'board': 'esp8266'});
+    expect(kept.seenAt, DateTime.utc(2026, 11, 8));
+    expect(kept.seenAt.isUtc, isTrue);
+    expect(await store.remove('desk'), isTrue);
+    expect(await store.get('desk'), isNull);
   });
 
   test('the execution log keeps only the newest rows', () async {

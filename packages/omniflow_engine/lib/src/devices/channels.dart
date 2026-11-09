@@ -16,10 +16,16 @@ class ChannelRequest {
     required this.manifest,
     required this.command,
     required this.context,
+    this.allowPairing = true,
   });
 
   final Device device;
   final DriverManifest manifest;
+
+  /// Whether the channel may start a pairing (a prompt on a TV) when the
+  /// device does not know this engine yet. False for agents: pairing is the
+  /// user's step, so the command fails with [PairingRequiredException].
+  final bool allowPairing;
 
   /// The command template. Channels that send structured payloads receive it
   /// rendered. The exec channel renders it as argv itself.
@@ -42,6 +48,16 @@ class CommandFailedException implements Exception {
 
   @override
   String toString() => 'CommandFailedException: $message';
+}
+
+/// The device is not paired with this engine, and the caller may not start
+/// a pairing ([ChannelRequest.allowPairing] is false).
+class PairingRequiredException extends CommandFailedException {
+  PairingRequiredException(String deviceId)
+    : super(
+        '$deviceId is not paired with OmniFlow yet. Pair it first: '
+        'omni device pair $deviceId, or Pair in the device menu of the app',
+      );
 }
 
 /// Delivers a command over one transport type.

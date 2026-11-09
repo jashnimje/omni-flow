@@ -16,11 +16,44 @@ const _modeHelp = {
   'adc': 'analog sensor 0 to 100%',
 };
 
+/// The board.describe capability each mode needs.
+const _modeCap = {
+  'out': 'out',
+  'in_pullup': 'pullup',
+  'in': 'in',
+  'pwm': 'pwm',
+  'servo': 'servo',
+  'adc': 'adc',
+};
+
 /// A hint only. The engine checks the name and says why it refuses one.
 final _pinName = RegExp(r'^[a-z][a-z0-9_]*$');
 
+/// One GPIO the board reports, with what it can do.
+typedef BoardPin = ({int pin, Set<String> caps});
+
+/// The GPIOs in the `describe` of a board.describe reply, in board order.
+List<BoardPin> boardPinsOf(Json describe) => [
+  for (final p in (describe['pins'] as List? ?? const []))
+    if (p case {'pin': final int pin, 'caps': final List caps})
+      (pin: pin, caps: {for (final c in caps) '$c'}),
+];
+
+/// The warnings in a board.pins reply, such as a strapping pin that can
+/// stop the board from booting.
+List<String> pinWarningsOf(Json result) => [
+  for (final w in (result['warnings'] as List? ?? const []))
+    switch (w) {
+      {'pin': final pin, 'message': final message} => 'GPIO $pin: $message',
+      {'message': final message} => '$message',
+      _ => '$w',
+    },
+];
+
 /// Names the pins of an OmniFlow board. Every change goes to the engine,
-/// which checks it against the board and sets the board up.
+/// which checks it against the board and sets the board up. When the board
+/// answers board.describe, the GPIO is picked from the pins that can do the
+/// chosen mode. Otherwise it is typed.
 class PinSheet extends ConsumerStatefulWidget {
   const PinSheet({super.key, required this.device});
 
@@ -36,16 +69,76 @@ class _PinSheetState extends ConsumerState<PinSheet> {
   final _pin = TextEditingController();
   var _mode = 'out';
   var _saving = false;
+  var _activeLow = false;
+  List<BoardPin>? _board;
+  int? _picked;
+  var _warnings = const <String>[];
 
   static Map<String, Object?> _pinsOf(Json device) => Map<String, Object?>.from(
     (device['settings'] as Map? ?? const {})['pins'] as Map? ?? const {},
   );
 
   @override
+  void initState() {
+    super.initState();
+    _describe();
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     _pin.dispose();
     super.dispose();
+  }
+
+  /// Asks the board what each GPIO can do. A board that is offline or does
+  /// not say leaves the typed GPIO field.
+  Future<void> _describe() async {
+    Json result;
+    try {
+      result = await ref.read(engineClientProvider).call('board.describe', {
+        'id': widget.device['id'],
+      });
+    } on Object {
+      return;
+    }
+    if (!mounted || result['ok'] != true) return;
+    final board = boardPinsOf(
+      Map<String, Object?>.from(result['describe'] as Map? ?? const {}),
+    );
+    final warnings = pinWarningsOf(result);
+    if (board.isEmpty) {
+      if (warnings.isNotEmpty) setState(() => _warnings = warnings);
+      return;
+    }
+    setState(() {
+      _warnings = warnings;
+      _board = board;
+      final typed = int.tryParse(_pin.text);
+      _picked = _pinsFor(_mode).any((p) => p.pin == typed) ? typed : null;
+      _fitMode();
+    });
+  }
+
+  /// The modes [pin] can do, or any pin can do when none is picked.
+  List<String> _modesFor(int? pin) {
+    final board = _board;
+    if (board == null) return pinModes;
+    final pins = pin == null ? board : board.where((p) => p.pin == pin);
+    return [
+      for (final m in pinModes)
+        if (pins.any((p) => p.caps.contains(_modeCap[m]))) m,
+    ];
+  }
+
+  List<BoardPin> _pinsFor(String mode) => [
+    for (final p in _board ?? const <BoardPin>[])
+      if (p.caps.contains(_modeCap[mode])) p,
+  ];
+
+  void _fitMode() {
+    final modes = _modesFor(_picked);
+    if (!modes.contains(_mode) && modes.isNotEmpty) _mode = modes.first;
   }
 
   /// Sends [next], then shows the pins the engine holds, which after a
@@ -67,12 +160,16 @@ class _PinSheetState extends ConsumerState<PinSheet> {
         .firstOrNull;
     setState(() {
       _saving = false;
+      _warnings = pinWarningsOf(result);
       _pins = fresh != null
           ? _pinsOf(fresh)
           : (result['ok'] == true ? next : _pins);
       if (result['ok'] == true) {
         _name.clear();
         _pin.clear();
+        _picked = null;
+        _activeLow = false;
+        _fitMode();
       }
     });
     if (result['provisionError'] != null) {
@@ -86,7 +183,7 @@ class _PinSheetState extends ConsumerState<PinSheet> {
         context,
         title: 'Replace $name?',
         body:
-            '$name is GPIO ${old['pin']}, ${old['mode']}. '
+            '$name is ${_describePin(old)}. '
             'Saving makes it GPIO $pin, $_mode.',
         action: 'Replace',
       );
@@ -94,14 +191,69 @@ class _PinSheetState extends ConsumerState<PinSheet> {
     }
     await _save({
       ..._pins,
-      name: {'pin': pin, 'mode': _mode},
+      name: {
+        'pin': pin,
+        'mode': _mode,
+        if (_mode == 'out' && _activeLow) 'invert': true,
+      },
     });
+  }
+
+  static String _describePin(Map spec) =>
+      'GPIO ${spec['pin']}, ${spec['mode']}'
+      '${spec['mode'] == 'out' && spec['invert'] == true ? ', active low' : ''}';
+
+  /// Which named pin, if any, already uses [pin].
+  String? _userOf(int pin) => _pins.entries
+      .where((e) => e.value is Map && (e.value as Map)['pin'] == pin)
+      .map((e) => e.key)
+      .firstOrNull;
+
+  Widget _gpioField() {
+    if (_board == null) {
+      return TextField(
+        key: const ValueKey('pin-number'),
+        controller: _pin,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          labelText: 'GPIO',
+          hintText: 'the number printed on the board',
+        ),
+        onChanged: (_) => setState(() {}),
+      );
+    }
+    final pins = _pinsFor(_mode);
+    return DropdownButtonFormField<int?>(
+      key: const ValueKey('pin-gpio'),
+      initialValue: _picked,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: 'GPIO',
+        helperText: pins.isEmpty ? 'No pin on this board can do $_mode' : null,
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('Pick a pin')),
+        for (final p in pins)
+          DropdownMenuItem(
+            value: p.pin,
+            child: Text(switch (_userOf(p.pin)) {
+              final user? => 'GPIO ${p.pin} ($user)',
+              null => 'GPIO ${p.pin}',
+            }),
+          ),
+      ],
+      onChanged: (pin) => setState(() {
+        _picked = pin;
+        _fitMode();
+      }),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final name = _name.text.trim();
-    final pin = int.tryParse(_pin.text);
+    final pin = _board == null ? int.tryParse(_pin.text) : _picked;
+    final modes = _modesFor(_picked);
     return Padding(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -131,7 +283,7 @@ class _PinSheetState extends ConsumerState<PinSheet> {
                 contentPadding: EdgeInsets.zero,
                 title: Text(e.key),
                 subtitle: Text(
-                  'GPIO ${(e.value as Map)['pin']}, ${(e.value as Map)['mode']}',
+                  e.value is Map ? _describePin(e.value as Map) : '${e.value}',
                 ),
                 trailing: IconButton(
                   key: ValueKey('pin-remove-${e.key}'),
@@ -140,6 +292,28 @@ class _PinSheetState extends ConsumerState<PinSheet> {
                   onPressed: _saving
                       ? null
                       : () => _save({..._pins}..remove(e.key)),
+                ),
+              ),
+            if (_warnings.isNotEmpty)
+              Card(
+                key: const ValueKey('pin-warnings'),
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final w in _warnings)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(w)),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               ),
             const Divider(),
@@ -155,23 +329,14 @@ class _PinSheetState extends ConsumerState<PinSheet> {
               ),
               onChanged: (_) => setState(() {}),
             ),
-            TextField(
-              key: const ValueKey('pin-number'),
-              controller: _pin,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'GPIO',
-                hintText: 'the number printed on the board',
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
+            _gpioField(),
             DropdownButtonFormField<String>(
               key: const ValueKey('pin-mode'),
-              initialValue: _mode,
+              initialValue: modes.contains(_mode) ? _mode : null,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Used as'),
               items: [
-                for (final m in pinModes)
+                for (final m in modes)
                   DropdownMenuItem(
                     value: m,
                     child: Text(
@@ -180,12 +345,30 @@ class _PinSheetState extends ConsumerState<PinSheet> {
                     ),
                   ),
               ],
-              onChanged: (m) => setState(() => _mode = m ?? 'out'),
+              onChanged: (m) => setState(() {
+                _mode = m ?? _mode;
+                if (_mode != 'out') _activeLow = false;
+              }),
             ),
+            if (_mode == 'out')
+              SwitchListTile(
+                key: const ValueKey('pin-active-low'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Relay is active low'),
+                subtitle: const Text(
+                  'On drives the pin low, for relay boards that switch on low',
+                ),
+                value: _activeLow,
+                onChanged: (v) => setState(() => _activeLow = v),
+              ),
             const SizedBox(height: 12),
             FilledButton(
               key: const ValueKey('pin-save'),
-              onPressed: name.isNotEmpty && pin != null && !_saving
+              onPressed:
+                  name.isNotEmpty &&
+                      pin != null &&
+                      modes.contains(_mode) &&
+                      !_saving
                   ? () => _add(name, pin)
                   : null,
               child: _saving

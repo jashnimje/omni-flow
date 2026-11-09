@@ -59,7 +59,7 @@ const int MAX_ARGS = 8;
 struct Args {
   struct Field {
     char key[12];
-    char text[OMNI_TEXT_MAX];
+    char text[OMNI_TEXT_MAX];  // a string, or a number as it was written
     long number;
     uint8_t kind;  // 1 string, 2 number, 3 bool, 4 null
   };
@@ -69,6 +69,8 @@ struct Args {
   const Field* get(const char* key) const;
   const char* str(const char* key) const;
   bool num(const char* key, long* out) const;
+  // A whole number 0 to 4294967295, which a long cannot hold on 32-bit boards.
+  bool u32(const char* key, uint32_t* out) const;
 };
 
 // Returns 0 when the line parsed, otherwise the error to report (an OMNI_P literal).
@@ -95,22 +97,33 @@ extern const BoardProfile BOARD_PICO_W;
 extern const BoardProfile BOARD_UNO;
 extern const BoardProfile BOARD_HOST;
 
+// A 433 MHz on-off keyed protocol from RCSwitch's table, in pulse lengths.
+struct RfProtocol {
+  uint8_t number;
+  uint16_t pulseUs;
+  uint8_t syncHigh, syncLow, zeroHigh, zeroLow, oneHigh, oneLow;
+};
+
 // The hardware under the core. Values are already in protocol units:
 // digital 0 or 1, analog and PWM in percent 0..100, servo in degrees.
 class Hal {
  public:
   virtual ~Hal() {}
   // Returns false, with the pin left in its old mode, when no PWM or servo
-  // channel is free. MODE_NONE releases the pin to a plain input.
-  virtual bool setMode(int pin, Mode mode) = 0;
+  // channel is free. MODE_NONE releases the pin to a plain input. For
+  // MODE_OUT, level (0 or 1) is driven from the instant the pin is an output.
+  virtual bool setMode(int pin, Mode mode, int level) = 0;
   virtual void writeDigital(int pin, int value) = 0;
   virtual int readDigital(int pin) = 0;
   virtual int readAnalogPercent(int pin) = 0;
   virtual void writePwmPercent(int pin, int percent) = 0;
   virtual void writeServo(int pin, int degrees) = 0;
-  // 32 NEC frame bits; bit 0 is transmitted first.
+  // 32 NEC frame bits; bit 0 is transmitted first. necPulse gives the timing.
   virtual void sendIr(uint32_t bitsInSendOrder) = 0;
   virtual bool hasIr() = 0;
+  // Sends the code repeat times on the RF pin; rfPulse gives the timing.
+  virtual void sendRf(const RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) = 0;
+  virtual bool hasRf() = 0;
   virtual unsigned long millis() = 0;
 };
 
@@ -131,6 +144,19 @@ class Out {
 uint32_t necFrame(uint16_t address, uint8_t command);
 // A 32-bit code written most significant bit first (old IRremote, LIRC).
 uint32_t necFromMsbCode(uint32_t code);
+
+// An NEC frame is NEC_PULSES carrier marks, each followed by a space: the
+// 9 ms header, the 32 bits, then the stop mark, whose space is 0.
+const int NEC_PULSES = 34;
+const uint32_t IR_CARRIER_HZ = 38000;
+void necPulse(uint32_t bitsInSendOrder, int i, uint16_t* markUs, uint16_t* spaceUs);
+
+// RCSwitch protocols 1 to 3. Returns false for any other number.
+bool rfProtocol(long number, RfProtocol* out);
+// One RF frame is bits + 1 pulses, each high then low: the code most
+// significant bit first, then the sync, as RCSwitch::send does it.
+void rfPulse(const RfProtocol& protocol, uint32_t code, uint8_t bits, int i, uint16_t* highUs, uint16_t* lowUs);
+const int RF_MAX_REPEAT = 20;
 
 class Out;
 
@@ -160,10 +186,14 @@ class Core {
   const char* node() const { return node_; }
   void setNode(const char* node) { node_ = node; }
   const BoardProfile& board() const { return board_; }
-  // The IR LED pin is kept from pin commands and describe; -1 for none.
-  void setIrPin(int pin) { irPin_ = pin; }
+  // The IR LED and RF transmitter pins are kept from pin commands and
+  // describe; -1 for none.
+  void setIrPin(int pin) { irPin_ = (int8_t)pin; }
+  void setRfPin(int pin) { rfPin_ = (int8_t)pin; }
+  int irPin() const { return irPin_; }
+  int rfPin() const { return rfPin_; }
   // What a pin offers to pin commands: its profile capabilities, or none for
-  // the IR pin and pins outside the profile.
+  // the IR and RF pins and pins outside the profile.
   uint8_t capsOf(int pin) const;
 
   void error(Out& out, long id, const char* message);
@@ -181,16 +211,23 @@ class Core {
   int readValue(int pin);
   void describe(Out& out, long id);
   Watch* findWatch(int pin);
-  void setPinMode(Out& out, long id, int pin, Mode mode);
+  void setPinMode(Out& out, long id, int pin, Mode mode, int level);
+  void sendRf(Out& out, long id, const Args& m);
+  bool levelWritten(int pin) const { return (levelSet_[pin / 8] >> (pin % 8)) & 1; }
+  void markWritten(int pin, bool on);
 
   const char* node_;
   const char* firmware_;
   const BoardProfile& board_;
   Hal& hal_;
   Extension* extension_ = 0;
-  int irPin_ = -1;
+  int8_t irPin_ = -1;
+  int8_t rfPin_ = -1;
   Mode modes_[MAX_PINS];
   int written_[MAX_PINS];
+  // Set once pin.write has chosen an output's level, so a resent pin.mode
+  // out with a value no longer changes it.
+  uint8_t levelSet_[(MAX_PINS + 7) / 8];
   Watch watches_[MAX_WATCHES];
 };
 
@@ -203,14 +240,16 @@ struct Settings {
 #endif
   char node[24];
   int8_t irPin;
+  int8_t rfPin;  // added in settings version 3
 };
 
 // A node name is a lower case letter, then up to 22 lower case letters,
 // digits, _ or -, so it never needs escaping in JSON.
 bool validNodeName(const char* name);
-// Makes settings read back from flash safe to use: terminates the strings and
-// drops a node name that is not valid, so the board builds its default again.
-void sanitizeSettings(Settings& settings);
+// Makes settings read back from flash safe to use: terminates the strings,
+// drops a node name that is not valid, so the board builds its default again,
+// and drops an IR or RF pin the board cannot drive.
+void sanitizeSettings(Settings& settings, const BoardProfile& board);
 
 // What the setup commands need from the board.
 class SetupHal {
@@ -224,11 +263,13 @@ class SetupHal {
   virtual void localIp(uint8_t ip[4]) = 0;
   virtual int rssi() = 0;
 #endif
+  // node.set changed the name, which mDNS announces.
+  virtual void nodeRenamed() {}
   // Lets the virtual board add test-only fields to wifi.status.
   virtual void statusExtra(Out&) {}
 };
 
-// The setup commands: wifi.set, wifi.clear, wifi.status, node.set, ir.pin.
+// The setup commands: wifi.set, wifi.clear, wifi.status, node.set, ir.pin, rf.pin.
 // All but wifi.status change how the board joins the network or what it is
 // called, so they are taken only from USB serial, never from the Wi-Fi.
 class Setup : public Extension {
@@ -245,6 +286,32 @@ class Setup : public Extension {
   SetupHal& hal_;
   int udpPort_;
 };
+
+#if OMNI_HAS_WIFI
+// When a board on Wi-Fi (re)starts its network services and says hello. A
+// hello goes out the moment the board joins or rejoins, then every period.
+class Link {
+ public:
+  enum Action : uint8_t {
+    START_UDP = 1,  // (re)open the UDP socket and report wifi.status
+    START_MDNS = 2,  // restart mDNS under the current node name
+    HELLO = 4,
+  };
+  explicit Link(unsigned long helloEveryMs) : every_(helloEveryMs) {}
+  // Call every loop with whether Wi-Fi is up. Returns Action bits to do now.
+  uint8_t update(bool connected, unsigned long now);
+  // The node name changed: restart mDNS and say hello at once.
+  void renamed() { renamed_ = true; }
+  // Wi-Fi was set up again or cleared: the next join starts everything again.
+  void reset() { up_ = false; }
+
+ private:
+  unsigned long every_;
+  unsigned long lastHello_ = 0;
+  bool up_ = false;
+  bool renamed_ = false;
+};
+#endif
 
 }  // namespace omni
 

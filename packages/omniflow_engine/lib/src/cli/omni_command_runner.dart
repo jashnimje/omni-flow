@@ -6,6 +6,8 @@ import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:mcp_dart/mcp_dart.dart' show StdioServerTransport;
 
+import '../api/local_client.dart';
+import '../api/local_server.dart';
 import '../api/omni_engine.dart';
 import '../mcp/omni_mcp.dart';
 import '../storage/database.dart' show DatabaseInUseException;
@@ -36,12 +38,15 @@ Directory defaultHome() {
 }
 
 /// The `omni` CLI. Every subcommand sends one core API command, so the CLI
-/// can do anything the app can.
+/// can do anything the app can. While `omni hub` runs, commands go to the
+/// hub through its control socket, `<home>/omni.sock` unless [socketPath]
+/// says otherwise; with no hub they open the engine through [engineFactory].
 class OmniCommandRunner extends CommandRunner<int> {
   OmniCommandRunner({
     StringSink? out,
     Stream<List<int>>? input,
     EngineFactory? engineFactory,
+    this._socketPath,
   }) : out = out ?? stdout,
        input = input ?? stdin,
        engineFactory = engineFactory ?? defaultEngine,
@@ -122,6 +127,8 @@ class OmniCommandRunner extends CommandRunner<int> {
           },
           usage: 'ID CAPABILITY [key=value ...]',
         ),
+        _DevicePair(),
+        _DeviceHostKey(),
       ]),
     );
     addCommand(
@@ -139,6 +146,13 @@ class OmniCommandRunner extends CommandRunner<int> {
             return {'id': rest[0], 'pins': await _jsonArg(rest[1])};
           },
           usage: 'ID PINS',
+        ),
+        _ApiCommand(
+          'describe',
+          'Show the pins a board offers, its IR and RF outputs, and the pins set now.',
+          'board.describe',
+          (rest, _) async => {'id': _one(rest, 'ID')},
+          usage: 'ID',
         ),
         _ApiCommand(
           'provision',
@@ -335,6 +349,7 @@ class OmniCommandRunner extends CommandRunner<int> {
   final StringSink out;
   final Stream<List<int>> input;
   final EngineFactory engineFactory;
+  final String? _socketPath;
 
   ArgResults? _globals;
 
@@ -342,6 +357,14 @@ class OmniCommandRunner extends CommandRunner<int> {
     final option = _globals?.option('home');
     return option == null ? defaultHome() : Directory(option);
   }
+
+  String get socketPath => _socketPath ?? localSocketPath(home);
+
+  /// The running hub when one answers on [socketPath], else the engine
+  /// opened here (with [tap], for commands that show packets).
+  Future<EngineConnection> connect({PacketTap? tap}) async =>
+      await LocalClient.connect(socketPath) ??
+      InProcessConnection(await engineFactory(home, tap: tap));
 
   @override
   Future<int> run(Iterable<String> args) async {
@@ -376,9 +399,15 @@ Future<int> runOmni(
     return 64;
   } on DatabaseInUseException {
     errors.writeln(
-      'omni: the database is in use by another omni process (omni hub?)',
+      'omni: the database is in use by another omni process: an omni mcp '
+      'started by an MCP client such as Claude Desktop, omni watch, or '
+      'another command. Start omni hub first so the others go through it, '
+      'or stop that process',
     );
     return 75;
+  } on LocalSocketException catch (e) {
+    errors.writeln('omni: ${e.message}');
+    return e.exitCode;
   } on FileSystemException catch (e) {
     final path = e.path == null ? '' : '${e.path}: ';
     errors.writeln('omni: $path${e.osError?.message ?? e.message}');
@@ -453,7 +482,7 @@ class _ApiCommand extends Command<int> {
   @override
   Future<int> run() async {
     final args = await buildArgs();
-    final engine = await omni.engineFactory(omni.home);
+    final engine = await omni.connect();
     try {
       final result = await engine.handle(apiCommand, args);
       omni.out.writeln(const JsonEncoder.withIndent('  ').convert(result));
@@ -578,6 +607,103 @@ class _DeviceDiscover extends _ApiCommand {
   };
 }
 
+/// `omni device pair ID`: prints what the user must do, then runs the
+/// pairing and waits for it (up to a minute while a TV shows its prompt).
+class _DevicePair extends _ApiCommand {
+  _DevicePair()
+    : super(
+        'pair',
+        'Pair a TV, a Hue bridge or another device that needs it: omni device pair living_tv',
+        'device.pair',
+        (_, _) async => {},
+        usage: 'ID',
+      ) {
+    argParser.addOption(
+      'app-name',
+      help: 'The name a Hue bridge lists this pairing under.',
+    );
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async => {
+    'id': OmniCommandRunner._one(argResults!.rest, 'ID'),
+    'appName': ?argResults!.option('app-name'),
+  };
+
+  @override
+  Future<int> run() async {
+    final args = await buildArgs();
+    final engine = await omni.connect();
+    try {
+      final got = await engine.handle('device.get', {'id': args['id']});
+      final pairing = got['ok'] == true
+          ? (got['device'] as Map)['pairing'] as Map?
+          : null;
+      if (pairing != null) {
+        omni.out.writeln(jsonEncode({'event': 'pairing.started', ...pairing}));
+      }
+      final events = await engine.events();
+      final prompts = events
+          .where(
+            (e) =>
+                e['event'] == 'device.pairingPrompt' &&
+                e['deviceId'] == args['id'],
+          )
+          .listen((e) => omni.out.writeln(jsonEncode(e)));
+      try {
+        final result = await engine.handle(apiCommand, args);
+        omni.out.writeln(const JsonEncoder.withIndent('  ').convert(result));
+        return result['ok'] == true ? 0 : 1;
+      } finally {
+        await prompts.cancel();
+      }
+    } finally {
+      await engine.close();
+    }
+  }
+}
+
+/// `omni device hostkey ID` shows the pinned and offered SSH host keys.
+/// `--accept FINGERPRINT` pins the offered key only when it is the one the
+/// user read, and `--clear` drops the pin.
+class _DeviceHostKey extends _ApiCommand {
+  _DeviceHostKey()
+    : super(
+        'hostkey',
+        'Show, accept or clear the SSH host key pinned for a host device.',
+        'device.hostkey',
+        (_, _) async => {},
+        usage: 'ID',
+      ) {
+    argParser
+      ..addOption(
+        'accept',
+        valueHelp: 'FINGERPRINT',
+        help: 'Pin the key the host offers, when it is this one (from show).',
+      )
+      ..addFlag(
+        'clear',
+        negatable: false,
+        help: 'Forget the pin. The next connection pins what it meets.',
+      );
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    final id = OmniCommandRunner._one(a.rest, 'ID');
+    final accept = a.option('accept');
+    if (accept != null && a.flag('clear')) {
+      throw UsageException('use --accept or --clear, not both', usage);
+    }
+    return {
+      'id': id,
+      if (accept != null) ...{'action': 'accept', 'fingerprint': accept},
+      if (a.flag('clear')) 'action': 'clear',
+    };
+  }
+}
+
 /// Prints engine events as JSON lines until stopped: live WiZ state, devices
 /// changing, and with --packets every packet sent or received.
 class _Watch extends Command<int> {
@@ -599,7 +725,9 @@ class _Watch extends Command<int> {
   String get name => 'watch';
 
   @override
-  String get description => 'Print live device state and events as JSON lines.';
+  String get description =>
+      'Print live device state and events as JSON lines. While omni hub runs, '
+      'they come from the hub and --wiz-port is not used.';
 
   @override
   Future<int> run() async {
@@ -607,8 +735,12 @@ class _Watch extends Command<int> {
     final a = argResults!;
     final wizPort = _port(a, 'wiz-port', usage);
     final seconds = _seconds(a, usage);
-    final tap = a.flag('packets') ? PacketTap() : null;
-    final engine = await omni.engineFactory(omni.home, tap: tap);
+    final packets = a.flag('packets');
+    final connection = await omni.connect(tap: packets ? PacketTap() : null);
+    if (connection is! InProcessConnection) {
+      return _watchHub(omni, connection, packets, seconds);
+    }
+    final engine = connection.engine;
     final subscription = engine.events.listen(
       (e) => omni.out.writeln(jsonEncode(e)),
     );
@@ -622,6 +754,29 @@ class _Watch extends Command<int> {
     } finally {
       await subscription.cancel();
       await engine.close();
+    }
+  }
+
+  /// The hub already listens for WiZ pushes, so this only prints its events,
+  /// until stopped or until the hub stops.
+  Future<int> _watchHub(
+    OmniCommandRunner omni,
+    EngineConnection hub,
+    bool packets,
+    Duration? seconds,
+  ) async {
+    try {
+      final hubStopped = Completer<void>();
+      final subscription = (await hub.events(packets: packets)).listen(
+        (e) => omni.out.writeln(jsonEncode(e)),
+        onDone: hubStopped.complete,
+      );
+      omni.out.writeln(jsonEncode({'event': 'watch.started', 'hub': true}));
+      await _untilStopped(seconds, orWhen: hubStopped.future);
+      await subscription.cancel();
+      return 0;
+    } finally {
+      await hub.close();
     }
   }
 }
@@ -732,7 +887,7 @@ class _FlowApprove extends _ApiCommand {
     final id = OmniCommandRunner._one(a.rest, 'ID');
     var revision = a.option('revision');
     if (revision == null) {
-      final engine = await omni.engineFactory(omni.home);
+      final engine = await omni.connect();
       try {
         final got = await engine.handle('flow.get', {'id': id});
         if (got['ok'] != true) throw UsageException('no flow $id', usage);
@@ -765,25 +920,31 @@ Duration? _seconds(ArgResults a, String usage) {
 
 /// Waits [duration], or until Ctrl-C or a SIGTERM (launchd, kill), so the
 /// caller's finally still closes the engine and its pending writes land.
-Future<void> _untilStopped(Duration? duration) async {
-  if (duration != null) return Future<void>.delayed(duration);
+/// [orWhen] ends the wait early.
+Future<void> _untilStopped(Duration? duration, {Future<void>? orWhen}) async {
   final stopped = Completer<void>();
-  void stop(ProcessSignal _) {
+  void stop([Object? _]) {
     if (!stopped.isCompleted) stopped.complete();
   }
 
+  final timer = duration == null ? null : Timer(duration, stop);
   final subscriptions = [
-    ProcessSignal.sigint.watch().listen(stop),
-    if (!Platform.isWindows) ProcessSignal.sigterm.watch().listen(stop),
+    if (duration == null) ProcessSignal.sigint.watch().listen(stop),
+    if (duration == null && !Platform.isWindows)
+      ProcessSignal.sigterm.watch().listen(stop),
   ];
+  orWhen?.whenComplete(stop).ignore();
   await stopped.future;
+  timer?.cancel();
   for (final s in subscriptions) {
     await s.cancel();
   }
 }
 
 /// Runs everything on its own until stopped: flows from their triggers, WiZ
-/// pushes, timers, zone ticks and device polls. Prints events as JSON lines.
+/// pushes, timers, zone ticks and device polls. Prints events as JSON lines,
+/// and serves its control socket so other `omni` commands and `omni mcp`
+/// work while it runs.
 class _Hub extends Command<int> {
   _Hub() {
     argParser
@@ -795,6 +956,11 @@ class _Hub extends Command<int> {
         'wiz-port',
         defaultsTo: '38900',
         help: 'Port to receive WiZ pushes on.',
+      )
+      ..addOption(
+        'hello-port',
+        defaultsTo: '38951',
+        help: 'Port to receive board hellos on, or 0 for none.',
       );
   }
 
@@ -810,24 +976,42 @@ class _Hub extends Command<int> {
     final omni = runner! as OmniCommandRunner;
     final a = argResults!;
     final wizPort = _port(a, 'wiz-port', usage);
+    final helloPort = _port(a, 'hello-port', usage);
     final seconds = _seconds(a, usage);
-    final engine = await omni.engineFactory(omni.home);
-    final subscription = engine.events.listen(
-      (e) => omni.out.writeln(jsonEncode(e)),
-    );
+    await preparePrivateHome(omni.home);
+    // The tap is for socket clients (omni watch --packets, the MCP packet
+    // sniffer). The hub's own output leaves packets out.
+    final engine = await omni.engineFactory(omni.home, tap: PacketTap());
+    final subscription = engine.events
+        .where((e) => e['event'] != 'packet.captured')
+        .listen((e) => omni.out.writeln(jsonEncode(e)));
+    LocalServer? server;
     try {
-      final started = await engine.handle('hub.start', {'wizPort': wizPort});
+      server = await LocalServer.start(
+        engine,
+        home: omni.home,
+        path: omni.socketPath,
+      );
+      final started = await engine.handle('hub.start', {
+        'wizPort': wizPort,
+        'helloPort': helloPort,
+      });
       if (started['ok'] != true) {
         omni.out.writeln(jsonEncode(started));
         return 1;
       }
       omni.out.writeln(
-        jsonEncode({'event': 'hub.started', 'flows': started['flows']}),
+        jsonEncode({
+          'event': 'hub.started',
+          'flows': started['flows'],
+          'socket': server.path,
+        }),
       );
       await _untilStopped(seconds);
       return 0;
     } finally {
       await subscription.cancel();
+      await server?.close();
       await engine.close();
     }
   }
@@ -835,6 +1019,7 @@ class _Hub extends Command<int> {
 
 /// Serves the MCP tools over stdin and stdout, for Claude Code or Claude
 /// Desktop to start as a subprocess. Nothing else may write to stdout.
+/// While `omni hub` runs, the tools drive the hub through its socket.
 class _Mcp extends Command<int> {
   @override
   String get name => 'mcp';
@@ -845,11 +1030,11 @@ class _Mcp extends Command<int> {
   @override
   Future<int> run() async {
     final omni = runner! as OmniCommandRunner;
-    final engine = await omni.engineFactory(omni.home, tap: PacketTap());
+    final engine = await omni.connect(tap: PacketTap());
     final closed = Completer<void>();
     final transport = StdioServerTransport();
     try {
-      await createOmniMcpServer(engine).connect(transport);
+      await createOmniMcpServerFor(engine).connect(transport);
       // connect() installs the server's own close handler, so chain onto it.
       final serverOnClose = transport.onclose;
       transport.onclose = () {
@@ -949,6 +1134,14 @@ class _BoardPin extends _ApiCommand {
         'no-watch',
         negatable: false,
         help: 'Do not report input changes.',
+      )
+      ..addFlag(
+        'active-low',
+        defaultsTo: null,
+        help:
+            'out: the load switches on at LOW (most relay modules). '
+            '--no-active-low on in_pullup reads true when high. Kept from '
+            'the current pin when not given.',
       );
   }
 
@@ -963,7 +1156,7 @@ class _BoardPin extends _ApiCommand {
         usage,
       );
     }
-    final engine = await omni.engineFactory(omni.home);
+    final engine = await omni.connect();
     final Map<String, Object?> current;
     try {
       final got = await engine.handle('device.get', {'id': rest[0]});
@@ -982,9 +1175,18 @@ class _BoardPin extends _ApiCommand {
       if (pin == null) throw UsageException('PIN is a GPIO number', usage);
       final watchMs = a.option('watch-ms');
       final delta = a.option('delta');
+      final before = current[rest[1]];
+      // Rewriting the pin without its invert would drive an active-low
+      // relay to the level that switches it on while its state reads off.
+      final invert = a.wasParsed('active-low')
+          ? a.flag('active-low')
+          : before is Map && before['mode'] == rest[3]
+          ? before['invert']
+          : null;
       current[rest[1]] = {
         'pin': pin,
         'mode': rest[3],
+        'invert': ?invert,
         if (a.flag('no-watch'))
           'watch': false
         else if (watchMs != null || delta != null)

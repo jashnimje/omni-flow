@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "philips_hue_light",
+  "name": "Philips Hue light (bridge, local REST API v1)",
+  "category": "lighting",
+  "icon": "lightbulb",
+  "transport": { "type": "http", "port": 80, "authErrorTypes": [1] },
+  "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid" }],
+  "pairing": { "method": "hue_bridge" },
+  "settings": [
+    { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
+    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true }
+  ],
+  "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": "{{value}}" } },
+      "stateJsonPath": "$.on"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "Brightness",
+      "params": { "value": { "type": "number", "integer": true, "min": 1, "max": 254 } },
+      "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": true, "bri": "{{value}}" } },
+      "stateJsonPath": "$.bri"
+    },
+    {
+      "id": "color_temp",
+      "type": "level",
+      "label": "White temperature in mireds (153 cool to 500 warm)",
+      "params": { "value": { "type": "number", "integer": true, "min": 153, "max": 500, "unit": "mired" } },
+      "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": true, "ct": "{{value}}" } },
+      "stateJsonPath": "$.ct"
+    }
+  ]
+}

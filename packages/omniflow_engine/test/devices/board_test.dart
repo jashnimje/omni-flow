@@ -96,9 +96,10 @@ void main() {
     expect(manifest.capabilities.map((c) => c.id), [
       'ir_nec',
       'ir_code',
+      'rf_send',
       'relay',
     ]);
-    expect(registry['omniflow_board']!.capabilities, hasLength(2));
+    expect(registry['omniflow_board']!.capabilities, hasLength(3));
   });
 
   test('pins the board does not offer are named with what it can do', () {
@@ -133,7 +134,7 @@ void main() {
       'door': {'pin': 0, 'mode': 'in_pullup'},
     });
     expect(pinSetupCommands(pins, {'relay': true}), [
-      {'cmd': 'pin.mode', 'pin': 4, 'mode': 'out'},
+      {'cmd': 'pin.mode', 'pin': 4, 'mode': 'out', 'value': 1},
       {'cmd': 'pin.write', 'pin': 4, 'value': true},
       {'cmd': 'pin.mode', 'pin': 5, 'mode': 'pwm'},
       {'cmd': 'pin.mode', 'pin': 0, 'mode': 'in_pullup'},
@@ -278,6 +279,203 @@ void main() {
       pinSetupCommands([relay], {'relay': relay.stateValue(1)}),
       contains(equals({'cmd': 'pin.write', 'pin': 4, 'value': true})),
     );
+  });
+
+  group('an active-low output', () {
+    final relay = parseBoardPins({
+      'relay': {'pin': 4, 'mode': 'out', 'invert': true},
+    }).single;
+
+    test('keeps state logical and drives the opposite level', () {
+      expect(relay.invert, isTrue);
+      expect(relay.stateValue(0), isTrue);
+      expect(relay.stateValue(1), isFalse);
+      expect(relay.levelFor(true), 0);
+      expect(relay.levelFor(false), 1);
+      final capability = relay.capability;
+      expect(capability.toDevice(true), 0);
+      expect(capability.toDevice(false), 1);
+      expect(capability.fromDevice(0), isTrue);
+      expect(relay.toJson(), {'pin': 4, 'mode': 'out', 'invert': true});
+    });
+
+    test('starts off at its mode, with no remembered state', () {
+      expect(pinSetupCommands([relay], const {}), [
+        {'cmd': 'pin.mode', 'pin': 4, 'mode': 'out', 'value': 1},
+        {'cmd': 'pin.write', 'pin': 4, 'value': 1},
+      ]);
+    });
+
+    test('starts as remembered', () {
+      expect(pinSetupCommands([relay], {'relay': true}), [
+        {'cmd': 'pin.mode', 'pin': 4, 'mode': 'out', 'value': 0},
+        {'cmd': 'pin.write', 'pin': 4, 'value': 0},
+      ]);
+    });
+
+    test('a plain output with nothing remembered starts low', () {
+      final plain = parseBoardPins({
+        'lamp': {'pin': 5, 'mode': 'out'},
+      });
+      expect(pinSetupCommands(plain, const {}), [
+        {'cmd': 'pin.mode', 'pin': 5, 'mode': 'out', 'value': 0},
+      ]);
+      expect(plain.single.toJson(), {'pin': 5, 'mode': 'out'});
+    });
+
+    test('invert is refused on pwm, servo and adc pins', () {
+      expect(
+        () => parseBoardPins({
+          'fan': {'pin': 5, 'mode': 'pwm', 'invert': true},
+          'arm': {'pin': 6, 'mode': 'servo', 'invert': false},
+          'light': {'pin': 34, 'mode': 'adc', 'invert': true},
+          'bad': {'pin': 7, 'mode': 'out', 'invert': 'yes'},
+        }),
+        throwsA(
+          isA<ValidationException>().having(
+            (e) => e.issues.map((i) => i.path).toList(),
+            'paths',
+            [
+              r'$.fan.invert',
+              r'$.arm.invert',
+              r'$.light.invert',
+              r'$.bad.invert',
+            ],
+          ),
+        ),
+      );
+    });
+  });
+
+  group('strapping pins', () {
+    final pins = parseBoardPins({
+      'boot': {'pin': 0, 'mode': 'in_pullup'},
+      'led': {'pin': 2, 'mode': 'out'},
+      'cs': {'pin': 5, 'mode': 'out'},
+      'flash': {'pin': 12, 'mode': 'in'},
+      'tx': {'pin': 15, 'mode': 'out'},
+      'safe': {'pin': 4, 'mode': 'out'},
+    });
+
+    List<String> warnedOn(String board) => [
+      for (final w in strappingPinWarnings(pins, {'board': board}))
+        w.split(':').first,
+    ];
+
+    test('ESP32 warns on GPIO 0, 2, 5, 12 and 15', () {
+      expect(warnedOn('esp32'), ['boot', 'led', 'cs', 'flash', 'tx']);
+      expect(
+        strappingPinWarnings(pins, {'board': 'esp32'}).first,
+        startsWith('boot: GPIO 0 is a boot strapping pin on esp32'),
+      );
+    });
+
+    test('ESP8266 warns on GPIO 0, 2 and 15', () {
+      expect(warnedOn('esp8266'), ['boot', 'led', 'tx']);
+    });
+
+    test('other boards and an unknown board give no warnings', () {
+      expect(warnedOn('pico_w'), isEmpty);
+      expect(warnedOn('uno'), isEmpty);
+      expect(strappingPinWarnings(pins, const {}), isEmpty);
+    });
+
+    test('a warning never refuses the pin', () {
+      final describe = {
+        'board': 'esp32',
+        'pins': [
+          for (final p in [0, 2, 4, 5, 12, 15])
+            {
+              'pin': p,
+              'caps': ['in', 'pullup', 'out'],
+            },
+        ],
+      };
+      expect(pinsUnsupportedBy(pins, describe), isEmpty);
+    });
+  });
+
+  test('a kept describe drops the reply id and message type', () {
+    expect(
+      boardDescribeOf({
+        'node': 'desk',
+        'event': 'describe',
+        'id': 7,
+        'board': 'esp32',
+        'rf': true,
+      }),
+      {'node': 'desk', 'board': 'esp32', 'rf': true},
+    );
+  });
+
+  group('rf_send', () {
+    final rf = DriverRegistry.withBuiltIns()['omniflow_board']!.capability(
+      'rf_send',
+    )!;
+
+    Object? rendered(Map<String, Object?> params) => const TemplateRenderer()
+        .render(rf.command, TemplateContext(params: rf.validateParams(params)));
+
+    test('sends rf.send with the firmware defaults: 24 bits, protocol 1, 10 repeats', () {
+      expect(rendered({'code': 5393}), {
+        'cmd': 'rf.send',
+        'code': 5393,
+        'bits': 24,
+        'protocol': 1,
+        'repeat': 10,
+      });
+      expect(
+        rendered({'code': 4294967295, 'bits': 32, 'protocol': 3, 'repeat': 20}),
+        {
+          'cmd': 'rf.send',
+          'code': 4294967295,
+          'bits': 32,
+          'protocol': 3,
+          'repeat': 20,
+        },
+      );
+    });
+
+    test('refuses a code, bits, protocol or repeat out of range', () {
+      for (final bad in [
+        {'code': -1},
+        {'code': 4294967296},
+        {'code': 1.5},
+        {'code': 1, 'bits': 0},
+        {'code': 1, 'bits': 33},
+        {'code': 1, 'protocol': 4},
+        {'code': 1, 'protocol': 0},
+        {'code': 1, 'repeat': 0},
+        {'code': 1, 'repeat': 21},
+        <String, Object?>{},
+      ]) {
+        expect(
+          () => rf.validateParams(bad),
+          throwsA(isA<ValidationException>()),
+          reason: '$bad',
+        );
+      }
+    });
+
+    test('rf_send is a reserved pin name', () {
+      expect(
+        () => boardPinsOf(
+          const Device(
+            id: 'desk',
+            name: 'Desk',
+            driverId: 'omniflow_board',
+            host: '192.168.1.40',
+            settings: {
+              'pins': {
+                'rf_send': {'pin': 4, 'mode': 'out'},
+              },
+            },
+          ),
+          DriverRegistry.withBuiltIns()['omniflow_board']!,
+        ),
+        throwsA(isA<ValidationException>()),
+      );
+    });
   });
 
   test('a serial port path picks the serial link', () {

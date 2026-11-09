@@ -2,6 +2,14 @@
 library;
 
 export 'src/api/command_bar.dart';
+export 'src/api/local_client.dart'
+    show
+        EngineConnection,
+        InProcessConnection,
+        LocalClient,
+        LocalSocketException,
+        localSocketPath;
+export 'src/api/local_server.dart' show LocalServer, preparePrivateHome;
 export 'src/api/omni_engine.dart';
 export 'src/cli/omni_command_runner.dart';
 export 'src/codecs/crc32.dart';
@@ -16,15 +24,23 @@ export 'src/dag/flow.dart';
 export 'src/dag/node_types.dart';
 export 'src/dag/transformers.dart';
 export 'src/dag/validator.dart';
+export 'src/devices/adb/adb_channel.dart';
+export 'src/devices/adb/adb_commands.dart' show AdbAction, shellQuote;
+export 'src/devices/adb/adb_key.dart' show adbHostKeySecret;
 export 'src/devices/board.dart';
 export 'src/devices/channels.dart';
 export 'src/devices/device.dart';
 export 'src/devices/device_service.dart';
 export 'src/devices/discovery.dart';
+export 'src/devices/discovery/mdns_discovery.dart';
+export 'src/devices/discovery/tuya_broadcast.dart';
 export 'src/devices/http_channel.dart';
 export 'src/devices/mqtt_channel.dart';
 export 'src/devices/serial_channel.dart';
 export 'src/devices/tuya_channel.dart';
+export 'src/devices/tv/tv_channel.dart';
+export 'src/devices/tv/tv_socket.dart'
+    show TvPairingException, TvCertificateMismatchException, certificateSha256;
 export 'src/devices/wiz_push.dart';
 export 'src/manifest/capability.dart';
 export 'src/mcp/omni_mcp.dart';

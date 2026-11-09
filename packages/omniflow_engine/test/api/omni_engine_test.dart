@@ -113,6 +113,55 @@ void main() {
       expect(wrong['ok'], isFalse);
     });
 
+    test(
+      'a Tuya plug picked from a scan gets its devId from the stable id',
+      () async {
+        final engine = await open();
+        addTearDown(engine.close);
+        final added = await engine.handle('device.add', {
+          'id': 'plug',
+          'driver': 'tuya_plug',
+          'host': '10.0.0.8',
+          'stableId': 'bf0123456789abcdef',
+          'settings': {'devId': ''},
+        });
+        expect(added['ok'], isTrue, reason: '$added');
+        final device = added['device'] as Map;
+        expect((device['settings'] as Map)['devId'], 'bf0123456789abcdef');
+        expect(added.containsKey('missingSettings'), isFalse);
+      },
+    );
+
+    test(
+      'adding a device reports the plain settings its commands need',
+      () async {
+        final engine = await open();
+        addTearDown(engine.close);
+        final ha = await engine.handle('device.add', {
+          'id': 'lamp',
+          'driver': 'home_assistant_entity',
+          'host': '10.0.0.9',
+          'settings': {'entityId': 'light.lamp'},
+        });
+        expect(ha['ok'], isTrue, reason: '$ha');
+        expect(ha['missingSettings'], ['domain']);
+        final plug = await engine.handle('device.add', {
+          'id': 'plug',
+          'driver': 'tuya_plug',
+          'host': '10.0.0.8',
+        });
+        expect(plug['missingSettings'], ['devId']);
+        // A setting read with a fallback, like baseTopic, is not required.
+        final z2m = await engine.handle('device.add', {
+          'id': 'bulb',
+          'driver': 'zigbee2mqtt_device',
+          'host': '10.0.0.7',
+          'settings': {'friendlyName': 'hall'},
+        });
+        expect(z2m.containsKey('missingSettings'), isFalse, reason: '$z2m');
+      },
+    );
+
     test('invalid params come back with every issue', () async {
       final engine = await open();
       addTearDown(engine.close);

@@ -109,6 +109,56 @@ uint32_t necFromMsbCode(uint32_t code) {
   return out;
 }
 
+void necPulse(uint32_t bits, int i, uint16_t* markUs, uint16_t* spaceUs) {
+  if (i == 0) {
+    *markUs = 9000;
+    *spaceUs = 4500;
+    return;
+  }
+  *markUs = 562;
+  if (i > 32) {
+    *spaceUs = 0;
+    return;
+  }
+  *spaceUs = (bits >> (i - 1)) & 1 ? 1687 : 562;
+}
+
+// ---------------------------------------------------------------- 433 MHz RF
+
+// RCSwitch's protocols 1 to 3 (RCSwitch.cpp, proto[]): the pulse length, then
+// sync, zero and one as high and low pulse counts.
+#ifdef __AVR__
+#define OMNI_FLASH PROGMEM
+#else
+#define OMNI_FLASH
+#endif
+static const RfProtocol RF_PROTOCOLS[] OMNI_FLASH = {
+    {1, 350, 1, 31, 1, 3, 3, 1},
+    {2, 650, 1, 10, 1, 2, 2, 1},
+    {3, 100, 30, 71, 4, 11, 9, 6},
+};
+
+bool rfProtocol(long number, RfProtocol* out) {
+  if (number < 1 || number > (long)(sizeof(RF_PROTOCOLS) / sizeof(RF_PROTOCOLS[0]))) return false;
+#ifdef __AVR__
+  memcpy_P(out, &RF_PROTOCOLS[number - 1], sizeof(*out));
+#else
+  *out = RF_PROTOCOLS[number - 1];
+#endif
+  return true;
+}
+
+void rfPulse(const RfProtocol& p, uint32_t code, uint8_t bits, int i, uint16_t* highUs, uint16_t* lowUs) {
+  uint8_t high = p.syncHigh, low = p.syncLow;
+  if (i < bits) {
+    bool one = (code >> (bits - 1 - i)) & 1;
+    high = one ? p.oneHigh : p.zeroHigh;
+    low = one ? p.oneLow : p.zeroLow;
+  }
+  *highUs = (uint16_t)(high * p.pulseUs);
+  *lowUs = (uint16_t)(low * p.pulseUs);
+}
+
 // ---------------------------------------------------------------- tiny JSON
 
 const Args::Field* Args::get(const char* key) const {
@@ -127,6 +177,20 @@ bool Args::num(const char* key, long* out) const {
   const Field* f = get(key);
   if (!f || (f->kind != 2 && f->kind != 3)) return false;
   *out = f->number;
+  return true;
+}
+
+bool Args::u32(const char* key, uint32_t* out) const {
+  const Field* f = get(key);
+  if (!f || f->kind != 2 || !f->text[0]) return false;
+  uint32_t value = 0;
+  for (const char* p = f->text; *p; p++) {
+    if (*p < '0' || *p > '9') return false;
+    uint32_t digit = (uint32_t)(*p - '0');
+    if (value > (0xFFFFFFFFUL - digit) / 10) return false;
+    value = value * 10 + digit;
+  }
+  *out = value;
   return true;
 }
 
@@ -150,11 +214,6 @@ static char unescape(char c) {
 }
 
 // OMNI_P cannot be used outside a function, so these are flash arrays.
-#ifdef __AVR__
-#define OMNI_FLASH PROGMEM
-#else
-#define OMNI_FLASH
-#endif
 static const char NOT_JSON[] OMNI_FLASH = "not a JSON command";
 static const char TOO_LONG[] OMNI_FLASH = "value too long";
 
@@ -232,6 +291,12 @@ const char* parseArgs(const char* line, Args& msg) {
         end++;
         while (*end >= '0' && *end <= '9') end++;
       }
+      // The literal too, for numbers a long cannot hold.
+      size_t n = (size_t)(end - p);
+      if (n < sizeof(f.text)) {
+        memcpy(f.text, p, n);
+        f.text[n] = 0;
+      }
       p = end;
       f.kind = 2;
     } else {
@@ -293,7 +358,17 @@ Core::Core(const char* node, const char* firmware, const BoardProfile& board, Ha
     modes_[i] = MODE_NONE;
     written_[i] = 0;
   }
+  memset(levelSet_, 0, sizeof(levelSet_));
   for (int i = 0; i < MAX_WATCHES; i++) watches_[i].pin = -1;
+}
+
+void Core::markWritten(int pin, bool on) {
+  uint8_t bit = (uint8_t)(1 << (pin % 8));
+  if (on) {
+    levelSet_[pin / 8] |= bit;
+  } else {
+    levelSet_[pin / 8] &= (uint8_t)~bit;
+  }
 }
 
 static void writeHead(Out& out, const char* node, const char* event) {
@@ -344,6 +419,8 @@ void Core::describe(Out& out, long id) {
   out.write(board_.name);
   out.writeP(OMNI_P("\",\"ir\":"));
   out.write(hal_.hasIr() ? "true" : "false");
+  out.writeP(OMNI_P(",\"rf\":"));
+  out.write(hal_.hasRf() ? "true" : "false");
   writeNumber(out, "watches", MAX_WATCHES);
   out.writeP(OMNI_P(",\"pins\":["));
   bool first = true;
@@ -388,7 +465,7 @@ void Core::describe(Out& out, long id) {
 }
 
 uint8_t Core::capsOf(int pin) const {
-  if (pin < 0 || pin >= MAX_PINS || pin == irPin_) return 0;
+  if (pin < 0 || pin >= MAX_PINS || pin == irPin_ || pin == rfPin_) return 0;
   return board_.caps(pin);
 }
 
@@ -434,11 +511,19 @@ Core::Watch* Core::findWatch(int pin) {
   return 0;
 }
 
-void Core::setPinMode(Out& out, long id, int pin, Mode mode) {
+// level is the output level to start at, or -1 for none given.
+void Core::setPinMode(Out& out, long id, int pin, Mode mode, int level) {
   // Setting the mode a pin already has changes nothing, so the host can
   // re-send its whole pin setup at any time without switching outputs off.
-  if (modes_[pin] == mode) return ack(out, id, OMNI_P("pin.mode"), pin, false, 0);
-  if (!hal_.setMode(pin, mode)) {
+  // A start level still applies until pin.write has chosen one.
+  if (modes_[pin] == mode) {
+    if (level >= 0 && !levelWritten(pin) && written_[pin] != level) {
+      hal_.writeDigital(pin, level);
+      written_[pin] = level;
+    }
+    return ack(out, id, OMNI_P("pin.mode"), pin, level >= 0, written_[pin]);
+  }
+  if (!hal_.setMode(pin, mode, level > 0 ? 1 : 0)) {
     // The hardware is back in the old mode, so put its output level back too.
     if (modes_[pin] == MODE_OUT) hal_.writeDigital(pin, written_[pin]);
     if (modes_[pin] == MODE_PWM) hal_.writePwmPercent(pin, written_[pin]);
@@ -451,13 +536,32 @@ void Core::setPinMode(Out& out, long id, int pin, Mode mode) {
     if (w) w->pin = -1;
   }
   modes_[pin] = mode;
-  written_[pin] = 0;
+  written_[pin] = level > 0 ? 1 : 0;
+  markWritten(pin, false);
   // Every board's servo starts at the middle, the same as Servo.attach.
   if (mode == MODE_SERVO) {
     written_[pin] = 90;
     hal_.writeServo(pin, 90);
   }
-  ack(out, id, OMNI_P("pin.mode"), pin, false, 0);
+  ack(out, id, OMNI_P("pin.mode"), pin, level >= 0, written_[pin]);
+}
+
+void Core::sendRf(Out& out, long id, const Args& m) {
+  if (!hal_.hasRf()) return error(out, id, OMNI_P("this board has no RF output"));
+  uint32_t code;
+  long bits, protocolNumber = 1, repeat = 10;
+  if (!m.u32("code", &code) || !m.num("bits", &bits)) {
+    return error(out, id, OMNI_P("needs code (a whole number) and bits"));
+  }
+  if (bits < 1 || bits > 32) return error(out, id, OMNI_P("bits is 1 to 32"));
+  if (bits < 32 && (code >> bits)) return error(out, id, OMNI_P("code has more bits than bits"));
+  m.num("protocol", &protocolNumber);
+  RfProtocol protocol;
+  if (!rfProtocol(protocolNumber, &protocol)) return error(out, id, OMNI_P("protocol is 1 to 3"));
+  m.num("repeat", &repeat);
+  if (repeat < 1 || repeat > RF_MAX_REPEAT) return error(out, id, OMNI_P("repeat is 1 to 20"));
+  hal_.sendRf(protocol, code, (uint8_t)bits, (uint8_t)repeat);
+  ack(out, id, OMNI_P("rf.send"), -1, false, 0);
 }
 
 bool Core::handleLine(const char* line, Out& out) {
@@ -511,6 +615,11 @@ bool Core::handleLine(const char* line, Out& out) {
     return false;
   }
 
+  if (named(cmd, OMNI_P("rf.send"))) {
+    sendRf(out, id, m);
+    return false;
+  }
+
   // A pin is a whole number on the board; true, 2.5 or "4" is not a pin.
   const Args::Field* pinField = m.get("pin");
   bool hasPin = pinField && pinField->kind == 2 && pinField->number >= 0 && pinField->number < MAX_PINS;
@@ -530,7 +639,18 @@ bool Core::handleLine(const char* line, Out& out) {
     } else if (mode != MODE_NONE && !(caps & capFor(mode))) {
       error(out, id, OMNI_P("this pin cannot do that mode"));
     } else {
-      setPinMode(out, id, pin, mode);
+      // An output may name the level it starts at, so an active-low relay
+      // never clicks on while the board sets it up.
+      const Args::Field* value = m.get("value");
+      int level = -1;
+      if (value && ((value->kind != 2 && value->kind != 3) || value->number < 0 || value->number > 1)) {
+        error(out, id, OMNI_P("value is 0 or 1"));
+      } else if (value && mode != MODE_OUT) {
+        error(out, id, OMNI_P("value is only taken with mode out"));
+      } else {
+        if (value) level = (int)value->number;
+        setPinMode(out, id, pin, mode, level);
+      }
     }
     return false;
   }
@@ -542,10 +662,12 @@ bool Core::handleLine(const char* line, Out& out) {
       return false;
     }
     if (modes_[pin] != MODE_OUT) {
+      long value = 0;
+      m.num("value", &value);
       Watch* w = findWatch(pin);
       if (w) w->pin = -1;
       modes_[pin] = MODE_OUT;
-      hal_.setMode(pin, MODE_OUT);
+      hal_.setMode(pin, MODE_OUT, value ? 1 : 0);
     }
     cmd = "pin.write";
   }
@@ -563,6 +685,7 @@ bool Core::handleLine(const char* line, Out& out) {
         int v = value ? 1 : 0;
         hal_.writeDigital(pin, v);
         written_[pin] = v;
+        markWritten(pin, true);
         ack(out, id, OMNI_P("pin.write"), pin, true, v);
       }
     } else if (named(cmd, OMNI_P("pwm.write"))) {
@@ -670,13 +793,19 @@ bool validNodeName(const char* name) {
   return n < (int)sizeof(Settings::node);
 }
 
-void sanitizeSettings(Settings& settings) {
+static bool drivable(int pin, const BoardProfile& board) {
+  return pin >= 0 && pin < MAX_PINS && (board.caps(pin) & CAP_OUT);
+}
+
+void sanitizeSettings(Settings& settings, const BoardProfile& board) {
 #if OMNI_HAS_WIFI
   settings.ssid[sizeof(settings.ssid) - 1] = 0;
   settings.password[sizeof(settings.password) - 1] = 0;
 #endif
   settings.node[sizeof(settings.node) - 1] = 0;
   if (!validNodeName(settings.node)) settings.node[0] = 0;
+  if (!drivable(settings.irPin, board)) settings.irPin = -1;
+  if (!drivable(settings.rfPin, board) || settings.rfPin == settings.irPin) settings.rfPin = -1;
 }
 
 #if OMNI_HAS_WIFI
@@ -727,7 +856,8 @@ bool Setup::handle(const char* cmd, const Args& args, long id, Out& out) {
   bool wifiClear = named(cmd, OMNI_P("wifi.clear"));
   bool nodeSet = named(cmd, OMNI_P("node.set"));
   bool irPin = named(cmd, OMNI_P("ir.pin"));
-  if ((wifiSet || wifiClear || nodeSet || irPin) && !fromSerial) {
+  bool rfPin = named(cmd, OMNI_P("rf.pin"));
+  if ((wifiSet || wifiClear || nodeSet || irPin || rfPin) && !fromSerial) {
     core_.error(out, id, OMNI_P("setup commands are only taken over USB"));
     return true;
   }
@@ -771,29 +901,61 @@ bool Setup::handle(const char* cmd, const Args& args, long id, Out& out) {
       core_.error(out, id, OMNI_P("name is lower case letters, digits, _ and -"));
       return true;
     }
+    bool renamed = strcmp(settings_.node, name) != 0;
     strcpy(settings_.node, name);
     core_.setNode(settings_.node);
     hal_.saveSettings();
     core_.ack(out, id, OMNI_P("node.set"), -1, false, 0);
+    if (renamed) hal_.nodeRenamed();
     return true;
   }
-  if (irPin) {
+  if (irPin || rfPin) {
     const Args::Field* f = args.get("pin");
     long pin = f && f->kind == 2 ? f->number : -2;
     bool none = pin == -1;
-    if (!none && (pin < 0 || pin >= MAX_PINS || !(core_.board().caps((int)pin) & CAP_OUT))) {
+    int other = irPin ? core_.rfPin() : core_.irPin();
+    if (!none && !drivable((int)pin, core_.board())) {
       core_.error(out, id, OMNI_P("pin must be an output pin, or -1 for none"));
     } else if (!none && core_.modeOf((int)pin) != MODE_NONE) {
       core_.error(out, id, OMNI_P("that pin has a mode, set pin.mode none first"));
-    } else {
+    } else if (!none && pin == other) {
+      core_.error(out, id, irPin ? OMNI_P("that pin is the RF pin") : OMNI_P("that pin is the IR pin"));
+    } else if (irPin) {
       settings_.irPin = (int8_t)pin;
       core_.setIrPin(settings_.irPin);
       hal_.saveSettings();
       core_.ack(out, id, OMNI_P("ir.pin"), settings_.irPin, false, 0);
+    } else {
+      settings_.rfPin = (int8_t)pin;
+      core_.setRfPin(settings_.rfPin);
+      hal_.saveSettings();
+      core_.ack(out, id, OMNI_P("rf.pin"), settings_.rfPin, false, 0);
     }
     return true;
   }
   return false;
 }
+
+#if OMNI_HAS_WIFI
+uint8_t Link::update(bool connected, unsigned long now) {
+  if (!connected) {
+    up_ = false;
+    return 0;
+  }
+  uint8_t todo = 0;
+  if (!up_) {
+    up_ = true;
+    renamed_ = false;
+    todo = START_UDP | START_MDNS | HELLO;
+  } else if (renamed_) {
+    renamed_ = false;
+    todo = START_MDNS | HELLO;
+  } else if (now - lastHello_ >= every_) {
+    todo = HELLO;
+  }
+  if (todo & HELLO) lastHello_ = now;
+  return todo;
+}
+#endif
 
 }  // namespace omni

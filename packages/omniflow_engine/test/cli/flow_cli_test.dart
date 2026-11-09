@@ -195,9 +195,19 @@ void main() {
       '0.3',
       '--wiz-port',
       '0',
+      '--hello-port',
+      '0',
     ]);
     expect(code, 0, reason: out);
     final first = jsonDecode(const LineSplitter().convert(out).first) as Map;
-    expect(first, {'event': 'hub.started', 'flows': []});
+    expect(first, {
+      'event': 'hub.started',
+      'flows': [],
+      'socket': '${home.absolute.path}/omni.sock',
+    });
+    expect(
+      FileSystemEntity.typeSync('${home.path}/omni.sock'),
+      FileSystemEntityType.notFound,
+    );
   });
 }

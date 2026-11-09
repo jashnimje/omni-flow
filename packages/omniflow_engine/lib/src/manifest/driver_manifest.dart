@@ -18,7 +18,10 @@ enum TransportType {
   /// An OmniFlow board (protocol v2): USB serial when the device host is a
   /// serial port path, Wi-Fi UDP otherwise. Its devices also get one
   /// capability per pin named in their `pins` setting.
-  omniflow('omniflow');
+  omniflow('omniflow'),
+
+  /// JSON over a WebSocket (LG webOS, Samsung Tizen TVs).
+  websocket('websocket');
 
   const TransportType(this.wireName);
 
@@ -28,7 +31,6 @@ enum TransportType {
   /// for it. Null when it can.
   String? get notYetSupported => switch (this) {
     tcp => 'tcp is not supported yet',
-    adb => 'adb arrives with M4',
     _ => null,
   };
 
@@ -51,7 +53,56 @@ enum PayloadEncoding {
       values.where((t) => t.wireName == name).firstOrNull;
 }
 
-const discoveryMethods = {'udp_broadcast', 'mdns', 'ssdp', 'serial', 'ble'};
+const discoveryMethods = {
+  'udp_broadcast',
+  'mdns',
+  'tuya_broadcast',
+  'ssdp',
+  'serial',
+  'ble',
+};
+
+/// RFC 6763 service names: an underscore, 1 to 15 letters, digits or
+/// hyphens, then `._tcp` or `._udp`.
+final mdnsServicePattern = RegExp(r'^_[A-Za-z0-9-]{1,15}\._(tcp|udp)$');
+
+/// How a device of a driver is paired, which `device.pair` runs.
+enum PairingMethod {
+  /// The TV shows "Allow USB debugging?" for the engine's ADB key.
+  adb('adb'),
+
+  /// The TV shows a prompt and issues a key (LG webOS, Samsung Tizen).
+  tv('tv'),
+
+  /// The user presses the Hue bridge's link button, then the bridge issues
+  /// a username.
+  hueBridge('hue_bridge'),
+
+  /// Nothing to pair over the network: the user stores a secret, for
+  /// example a Home Assistant access token.
+  secret('secret');
+
+  const PairingMethod(this.wireName);
+
+  final String wireName;
+
+  static PairingMethod? fromWire(Object? name) =>
+      values.where((m) => m.wireName == name).firstOrNull;
+}
+
+/// A manifest's `pairing` entry. An `adb` or `websocket` transport pairs
+/// that way without one.
+class PairingSpec {
+  const PairingSpec(this.method, {this.secret, this.instructions});
+
+  final PairingMethod method;
+
+  /// The secret setting the user stores, for [PairingMethod.secret].
+  final String? secret;
+
+  /// What the user does, in the driver author's words.
+  final String? instructions;
+}
 
 class TransportSpec {
   const TransportSpec({
@@ -111,6 +162,7 @@ class DriverManifest {
     this.statePush,
     this.statePoll,
     this.reliability = const Reliability(),
+    this.pairing,
   });
 
   final String id;
@@ -124,6 +176,17 @@ class DriverManifest {
   final Map<String, Object?>? statePoll;
   final Reliability reliability;
   final List<CapabilitySpec> capabilities;
+  final PairingSpec? pairing;
+
+  /// How [pairing] or the transport says a device is paired, or null when
+  /// it needs no pairing.
+  PairingSpec? get pairingSpec =>
+      pairing ??
+      switch (transport.type) {
+        TransportType.adb => const PairingSpec(PairingMethod.adb),
+        TransportType.websocket => const PairingSpec(PairingMethod.tv),
+        _ => null,
+      };
 
   CapabilitySpec? capability(String id) =>
       capabilities.where((c) => c.id == id).firstOrNull;
@@ -144,6 +207,7 @@ class DriverManifest {
           statePoll: statePoll,
           reliability: reliability,
           capabilities: List.unmodifiable([...capabilities, ...extra]),
+          pairing: pairing,
         );
 
   /// High risk when any capability, or the transport itself, executes commands on a host.
@@ -212,6 +276,22 @@ class DriverManifest {
       }
       issues.jsonPath(entry['matchJsonPath'], '$path.matchJsonPath');
       issues.jsonPath(entry['idJsonPath'], '$path.idJsonPath');
+      final config = Map<String, Object?>.from(entry);
+      issues.optionalInt(config, 'windowMs', path, min: 1, max: 60000);
+      issues.optionalString(config, 'idSetting', path);
+      if (entry['method'] == 'mdns') {
+        final service = issues.requiredString(config, 'service', path);
+        if (service != null && !mdnsServicePattern.hasMatch(service)) {
+          issues.add('$path.service', 'must be a service type like _hue._tcp');
+        }
+        issues.optionalString(config, 'idTxt', path);
+        final idInstance = config['idInstance'];
+        if (idInstance != null && idInstance is! bool) {
+          issues.add('$path.idInstance', 'must be true or false');
+        } else if (idInstance == true && config['idTxt'] != null) {
+          issues.add('$path.idInstance', 'cannot be used with idTxt');
+        }
+      }
       discovery.add(
         DiscoverySpec(
           entry['method'] as String,
@@ -281,6 +361,21 @@ class DriverManifest {
       capabilities.add(capability);
     }
 
+    for (var i = 0; i < discovery.length; i++) {
+      final key = discovery[i].config['idSetting'];
+      if (key is String && !settings.any((s) => s.key == key && !s.secret)) {
+        issues.add(
+          '$root.discovery[$i].idSetting',
+          '$key is not a setting that is not secret',
+        );
+      }
+    }
+
+    final pairing = _parsePairing(map['pairing'], '$root.pairing', issues, {
+      for (final s in settings)
+        if (s.secret) s.key,
+    }, transport?.type);
+
     final statePush = issues.optionalMap(map, 'statePush', root);
     final statePoll = issues.optionalMap(map, 'statePoll', root);
     issues.jsonPath(statePush?['jsonPath'], '$root.statePush.jsonPath');
@@ -308,7 +403,59 @@ class DriverManifest {
       statePoll: statePoll,
       reliability: reliability,
       capabilities: List.unmodifiable(capabilities),
+      pairing: pairing,
     );
+  }
+
+  static PairingSpec? _parsePairing(
+    Object? json,
+    String path,
+    IssueCollector issues,
+    Set<String> secretSettings,
+    TransportType? transport,
+  ) {
+    if (json == null) return null;
+    if (json is! Map) {
+      issues.add(path, 'must be an object');
+      return null;
+    }
+    final map = Map<String, Object?>.from(json);
+    final method = PairingMethod.fromWire(map['method']);
+    if (method == null) {
+      issues.add(
+        '$path.method',
+        'must be one of ${PairingMethod.values.map((m) => m.wireName).join(', ')}',
+      );
+      return null;
+    }
+    final needs = switch (method) {
+      PairingMethod.adb => TransportType.adb,
+      PairingMethod.tv => TransportType.websocket,
+      PairingMethod.hueBridge => TransportType.http,
+      PairingMethod.secret => null,
+    };
+    if (needs != null && transport != null && transport != needs) {
+      issues.add(
+        '$path.method',
+        '${method.wireName} pairing needs the ${needs.wireName} transport',
+      );
+    }
+    final secret = issues.optionalString(map, 'secret', path);
+    if (method == PairingMethod.secret && secret == null) {
+      issues.add('$path.secret', 'names the secret setting the user stores');
+    }
+    if (method == PairingMethod.hueBridge &&
+        !secretSettings.contains('username')) {
+      issues.add(path, 'hue_bridge pairing stores a secret setting username');
+    }
+    if (secret != null && !secretSettings.contains(secret)) {
+      issues.add('$path.secret', '$secret is not a secret setting');
+    }
+    final instructions = issues.optionalString(map, 'instructions', path);
+    if (instructions != null && instructions.length > 400) {
+      issues.add('$path.instructions', 'must be at most 400 characters');
+    }
+    return PairingSpec(method, secret: secret, instructions: instructions);
   }
 
   static TransportSpec? _parseTransport(

@@ -7,7 +7,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:omniflow_engine/omniflow_engine.dart';
+import 'package:omniflow_engine/src/api/board_commands.dart';
+import 'package:omniflow_engine/src/api/board_runtime.dart';
+import 'package:omniflow_engine/src/api/engine_core.dart';
 import 'package:test/test.dart';
+
+import '../devices/fake_mdns.dart';
 
 import '../support/virtual_board.dart';
 
@@ -23,6 +28,159 @@ Future<void> main() async {
     () => boardTests(),
     skip: noCompiler ? 'no C++ compiler for the virtual board' : null,
   );
+  group(
+    'board.describe on a virtual board',
+    () => describeTests(),
+    skip: noCompiler ? 'no C++ compiler for the virtual board' : null,
+  );
+}
+
+/// The board commands on an engine core of their own, for commands the
+/// engine's command table does not list yet.
+void describeTests() {
+  late OmniDatabase db;
+  late UdpTransport udp;
+  late SerialChannel serial;
+  late EngineCore core;
+  late BoardCommands commands;
+  final boards = <VirtualBoard>[];
+
+  setUp(() async {
+    db = OmniDatabase.memory();
+    udp = await UdpTransport.bind();
+    serial = SerialChannel();
+    final secrets = InMemorySecretStore();
+    final registry = DriverRegistry.withBuiltIns();
+    final udpJson = UdpJsonChannel(udp);
+    final boardChannel = BoardChannel(udp: udpJson, serial: serial);
+    core = EngineCore(
+      db: db,
+      registry: registry,
+      devices: DeviceService(
+        registry: registry,
+        store: DriftDeviceStore(db),
+        channels: {
+          TransportType.udp: udpJson,
+          TransportType.omniflow: boardChannel,
+        },
+      ),
+      secrets: secrets,
+      discovery: DeviceDiscovery(udp: UdpDiscovery(udp)),
+      tap: null,
+      serial: serial,
+      mqtt: MqttChannel(secrets),
+      boardChannel: boardChannel,
+      http: HttpChannel(secrets: secrets),
+      tv: TvWebSocketChannel(secrets),
+      adb: AdbChannel(secrets),
+    );
+    commands = BoardCommands(core, BoardRuntime(core));
+  });
+
+  tearDown(() async {
+    for (final b in boards) {
+      await b.stop();
+    }
+    boards.clear();
+    await core.settle();
+    await serial.close();
+    await core.devices.close();
+    udp.close();
+    await db.close();
+  });
+
+  Future<VirtualBoard> addBoard(Map<String, Object?> pins) async {
+    final b = await VirtualBoard.start(node: 'desk_board', udp: true);
+    boards.add(b);
+    await DriftDeviceStore(db).put(
+      Device(
+        id: 'desk',
+        name: 'Desk',
+        driverId: 'omniflow_board',
+        host: '127.0.0.1',
+        port: b.udpPort,
+        settings: {'pins': pins},
+      ),
+    );
+    return b;
+  }
+
+  test('a live describe lists what the board offers, and is kept', () async {
+    await addBoard({
+      'relay': {'pin': 2, 'mode': 'out'},
+    });
+    await commands.provision({'id': 'desk'});
+    final result = await commands.describe({'id': 'desk'});
+    expect(result['live'], isTrue);
+    expect(result.containsKey('seenAt'), isFalse);
+    expect(result['warnings'], isEmpty);
+    final describe = result['describe'] as Map<String, Object?>;
+    expect(describe['board'], 'host');
+    expect(describe['node'], 'desk_board');
+    expect(describe.keys, containsAll(['pins', 'set', 'watches', 'ir', 'rf']));
+    expect(describe.containsKey('id'), isFalse);
+    expect(describe.containsKey('event'), isFalse);
+    expect(pinsSetOnBoard(describe), [2]);
+    final pin2 = (describe['pins'] as List).cast<Map>().firstWhere(
+      (p) => p['pin'] == 2,
+    );
+    expect(pin2['caps'], contains('out'));
+    expect((await DriftBoardDescribeStore(db).get('desk'))!.describe, describe);
+    final device = await core.device('desk');
+    expect(device.state.keys, isNot(contains('_board')));
+  });
+
+  test('an offline board gives the last describe the engine saw', () async {
+    final b = await addBoard(const {});
+    final live = await commands.describe({'id': 'desk'});
+    await b.stop();
+    boards.remove(b);
+    final offline = await commands.describe({'id': 'desk'});
+    expect(offline['live'], isFalse);
+    expect(DateTime.parse(offline['seenAt'] as String).isUtc, isTrue);
+    expect(offline['describe'], live['describe']);
+
+    final pins = await commands.pins({
+      'id': 'desk',
+      'pins': {
+        'relay': {'pin': 2, 'mode': 'out', 'invert': true},
+      },
+    });
+    expect(pins['provisionError'], isNotNull);
+    expect(pins['warnings'], isEmpty);
+  });
+
+  test('a board never seen and offline is a timeout', () async {
+    final port = await VirtualBoard.freePort();
+    await DriftDeviceStore(db).put(
+      Device(
+        id: 'ghost',
+        name: 'Ghost',
+        driverId: 'omniflow_board',
+        host: '127.0.0.1',
+        port: port,
+      ),
+    );
+    await expectLater(
+      commands.describe({'id': 'ghost'}),
+      throwsA(isA<TransportTimeoutException>()),
+    );
+  });
+
+  test('only a board can be described', () async {
+    await DriftDeviceStore(db).put(
+      const Device(
+        id: 'lamp',
+        name: 'Lamp',
+        driverId: 'philips_wiz_udp',
+        host: '127.0.0.1',
+      ),
+    );
+    await expectLater(
+      commands.describe({'id': 'lamp'}),
+      throwsA(isA<ApiError>().having((e) => e.type, 'type', 'invalid')),
+    );
+  });
 }
 
 void boardTests() {
@@ -36,6 +194,7 @@ void boardTests() {
       home: home,
       secrets: InMemorySecretStore(),
       discoveryTargets: () async => [InternetAddress.loopbackIPv4],
+      mdns: MdnsDiscovery(client: () => FakeMdns(const [])),
     );
   });
 
@@ -546,6 +705,76 @@ void boardTests() {
         reason: remote,
       );
     }
+  });
+
+  test('an active-low relay starts off and is driven inverted', () async {
+    final b = await board(node: 'relay_board');
+    final added = await ok('device.add', {
+      'id': 'relay',
+      'driver': 'omniflow_board',
+      'host': '127.0.0.1',
+      'port': b.udpPort,
+      'settings': {
+        'pins': {
+          'pump': {'pin': 2, 'mode': 'out', 'invert': true},
+        },
+      },
+    });
+    expect((added['provisioned'] as Map)['warnings'], isEmpty);
+    expect((added['device'] as Map)['state'], containsPair('pump', false));
+    Future<Object?> level() async => (await engine.devices.sendCommand(
+      'relay',
+      {'cmd': 'pin.read', 'pin': 2},
+    )).json?['value'];
+    expect(await level(), 1, reason: 'off is HIGH on an active-low relay');
+
+    await ok('device.invoke', {
+      'id': 'relay',
+      'capability': 'pump',
+      'params': {'value': true},
+    });
+    expect(await level(), 0);
+    await stateOf('relay', (s) => s['pump'] == true);
+
+    final again = await ok('board.provision', {'id': 'relay'});
+    expect(again['warnings'], isEmpty);
+    expect(await level(), 0, reason: 'a new setup keeps it on as remembered');
+    await ok('device.invoke', {
+      'id': 'relay',
+      'capability': 'pump',
+      'params': {'value': false},
+    });
+    expect(await level(), 1);
+  });
+
+  test('rf_send reaches the board with its defaults', () async {
+    final b = await board(node: 'rf_board');
+    await ok('device.add', {
+      'id': 'rf',
+      'driver': 'omniflow_board',
+      'host': '127.0.0.1',
+      'port': b.udpPort,
+    });
+    final sent = engine.events.firstWhere(
+      (e) => e['event'] == 'board.event' && e['type'] == 'sim.rf',
+    );
+    await ok('device.invoke', {
+      'id': 'rf',
+      'capability': 'rf_send',
+      'params': {'code': 5393},
+    });
+    final payload =
+        (await sent.timeout(const Duration(seconds: 5)))['payload'] as Map;
+    expect(
+      (payload['code'], payload['bits'], payload['protocol']),
+      (5393, 24, 1),
+    );
+    final refused = await engine.handle('device.invoke', {
+      'id': 'rf',
+      'capability': 'rf_send',
+      'params': {'code': 5393, 'bits': 40},
+    });
+    expect((refused['error'] as Map)['type'], 'invalid');
   });
 
   test('a pin removed from the setting is released on the board', () async {

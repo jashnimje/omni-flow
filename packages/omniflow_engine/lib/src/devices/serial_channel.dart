@@ -20,6 +20,18 @@ class SerialEvent {
   final Map<String, Object?> json;
 }
 
+/// Where a port's outgoing bytes go.
+abstract interface class SerialSink {
+  /// Writes [bytes] and flushes them to the port.
+  Future<void> write(List<int> bytes);
+
+  /// Closes the sink. Must not wait on a write that never completes.
+  Future<void> close();
+}
+
+/// Opens the [SerialSink] for a port path.
+typedef SerialSinkOpener = Future<SerialSink> Function(String path);
+
 /// The OmniFlow MCU protocol over a serial port, for a board on USB.
 ///
 /// The device's host is the port path (`/dev/cu.usbmodem1101`). The port is
@@ -31,11 +43,13 @@ class SerialChannel implements DriverChannel {
     this._renderer = const TemplateRenderer(),
     this._tap,
     this._executor = const LocalExecutor(),
+    this._openSink = _FileSink.open,
   });
 
   final TemplateRenderer _renderer;
   final PacketTap? _tap;
   final HostExecutor _executor;
+  final SerialSinkOpener _openSink;
   final _ports = <String, _SerialPort>{};
   final _events = StreamController<SerialEvent>.broadcast();
   var _nextId = 0;
@@ -48,14 +62,13 @@ class SerialChannel implements DriverChannel {
     if (rendered is! Map) {
       throw ArgumentError('a serial command renders to an object');
     }
-    final port = await _open(
-      request.device,
-      request.manifest.transport.options['baud'] as int? ?? 115200,
-    );
+    final baud = request.manifest.transport.options['baud'] as int? ?? 115200;
     final reliability = request.manifest.reliability;
     final id = ++_nextId;
     final payload = {...rendered.cast<String, Object?>(), 'id': id};
     for (var attempt = 0; attempt <= reliability.retries; attempt++) {
+      // A port dropped by a stuck write or a lost reader is opened again.
+      final port = await _open(request.device, baud);
       try {
         final reply = await port.request(
           payload,
@@ -69,6 +82,8 @@ class SerialChannel implements DriverChannel {
         }
         return ChannelReply(reply);
       } on TimeoutException {
+        continue;
+      } on FileSystemException {
         continue;
       }
     }
@@ -141,24 +156,54 @@ class SerialChannel implements DriverChannel {
         'serial port ${device.host} is not present',
       );
     }
-    final stty = Platform.isMacOS
-        ? ['/bin/stty', '-f', device.host, '$baud', 'raw', '-echo']
-        : ['/bin/stty', '-F', device.host, '$baud', 'raw', '-echo'];
-    final configured = await _executor.run(
-      stty,
-      timeout: const Duration(seconds: 5),
-    );
-    if (!configured.succeeded) {
-      throw CommandFailedException(
-        'cannot configure ${device.host}: ${configured.stderr}',
+    // The write descriptor is opened first and held while stty runs. macOS
+    // puts a tty back to its defaults when its last descriptor closes, so
+    // settings made with nothing open are lost. -hupcl keeps DTR up when the
+    // port closes, so the next open does not reset an Uno or a CH340 board.
+    final opening = _openSink(device.host);
+    final SerialSink sink;
+    try {
+      sink = await opening.timeout(_openTimeout);
+    } on TimeoutException {
+      unawaited(opening.then((orphan) => orphan.close(), onError: (_) {}));
+      throw TransportTimeoutException(
+        'serial port ${device.host} did not open',
       );
     }
-    final port = await _SerialPort.open(device, _tap, (json) {
+    try {
+      final configured = await _executor.run(
+        sttyArgv(device.host, baud),
+        timeout: _openTimeout,
+      );
+      if (!configured.succeeded) {
+        throw CommandFailedException(
+          'cannot configure ${device.host}: ${configured.stderr}',
+        );
+      }
+    } catch (_) {
+      await sink.close();
+      rethrow;
+    }
+    final port = await _SerialPort.open(device, sink, _tap, (json) {
       if (!_events.isClosed) _events.add(SerialEvent(device.id, json));
     });
     _ports[device.id] = port;
     return port;
   }
+
+  static const _openTimeout = Duration(seconds: 5);
+
+  /// The stty call that sets [path] to [baud], raw, no echo and no hang-up
+  /// on close.
+  static List<String> sttyArgv(String path, int baud) => [
+    '/bin/stty',
+    Platform.isMacOS ? '-f' : '-F',
+    path,
+    '$baud',
+    'raw',
+    '-echo',
+    '-hupcl',
+  ];
 
   Future<void> close() async {
     for (final p in _ports.values) {
@@ -180,13 +225,19 @@ class _SerialPort {
 
   static Future<_SerialPort> open(
     Device device,
+    SerialSink writer,
     PacketTap? tap,
     void Function(Map<String, Object?>) onEvent,
   ) async {
-    final writer = await File(device.host).open(mode: FileMode.writeOnly);
     // Reads go through cat so closing the port is a kill. A read on the tty
     // itself blocks until the board sends a line, which would hang shutdown.
-    final reader = await Process.start('/bin/cat', [device.host]);
+    final Process reader;
+    try {
+      reader = await Process.start('/bin/cat', [device.host]);
+    } catch (_) {
+      await writer.close();
+      rethrow;
+    }
     final port = _SerialPort._(device.host, writer, reader, onEvent, tap);
     port._subscription = reader.stdout
         .transform(const NdjsonDecoder())
@@ -195,7 +246,7 @@ class _SerialPort {
   }
 
   final String path;
-  final RandomAccessFile _writer;
+  final SerialSink _writer;
   final Process _reader;
   final void Function(Map<String, Object?>) _onEvent;
   final PacketTap? _tap;
@@ -223,10 +274,22 @@ class _SerialPort {
         bytes: shown,
       ),
     );
-    await _writer.writeFrom(bytes);
-    await _writer.flush();
+    final clock = Stopwatch()..start();
     try {
-      return await waiter.future.timeout(timeout);
+      await _writer.write(bytes).timeout(timeout);
+    } on TimeoutException {
+      // A port that cannot take one line within the reply timeout is stuck
+      // (flow control held, a wedged adapter). Drop it so the next attempt
+      // opens it again rather than queueing behind the stuck write.
+      _waiting.remove(id);
+      unawaited(close());
+      rethrow;
+    }
+    final left = timeout - clock.elapsed;
+    try {
+      return await waiter.future.timeout(
+        left.isNegative ? Duration.zero : left,
+      );
     } finally {
       if (waiter.isCompleted) _waiting.remove(id);
     }
@@ -264,6 +327,50 @@ class _SerialPort {
       }
     }
     _waiting.clear();
+  }
+}
+
+/// The tty opened for writing.
+class _FileSink implements SerialSink {
+  _FileSink(this._file);
+
+  static Future<SerialSink> open(String path) async =>
+      _FileSink(await File(path).open(mode: FileMode.writeOnly));
+
+  final RandomAccessFile _file;
+  Future<void>? _pending;
+  var _closed = false;
+
+  @override
+  Future<void> write(List<int> bytes) {
+    if (_closed) {
+      return Future.error(const FileSystemException('serial port closed'));
+    }
+    final write = () async {
+      await _file.writeFrom(bytes);
+      await _file.flush();
+    }();
+    _pending = write;
+    return write.whenComplete(() {
+      if (identical(_pending, write)) _pending = null;
+    });
+  }
+
+  /// A RandomAccessFile refuses close while an operation is pending, and a
+  /// write blocked in the kernel never returns, so a pending write closes
+  /// the file when it finishes instead.
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    final pending = _pending;
+    if (pending != null) {
+      unawaited(
+        pending.then((_) => _file.close(), onError: (_) => _file.close()),
+      );
+      return;
+    }
+    await _file.close();
   }
 }
 

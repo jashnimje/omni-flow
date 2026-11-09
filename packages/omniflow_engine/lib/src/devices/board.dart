@@ -34,6 +34,9 @@ enum PinMode {
 /// of 2 for `adc`); `"watch": false` turns that off. A digital input reads
 /// true when the pin is high, except `in_pullup`, which is active low (a
 /// button to ground reads true while pressed) unless `"invert": false`.
+/// An `out` pin with `"invert": true` is active low, for a relay module that
+/// switches on at LOW: its state stays true for on, and the pin is driven to
+/// the opposite level.
 class BoardPin {
   const BoardPin({
     required this.name,
@@ -56,10 +59,14 @@ class BoardPin {
   /// The device state value for a raw reading: a bool for a digital input or
   /// an output, the number itself for everything else.
   Object stateValue(num raw) => switch (mode) {
-    PinMode.input || PinMode.inputPullup => (raw != 0) != invert,
-    PinMode.output => raw != 0,
+    PinMode.input ||
+    PinMode.inputPullup ||
+    PinMode.output => (raw != 0) != invert,
     _ => raw,
   };
+
+  /// The level an output is driven to for the logical [on].
+  int levelFor(bool on) => on != invert ? 1 : 0;
 
   CapabilitySpec get capability => switch (mode) {
     PinMode.output => CapabilitySpec(
@@ -69,6 +76,7 @@ class BoardPin {
       params: CapabilityType.toggle.defaultParams,
       command: {'cmd': 'pin.write', 'pin': pin, 'value': '{{value}}'},
       stateJsonPath: '\$.$name',
+      onOff: invert ? (levelFor(true), levelFor(false)) : null,
     ),
     PinMode.pwm || PinMode.servo => CapabilitySpec(
       id: name,
@@ -104,7 +112,8 @@ class BoardPin {
     'mode': mode.wireName,
     if (mode.isInput)
       'watch': watchMs == null ? false : {'ms': watchMs, 'delta': watchDelta},
-    if (mode.isDigitalInput && invert != (mode == PinMode.inputPullup))
+    if ((mode.isDigitalInput || mode == PinMode.output) &&
+        invert != (mode == PinMode.inputPullup))
       'invert': invert,
   };
 }
@@ -191,9 +200,13 @@ List<BoardPin> parseBoardPins(Object? json, {Set<String> reserved = const {}}) {
       issues.add(ValidationIssue('$path.watch', 'only inputs can be watched'));
     }
     final invert = spec['invert'];
-    if (invert != null && (invert is! bool || !mode.isDigitalInput)) {
+    if (invert != null &&
+        (invert is! bool || !(mode.isDigitalInput || mode == PinMode.output))) {
       issues.add(
-        ValidationIssue('$path.invert', 'is true or false, for digital inputs'),
+        ValidationIssue(
+          '$path.invert',
+          'is true or false, for digital inputs and outputs',
+        ),
       );
     }
     pins.add(
@@ -289,6 +302,35 @@ List<String> pinsUnsupportedBy(
   ];
 }
 
+/// The GPIOs that set how each board boots. A button or load on one can
+/// keep the board from starting or send it into its flash loader.
+const strappingPins = {
+  'esp8266': {0, 2, 15},
+  'esp32': {0, 2, 5, 12, 15},
+};
+
+/// One warning per pin in [pins] that is a boot strapping pin on the board
+/// [describe] names. These pins still work, so nothing is refused.
+List<String> strappingPinWarnings(
+  List<BoardPin> pins,
+  Map<String, Object?> describe,
+) {
+  final board = describe['board'];
+  final strapping = strappingPins[board] ?? const <int>{};
+  return [
+    for (final p in pins)
+      if (strapping.contains(p.pin))
+        '${p.name}: GPIO ${p.pin} is a boot strapping pin on $board. '
+            'Wiring that pulls it the wrong way at power on stops the board '
+            'from booting, so use another pin if one is free',
+  ];
+}
+
+/// A describe reply as the engine keeps it: what the board is and can do,
+/// without the request id and message type of that one reply.
+Map<String, Object?> boardDescribeOf(Map<String, Object?> reply) =>
+    {...reply}..removeWhere((k, _) => k == 'id' || k == 'event');
+
 /// The pins a describe reply says have a mode set, for [pinSetupCommands]
 /// to release the ones no longer configured. Each pin entry carries `mode`
 /// once the firmware reports it.
@@ -320,6 +362,11 @@ List<int> pinsSetOnBoard(Map<String, Object?> describe) {
 /// inputs. Safe to send again at any time: the firmware leaves a pin that
 /// already has its mode alone.
 ///
+/// An output's `pin.mode` names the level it starts at, so it comes up off
+/// (or as remembered) instead of glitching on. Firmware that ignores that
+/// level gets it from the `pin.write` after, which an inverted output always
+/// gets, since its pin left at LOW would be on.
+///
 /// Every mode and write goes out before the first watch, so a board that
 /// refuses a watch (too many watched pins) still has every output set up.
 /// [current] are the pins the board has set ([pinsSetOnBoard]): any of them
@@ -336,8 +383,20 @@ List<Map<String, Object?>> pinSetupCommands(
       if (!configured.contains(pin))
         {'cmd': 'pin.mode', 'pin': pin, 'mode': 'none'},
     for (final p in pins) ...[
-      {'cmd': 'pin.mode', 'pin': p.pin, 'mode': p.mode.wireName},
-      if (p.mode == PinMode.output && state[p.name] is bool)
+      {
+        'cmd': 'pin.mode',
+        'pin': p.pin,
+        'mode': p.mode.wireName,
+        if (p.mode == PinMode.output)
+          'value': p.levelFor(state[p.name] == true),
+      },
+      if (p.mode == PinMode.output && p.invert)
+        {
+          'cmd': 'pin.write',
+          'pin': p.pin,
+          'value': p.levelFor(state[p.name] == true),
+        }
+      else if (p.mode == PinMode.output && state[p.name] is bool)
         {'cmd': 'pin.write', 'pin': p.pin, 'value': state[p.name]},
       if (p.mode == PinMode.pwm && state[p.name] is num)
         {'cmd': 'pwm.write', 'pin': p.pin, 'value': state[p.name]},

@@ -2,6 +2,189 @@
 
 /// Built-in driver manifest sources, keyed by file name.
 const builtInDriverSources = <String, String>{
+  'android_tv_adb.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "android_tv_adb",
+  "name": "Android TV or Fire TV (network ADB)",
+  "category": "media",
+  "icon": "tv",
+  "transport": { "type": "adb", "port": 5555 },
+  "settings": [
+    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" }
+  ],
+  "reliability": { "timeoutMs": 5000, "retries": 0 },
+  "capabilities": [
+    { "id": "wake", "type": "action", "label": "Wake", "command": { "op": "key", "key": "wakeup" } },
+    { "id": "sleep", "type": "action", "label": "Sleep", "command": { "op": "key", "key": "sleep" } },
+    { "id": "power", "type": "action", "label": "Power key", "command": { "op": "key", "key": "power" } },
+    { "id": "remote", "type": "dpad_remote", "label": "Remote", "command": { "op": "key", "key": "{{value}}" } },
+    { "id": "volume_up", "type": "action", "label": "Volume up", "command": { "op": "key", "key": "volume_up" } },
+    { "id": "volume_down", "type": "action", "label": "Volume down", "command": { "op": "key", "key": "volume_down" } },
+    { "id": "mute", "type": "action", "label": "Mute", "command": { "op": "key", "key": "mute" } },
+    { "id": "play_pause", "type": "action", "label": "Play or pause", "command": { "op": "key", "key": "play_pause" } },
+    {
+      "id": "launch_app",
+      "type": "action",
+      "label": "Launch app",
+      "params": {
+        "package": { "type": "string", "pattern": "[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+" }
+      },
+      "command": { "op": "launch", "package": "{{package}}" }
+    },
+    {
+      "id": "open_url",
+      "type": "action",
+      "label": "Open link",
+      "params": {
+        "url": { "type": "string", "pattern": "https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!$&()*+,;=%]+" }
+      },
+      "command": { "op": "open_url", "url": "{{url}}" }
+    },
+    { "id": "wake_on_lan", "type": "action", "label": "Wake-on-LAN", "command": { "op": "wake_on_lan" } }
+  ]
+}
+''',
+  'home_assistant_entity.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "home_assistant_entity",
+  "name": "Home Assistant light or switch (REST API)",
+  "category": "power",
+  "icon": "plug",
+  "transport": {
+    "type": "http",
+    "port": 8123,
+    "auth": { "header": "Authorization", "scheme": "Bearer", "secret": "token" },
+    "flattenReply": "attributes"
+  },
+  "discovery": [{ "method": "mdns", "service": "_home-assistant._tcp", "idTxt": "uuid" }],
+  "pairing": {
+    "method": "secret",
+    "secret": "token",
+    "instructions": "In Home Assistant open your profile, then Security, and create a long-lived access token"
+  },
+  "settings": [
+    { "key": "entityId", "label": "Entity id, such as light.kitchen or switch.heater" },
+    { "key": "domain", "label": "Entity domain: light, switch, fan or input_boolean" },
+    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
+  ],
+  "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["on", "off"],
+      "command": { "method": "POST", "path": "/api/services/{{device.domain}}/turn_{{value}}", "body": { "entity_id": "{{device.entityId}}" } },
+      "stateJsonPath": "$.state"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "Brightness (lights only)",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 255 } },
+      "command": { "method": "POST", "path": "/api/services/light/turn_on", "body": { "entity_id": "{{device.entityId}}", "brightness": "{{value}}" } },
+      "stateJsonPath": "$.brightness"
+    }
+  ]
+}
+''',
+  'home_assistant_sensor.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "home_assistant_sensor",
+  "name": "Home Assistant sensor (REST API)",
+  "category": "sensor",
+  "icon": "gauge",
+  "transport": {
+    "type": "http",
+    "port": 8123,
+    "auth": { "header": "Authorization", "scheme": "Bearer", "secret": "token" },
+    "flattenReply": "attributes"
+  },
+  "discovery": [{ "method": "mdns", "service": "_home-assistant._tcp", "idTxt": "uuid" }],
+  "pairing": {
+    "method": "secret",
+    "secret": "token",
+    "instructions": "In Home Assistant open your profile, then Security, and create a long-lived access token"
+  },
+  "settings": [
+    { "key": "entityId", "label": "Entity id, such as sensor.living_room_temperature" },
+    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
+  ],
+  "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "value",
+      "type": "sensor",
+      "label": "Value",
+      "stateJsonPath": "$.state"
+    }
+  ]
+}
+''',
+  'lg_webos_tv.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "lg_webos_tv",
+  "name": "LG webOS TV (local SSAP over WebSocket)",
+  "category": "media",
+  "icon": "tv",
+  "transport": {
+    "type": "websocket",
+    "port": 3001,
+    "protocol": "webos",
+    "pairingTimeoutMs": 60000,
+    "permissions": ["CONTROL_AUDIO", "CONTROL_POWER", "LAUNCH", "WRITE_NOTIFICATION_TOAST"]
+  },
+  "settings": [
+    { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true },
+    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true }
+  ],
+  "statePoll": { "intervalSeconds": 60, "command": { "uri": "ssap://audio/getVolume" } },
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "volume",
+      "type": "level",
+      "label": "Volume",
+      "params": { "value": { "type": "number", "min": 0, "max": 100, "integer": true } },
+      "command": { "uri": "ssap://audio/setVolume", "payload": { "volume": "{{value}}" } },
+      "stateJsonPath": "$.volume"
+    },
+    {
+      "id": "mute",
+      "type": "toggle",
+      "label": "Mute",
+      "command": { "uri": "ssap://audio/setMute", "payload": { "mute": "{{value}}" } },
+      "stateJsonPath": "$.muted"
+    },
+    {
+      "id": "power_off",
+      "type": "action",
+      "label": "Turn off",
+      "command": { "uri": "ssap://system/turnOff" }
+    },
+    {
+      "id": "launch_app",
+      "type": "action",
+      "label": "Open app or input",
+      "params": { "app": { "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,127}" } },
+      "command": { "uri": "ssap://system.launcher/launch", "payload": { "id": "{{app}}" } }
+    },
+    {
+      "id": "toast",
+      "type": "action",
+      "label": "Show a message",
+      "params": { "message": { "type": "string", "pattern": "[^\\x00-\\x1f\\x7f]{1,100}" } },
+      "command": { "uri": "ssap://system.notifications/createToast", "payload": { "message": "{{message}}" } }
+    }
+  ]
+}
+''',
   'linux_host.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -140,6 +323,7 @@ const builtInDriverSources = <String, String>{
   "transport": { "type": "omniflow", "port": 38950, "payload": "json", "requestId": true, "baud": 115200 },
   "discovery": [
     { "method": "udp_broadcast", "port": 38950, "probe": { "cmd": "describe" }, "matchJsonPath": "$.pins", "idJsonPath": "$.node" },
+    { "method": "mdns", "service": "_omniflow._udp", "idInstance": true },
     { "method": "serial" }
   ],
   "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
@@ -161,6 +345,61 @@ const builtInDriverSources = <String, String>{
       "label": "Send NEC IR (32-bit code, MSB first)",
       "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
       "command": { "cmd": "ir.send", "hex": "{{value}}" }
+    },
+    {
+      "id": "rf_send",
+      "type": "action",
+      "label": "Send a 433 MHz RF code",
+      "params": {
+        "code": { "type": "number", "integer": true, "min": 0, "max": 4294967295 },
+        "bits": { "type": "number", "integer": true, "min": 1, "max": 32, "optional": true },
+        "protocol": { "type": "number", "integer": true, "min": 1, "max": 3, "optional": true },
+        "repeat": { "type": "number", "integer": true, "min": 1, "max": 20, "optional": true }
+      },
+      "command": { "cmd": "rf.send", "code": "{{code}}", "bits": "{{bits|24}}", "protocol": "{{protocol|1}}", "repeat": "{{repeat|10}}" }
+    }
+  ]
+}
+''',
+  'philips_hue_light.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "philips_hue_light",
+  "name": "Philips Hue light (bridge, local REST API v1)",
+  "category": "lighting",
+  "icon": "lightbulb",
+  "transport": { "type": "http", "port": 80, "authErrorTypes": [1] },
+  "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid" }],
+  "pairing": { "method": "hue_bridge" },
+  "settings": [
+    { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
+    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true }
+  ],
+  "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": "{{value}}" } },
+      "stateJsonPath": "$.on"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "Brightness",
+      "params": { "value": { "type": "number", "integer": true, "min": 1, "max": 254 } },
+      "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": true, "bri": "{{value}}" } },
+      "stateJsonPath": "$.bri"
+    },
+    {
+      "id": "color_temp",
+      "type": "level",
+      "label": "White temperature in mireds (153 cool to 500 warm)",
+      "params": { "value": { "type": "number", "integer": true, "min": 153, "max": 500, "unit": "mired" } },
+      "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": true, "ct": "{{value}}" } },
+      "stateJsonPath": "$.ct"
     }
   ]
 }
@@ -230,6 +469,57 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
+  'samsung_tizen_tv.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "samsung_tizen_tv",
+  "name": "Samsung Tizen TV (local remote control over secure WebSocket)",
+  "category": "media",
+  "icon": "tv",
+  "transport": {
+    "type": "websocket",
+    "port": 8002,
+    "protocol": "tizen",
+    "clientName": "OmniFlow",
+    "pairingTimeoutMs": 60000
+  },
+  "settings": [
+    { "key": "token", "label": "Pairing token (issued when you allow OmniFlow on the TV)", "secret": true },
+    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect)", "secret": true }
+  ],
+  "reliability": { "timeoutMs": 3000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "remote",
+      "type": "dpad_remote",
+      "label": "Remote",
+      "command": {
+        "key": "{{value}}",
+        "keyMap": {
+          "up": "KEY_UP",
+          "down": "KEY_DOWN",
+          "left": "KEY_LEFT",
+          "right": "KEY_RIGHT",
+          "ok": "KEY_ENTER",
+          "back": "KEY_RETURN",
+          "home": "KEY_HOME"
+        }
+      }
+    },
+    { "id": "volume_up", "type": "action", "label": "Volume up", "command": { "key": "KEY_VOLUP" } },
+    { "id": "volume_down", "type": "action", "label": "Volume down", "command": { "key": "KEY_VOLDOWN" } },
+    { "id": "mute", "type": "action", "label": "Mute", "command": { "key": "KEY_MUTE" } },
+    { "id": "power", "type": "action", "label": "Power key", "command": { "key": "KEY_POWER" } },
+    {
+      "id": "launch_app",
+      "type": "action",
+      "label": "Launch app",
+      "params": { "app": { "type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9._]{1,127}" } },
+      "command": { "launch": "{{app}}", "actionType": "DEEP_LINK" }
+    }
+  ]
+}
+''',
   'shelly_plus_switch.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -238,6 +528,7 @@ const builtInDriverSources = <String, String>{
   "category": "power",
   "icon": "plug",
   "transport": { "type": "http", "port": 80 },
+  "discovery": [{ "method": "mdns", "service": "_shelly._tcp", "idInstance": true }],
   "statePoll": { "intervalSeconds": 60, "command": { "path": "/rpc/Switch.GetStatus", "query": { "id": 0 } } },
   "reliability": { "timeoutMs": 2000, "retries": 1 },
   "capabilities": [
@@ -301,6 +592,7 @@ const builtInDriverSources = <String, String>{
   "category": "power",
   "icon": "plug",
   "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
+  "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
   "settings": [
     { "key": "devId", "label": "Device id" },
     { "key": "localKey", "label": "Local key", "secret": true }

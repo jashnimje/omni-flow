@@ -18,7 +18,7 @@ class HostKeyMismatchException implements Exception {
   @override
   String toString() =>
       'HostKeyMismatchException: $host offered $offered but $pinned is pinned. '
-      'If the host was reinstalled, clear the pin and connect again.';
+      'If the host was reinstalled, check the new key and accept it.';
 }
 
 /// Pins each host's key on first use, in the secret store.
@@ -52,8 +52,56 @@ class HostKeyPins {
     }
   }
 
+  /// The pinned key as `<type> <fingerprint>`, or null when none is pinned.
+  Future<String?> pinned(String host, int port) =>
+      _secrets.read(keyFor(host, port));
+
+  /// Pins [offered] (`<type> <fingerprint>`), replacing any pinned key.
+  Future<void> pin(String host, int port, String offered) =>
+      _secrets.write(keyFor(host, port), offered);
+
   Future<void> clear(String host, int port) =>
       _secrets.delete(keyFor(host, port));
+}
+
+/// Connects to [host] and returns the host key it offers, as
+/// `<type> <fingerprint>` like a pin. The key is refused as soon as it
+/// arrives, so the probe never authenticates or sends a credential.
+Future<String> probeSshHostKey(
+  String host,
+  int port, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final SSHSocket socket;
+  try {
+    socket = await SSHSocket.connect(host, port, timeout: timeout);
+  } on Exception catch (e) {
+    throw TransportTimeoutException('cannot reach $host:$port over SSH ($e)');
+  }
+  final offered = Completer<String>();
+  final client = SSHClient(
+    socket,
+    username: 'omniflow',
+    onVerifyHostKey: (type, fingerprint) {
+      if (!offered.isCompleted) {
+        offered.complete('$type ${utf8.decode(fingerprint)}');
+      }
+      return false;
+    },
+  );
+  final closed = client.done.then<String>(
+    (_) => throw TransportTimeoutException('$host:$port sent no SSH host key'),
+    onError: (Object e) => throw TransportTimeoutException(
+      '$host:$port sent no SSH host key ($e)',
+    ),
+  );
+  try {
+    return await Future.any([offered.future, closed]).timeout(timeout);
+  } on TimeoutException {
+    throw TransportTimeoutException('$host:$port sent no SSH host key');
+  } finally {
+    client.close();
+  }
 }
 
 /// Runs an argv on a remote host over SSH, authenticating with a private key

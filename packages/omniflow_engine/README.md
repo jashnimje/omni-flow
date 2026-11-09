@@ -19,6 +19,19 @@ omni secret set plug localKey < local_key.txt
 omni device invoke plug power value=true
 ```
 
+A Tuya plug takes its `devId` as its stable id, so it is found again by its UDP announcement when its address changes. A device that sends a secret (Hue, Home Assistant, MQTT, LG and Samsung TVs) does not follow a new address: give it a DHCP reservation, or add it again with the new host. TVs and Hue bridges are paired once. Pairing a Hue bridge stores its username for the lights already added on it, so add every light first. A light added later needs another `omni device pair` and another press of the button. `omni device pair` prints what to do on the device, then waits for it:
+
+```sh
+omni device add tv --driver android_tv_adb --host 192.168.1.60 --set mac=AA:BB:CC:DD:EE:FF
+omni device pair tv                        # accept "Allow USB debugging?" on the TV
+omni device add lamp --driver philips_hue_light --host 192.168.1.20 --set lightId=1
+omni device pair lamp                      # press the bridge's link button first
+omni device add hall --driver home_assistant_entity --host 192.168.1.5 --set entityId=light.hall --set domain=light
+omni secret set hall token < ha_token.txt  # a long-lived access token
+```
+
+SSH host keys are pinned on first use. After a host is reinstalled, `omni device hostkey mac` shows the pinned and offered keys, `omni device hostkey mac --accept SHA256:...` pins the offered key when it is the one you checked, and `--clear` drops the pin. `omni board describe desk` shows what a board offers and the pins it has set.
+
 After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build`.
 
 Flows. Save the sample flow from `docs/DESIGN.md` (Flows, Schema v1) to a file first. Its id is `flow_arrive_desk_evening`.
@@ -30,4 +43,4 @@ omni var set HomeSsids '["HomeNet"]'
 omni hub                                   # runs every enabled flow until Ctrl-C or SIGTERM
 ```
 
-Every `omni` command, `omni hub` and `omni mcp` included, holds the database lock while it runs, so only one of them can use a data directory at a time.
+While `omni hub` runs, other `omni` commands, `omni watch` and `omni mcp` reach it through its control socket `<home>/omni.sock` (mode 0600). With no hub running, each command opens the engine and holds the database lock while it runs. An MCP client such as Claude Desktop starts `omni mcp` on its own, so start `omni hub` before it. Otherwise `omni mcp` holds the lock and `omni hub` exits 75 with a message saying so.

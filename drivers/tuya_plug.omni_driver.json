@@ -5,6 +5,7 @@
   "category": "power",
   "icon": "plug",
   "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
+  "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
   "settings": [
     { "key": "devId", "label": "Device id" },
     { "key": "localKey", "label": "Local key", "secret": true }

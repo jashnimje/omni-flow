@@ -114,13 +114,84 @@ void main() {
     });
 
     test('a transport the engine has no channel for yet', () {
-      for (final (type, why) in [
-        ('adb', 'adb arrives with M4'),
-        ('tcp', 'tcp is not supported yet'),
-      ]) {
+      final json = validManifest()..['transport'] = {'type': 'tcp'};
+      expect(issuesFor(json), [r'$.transport.type: tcp is not supported yet']);
+    });
+
+    test('adb and websocket have channels now', () {
+      for (final type in ['adb', 'websocket']) {
         final json = validManifest()..['transport'] = {'type': type};
-        expect(issuesFor(json), [r'$.transport.type: ' + why]);
+        expect(issuesFor(json), isEmpty, reason: type);
       }
+    });
+
+    test('an mdns entry needs a valid service type', () {
+      List<String> withDiscovery(Map<String, Object?> entry) =>
+          issuesFor(validManifest()..['discovery'] = [entry]);
+      expect(
+        withDiscovery({'method': 'mdns', 'service': '_hue._tcp'}),
+        isEmpty,
+      );
+      expect(withDiscovery({'method': 'mdns'}), [
+        r'$.discovery[0].service: is required',
+      ]);
+      expect(withDiscovery({'method': 'mdns', 'service': 'hue.local'}), [
+        r'$.discovery[0].service: must be a service type like _hue._tcp',
+      ]);
+      expect(
+        withDiscovery({
+          'method': 'mdns',
+          'service': '_x._tcp',
+          'idTxt': 'id',
+          'idInstance': true,
+        }),
+        [r'$.discovery[0].idInstance: cannot be used with idTxt'],
+      );
+      expect(withDiscovery({'method': 'tuya_broadcast', 'windowMs': 0}), [
+        r'$.discovery[0].windowMs: must be between 1 and 60000',
+      ]);
+    });
+
+    test('idSetting names a setting that is not secret', () {
+      final json = validManifest()
+        ..['discovery'] = [
+          {'method': 'tuya_broadcast', 'idSetting': 'localKey'},
+        ];
+      expect(issuesFor(json), [
+        r'$.discovery[0].idSetting: localKey is not a setting that is not secret',
+      ]);
+    });
+
+    test('pairing defaults by transport and is checked when declared', () {
+      final adb = DriverManifest.parse(
+        validManifest()..['transport'] = {'type': 'adb'},
+      );
+      expect(adb.pairingSpec?.method, PairingMethod.adb);
+      expect(DriverManifest.parse(validManifest()).pairingSpec, isNull);
+      final secret = DriverManifest.parse(
+        validManifest()
+          ..['pairing'] = {
+            'method': 'secret',
+            'secret': 'localKey',
+            'instructions': 'Read it with tinytuya wizard',
+          },
+      );
+      expect(secret.pairingSpec?.secret, 'localKey');
+      expect(issuesFor(validManifest()..['pairing'] = {'method': 'secret'}), [
+        r'$.pairing.secret: names the secret setting the user stores',
+      ]);
+      expect(
+        issuesFor(
+          validManifest()..['pairing'] = {'method': 'secret', 'secret': 'nope'},
+        ),
+        [r'$.pairing.secret: nope is not a secret setting'],
+      );
+      expect(issuesFor(validManifest()..['pairing'] = {'method': 'tv'}), [
+        r'$.pairing.method: tv pairing needs the websocket transport',
+      ]);
+      expect(issuesFor(validManifest()..['pairing'] = {'method': 'magic'}), [
+        r'$.pairing.method: must be one of adb, tv, hue_bridge, secret',
+      ]);
     });
 
     test('integer on a param that is not a number', () {

@@ -11,9 +11,13 @@
 // goes to 127.0.0.1:hello-to.
 //
 // Extra test commands: {"cmd":"sim.set","pin":3,"value":1} sets an input, and
-// every IR frame is reported as {"event":"sim.ir","bits":"0x..."}. Wi-Fi joins
-// at once and reports the loopback address, and wifi.status adds
-// "passwordLength" so a test can see the password arrived.
+// {"cmd":"sim.wifi","connected":false} drops the simulated Wi-Fi link (true
+// brings it back, which sends a hello at once, as a board does on a rejoin).
+// Every IR frame is reported as {"event":"sim.ir","bits":"0x..."}, and every
+// RF send as {"event":"sim.rf","protocol":1,"code":5393,"bits":24,"repeat":10}.
+// Wi-Fi joins at once and reports the loopback address, and wifi.status adds
+// "passwordLength" so a test can see the password arrived. A node.set that
+// changes the name sends a hello under the new name at once.
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -33,6 +37,8 @@ using namespace omni;
 static int simValue[MAX_PINS];
 static Out* irOut = 0;
 static Core* simCore = 0;
+static bool simWifiUp = true;
+static Link* simLink = 0;
 
 static unsigned long monotonicMs() {
   struct timespec ts;
@@ -44,7 +50,7 @@ class SimHal : public Hal {
  public:
   // Counts from start like a board's millis(), so it wraps the same way.
   unsigned long start = monotonicMs();
-  bool setMode(int, Mode) override { return true; }
+  bool setMode(int, Mode, int) override { return true; }
   void writeDigital(int, int) override {}
   int readDigital(int pin) override { return simValue[pin] ? 1 : 0; }
   int readAnalogPercent(int pin) override { return simValue[pin]; }
@@ -55,6 +61,15 @@ class SimHal : public Hal {
     if (!irOut) return;
     char buf[96];
     snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"event\":\"sim.ir\",\"bits\":\"0x%08x\"}\n", simCore->node(), bits);
+    irOut->write(buf);
+    irOut->end();
+  }
+  bool hasRf() override { return true; }
+  void sendRf(const RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) override {
+    if (!irOut) return;
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"event\":\"sim.rf\",\"protocol\":%u,\"code\":%lu,\"bits\":%u,\"repeat\":%u}\n",
+             simCore->node(), protocol.number, (unsigned long)code, bits, repeat);
     irOut->write(buf);
     irOut->end();
   }
@@ -76,6 +91,9 @@ class SimSetupHal : public SetupHal {
     ip[3] = 1;
   }
   int rssi() override { return -50; }
+  void nodeRenamed() override {
+    if (simLink) simLink->renamed();
+  }
   void statusExtra(Out& out) override {
     char buf[32];
     snprintf(buf, sizeof(buf), ",\"passwordLength\":%d", (int)strlen(settings.password));
@@ -195,12 +213,18 @@ class EventOut : public Out {
 };
 
 static bool simCommand(const char* line, Out& out) {
-  if (!strstr(line, "\"sim.set\"")) return false;
+  bool wifi = strstr(line, "\"sim.wifi\"") != 0;
+  if (!wifi && !strstr(line, "\"sim.set\"")) return false;
   const char* p = strstr(line, "\"pin\"");
   const char* v = strstr(line, "\"value\"");
   const char* pc = p ? strchr(p, ':') : 0;
   const char* vc = v ? strchr(v, ':') : 0;
-  if (pc && vc) {
+  if (wifi) {
+    Args args;
+    long connected = 1;
+    if (!parseArgs(line, args)) args.num("connected", &connected);
+    simWifiUp = connected != 0;
+  } else if (pc && vc) {
     int pin = atoi(pc + 1);
     int value = atoi(vc + 1);
     if (pin >= 0 && pin < MAX_PINS) simValue[pin] = value;
@@ -235,6 +259,7 @@ int main(int argc, char** argv) {
     i++;
   }
   settings.irPin = -1;
+  settings.rfPin = -1;
   snprintf(settings.node, sizeof(settings.node), "%s", node);
   SimHal hal;
   Core core(settings.node, "omniflow-node/2 host", BOARD_HOST, hal);
@@ -277,8 +302,8 @@ int main(int argc, char** argv) {
   }
 
   core.boot(serial);
-  unsigned long lastHello = 0;
-  bool firstHello = true;
+  Link link((unsigned long)helloEvery);
+  simLink = &link;
   // The same line limit as the firmware on a Wi-Fi board.
   char line[200];
   size_t lineLen = 0;
@@ -330,12 +355,8 @@ int main(int argc, char** argv) {
         if (!simCommand(buf, reply) && core.handleLine(buf, reply)) addPeer(from, hal.millis());
       }
     }
-    unsigned long now = hal.millis();
-    if (hello.set && (firstHello || now - lastHello >= (unsigned long)helloEvery)) {
-      core.hello(hello, udpPort);
-      lastHello = now;
-      firstHello = false;
-    }
+    // The first update is the join, which says hello at once.
+    if ((link.update(simWifiUp, hal.millis()) & Link::HELLO) && hello.set) core.hello(hello, udpPort);
     core.poll(events);
   }
 }

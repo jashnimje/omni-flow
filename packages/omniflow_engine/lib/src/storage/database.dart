@@ -47,6 +47,10 @@ class Flows extends Table {
   /// False while a flow from MCP, the AI architect or an import waits for
   /// the user to approve its high-risk parts.
   BoolColumn get approved => boolean().withDefault(const Constant(true))();
+
+  /// True when the user saved or approved this version of the flow, so a
+  /// later rise in its risk does not revoke the approval.
+  BoolColumn get trusted => boolean().withDefault(const Constant(false))();
   DateTimeColumn get updatedAt => dateTime()();
 
   @override
@@ -72,6 +76,19 @@ class GlobalVariables extends Table {
   Set<Column> get primaryKey => {name};
 }
 
+/// The last describe reply each board gave, so a board that is offline can
+/// still show what its pins can do. Kept out of the device state, which
+/// users see and flows read.
+@DataClassName('BoardDescribeRow')
+class BoardDescribes extends Table {
+  TextColumn get deviceId => text()();
+  TextColumn get describeJson => text()();
+  DateTimeColumn get seenAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {deviceId};
+}
+
 /// Run traces, kept as a ring buffer of the newest [ExecutionLogStore.cap] rows.
 @DataClassName('LogRow')
 class ExecutionLog extends Table {
@@ -93,6 +110,7 @@ class ExecutionLog extends Table {
     Zones,
     GlobalVariables,
     ExecutionLog,
+    BoardDescribes,
   ],
 )
 class OmniDatabase extends _$OmniDatabase {
@@ -105,28 +123,63 @@ class OmniDatabase extends _$OmniDatabase {
   factory OmniDatabase.memory() => OmniDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
+
+  /// The key version 2 kept the trust mark under, inside the flow JSON.
+  static const legacyTrustedKey = '_trusted';
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
       if (from < 2) {
+        // Created with today's columns, so the version 3 steps are done too.
         await m.createTable(flows);
         await m.createTable(zones);
         await m.createTable(globalVariables);
         await m.createTable(executionLog);
+      } else if (from < 3) {
+        await m.addColumn(flows, flows.trusted);
+        await _moveTrustMarksToColumn();
       }
+      if (from < 3) await m.createTable(boardDescribes);
     },
   );
+
+  Future<void> _moveTrustMarksToColumn() async {
+    for (final row in await customSelect(
+      'SELECT id, flow_json FROM flows',
+    ).get()) {
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(row.read<String>('flow_json'));
+      } on FormatException {
+        continue;
+      }
+      if (decoded is! Map || !decoded.containsKey(legacyTrustedKey)) continue;
+      final trusted = decoded.remove(legacyTrustedKey) == true;
+      await customStatement(
+        'UPDATE flows SET flow_json = ?, trusted = ? WHERE id = ?',
+        [jsonEncode(decoded), trusted ? 1 : 0, row.read<String>('id')],
+      );
+    }
+  }
 }
 
 class FlowRecord {
-  const FlowRecord(this.json, {required this.enabled, required this.approved});
+  const FlowRecord(
+    this.json, {
+    required this.enabled,
+    required this.approved,
+    this.trusted = false,
+  });
 
   final Map<String, Object?> json;
   final bool enabled;
   final bool approved;
+
+  /// Whether the user saved or approved this version of the flow.
+  final bool trusted;
 }
 
 class DriftFlowStore {
@@ -138,31 +191,29 @@ class DriftFlowStore {
     for (final r in await (_db.select(
       _db.flows,
     )..orderBy([(f) => OrderingTerm(expression: f.id)])).get())
-      FlowRecord(
-        Map<String, Object?>.from(jsonDecode(r.flowJson) as Map),
-        enabled: r.enabled,
-        approved: r.approved,
-      ),
+      _toRecord(r),
   ];
 
   Future<FlowRecord?> get(String id) async {
     final r = await (_db.select(
       _db.flows,
     )..where((f) => f.id.equals(id))).getSingleOrNull();
-    return r == null
-        ? null
-        : FlowRecord(
-            Map<String, Object?>.from(jsonDecode(r.flowJson) as Map),
-            enabled: r.enabled,
-            approved: r.approved,
-          );
+    return r == null ? null : _toRecord(r);
   }
+
+  static FlowRecord _toRecord(FlowRow r) => FlowRecord(
+    Map<String, Object?>.from(jsonDecode(r.flowJson) as Map),
+    enabled: r.enabled,
+    approved: r.approved,
+    trusted: r.trusted,
+  );
 
   Future<void> put(
     String id,
     Map<String, Object?> json, {
     required bool enabled,
     required bool approved,
+    bool trusted = false,
     required DateTime at,
   }) => _db
       .into(_db.flows)
@@ -172,6 +223,7 @@ class DriftFlowStore {
           flowJson: jsonEncode(json),
           enabled: Value(enabled),
           approved: Value(approved),
+          trusted: Value(trusted),
           updatedAt: at,
         ),
       );
@@ -266,6 +318,49 @@ class ExecutionLogStore {
         Map<String, Object?>.from(jsonDecode(r.traceJson) as Map),
     ];
   }
+}
+
+/// The last describe each board gave, by device id.
+class DriftBoardDescribeStore {
+  DriftBoardDescribeStore(this._db);
+
+  final OmniDatabase _db;
+
+  Future<({Map<String, Object?> describe, DateTime seenAt})?> get(
+    String deviceId,
+  ) async {
+    final r = await (_db.select(
+      _db.boardDescribes,
+    )..where((b) => b.deviceId.equals(deviceId))).getSingleOrNull();
+    return r == null
+        ? null
+        : (
+            describe: Map<String, Object?>.from(
+              jsonDecode(r.describeJson) as Map,
+            ),
+            seenAt: r.seenAt.toUtc(),
+          );
+  }
+
+  Future<void> put(
+    String deviceId,
+    Map<String, Object?> describe,
+    DateTime at,
+  ) => _db
+      .into(_db.boardDescribes)
+      .insertOnConflictUpdate(
+        BoardDescribesCompanion.insert(
+          deviceId: deviceId,
+          describeJson: jsonEncode(describe),
+          seenAt: at,
+        ),
+      );
+
+  Future<bool> remove(String deviceId) async =>
+      await (_db.delete(
+        _db.boardDescribes,
+      )..where((b) => b.deviceId.equals(deviceId))).go() >
+      0;
 }
 
 class DriftDeviceStore implements DeviceStore {
@@ -363,7 +458,6 @@ class DatabaseInUseException implements Exception {
       'DatabaseInUseException: $path is open in another omni process (omni hub?)';
 }
 
-/// An exclusive lock next to the database, so two processes never open it.
 /// An exclusive lock next to the database, so it is never opened twice.
 ///
 /// The file lock keeps other processes out. File locks are per process, so a

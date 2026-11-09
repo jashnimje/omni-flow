@@ -7,6 +7,7 @@
   "transport": { "type": "omniflow", "port": 38950, "payload": "json", "requestId": true, "baud": 115200 },
   "discovery": [
     { "method": "udp_broadcast", "port": 38950, "probe": { "cmd": "describe" }, "matchJsonPath": "$.pins", "idJsonPath": "$.node" },
+    { "method": "mdns", "service": "_omniflow._udp", "idInstance": true },
     { "method": "serial" }
   ],
   "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
@@ -28,6 +29,18 @@
       "label": "Send NEC IR (32-bit code, MSB first)",
       "params": { "value": { "type": "string", "pattern": "0x[0-9A-Fa-f]{1,8}" } },
       "command": { "cmd": "ir.send", "hex": "{{value}}" }
+    },
+    {
+      "id": "rf_send",
+      "type": "action",
+      "label": "Send a 433 MHz RF code",
+      "params": {
+        "code": { "type": "number", "integer": true, "min": 0, "max": 4294967295 },
+        "bits": { "type": "number", "integer": true, "min": 1, "max": 32, "optional": true },
+        "protocol": { "type": "number", "integer": true, "min": 1, "max": 3, "optional": true },
+        "repeat": { "type": "number", "integer": true, "min": 1, "max": 20, "optional": true }
+      },
+      "command": { "cmd": "rf.send", "code": "{{code}}", "bits": "{{bits|24}}", "protocol": "{{protocol|1}}", "repeat": "{{repeat|10}}" }
     }
   ]
 }

@@ -62,6 +62,10 @@ void main() {
       final (code, _, err) = await omni(['device', 'list']);
       expect(code, 75);
       expect(err.trim(), contains('in use by another omni process'));
+      expect(const LineSplitter().convert(err), hasLength(1));
+      // The usual holder is an MCP client's omni mcp started before the hub.
+      expect(err, contains('omni mcp'));
+      expect(err, contains('Start omni hub first'));
     });
 
     test('a bad number for --seconds is a usage error, exit 64', () async {

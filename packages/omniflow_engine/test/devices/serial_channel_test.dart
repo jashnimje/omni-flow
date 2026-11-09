@@ -1,6 +1,7 @@
 @TestOn('mac-os || linux')
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,6 +9,58 @@ import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
 import '../support/v1_drivers.dart';
+
+/// The tty opened for writing, as the channel's own sink does it.
+class TtySink implements SerialSink {
+  TtySink(this._file);
+
+  static Future<TtySink> open(String path) async =>
+      TtySink(await File(path).open(mode: FileMode.writeOnly));
+
+  final RandomAccessFile _file;
+
+  @override
+  Future<void> write(List<int> bytes) async {
+    await _file.writeFrom(bytes);
+    await _file.flush();
+  }
+
+  @override
+  Future<void> close() => _file.close();
+}
+
+/// A port whose writes never complete, like a tty held by flow control.
+class StuckSink implements SerialSink {
+  var writes = 0;
+  var closed = false;
+
+  @override
+  Future<void> write(List<int> bytes) {
+    writes++;
+    return Completer<void>().future;
+  }
+
+  @override
+  Future<void> close() async => closed = true;
+}
+
+/// Runs commands for real and notes, for each, how many sinks were open.
+class RecordingExecutor implements HostExecutor {
+  RecordingExecutor(this.openSinks);
+
+  final int Function() openSinks;
+  final calls = <(List<String>, int)>[];
+
+  @override
+  Future<CommandResult> run(
+    List<String> argv, {
+    String? stdin,
+    Duration timeout = const Duration(seconds: 30),
+  }) {
+    calls.add((argv, openSinks()));
+    return const LocalExecutor().run(argv, stdin: stdin, timeout: timeout);
+  }
+}
 
 void main() {
   late Process board;
@@ -138,6 +191,72 @@ void main() {
       expect(stray, isEmpty);
     },
   );
+
+  DeviceService serviceWith(SerialChannel other) => DeviceService(
+    registry: v1Registry(),
+    store: store,
+    channels: {TransportType.serial: other},
+  );
+
+  test(
+    'stty sets raw, no echo and no hang-up while the port is held open',
+    () async {
+      var open = 0;
+      final executor = RecordingExecutor(() => open);
+      final held = SerialChannel(
+        executor: executor,
+        openSink: (path) async {
+          open++;
+          return TtySink.open(path);
+        },
+      );
+      addTearDown(held.close);
+      final result = await serviceWith(held)
+          .invoke('pico_usb', 'led', {'value': true});
+      expect(result.reply.json, containsPair('event', 'ack'));
+      final (argv, sinksOpen) = executor.calls.single;
+      expect(argv.first, '/bin/stty');
+      expect(argv, containsAllInOrder([tty, '115200', 'raw', '-echo']));
+      expect(argv, contains('-hupcl'));
+      expect(sinksOpen, 1, reason: 'stty must run on a held descriptor');
+    },
+  );
+
+  test('a write that never completes fails within the timeout', () async {
+    final sinks = <StuckSink>[];
+    final stuck = SerialChannel(
+      openSink: (_) async {
+        final sink = StuckSink();
+        sinks.add(sink);
+        return sink;
+      },
+    );
+    addTearDown(stuck.close);
+    final clock = Stopwatch()..start();
+    await expectLater(
+      serviceWith(stuck).invoke('pico_usb', 'led', {'value': true}),
+      throwsA(isA<TransportTimeoutException>()),
+    );
+    // 800 ms per attempt, one retry, in omniflow_mcu_serial.
+    expect(clock.elapsed, lessThan(const Duration(seconds: 4)));
+    expect(sinks, hasLength(2), reason: 'the stuck port is opened again');
+    expect(sinks.map((s) => s.writes), everyElement(1));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(sinks.map((s) => s.closed), everyElement(isTrue));
+  });
+
+  test('after a stuck write the retry reopens the port and works', () async {
+    var opens = 0;
+    final recovering = SerialChannel(
+      openSink: (path) async =>
+          ++opens == 1 ? StuckSink() : await TtySink.open(path),
+    );
+    addTearDown(recovering.close);
+    final result = await serviceWith(recovering)
+        .invoke('pico_usb', 'led', {'value': true});
+    expect(result.reply.json, containsPair('event', 'ack'));
+    expect(opens, 2);
+  });
 
   test('a missing port is a transport timeout', () async {
     await store.put(
