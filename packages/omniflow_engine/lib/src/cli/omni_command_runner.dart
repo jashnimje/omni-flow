@@ -18,6 +18,7 @@ import '../transports/packet_tap.dart';
 import '../version.dart';
 import 'add_cli.dart';
 import 'rule_cli.dart';
+import 'tv_cli.dart';
 
 typedef EngineFactory = Future<OmniEngine> Function(
   Directory home, {
@@ -133,6 +134,7 @@ class OmniCommandRunner extends CommandRunner<int> {
         ),
         _DevicePair(),
         _DeviceHostKey(),
+        DeviceShellCommand(),
       ]),
     );
     addCommand(
@@ -186,6 +188,7 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(_Mcp());
     addCommand(RuleCommand());
     addCommand(AddCommand());
+    addCommand(TvCommand());
     String id(List<String> rest) => _one(rest, 'ID');
     addCommand(
       _Group('flow', 'Validate, save, run and inspect flows.', [

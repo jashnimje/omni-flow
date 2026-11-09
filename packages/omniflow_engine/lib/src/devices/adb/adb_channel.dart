@@ -11,6 +11,7 @@ import '../device.dart';
 import 'adb_commands.dart';
 import 'adb_connection.dart';
 import 'adb_key.dart';
+import 'adb_sync.dart';
 import 'wake_on_lan.dart';
 
 const adbDefaultPort = 5555;
@@ -130,6 +131,94 @@ class AdbChannel implements DriverChannel {
           'output': output,
         }, raw: output);
     }
+  }
+
+  /// Runs [command] on [device] as built by the caller, and returns what it
+  /// printed. Only commands built from validated values come here.
+  Future<String> run(
+    Device device,
+    DriverManifest manifest,
+    String command, {
+    Duration? timeout,
+    bool offerKey = false,
+  }) => _shell(
+    device,
+    _portOf(device, manifest),
+    command,
+    timeout ?? Duration(milliseconds: manifest.reliability.timeoutMs),
+    offerKey: offerKey,
+  );
+
+  /// Runs [body] on a sync session to [device], then ends the session. A
+  /// session the device never accepted is opened once more on a fresh
+  /// connection, as nothing ran on it.
+  Future<T> sync<T>(
+    Device device,
+    DriverManifest manifest,
+    Future<T> Function(AdbSync sync) body, {
+    bool offerKey = false,
+    Duration? timeout,
+  }) async {
+    final port = _portOf(device, manifest);
+    final handshake = Duration(milliseconds: manifest.reliability.timeoutMs);
+    for (var attempt = 0; ; attempt++) {
+      final reused = _isHeld(device, port);
+      final AdbSync session;
+      try {
+        final connection = await _connection(
+          device,
+          port,
+          handshake,
+          offerKey: offerKey,
+        );
+        session = await AdbSync.open(
+          connection,
+          timeout: timeout ?? const Duration(seconds: 30),
+        );
+      } on AdbConnectionClosedException {
+        _drop(device.id);
+        if (attempt == 0 && reused) continue;
+        throw CommandFailedException('${device.id} closed the ADB connection');
+      } on AdbShellTimeoutException {
+        _drop(device.id);
+        throw CommandFailedException(
+          'no reply from ${device.id} to the ADB sync request',
+        );
+      } on AdbStreamRefusedException {
+        throw CommandFailedException('${device.id} refused ADB file access');
+      }
+      try {
+        final result = await body(session);
+        await session.quit();
+        return result;
+      } on AdbConnectionClosedException {
+        _drop(device.id);
+        throw CommandFailedException(
+          '${device.id} closed the ADB connection during the transfer',
+        );
+      } on TimeoutException {
+        session.abort();
+        _drop(device.id);
+        throw CommandFailedException(
+          'no reply from ${device.id} during the transfer',
+        );
+      } catch (_) {
+        session.abort();
+        rethrow;
+      }
+    }
+  }
+
+  int _portOf(Device device, DriverManifest manifest) =>
+      device.port ?? manifest.transport.port ?? adbDefaultPort;
+
+  bool _isHeld(Device device, int port) {
+    final held = _connections[device.id];
+    return held != null &&
+        held.connection != null &&
+        !held.connection!.isClosed &&
+        held.host == device.host &&
+        held.port == port;
   }
 
   Future<String> _shell(

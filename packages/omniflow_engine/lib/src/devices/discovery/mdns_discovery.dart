@@ -69,9 +69,28 @@ typedef MdnsClientFactory = MDnsClient Function();
 /// The client, and its UDP 5353 socket, lives only for one [browse] call.
 /// mDNS replies carry no sender the client exposes, so an address outside
 /// the local network is refused at the A record instead.
+/// An mDNS client whose sockets never ask for SO_REUSEPORT where the
+/// platform has none (Android): binding then fails and nothing is found.
+MDnsClient platformMdnsClient() => MDnsClient(
+  rawDatagramSocketFactory:
+      (
+        host,
+        int port, {
+        bool reuseAddress = true,
+        bool reusePort = false,
+        int ttl = 1,
+      }) => RawDatagramSocket.bind(
+        host,
+        port,
+        reuseAddress: reuseAddress,
+        reusePort: reusePort && !Platform.isAndroid,
+        ttl: ttl,
+      ),
+);
+
 class MdnsDiscovery {
   MdnsDiscovery({
-    this._client = MDnsClient.new,
+    this._client = platformMdnsClient,
     this._acceptAddress = isLocalNetworkAddress,
     this.resolveTimeout = const Duration(milliseconds: 1500),
     this.maxInstances = 64,

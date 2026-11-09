@@ -123,7 +123,7 @@ void _tools({required bool viaHub}) {
     expect((packets.single as Map)['text'], '{"method":"getPilot"}');
   });
 
-  test('lists the seventeen tools', () async {
+  test('lists the twenty-four tools', () async {
     final tools = (await client.listTools()).tools.map((t) => t.name).toSet();
     expect(tools, {
       'discover_devices_and_capabilities',
@@ -143,6 +143,13 @@ void _tools({required bool viaHub}) {
       'describe_board',
       'pair_device',
       'trust_ssh_host_key',
+      'tv_state',
+      'tv_remote_keys',
+      'tv_list_apps',
+      'tv_app_info',
+      'tv_settings',
+      'tv_files',
+      'tv_change',
     });
   });
 
@@ -554,7 +561,7 @@ void _stdio() {
             .firstWhere((l) => l.contains('"id":2'))
             .timeout(const Duration(seconds: 20)),
       ) as Map;
-      expect(((list['result'] as Map)['tools'] as List), hasLength(17));
+      expect(((list['result'] as Map)['tools'] as List), hasLength(24));
       await process.stdin.close();
       expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
     },

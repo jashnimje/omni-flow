@@ -20,6 +20,7 @@ import 'pairing_commands.dart';
 import 'state_commands.dart';
 import 'stored_flows.dart';
 import 'things_runtime.dart';
+import 'tv_commands.dart';
 import '../dag/expression.dart';
 import '../dag/flow_engine.dart';
 import '../devices/adb/adb_channel.dart';
@@ -262,7 +263,13 @@ class OmniEngine {
     capabilitiesChanged: () => _stored.reloadFlows(),
   );
   late final _things = ThingsRuntime(_core);
-  late final _hub = HubRuntime(_core, _boards, _things);
+  late final _hub = HubRuntime(
+    _core,
+    _boards,
+    _things,
+    tvPoll: (id) => _tvCommands.poll(id),
+  );
+  late final _tvCommands = TvCommands(_core, _stored);
   late final _stored = StoredFlows(_core, _things);
   late final _flowCommands = FlowCommands(_core, _stored);
   late final _linkCommands = LinkCommands(_core, _flowCommands);
@@ -394,6 +401,7 @@ class OmniEngine {
     'device.pair': _pairingCommands.pair,
     'device.hostkey': _hostKeyCommands.hostKey,
     'secret.set': _deviceCommands.secretSet,
+    ..._tvCommands.commands,
   };
 
   Iterable<String> get commandNames => _commands.keys;

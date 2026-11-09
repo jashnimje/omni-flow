@@ -376,14 +376,22 @@ class _FileSink implements SerialSink {
 
 /// USB serial ports a board shows up as: `/dev/cu.usbmodem*` and
 /// `/dev/cu.usbserial*` on macOS, `/dev/ttyACM*` and `/dev/ttyUSB*` on Linux.
+///
+/// An Android app may not list /dev, and USB boards reach the phone through
+/// the USB host API instead, so there it finds none.
 Future<List<String>> usbSerialPorts() async {
+  if (Platform.isAndroid) return const [];
   final patterns = Platform.isMacOS
       ? ['cu.usbmodem', 'cu.usbserial']
       : ['ttyACM', 'ttyUSB'];
   final dev = Directory('/dev');
   if (!await dev.exists()) return const [];
-  return [
-    await for (final entry in dev.list())
-      if (patterns.any(entry.path.split('/').last.startsWith)) entry.path,
-  ]..sort();
+  try {
+    return [
+      await for (final entry in dev.list())
+        if (patterns.any(entry.path.split('/').last.startsWith)) entry.path,
+    ]..sort();
+  } on FileSystemException {
+    return const [];
+  }
 }

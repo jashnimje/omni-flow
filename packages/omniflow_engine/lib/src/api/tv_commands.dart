@@ -1,0 +1,1146 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+
+import 'api_error.dart';
+import 'command_args.dart';
+import 'engine_core.dart';
+import 'stored_flows.dart';
+import '../devices/adb/adb_commands.dart';
+import '../devices/adb/adb_sync.dart';
+import '../devices/adb/tv_keys.dart';
+import '../devices/adb/tv_parsers.dart';
+import '../devices/adb/tv_settings.dart';
+import '../devices/device.dart';
+import '../devices/board.dart' show manifestFor;
+import '../manifest/driver_manifest.dart';
+import '../transports/udp_transport.dart' show TransportTimeoutException;
+
+/// The state keys the hub keeps for a TV, so rules can start on them.
+const tvStateKeys = ['power', 'app', 'playing', 'volume'];
+
+const _maxPath = adbSyncMaxPath;
+const _maxShellTimeout = Duration(minutes: 10);
+const _installTimeout = Duration(minutes: 5);
+const _progressEvery = Duration(milliseconds: 250);
+
+/// How often one TV may be looked for at a new address, so a TV that is
+/// off is not searched for on every poll.
+const _healEvery = Duration(minutes: 1);
+
+final _serialPattern = RegExp(r'^[A-Za-z0-9]{4,64}$');
+
+/// The `tv.*` commands: remote keys, text and volume, apps, settings, files
+/// and the shell on any device whose driver speaks ADB. Every command line
+/// is built from validated, quoted values, except `tv.shell`, which runs
+/// what the user typed.
+class TvCommands {
+  TvCommands(this._core, this._stored);
+
+  final EngineCore _core;
+  final StoredFlows _stored;
+  final _random = Random.secure();
+  final _lastHeal = <String, DateTime>{};
+  final _askedSerial = <String>{};
+
+  Map<String, CommandHandler> get commands => {
+    'tv.state': state,
+    'tv.keys': keys,
+    'tv.key': key,
+    'tv.text': text,
+    'tv.volume': volume,
+    'tv.apps': apps,
+    'tv.app': app,
+    'tv.install': install,
+    'tv.settings.catalog': settingsCatalog,
+    'tv.settings.list': settingsList,
+    'tv.settings.get': settingsGet,
+    'tv.settings.put': settingsPut,
+    'tv.settings.delete': settingsDelete,
+    'tv.files.list': filesList,
+    'tv.files.stat': filesStat,
+    'tv.files.download': filesDownload,
+    'tv.files.upload': filesUpload,
+    'tv.files.copy': (args) => _copyOrMove(args, move: false),
+    'tv.files.move': (args) => _copyOrMove(args, move: true),
+    'tv.files.delete': filesDelete,
+    'tv.files.mkdir': filesMkdir,
+    'tv.files.rename': filesRename,
+    'tv.shell': shell,
+    'tv.capabilityRisk': capabilityRisk,
+  };
+
+  // Devices ------------------------------------------------------------
+
+  Future<_Tv> _tv(Map<String, Object?> args) async {
+    final device = await _core.device(stringArg(args, 'id'));
+    final manifest = manifestFor(_core.registry, device);
+    if (manifest == null || manifest.transport.type != TransportType.adb) {
+      throw ApiError('invalid', '${device.id} is not an Android TV over ADB');
+    }
+    // Only a user at the TV can allow a new key, so an agent or a poll
+    // passes allowPairing false and gets needs_user instead of a prompt.
+    return _Tv(device, manifest, offerKey: args['allowPairing'] != false);
+  }
+
+  /// Runs [op], and when the TV does not answer at its address, looks for
+  /// it by its mDNS instance (its stable id) and runs [op] once more there.
+  Future<T> _healing<T>(_Tv tv, Future<T> Function() op) async {
+    try {
+      final result = await op();
+      _learnStableId(tv);
+      return result;
+    } on TransportTimeoutException {
+      final stableId = tv.device.stableId;
+      final last = _lastHeal[tv.device.id];
+      final now = DateTime.now();
+      if (stableId == null ||
+          (last != null && now.difference(last) < _healEvery)) {
+        rethrow;
+      }
+      _lastHeal[tv.device.id] = now;
+      final host = await _core.discovery.locator(tv.manifest, stableId);
+      if (host == null || host == tv.device.host) rethrow;
+      final moved = await _core.devices.updateDevice(
+        tv.device.id,
+        (d) => d.copyWith(host: host),
+      );
+      _core.emit({
+        'event': 'device.moved',
+        'deviceId': tv.device.id,
+        'from': tv.device.host,
+        'to': host,
+      });
+      tv.device = moved;
+      return op();
+    }
+  }
+
+  /// A TV added by address has no stable id to be found by later. Its
+  /// `_adb._tcp` instance is `adb-<serial>`, so the serial gives it one.
+  void _learnStableId(_Tv tv) {
+    if (tv.device.stableId != null || !_askedSerial.add(tv.device.id)) return;
+    final advertises = tv.manifest.discovery.any(
+      (d) =>
+          d.method == 'mdns' &&
+          d.config['service'] == '_adb._tcp' &&
+          d.config['idInstance'] == true,
+    );
+    if (!advertises) return;
+    _core.track(
+      () async {
+        final serial = (await _core.adb.run(
+          tv.device,
+          tv.manifest,
+          'getprop ro.serialno',
+        )).trim();
+        if (!_serialPattern.hasMatch(serial)) return;
+        await _core.devices.updateDevice(
+          tv.device.id,
+          (d) => d.stableId == null ? d.copyWith(stableId: 'adb-$serial') : d,
+        );
+      }().catchError((Object _) {}),
+    );
+  }
+
+  Future<String> _run(_Tv tv, String command, {Duration? timeout}) => _healing(
+    tv,
+    () => _core.adb.run(
+      tv.device,
+      tv.manifest,
+      command,
+      timeout: timeout,
+      offerKey: tv.offerKey,
+    ),
+  );
+
+  String _marker() =>
+      '@@omniflow-exit-${List.generate(8, (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}:';
+
+  /// Runs [command] and reports its exit status, read from a marker line
+  /// printed after it. Null when the command ended the shell itself.
+  Future<({String output, int? exitCode})> _exec(
+    _Tv tv,
+    String command, {
+    Duration? timeout,
+  }) async {
+    final marker = _marker();
+    final raw = await _run(tv, '$command\necho "$marker\$?"', timeout: timeout);
+    final at = raw.lastIndexOf(marker);
+    if (at < 0) return (output: raw, exitCode: null);
+    return (
+      output: raw.substring(0, at),
+      exitCode: int.tryParse(raw.substring(at + marker.length).trim()),
+    );
+  }
+
+  /// Like [_exec], failing with the device's message when the command
+  /// did not exit 0.
+  Future<String> _check(_Tv tv, String command, String what) async {
+    final result = await _exec(tv, command);
+    if (result.exitCode != 0) {
+      final message = result.output.trim();
+      throw ApiError(
+        'device_error',
+        '$what failed${message.isEmpty ? '' : ': ${_firstLines(message)}'}',
+      );
+    }
+    return result.output;
+  }
+
+  Future<T> _sync<T>(_Tv tv, Future<T> Function(AdbSync sync) body) async {
+    try {
+      return await _healing(
+        tv,
+        () =>
+            _core.adb.sync(tv.device, tv.manifest, body, offerKey: tv.offerKey),
+      );
+    } on AdbSyncException catch (e) {
+      throw ApiError('device_error', e.message);
+    }
+  }
+
+  // State, remote, text, volume ----------------------------------------
+
+  Future<Map<String, Object?>> state(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final result = await _readState(tv);
+    await _record(tv.device.id, result);
+    return {'id': tv.device.id, ...result};
+  }
+
+  /// The TV's power, app, playback and volume. A TV that does not answer
+  /// at all is off: Android TVs drop off the network in deep standby.
+  Future<Map<String, Object?>> _readState(_Tv tv) async {
+    try {
+      final output = await _run(tv, tvSections(tvStateCommands));
+      return parseTvState(splitTvSections(output));
+    } on TransportTimeoutException {
+      return {
+        'power': 'off',
+        'app': null,
+        'activity': null,
+        'playing': null,
+        'volume': null,
+        'volumeMax': null,
+      };
+    }
+  }
+
+  /// One hub poll: reads the TV state into the device state, and only
+  /// saves it when a key changed, so rules see changes and not heartbeats.
+  Future<void> poll(String deviceId) async {
+    final tv = await _tv({'id': deviceId, 'allowPairing': false});
+    await _record(deviceId, await _readState(tv));
+  }
+
+  Future<void> _record(String deviceId, Map<String, Object?> state) async {
+    final device = await _core.devices.device(deviceId);
+    if (device == null) return;
+    final values = {for (final k in tvStateKeys) k: state[k]};
+    final changed = values.entries.any((e) => device.state[e.key] != e.value);
+    if (changed || !tvStateKeys.every(device.state.containsKey)) {
+      await _core.devices.mergeState(deviceId, values);
+    }
+  }
+
+  Future<Map<String, Object?>> keys(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    return {'id': tv.device.id, 'groups': tvKeyCatalogJson()};
+  }
+
+  Future<Map<String, Object?>> key(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final given = args['key'] ?? args['keycode'];
+    final keycode = switch (given) {
+      int code => AdbAction.keycodeOf(null, code),
+      String name when int.tryParse(name) != null => AdbAction.keycodeOf(
+        null,
+        name,
+      ),
+      String name => AdbAction.keycodeOf(name, null),
+      _ => throw ApiError('invalid', 'key is a key name or a key code'),
+    };
+    final longPress = AdbAction.flagOf(args['longPress'], r'$.longPress');
+    final repeat = AdbAction.repeatOf(args['repeat']);
+    await _run(tv, TvShell.key(keycode, longPress: longPress, repeat: repeat));
+    return {
+      'id': tv.device.id,
+      'keycode': keycode,
+      if (given is String && int.tryParse(given) == null) 'key': given,
+      'longPress': longPress,
+      'repeat': repeat,
+    };
+  }
+
+  Future<Map<String, Object?>> text(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final value = AdbAction.textOf(args['text']);
+    await _run(tv, TvShell.text(value));
+    return {'id': tv.device.id, 'typed': value.length};
+  }
+
+  static final _volumeLine = RegExp(
+    r'volume is (\d+) in range \[(\d+)\.\.(\d+)\]',
+  );
+
+  Future<(int, int)?> _volumeNow(_Tv tv) async {
+    final m = _volumeLine.firstMatch(await _run(tv, TvShell.volumeGet()));
+    return m == null ? null : (int.parse(m.group(1)!), int.parse(m.group(3)!));
+  }
+
+  /// Sets the media volume exactly. A TV whose media session service does
+  /// not take `--set` gets volume key presses instead.
+  Future<Map<String, Object?>> volume(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final before = await _volumeNow(tv);
+    final max = before?.$2 ?? 100;
+    final level = AdbAction.levelOf(args['level'], max: max);
+    await _run(tv, TvShell.volumeSet(level));
+    var now = await _volumeNow(tv);
+    var method = 'set';
+    if (now != null && now.$1 != level) {
+      final delta = level - now.$1;
+      for (var left = delta.abs(); left > 0; left -= adbMaxRepeat) {
+        await _run(
+          tv,
+          TvShell.key(
+            tvKeyCodes[delta > 0 ? 'volume_up' : 'volume_down']!,
+            repeat: min(left, adbMaxRepeat),
+          ),
+        );
+      }
+      now = await _volumeNow(tv);
+      method = 'keys';
+    }
+    final result = {
+      'id': tv.device.id,
+      'volume': now?.$1 ?? level,
+      'volumeMax': now?.$2 ?? max,
+      'method': method,
+    };
+    final device = await _core.devices.device(tv.device.id);
+    if (device != null && device.state['volume'] != result['volume']) {
+      await _core.devices.mergeState(tv.device.id, {
+        'volume': result['volume'],
+      });
+    }
+    return result;
+  }
+
+  // Apps ---------------------------------------------------------------
+
+  Future<Map<String, Object?>> apps(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final filter = optStringArg(args, 'filter') ?? 'all';
+    if (!const ['user', 'system', 'all'].contains(filter)) {
+      throw ApiError('invalid', 'filter is user, system or all');
+    }
+    final launchableOnly = args['launchableOnly'] == true;
+    final output = await _run(
+      tv,
+      tvSections(tvAppsCommands),
+      timeout: const Duration(seconds: 30),
+    );
+    final all = parseTvApps(splitTvSections(output));
+    return {
+      'id': tv.device.id,
+      'apps': [
+        for (final a in all)
+          if ((filter == 'all' ||
+                  (a['system'] == true) == (filter == 'system')) &&
+              (!launchableOnly || a['launchable'] == true))
+            a,
+      ],
+    };
+  }
+
+  Future<Map<String, Object?>> _appInfo(_Tv tv, String package) async {
+    final q = shellQuote(package);
+    final output = await _run(
+      tv,
+      tvSections({
+        'dumpsys': 'dumpsys package $q',
+        'user': "dumpsys package $q | grep -m 1 -E '^    User 0:'",
+        'sizes':
+            'for f in \$(pm path $q | sed s/^package://); do '
+            'stat -c %s "\$f"; done',
+        'leanback':
+            'cmd package resolve-activity --brief -a android.intent.action.MAIN '
+            '-c android.intent.category.LEANBACK_LAUNCHER $q',
+        'launcher':
+            'cmd package resolve-activity --brief -a android.intent.action.MAIN '
+            '-c android.intent.category.LAUNCHER $q',
+      }),
+      timeout: const Duration(seconds: 30),
+    );
+    final sections = splitTvSections(output);
+    final parsed = parseTvApps({
+      'packages': [
+        for (final line in (sections['dumpsys'] ?? '').split('\n'))
+          if (RegExp(
+            r'^(Hidden system packages|  Package \[|    versionName=|'
+            r'    versionCode=|    pkgFlags=|    User 0:)',
+          ).hasMatch(line))
+            line,
+      ].join('\n'),
+    }).where((a) => a['package'] == package).firstOrNull;
+    if (parsed == null) {
+      throw ApiError('not_found', 'no app $package on ${tv.device.id}');
+    }
+    final sizes = [
+      for (final line in (sections['sizes'] ?? '').split('\n'))
+        ?int.tryParse(line.trim()),
+    ];
+    bool resolves(String? s) => (s ?? '').contains('$package/');
+    return {
+      ...parsed,
+      'launchable':
+          resolves(sections['leanback']) || resolves(sections['launcher']),
+      if (sizes.isNotEmpty) 'sizeBytes': sizes.fold<int>(0, (a, b) => a + b),
+      ...parseTvAppInfo(sections['dumpsys'] ?? ''),
+    };
+  }
+
+  static const _appSuccess = {
+    'clear_cache': 'Success',
+    'clear_data': 'Success',
+    'disable': 'new state: disabled',
+    'enable': 'new state: enabled',
+    'uninstall': 'Success',
+  };
+
+  Future<Map<String, Object?>> app(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final package = AdbAction.packageOf(args['package']);
+    final action = stringArg(args, 'action');
+    switch (action) {
+      case 'info':
+        return {'id': tv.device.id, 'app': await _appInfo(tv, package)};
+      case 'open':
+        final output = await _run(tv, TvShell.launch(package));
+        if (RegExp(
+          r'No activities found|monkey aborted|^Error',
+          multiLine: true,
+        ).hasMatch(output)) {
+          throw ApiError('device_error', 'no launchable app $package');
+        }
+        return {'id': tv.device.id, 'package': package, 'action': action};
+      case 'stop':
+        await _run(tv, TvShell.forceStop(package));
+        return {'id': tv.device.id, 'package': package, 'action': action};
+    }
+    if (!adbAppActions.contains(action)) {
+      throw ApiError(
+        'invalid',
+        'action is open, stop, info or one of ${adbAppActions.join(', ')}',
+      );
+    }
+    final info = await _appInfo(tv, package);
+    final output = await _run(
+      tv,
+      TvShell.app(package, action, system: info['system'] == true),
+      timeout: const Duration(seconds: 60),
+    );
+    if (!output.contains(_appSuccess[action]!)) {
+      throw ApiError(
+        'device_error',
+        'the TV could not $action $package: ${_firstLines(output.trim())}',
+      );
+    }
+    return {
+      'id': tv.device.id,
+      'package': package,
+      'action': action,
+      'output': output.trim(),
+    };
+  }
+
+  Future<Map<String, Object?>> install(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final file = File(_localPath(args, 'path'));
+    if (!await file.exists()) {
+      throw ApiError('not_found', 'no file ${file.path} on this computer');
+    }
+    if (!file.path.toLowerCase().endsWith('.apk')) {
+      throw ApiError('invalid', 'path is an .apk file');
+    }
+    final replace = args['replace'] == true;
+    final remote = '/data/local/tmp/omniflow-${_hex(8)}.apk';
+    final total = await file.length();
+    final progress = _progress(tv.device.id, 'install', total);
+    await _sync(
+      tv,
+      (s) => s.push(file, remote, onProgress: (done, _) => progress(done)),
+    );
+    try {
+      final output = await _run(
+        tv,
+        'pm install ${replace ? '-r ' : ''}${shellQuote(remote)}',
+        timeout: _installTimeout,
+      );
+      if (!output.contains('Success')) {
+        throw ApiError(
+          'device_error',
+          'the TV did not install ${file.uri.pathSegments.last}: '
+              '${_firstLines(output.trim())}',
+        );
+      }
+      return {
+        'id': tv.device.id,
+        'installed': file.uri.pathSegments.last,
+        'bytes': total,
+        'replace': replace,
+      };
+    } finally {
+      try {
+        await _run(tv, 'rm -f ${shellQuote(remote)}');
+      } on Object {
+        // The temporary copy is left in /data/local/tmp.
+      }
+    }
+  }
+
+  // Settings -----------------------------------------------------------
+
+  Future<Map<String, Map<String, String>>> _allSettings(_Tv tv) async {
+    final output = await _run(
+      tv,
+      tvSections({
+        for (final ns in adbSettingNamespaces) ns: 'settings list $ns',
+      }),
+    );
+    final sections = splitTvSections(output);
+    return {
+      for (final ns in adbSettingNamespaces)
+        ns: parseSettingsList(sections[ns] ?? ''),
+    };
+  }
+
+  Future<Map<String, Object?>> settingsCatalog(
+    Map<String, Object?> args,
+  ) async {
+    final tv = await _tv(args);
+    final all = await _allSettings(tv);
+    return {
+      'id': tv.device.id,
+      'categories': [
+        for (final c in tvSettingCatalog)
+          {
+            'category': c.category,
+            'settings': [
+              for (final s in c.settings) s.toJson(all[s.namespace]![s.key]),
+            ],
+          },
+      ],
+    };
+  }
+
+  Future<Map<String, Object?>> settingsList(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final namespace = args['namespace'] == null
+        ? null
+        : AdbAction.namespaceOf(args['namespace']);
+    final all = await _allSettings(tv);
+    return {
+      'id': tv.device.id,
+      'settings': [
+        for (final ns in adbSettingNamespaces)
+          if (namespace == null || ns == namespace)
+            for (final e
+                in (all[ns]!.entries.toList()
+                  ..sort((a, b) => a.key.compareTo(b.key))))
+              {'namespace': ns, 'key': e.key, 'value': e.value},
+      ],
+    };
+  }
+
+  Future<String?> _setting(_Tv tv, String namespace, String key) async {
+    final value = (await _run(
+      tv,
+      TvShell.settingGet(namespace, key),
+    )).replaceAll(RegExp(r'\r?\n$'), '');
+    return value == 'null' ? null : value;
+  }
+
+  (String, String) _settingAddress(Map<String, Object?> args) => (
+    AdbAction.namespaceOf(args['namespace']),
+    AdbAction.settingKeyOf(args['key']),
+  );
+
+  Map<String, Object?> _settingJson(
+    String id,
+    String namespace,
+    String key,
+    String? value,
+  ) {
+    final known = tvSettingsById['$namespace/$key'];
+    return {
+      'id': id,
+      'namespace': namespace,
+      'key': key,
+      'value': value,
+      if (known != null) 'setting': known.toJson(value),
+    };
+  }
+
+  Future<Map<String, Object?>> settingsGet(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final (namespace, key) = _settingAddress(args);
+    return _settingJson(
+      tv.device.id,
+      namespace,
+      key,
+      await _setting(tv, namespace, key),
+    );
+  }
+
+  void _checkWritable(String namespace, String key) {
+    if (adbProtectedSettings.contains('$namespace/$key')) {
+      throw ApiError(
+        'invalid',
+        '$namespace $key would cut this engine off from the TV. Change it '
+            'on the TV',
+      );
+    }
+  }
+
+  Future<Map<String, Object?>> settingsPut(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final (namespace, key) = _settingAddress(args);
+    _checkWritable(namespace, key);
+    final known = tvSettingsById['$namespace/$key'];
+    final value = known != null
+        ? known.encode(args['value'])
+        : AdbAction.settingValueOf(args['value']);
+    final previous = await _setting(tv, namespace, key);
+    if (known?.id == 'global/bluetooth_on') {
+      await _check(
+        tv,
+        'cmd bluetooth_manager ${value == '1' ? 'enable' : 'disable'}',
+        'turning Bluetooth ${value == '1' ? 'on' : 'off'}',
+      );
+    } else {
+      await _check(
+        tv,
+        TvShell.settingPut(namespace, key, value),
+        'setting $namespace $key',
+      );
+    }
+    return {
+      ..._settingJson(
+        tv.device.id,
+        namespace,
+        key,
+        await _setting(tv, namespace, key),
+      ),
+      'previous': previous,
+      'raw': known == null,
+    };
+  }
+
+  Future<Map<String, Object?>> settingsDelete(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final (namespace, key) = _settingAddress(args);
+    _checkWritable(namespace, key);
+    final previous = await _setting(tv, namespace, key);
+    await _check(
+      tv,
+      TvShell.settingDelete(namespace, key),
+      'deleting $namespace $key',
+    );
+    return {
+      'id': tv.device.id,
+      'namespace': namespace,
+      'key': key,
+      'previous': previous,
+    };
+  }
+
+  // Files --------------------------------------------------------------
+
+  /// An absolute device path with no NUL or line break, without a
+  /// trailing slash.
+  static String _remotePath(Map<String, Object?> args, String key) =>
+      remotePathOf(args[key], key);
+
+  static String remotePathOf(Object? value, String key) {
+    if (value is! String ||
+        !value.startsWith('/') ||
+        value.length > _maxPath ||
+        value.contains(RegExp('[\x00\r\n]'))) {
+      throw ApiError(
+        'invalid',
+        '$key is an absolute path on the TV, at most $_maxPath bytes, '
+            'on one line',
+      );
+    }
+    final collapsed = value.replaceAll(RegExp('/+'), '/');
+    return collapsed.length > 1 && collapsed.endsWith('/')
+        ? collapsed.substring(0, collapsed.length - 1)
+        : collapsed;
+  }
+
+  static String _localPath(Map<String, Object?> args, String key) {
+    final value = args[key];
+    if (value is! String ||
+        value.isEmpty ||
+        !File(value).isAbsolute ||
+        value.contains(RegExp('[\x00\r\n]'))) {
+      throw ApiError(
+        'invalid',
+        '$key is an absolute path on the computer running the engine',
+      );
+    }
+    return value;
+  }
+
+  static String _join(String dir, String name) =>
+      dir == '/' ? '/$name' : '$dir/$name';
+
+  static String _parent(String path) {
+    final slash = path.lastIndexOf('/');
+    return slash <= 0 ? '/' : path.substring(0, slash);
+  }
+
+  static String _baseName(String path) =>
+      path.substring(path.lastIndexOf('/') + 1);
+
+  /// Emits `tv.progress` at most every [_progressEvery], and always at the
+  /// end.
+  void Function(int done) _progress(String id, String op, int? total) {
+    var last = DateTime.fromMillisecondsSinceEpoch(0);
+    return (done) {
+      final now = DateTime.now();
+      if (done != total && now.difference(last) < _progressEvery) return;
+      last = now;
+      _core.emit({
+        'event': 'tv.progress',
+        'id': id,
+        'op': op,
+        'done': done,
+        'total': total,
+      });
+    };
+  }
+
+  Future<AdbSyncEntry> _statOrMissing(AdbSync s, String path, String id) async {
+    final entry = await s.stat(path);
+    if (entry == null) throw ApiError('not_found', 'no $path on $id');
+    return entry;
+  }
+
+  Future<Map<String, Object?>> filesList(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final path = _remotePath(args, 'path');
+    return _sync(tv, (s) async {
+      final entry = path == '/'
+          ? null
+          : await _statOrMissing(s, path, tv.device.id);
+      if (entry != null && entry.type == 'file') {
+        throw ApiError('invalid', '$path is a file, not a folder');
+      }
+      final entries = await s.list(path)
+        ..sort((a, b) {
+          if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        });
+      return {
+        'id': tv.device.id,
+        'path': path,
+        'entries': [for (final e in entries) e.toJson()],
+      };
+    });
+  }
+
+  Future<Map<String, Object?>> filesStat(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final path = _remotePath(args, 'path');
+    return _sync(tv, (s) async {
+      final entry = await _statOrMissing(s, path, tv.device.id);
+      return {'id': tv.device.id, 'path': path, ...entry.toJson()};
+    });
+  }
+
+  /// Every file under the device folder [root], with the folders to make
+  /// first, walked through LIST.
+  Future<({List<String> dirs, List<(String, int)> files})> _walkRemote(
+    AdbSync s,
+    String root,
+  ) async {
+    final dirs = <String>[root];
+    final files = <(String, int)>[];
+    for (var i = 0; i < dirs.length; i++) {
+      for (final e in await s.list(dirs[i])) {
+        final path = _join(dirs[i], e.name);
+        if (e.isDirectory) {
+          dirs.add(path);
+        } else if (e.type == 'file') {
+          files.add((path, e.size));
+        }
+      }
+    }
+    return (dirs: dirs, files: files);
+  }
+
+  Future<void> _pullFile(
+    AdbSync s,
+    String remote,
+    File local,
+    void Function(int) progressBy,
+  ) async {
+    final raf = await local.open(mode: FileMode.write);
+    var ok = false;
+    try {
+      await s.pull(remote, (Uint8List chunk) async {
+        await raf.writeFrom(chunk);
+        progressBy(chunk.length);
+      });
+      ok = true;
+    } finally {
+      await raf.close();
+      if (!ok && await local.exists()) await local.delete();
+    }
+  }
+
+  Future<Map<String, Object?>> filesDownload(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final path = _remotePath(args, 'path');
+    final to = _localPath(args, 'to');
+    final overwrite = args['overwrite'] == true;
+    return _sync(tv, (s) async {
+      final entry = await _statOrMissing(s, path, tv.device.id);
+      var target = to;
+      if (await FileSystemEntity.isDirectory(to)) {
+        target = '$to${Platform.pathSeparator}${_baseName(path)}';
+      }
+      if (!overwrite &&
+          await FileSystemEntity.type(target) !=
+              FileSystemEntityType.notFound) {
+        throw ApiError(
+          'conflict',
+          '$target exists. Pass overwrite to replace it',
+        );
+      }
+      final isDir =
+          entry.isDirectory ||
+          (entry.type == 'link' && (await s.list(path)).isNotEmpty);
+      if (!isDir) {
+        var done = 0;
+        final progress = _progress(tv.device.id, 'download', entry.size);
+        await _pullFile(s, path, File(target), (n) => progress(done += n));
+        return {
+          'id': tv.device.id,
+          'path': path,
+          'to': target,
+          'files': 1,
+          'bytes': done,
+        };
+      }
+      final walk = await _walkRemote(s, path);
+      final total = walk.files.fold<int>(0, (a, f) => a + f.$2);
+      final progress = _progress(tv.device.id, 'download', total);
+      String localFor(String remote) => [
+        target,
+        ...remote.substring(path.length).split('/').where((p) => p.isNotEmpty),
+      ].join(Platform.pathSeparator);
+      for (final d in walk.dirs) {
+        await Directory(localFor(d)).create(recursive: true);
+      }
+      var done = 0;
+      for (final (remote, _) in walk.files) {
+        await _pullFile(
+          s,
+          remote,
+          File(localFor(remote)),
+          (n) => progress(done += n),
+        );
+      }
+      return {
+        'id': tv.device.id,
+        'path': path,
+        'to': target,
+        'files': walk.files.length,
+        'bytes': done,
+      };
+    });
+  }
+
+  Future<Map<String, Object?>> filesUpload(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final from = _localPath(args, 'from');
+    final path = _remotePath(args, 'path');
+    final overwrite = args['overwrite'] == true;
+    final kind = await FileSystemEntity.type(from, followLinks: false);
+    if (kind != FileSystemEntityType.file &&
+        kind != FileSystemEntityType.directory) {
+      throw ApiError('not_found', 'no file or folder $from on this computer');
+    }
+    final name = from
+        .split(Platform.pathSeparator)
+        .lastWhere((p) => p.isNotEmpty);
+    final target = await _sync(tv, (s) async {
+      final there = await s.stat(path);
+      final target = there != null && there.isDirectory
+          ? _join(path, name)
+          : path;
+      if (!overwrite && target != path && await s.stat(target) != null ||
+          !overwrite && target == path && there != null) {
+        throw ApiError(
+          'conflict',
+          '$target exists. Pass overwrite to replace it',
+        );
+      }
+      return target;
+    });
+    if (kind == FileSystemEntityType.file) {
+      final file = File(from);
+      final total = await file.length();
+      final progress = _progress(tv.device.id, 'upload', total);
+      final mode = _modeOf(await file.stat());
+      await _sync(
+        tv,
+        (s) => s.push(
+          file,
+          target,
+          mode: mode,
+          onProgress: (done, _) => progress(done),
+        ),
+      );
+      return {
+        'id': tv.device.id,
+        'from': from,
+        'path': target,
+        'files': 1,
+        'bytes': total,
+      };
+    }
+    final files = <(File, String)>[];
+    final dirs = <String>{target};
+    await for (final e in Directory(
+      from,
+    ).list(recursive: true, followLinks: false)) {
+      final relative = e.path
+          .substring(from.length)
+          .split(Platform.pathSeparator)
+          .where((p) => p.isNotEmpty)
+          .join('/');
+      final remote = remotePathOf(_join(target, relative), 'path');
+      if (e is Directory) {
+        dirs.add(remote);
+      } else if (e is File) {
+        files.add((e, remote));
+      }
+    }
+    await _check(
+      tv,
+      'mkdir -p -- ${(dirs.toList()..sort()).map(shellQuote).join(' ')}',
+      'making folders under $target',
+    );
+    var total = 0;
+    for (final (f, _) in files) {
+      total += await f.length();
+    }
+    final progress = _progress(tv.device.id, 'upload', total);
+    var done = 0;
+    await _sync(tv, (s) async {
+      for (final (file, remote) in files) {
+        var sent = 0;
+        await s.push(
+          file,
+          remote,
+          mode: _modeOf(await file.stat()),
+          onProgress: (n, _) {
+            done += n - sent;
+            sent = n;
+            progress(done);
+          },
+        );
+      }
+    });
+    return {
+      'id': tv.device.id,
+      'from': from,
+      'path': target,
+      'files': files.length,
+      'bytes': done,
+    };
+  }
+
+  /// A regular file with the local permission bits.
+  static int _modeOf(FileStat stat) => 0x8000 | (stat.mode & 0x1ff);
+
+  Future<Map<String, Object?>> _copyOrMove(
+    Map<String, Object?> args, {
+    required bool move,
+  }) async {
+    final tv = await _tv(args);
+    final from = _remotePath(args, 'from');
+    final to = _remotePath(args, 'to');
+    final overwrite = args['overwrite'] == true;
+    if (from == '/' || to == from || to.startsWith('$from/')) {
+      throw ApiError(
+        'invalid',
+        'cannot ${move ? 'move' : 'copy'} $from to $to',
+      );
+    }
+    final target = await _sync(tv, (s) async {
+      await _statOrMissing(s, from, tv.device.id);
+      final there = await s.stat(to);
+      final target = there != null && there.isDirectory
+          ? _join(to, _baseName(from))
+          : to;
+      if (!overwrite && await s.stat(target) != null) {
+        throw ApiError(
+          'conflict',
+          '$target exists. Pass overwrite to replace it',
+        );
+      }
+      return target;
+    });
+    final q = '-- ${shellQuote(from)} ${shellQuote(target)}';
+    await _check(
+      tv,
+      move ? 'mv $q' : 'cp -R $q',
+      '${move ? 'moving' : 'copying'} $from',
+    );
+    return {'id': tv.device.id, 'from': from, 'to': target};
+  }
+
+  Future<Map<String, Object?>> filesDelete(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final raw = args['paths'];
+    if (raw is! List || raw.isEmpty || raw.length > 500) {
+      throw ApiError('invalid', 'paths is a list of 1 to 500 paths');
+    }
+    final paths = [for (final p in raw) remotePathOf(p, 'paths')];
+    for (final p in paths) {
+      // A top folder holds the system or every user file.
+      if (p.split('/').where((s) => s.isNotEmpty).length < 2) {
+        throw ApiError('invalid', 'will not delete $p');
+      }
+    }
+    final recursive = args['recursive'] == true;
+    await _check(
+      tv,
+      'rm ${recursive ? '-r ' : ''}-- ${paths.map(shellQuote).join(' ')}',
+      'deleting',
+    );
+    return {'id': tv.device.id, 'deleted': paths};
+  }
+
+  Future<Map<String, Object?>> filesMkdir(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final path = _remotePath(args, 'path');
+    await _check(tv, 'mkdir -p -- ${shellQuote(path)}', 'making $path');
+    return {'id': tv.device.id, 'path': path};
+  }
+
+  Future<Map<String, Object?>> filesRename(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final path = _remotePath(args, 'path');
+    final name = args['name'];
+    if (name is! String ||
+        name.isEmpty ||
+        name.length > 255 ||
+        name == '.' ||
+        name == '..' ||
+        name.contains(RegExp('[/\x00\r\n]'))) {
+      throw ApiError('invalid', 'name is a file name without a slash');
+    }
+    if (path == '/') throw ApiError('invalid', 'cannot rename /');
+    final target = _join(_parent(path), name);
+    await _sync(tv, (s) async {
+      await _statOrMissing(s, path, tv.device.id);
+      if (await s.stat(target) != null) {
+        throw ApiError('conflict', '$target exists');
+      }
+    });
+    await _check(
+      tv,
+      'mv -- ${shellQuote(path)} ${shellQuote(target)}',
+      'renaming $path',
+    );
+    return {'id': tv.device.id, 'from': path, 'to': target};
+  }
+
+  // Shell ----------------------------------------------------------------
+
+  /// Runs what the user typed. With [cwd] it runs there, and the result
+  /// carries the folder the command ended in, so an interactive session
+  /// keeps its place between commands.
+  Future<Map<String, Object?>> shell(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final command = stringArg(args, 'command');
+    if (command.contains('\x00') || command.length > 3500) {
+      throw ApiError('invalid', 'command is at most 3500 characters');
+    }
+    final cwd = args['cwd'] == null ? null : _remotePath(args, 'cwd');
+    final ms = optIntArg(args, 'timeoutMs') ?? 30000;
+    if (ms < 100 || ms > _maxShellTimeout.inMilliseconds) {
+      throw ApiError(
+        'invalid',
+        'timeoutMs is 100 to ${_maxShellTimeout.inMilliseconds}',
+      );
+    }
+    final marker = _marker();
+    final script = [
+      if (cwd != null) 'cd ${shellQuote(cwd)} || exit 1',
+      command,
+      'echo "$marker\$?:\$PWD"',
+    ].join('\n');
+    final raw = await _run(tv, script, timeout: Duration(milliseconds: ms));
+    final at = raw.lastIndexOf(marker);
+    if (at < 0) {
+      return {'id': tv.device.id, 'output': raw, 'exitCode': null, 'cwd': cwd};
+    }
+    final tail = raw.substring(at + marker.length).trim();
+    final colon = tail.indexOf(':');
+    return {
+      'id': tv.device.id,
+      'output': raw.substring(0, at),
+      'exitCode': int.tryParse(colon < 0 ? tail : tail.substring(0, colon)),
+      'cwd': colon < 0 ? cwd : tail.substring(colon + 1),
+    };
+  }
+
+  /// Whether invoking [capability] on [id] is high risk: what the MCP
+  /// server checks before an agent invokes it.
+  Future<Map<String, Object?>> capabilityRisk(Map<String, Object?> args) async {
+    final device = await _core.device(stringArg(args, 'id'));
+    final manifest = manifestFor(_core.registry, device);
+    final capability = manifest?.capability(stringArg(args, 'capability'));
+    if (manifest == null || capability == null) {
+      throw ApiError(
+        'not_found',
+        'no capability ${args['capability']} on ${device.id}',
+      );
+    }
+    return {
+      'id': device.id,
+      'capability': capability.id,
+      'highRisk': _stored.capabilityIsHighRisk(manifest, capability),
+    };
+  }
+
+  String _hex(int bytes) => List.generate(
+    bytes,
+    (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
+}
+
+/// A TV device resolved for one command. [device] follows a new address
+/// when healing moves it.
+class _Tv {
+  _Tv(this.device, this.manifest, {required this.offerKey});
+
+  Device device;
+  final DriverManifest manifest;
+  final bool offerKey;
+}
+
+String _firstLines(String text) {
+  final lines = text.split('\n').take(3).join(' ').trim();
+  return lines.length > 300 ? '${lines.substring(0, 300)}...' : lines;
+}

@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/engine_calls.dart' show Json;
 import '../api/engine_client.dart';
 import '../nfc/nfc.dart';
+import '../service/phone_files.dart';
 
 export '../api/engine_calls.dart' show Json;
+export '../service/phone_files.dart' show PhoneFiles, PickedFile;
 
 /// Overridden in main() with the real engine, and in tests with a fake.
 final engineClientProvider = Provider<EngineClient>(
@@ -29,6 +31,25 @@ final nfcIntentsProvider = Provider<NfcIntents>((ref) => const NoNfcIntents());
 final wifiNamePermissionProvider = Provider<Future<bool> Function()>(
   (ref) =>
       () async => false,
+);
+
+/// Picking phone files for a TV and the folder TV downloads land in. main()
+/// puts in the file picker.
+final phoneFilesProvider = Provider<PhoneFiles>((ref) => const NoPhoneFiles());
+
+/// How often the TV control centre reads the TV's state while it is open.
+final tvPollProvider = Provider<Duration>((ref) => const Duration(seconds: 3));
+
+/// Whether the user accepted the TV console's warning in this session.
+class ConsoleAccepted extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void accept() => state = true;
+}
+
+final consoleAcceptedProvider = NotifierProvider<ConsoleAccepted, bool>(
+  ConsoleAccepted.new,
 );
 
 /// Shows API errors without each screen handling them.

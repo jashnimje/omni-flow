@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../api/engine_client.dart';
+import '../api/tv_calls.dart';
 import 'engine_link.dart';
 
 /// The event this client adds to [EngineClient.events] when the service
@@ -15,6 +16,7 @@ class ServiceEngineClient implements EngineClient {
   ServiceEngineClient(
     this._link, {
     this.callTimeout = const Duration(minutes: 2),
+    this.transferTimeout = const Duration(minutes: 30),
     String? session,
   }) : session = session ?? _newSession() {
     _sub = _link.incoming.listen(_onMessage);
@@ -25,6 +27,10 @@ class ServiceEngineClient implements EngineClient {
   /// Long enough for the slowest command, a board joining Wi-Fi during
   /// board.setup.
   final Duration callTimeout;
+
+  /// For the TV commands that move whole files or APKs, where a large file
+  /// over Wi-Fi takes many minutes.
+  final Duration transferTimeout;
   final String session;
 
   late final StreamSubscription<String> _sub;
@@ -88,7 +94,7 @@ class ServiceEngineClient implements EngineClient {
       return Future.value(_error('invalid', 'cannot send $command: $e'));
     }
     return reply.future.timeout(
-      callTimeout,
+      TvCalls.longRunning.contains(command) ? transferTimeout : callTimeout,
       onTimeout: () {
         _pending.remove(id);
         return _unavailable('$command got no answer from the service');

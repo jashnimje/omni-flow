@@ -4,6 +4,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'nfc/nfc.dart';
 import 'service/foreground_runtime.dart';
 import 'service/permissions.dart';
+import 'service/phone_files.dart';
 import 'startup.dart';
 import 'state/providers.dart';
 
@@ -24,6 +25,7 @@ void main() {
       platform: [
         nfcAdapterProvider.overrideWithValue(PluginNfcAdapter()),
         nfcIntentsProvider.overrideWithValue(intents),
+        phoneFilesProvider.overrideWithValue(const PluginPhoneFiles()),
         wifiNamePermissionProvider.overrideWithValue(
           const Permissions().askForWifiName,
         ),

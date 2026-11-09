@@ -6,6 +6,10 @@ import 'dart:typed_data';
 
 import 'package:omniflow_engine/src/devices/adb/adb_protocol.dart';
 
+import 'fake_fs.dart';
+
+export 'fake_fs.dart';
+
 /// What the fake does when a host offers a public key.
 enum KeyPrompt { accept, ignore, reject }
 
@@ -114,6 +118,21 @@ class FakeAdbd {
   /// Sets the device's output for a shell command.
   String Function(String command) respond = (_) => '';
 
+  /// The files the sync service serves.
+  final fs = FakeFs();
+
+  /// Every sync request, as `STAT /path`.
+  final syncRequests = <String>[];
+
+  /// Open sync streams, by the fake's stream id.
+  final syncs = <int, FakeSyncSession>{};
+
+  /// Refuses `sync:` as a device without file access does.
+  var refuseSync = false;
+
+  /// Takes sync data and never answers, as a TV that hung does.
+  var stallSync = false;
+
   int get port => _server.port;
 
   /// Connections the host side has not closed yet.
@@ -131,6 +150,7 @@ class FakeAdbd {
   void _serve(Socket socket) {
     connections++;
     _sockets.add(socket);
+    socket.done.then<void>((_) {}, onError: (Object _) {});
     final reader = AdbMessageReader();
     Uint8List? token;
     Uint8List? signedToken;
@@ -198,12 +218,45 @@ class FakeAdbd {
                 case KeyPrompt.reject:
                   sendToken();
               }
+            case AdbCommand.wrte:
+              final session = syncs[m.arg1];
+              expect0(session != null, 'WRTE only goes to a sync stream');
+              send(AdbCommand.okay, m.arg1, m.arg0);
+              if (stallSync) return;
+              session!.add(m.data);
+            case AdbCommand.clse:
+              syncs.remove(m.arg1);
             case AdbCommand.open:
               final service = utf8.decode(m.data);
               expect0(service.endsWith('\x00'), 'OPEN payload ends with NUL');
-              final command = service
-                  .substring(0, service.length - 1)
-                  .replaceFirst('shell:', '');
+              final name = service.substring(0, service.length - 1);
+              if (name == 'sync:') {
+                if (refuseSync) {
+                  send(AdbCommand.clse, 0, m.arg0);
+                  return;
+                }
+                final remoteId = nextRemoteId++;
+                syncs[remoteId] = FakeSyncSession(
+                  this,
+                  (data) {
+                    for (var i = 0; i < data.length; i += 64 * 1024 + 8) {
+                      send(
+                        AdbCommand.wrte,
+                        remoteId,
+                        m.arg0,
+                        data.sublist(i, min(i + 64 * 1024 + 8, data.length)),
+                      );
+                    }
+                  },
+                  () {
+                    syncs.remove(remoteId);
+                    send(AdbCommand.clse, remoteId, m.arg0);
+                  },
+                );
+                send(AdbCommand.okay, remoteId, m.arg0);
+                return;
+              }
+              final command = name.replaceFirst('shell:', '');
               commands.add(command);
               if (dropOnOpen || dropNextOpens > 0) {
                 if (dropNextOpens > 0) dropNextOpens--;
@@ -237,4 +290,126 @@ class FakeAdbd {
 
 void expect0(bool ok, String what) {
   if (!ok) throw StateError('fake adbd: $what');
+}
+
+/// adbd's sync service over [FakeAdbd.fs]: STAT (no link following),
+/// LIST (with `.` and `..`, as readdir gives them), RECV, SEND (making
+/// parent folders, as `fixed_push_mkdir` does) and QUIT.
+class FakeSyncSession {
+  FakeSyncSession(this._adbd, this._reply, this._close);
+
+  final FakeAdbd _adbd;
+  final void Function(List<int> data) _reply;
+  final void Function() _close;
+  final _buffer = BytesBuilder();
+  Uint8List _pending = Uint8List(0);
+
+  String? _sendPath;
+  int _sendMode = 0;
+  BytesBuilder? _sendData;
+
+  FakeFs get _fs => _adbd.fs;
+
+  void add(List<int> data) {
+    _buffer
+      ..add(_pending)
+      ..add(data);
+    var bytes = _buffer.takeBytes();
+    while (bytes.length >= 8) {
+      final id = ascii.decode(bytes.sublist(0, 4));
+      final n = ByteData.sublistView(bytes).getUint32(4, Endian.little);
+      final payloadLength = id == 'DONE' ? 0 : n;
+      if (bytes.length < 8 + payloadLength) break;
+      final payload = bytes.sublist(8, 8 + payloadLength);
+      bytes = Uint8List.sublistView(bytes, 8 + payloadLength);
+      _handle(id, n, payload);
+    }
+    _pending = Uint8List.fromList(bytes);
+  }
+
+  static List<int> le32(int v) => [
+    v & 0xff,
+    (v >> 8) & 0xff,
+    (v >> 16) & 0xff,
+    (v >> 24) & 0xff,
+  ];
+
+  void _fail(String message) => _reply([
+    ...ascii.encode('FAIL'),
+    ...le32(utf8.encode(message).length),
+    ...utf8.encode(message),
+  ]);
+
+  void _handle(String id, int n, Uint8List payload) {
+    if (_sendPath != null) {
+      if (id == 'DATA') {
+        expect0(payload.length <= 64 * 1024, 'DATA chunk within 64 KiB');
+        _sendData!.add(payload);
+      } else if (id == 'DONE') {
+        final path = _sendPath!;
+        _sendPath = null;
+        if (_fs.nodes[path]?.isDir == true) {
+          _fail('is a directory: $path');
+          return;
+        }
+        _fs.writeFile(path, _sendData!.takeBytes(), mode: _sendMode, mtime: n);
+        _reply([...ascii.encode('OKAY'), ...le32(0)]);
+      } else {
+        throw StateError('fake adbd: $id inside SEND');
+      }
+      return;
+    }
+    final arg = utf8.decode(payload);
+    _adbd.syncRequests.add('$id $arg');
+    switch (id) {
+      case 'STAT':
+        final node = _fs.nodes[arg];
+        _reply([
+          ...ascii.encode('STAT'),
+          ...le32(node?.mode ?? 0),
+          ...le32(node?.size ?? 0),
+          ...le32(node?.mtime ?? 0),
+        ]);
+      case 'LIST':
+        final dir = _fs.nodes[_fs.resolve(arg)];
+        if (dir != null && dir.isDir) {
+          for (final name in ['.', '..', ..._fs.children(arg)]) {
+            final node = name == '.' || name == '..'
+                ? FakeNode.dir()
+                : _fs.nodes[FakeFs.join(_fs.resolve(arg), name)]!;
+            final bytes = utf8.encode(name);
+            _reply([
+              ...ascii.encode('DENT'),
+              ...le32(node.mode),
+              ...le32(node.size),
+              ...le32(node.mtime),
+              ...le32(bytes.length),
+              ...bytes,
+            ]);
+          }
+        }
+        _reply([...ascii.encode('DONE'), ...List.filled(16, 0)]);
+      case 'RECV':
+        final node = _fs.nodes[_fs.resolve(arg)];
+        if (node == null || node.isDir) {
+          _fail(node == null ? 'No such file or directory' : 'Is a directory');
+          return;
+        }
+        final bytes = node.bytes!;
+        for (var i = 0; i < bytes.length; i += 64 * 1024) {
+          final chunk = bytes.sublist(i, min(i + 64 * 1024, bytes.length));
+          _reply([...ascii.encode('DATA'), ...le32(chunk.length), ...chunk]);
+        }
+        _reply([...ascii.encode('DONE'), ...le32(0)]);
+      case 'SEND':
+        final comma = arg.lastIndexOf(',');
+        _sendPath = arg.substring(0, comma);
+        _sendMode = int.parse(arg.substring(comma + 1));
+        _sendData = BytesBuilder();
+      case 'QUIT':
+        _close();
+      default:
+        throw StateError('fake adbd: unknown sync request $id');
+    }
+  }
 }

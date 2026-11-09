@@ -5,20 +5,50 @@
   "category": "media",
   "icon": "tv",
   "transport": { "type": "adb", "port": 5555 },
+  "discovery": [{ "method": "mdns", "service": "_adb._tcp", "idInstance": true }],
   "settings": [
-    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" }
+    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" },
+    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)" }
   ],
   "setup": ["pair", "configure:mac?"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },
   "capabilities": [
+    { "id": "power_state", "type": "sensor", "label": "Power (on, asleep or off)", "stateJsonPath": "$.power" },
+    { "id": "current_app", "type": "sensor", "label": "App on screen", "stateJsonPath": "$.app" },
+    { "id": "playback", "type": "sensor", "label": "Playback (playing, paused or stopped)", "stateJsonPath": "$.playing" },
     { "id": "wake", "type": "action", "label": "Wake", "command": { "op": "key", "key": "wakeup" } },
     { "id": "sleep", "type": "action", "label": "Sleep", "command": { "op": "key", "key": "sleep" } },
     { "id": "power", "type": "action", "label": "Power key", "command": { "op": "key", "key": "power" } },
     { "id": "remote", "type": "dpad_remote", "label": "Remote", "command": { "op": "key", "key": "{{value}}" } },
+    {
+      "id": "press_key",
+      "type": "action",
+      "label": "Press a remote key",
+      "params": {
+        "key": { "type": "string", "pattern": "[a-z0-9_]{1,20}" },
+        "longPress": { "type": "boolean", "optional": true }
+      },
+      "command": { "op": "key", "key": "{{key}}", "longPress": "{{longPress|false}}" }
+    },
+    {
+      "id": "volume",
+      "type": "level",
+      "label": "Volume",
+      "params": { "value": { "type": "number", "min": 0, "max": 100 } },
+      "command": { "op": "volume", "level": "{{value}}" },
+      "stateJsonPath": "$.volume"
+    },
     { "id": "volume_up", "type": "action", "label": "Volume up", "command": { "op": "key", "key": "volume_up" } },
     { "id": "volume_down", "type": "action", "label": "Volume down", "command": { "op": "key", "key": "volume_down" } },
     { "id": "mute", "type": "action", "label": "Mute", "command": { "op": "key", "key": "mute" } },
     { "id": "play_pause", "type": "action", "label": "Play or pause", "command": { "op": "key", "key": "play_pause" } },
+    {
+      "id": "type_text",
+      "type": "action",
+      "label": "Type text",
+      "params": { "text": { "type": "string", "pattern": "[ -~]{1,500}" } },
+      "command": { "op": "text", "text": "{{text}}" }
+    },
     {
       "id": "launch_app",
       "type": "action",
@@ -29,6 +59,15 @@
       "command": { "op": "launch", "package": "{{package}}" }
     },
     {
+      "id": "stop_app",
+      "type": "action",
+      "label": "Stop app",
+      "params": {
+        "package": { "type": "string", "pattern": "[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+" }
+      },
+      "command": { "op": "stop", "package": "{{package}}" }
+    },
+    {
       "id": "open_url",
       "type": "action",
       "label": "Open link",
@@ -36,6 +75,27 @@
         "url": { "type": "string", "pattern": "https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!$&()*+,;=%]+" }
       },
       "command": { "op": "open_url", "url": "{{url}}" }
+    },
+    {
+      "id": "set_setting",
+      "type": "action",
+      "label": "Change a setting",
+      "params": {
+        "namespace": { "type": "enum", "values": ["system", "secure", "global"] },
+        "key": { "type": "string", "pattern": "[A-Za-z0-9_][A-Za-z0-9_.:\\-]{0,199}" },
+        "value": { "type": "string", "pattern": "[^\\r\\n]{0,4096}" }
+      },
+      "command": { "op": "setting", "namespace": "{{namespace}}", "key": "{{key}}", "value": "{{value}}" }
+    },
+    {
+      "id": "manage_app",
+      "type": "action",
+      "label": "Clear, disable, enable or uninstall an app",
+      "params": {
+        "package": { "type": "string", "pattern": "[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+" },
+        "action": { "type": "enum", "values": ["clear_cache", "clear_data", "disable", "enable", "uninstall"] }
+      },
+      "command": { "op": "app", "package": "{{package}}", "action": "{{action}}" }
     },
     { "id": "wake_on_lan", "type": "action", "label": "Wake-on-LAN", "command": { "op": "wake_on_lan" } }
   ]

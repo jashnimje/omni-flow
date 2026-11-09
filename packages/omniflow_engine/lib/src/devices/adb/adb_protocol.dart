@@ -34,8 +34,13 @@ abstract final class AdbAuthType {
 /// drop it, and a device answering a host at this version keeps it.
 const adbVersion = 0x01000000;
 
-/// The largest payload this host sends.
+/// The largest payload this host sends in a shell OPEN.
 const adbMaxData = 4096;
+
+/// The largest payload this host asks the device to send in one message.
+/// File transfers come in 64 KiB sync chunks, so 4 KiB messages would
+/// split each into sixteen round trips.
+const adbHostMaxData = 256 * 1024;
 
 /// The largest payload accepted from a device (adbd's MAX_PAYLOAD is 1 MiB).
 const adbMaxIncomingData = 1024 * 1024;

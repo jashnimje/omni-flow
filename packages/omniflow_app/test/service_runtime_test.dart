@@ -219,6 +219,22 @@ void main() {
       expect(errorOf(result)['type'], 'unavailable');
     });
 
+    test('a TV file transfer gets the longer transfer timeout', () async {
+      final engine = FakeEngine()..delay = const Duration(milliseconds: 150);
+      final link = LoopbackLink();
+      link.host.attach(engine);
+      final client = ServiceEngineClient(
+        link.uiEnd(),
+        callTimeout: const Duration(milliseconds: 50),
+        transferTimeout: const Duration(seconds: 5),
+      );
+      addTearDown(client.close);
+      final upload = await client.call('tv.files.upload', {'id': 'tv'});
+      expect(upload['ok'], isTrue, reason: '$upload');
+      final state = await client.call('tv.state', {'id': 'tv'});
+      expect(errorOf(state)['type'], 'unavailable');
+    });
+
     test('garbage on the link is ignored', () async {
       final link = LoopbackLink();
       link.host.attach(FakeEngine());

@@ -11,7 +11,6 @@ import 'things_runtime.dart';
 import '../devices/board.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
-import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../storage/database.dart';
@@ -447,30 +446,36 @@ class DeviceCommands {
   }
 
   /// Each capability of a device with the params it accepts, for UIs and agents.
-  List<Map<String, Object?>> _capabilitiesJson(Device device) => [
-    for (final c
-        in manifestFor(_registry, device)?.capabilities ??
-            const <CapabilitySpec>[])
-      {
-        'id': c.id,
-        'type': c.type.wireName,
-        'label': c.label,
-        'highRisk': _registry[device.driverId]!.isHighRisk,
-        if (stateKeyOf(c.stateJsonPath) != null)
-          'stateKey': stateKeyOf(c.stateJsonPath),
-        'params': {
-          for (final p in c.params.entries)
-            p.key: {
-              'type': p.value.type.wireName,
-              if (p.value.min != null) 'min': p.value.min,
-              if (p.value.max != null) 'max': p.value.max,
-              if (p.value.unit != null) 'unit': p.value.unit,
-              if (p.value.values.isNotEmpty) 'values': p.value.values,
-              if (p.value.optional) 'optional': true,
-            },
+  List<Map<String, Object?>> _capabilitiesJson(Device device) {
+    final manifest = manifestFor(_registry, device);
+    if (manifest == null) return const [];
+    return [
+      for (final c in manifest.capabilities)
+        {
+          'id': c.id,
+          'type': c.type.wireName,
+          'label': c.label,
+          // The same test flows and MCP apply, so the app asks first exactly
+          // where a flow would wait for approval.
+          'highRisk':
+              _registry[device.driverId]!.isHighRisk ||
+              _stored.capabilityIsHighRisk(manifest, c),
+          if (stateKeyOf(c.stateJsonPath) != null)
+            'stateKey': stateKeyOf(c.stateJsonPath),
+          'params': {
+            for (final p in c.params.entries)
+              p.key: {
+                'type': p.value.type.wireName,
+                if (p.value.min != null) 'min': p.value.min,
+                if (p.value.max != null) 'max': p.value.max,
+                if (p.value.unit != null) 'unit': p.value.unit,
+                if (p.value.values.isNotEmpty) 'values': p.value.values,
+                if (p.value.optional) 'optional': true,
+              },
+          },
         },
-      },
-  ];
+    ];
+  }
 }
 
 /// The stable id a driver's discovery reads from a device setting

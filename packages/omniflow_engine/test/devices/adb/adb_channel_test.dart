@@ -80,7 +80,7 @@ void main() {
     expect(generated, 1);
     expect(await secrets.read(adbHostKeySecret), hostKey.toPem());
     expect(adbd.hostVersions.single, 0x01000000);
-    expect(adbd.hostMaxData.single, 4096);
+    expect(adbd.hostMaxData.single, 256 * 1024);
     expect(adbd.hostBanners.single, 'host::\x00');
     expect(adbd.signaturesSent, 1);
     expect(adbd.signaturesAccepted, 0);
@@ -109,7 +109,7 @@ void main() {
 
   test('shell output comes back and the connection is reused', () async {
     adbd.respond = (command) =>
-        command.startsWith('monkey') ? 'Events injected: 1\n' : '';
+        command.startsWith('c=') ? 'Starting: Intent\n' : '';
     final service = serviceFor(newChannel());
 
     final launched = await service.invoke('tv', 'launch_app', {
@@ -121,12 +121,11 @@ void main() {
     });
 
     expect(launched.reply.json, {
-      'shell':
-          "monkey -p 'com.netflix.ninja' -c android.intent.category.LAUNCHER 1",
-      'output': 'Events injected: 1\n',
+      'shell': TvShell.launch('com.netflix.ninja'),
+      'output': 'Starting: Intent\n',
     });
     expect(adbd.commands, [
-      "monkey -p 'com.netflix.ninja' -c android.intent.category.LAUNCHER 1",
+      TvShell.launch('com.netflix.ninja'),
       'input keyevent 20',
       "am start -a android.intent.action.VIEW -d "
           "'https://www.youtube.com/watch?v=dQw4w9WgXcQ'",

@@ -109,6 +109,22 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
           '${args['deviceId']} runs host commands. Ask the user to run it, or deploy a flow for approval',
         );
       }
+      // On a TV a raw setting or an app's data, state or presence is the
+      // user's change, even though the TV's other capabilities are not.
+      if (driver?['transport'] == 'adb') {
+        final risk = await engine.handle('tv.capabilityRisk', {
+          'id': args['deviceId'],
+          'capability': args['capabilityId'],
+        });
+        if (risk['ok'] != true) return reply(risk);
+        if (risk['highRisk'] == true) {
+          return refuse(
+            'needs_user',
+            '${args['capabilityId']} changes ${args['deviceId']} beyond the remote. '
+                'Ask the user to run it, or deploy a rule for their approval',
+          );
+        }
+      }
       final result = await engine.handle('device.invoke', {
         'id': args['deviceId'],
         'capability': args['capabilityId'],
@@ -502,7 +518,190 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     },
   );
 
+  _registerTvTools(server, engine, reply, refuse);
+
   return server;
+}
+
+/// The TV tools: an agent reads a TV's state, apps, settings and files.
+/// Every change (keys, text, volume, apps, settings, files, install and the
+/// shell) is the user's, so `tv_change` only says what the user runs.
+void _registerTvTools(
+  McpServer server,
+  EngineConnection engine,
+  CallToolResult Function(Map<String, Object?>) reply,
+  CallToolResult Function(String, String) refuse,
+) {
+  Future<CallToolResult> read(String command, Map<String, Object?> args) async {
+    final result = await engine.handle(command, {
+      ...args,
+      'allowPairing': false,
+    });
+    if (result['error'] case {'type': 'needs_user'}) {
+      return refuse('needs_user', _pairCommandFor('${args['id']}'));
+    }
+    return reply(result);
+  }
+
+  final device = {'deviceId': JsonSchema.string()};
+
+  server.registerTool(
+    'tv_state',
+    description:
+        'Reads an Android TV now: power (on, asleep or off), the app on screen and its '
+        'activity, playback (playing, paused, stopped or null), volume, volumeMax and muted.',
+    inputSchema: JsonSchema.object(properties: device, required: ['deviceId']),
+    callback: (args, _) => read('tv.state', {'id': args['deviceId']}),
+  );
+
+  server.registerTool(
+    'tv_remote_keys',
+    description:
+        'The remote keys an Android TV takes, grouped (power, navigation, volume, channel, '
+        'media, numbers, colors, inputs, system), each with its key name and Android key code.',
+    inputSchema: JsonSchema.object(properties: device, required: ['deviceId']),
+    callback: (args, _) => read('tv.keys', {'id': args['deviceId']}),
+  );
+
+  server.registerTool(
+    'tv_list_apps',
+    description:
+        'Lists the apps on an Android TV with package, label when known, versionName, '
+        'versionCode, system, enabled and launchable. filter is user, system or all.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        ...device,
+        'filter': JsonSchema.string(enumValues: ['user', 'system', 'all']),
+        'launchableOnly': JsonSchema.boolean(),
+      },
+      required: ['deviceId'],
+    ),
+    callback: (args, _) => read('tv.apps', {
+      'id': args['deviceId'],
+      if (args['filter'] != null) 'filter': args['filter'],
+      if (args['launchableOnly'] != null)
+        'launchableOnly': args['launchableOnly'],
+    }),
+  );
+
+  server.registerTool(
+    'tv_app_info',
+    description:
+        'Details of one app on an Android TV: version, size, install and update times, '
+        'SDK levels and whether it is enabled and launchable.',
+    inputSchema: JsonSchema.object(
+      properties: {...device, 'package': JsonSchema.string()},
+      required: ['deviceId', 'package'],
+    ),
+    callback: (args, _) => read('tv.app', {
+      'id': args['deviceId'],
+      'package': args['package'],
+      'action': 'info',
+    }),
+  );
+
+  server.registerTool(
+    'tv_settings',
+    description:
+        'Reads Android TV settings. view "catalog" gives the curated settings by category '
+        'with type, range and the live value; "list" every setting, optionally of one '
+        'namespace (system, secure, global); "get" one setting by namespace and key.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        ...device,
+        'view': JsonSchema.string(enumValues: ['catalog', 'list', 'get']),
+        'namespace': JsonSchema.string(
+          enumValues: ['system', 'secure', 'global'],
+        ),
+        'key': JsonSchema.string(),
+      },
+      required: ['deviceId'],
+    ),
+    callback: (args, _) {
+      final id = args['deviceId'];
+      return switch (args['view'] ?? 'catalog') {
+        'catalog' => read('tv.settings.catalog', {'id': id}),
+        'list' => read('tv.settings.list', {
+          'id': id,
+          if (args['namespace'] != null) 'namespace': args['namespace'],
+        }),
+        'get' => read('tv.settings.get', {
+          'id': id,
+          'namespace': args['namespace'],
+          'key': args['key'],
+        }),
+        _ => Future.value(refuse('invalid', 'view is catalog, list or get')),
+      };
+    },
+  );
+
+  server.registerTool(
+    'tv_files',
+    description:
+        'Reads the file system of an Android TV. view "list" lists a folder, "stat" one '
+        'path. Paths are absolute, such as /sdcard/Download.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        ...device,
+        'view': JsonSchema.string(enumValues: ['list', 'stat']),
+        'path': JsonSchema.string(),
+      },
+      required: ['deviceId', 'path'],
+    ),
+    callback: (args, _) => read(
+      args['view'] == 'stat' ? 'tv.files.stat' : 'tv.files.list',
+      {'id': args['deviceId'], 'path': args['path']},
+    ),
+  );
+
+  server.registerTool(
+    'tv_change',
+    description:
+        'Changing an Android TV is the user\'s step: pressing keys, typing, volume, opening, '
+        'stopping, clearing, disabling, installing or uninstalling apps, changing or deleting '
+        'settings, copying, moving, uploading, downloading or deleting files, and the shell. '
+        'This tool changes nothing. It returns the omni command for the user to run, or the '
+        'app screen to use. For a change that should run on its own, deploy a rule: one '
+        'that changes settings or apps waits for the user to approve it.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        ...device,
+        'change': JsonSchema.string(
+          enumValues: [
+            'remote',
+            'text',
+            'volume',
+            'apps',
+            'install',
+            'settings',
+            'files',
+            'shell',
+          ],
+        ),
+      },
+      required: ['deviceId', 'change'],
+    ),
+    callback: (args, _) async {
+      final id = args['deviceId'];
+      final example = switch (args['change']) {
+        'remote' => 'omni tv $id remote <key>',
+        'text' => 'omni tv $id text <text>',
+        'volume' => 'omni tv $id volume <level>',
+        'apps' =>
+          'omni tv $id apps open|stop|clear-cache|clear-data|disable|enable|uninstall <package>',
+        'install' => 'omni tv $id apps install <file.apk>',
+        'settings' =>
+          'omni tv $id settings set|delete <namespace> <key> [value]',
+        'files' => 'omni tv $id files get|put|cp|mv|rm|mkdir|rename ...',
+        _ => 'omni tv $id shell',
+      };
+      return refuse(
+        'needs_user',
+        'only the user can change $id: ask them to run $example on this computer, '
+            'or to use the TV screen in the OmniFlow app',
+      );
+    },
+  );
 }
 
 Future<String?> _driverIdOf(

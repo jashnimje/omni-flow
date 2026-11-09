@@ -24,7 +24,19 @@ void main() {
   test('launch and open_url quote their value', () {
     expect(
       shellOf({'op': 'launch', 'package': 'com.netflix.ninja'}),
-      "monkey -p 'com.netflix.ninja' -c android.intent.category.LAUNCHER 1",
+      TvShell.launch('com.netflix.ninja'),
+    );
+    expect(
+      TvShell.launch('com.netflix.ninja'),
+      allOf(
+        contains(
+          "-c android.intent.category.LEANBACK_LAUNCHER 'com.netflix.ninja'",
+        ),
+        contains('am start -n "\$c"'),
+        contains(
+          "monkey -p 'com.netflix.ninja' -c android.intent.category.LAUNCHER 1",
+        ),
+      ),
     );
     expect(
       shellOf({

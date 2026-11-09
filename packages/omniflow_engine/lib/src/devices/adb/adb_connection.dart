@@ -115,7 +115,7 @@ class AdbConnection {
   final _reader = AdbMessageReader();
   final _inbox = ListQueue<AdbMessage>();
   Completer<void>? _arrived;
-  final _streams = <int, _ShellStream>{};
+  final _streams = <int, _Stream>{};
   var _nextLocalId = 1;
   var _ready = false;
   var _closed = false;
@@ -138,7 +138,7 @@ class AdbConnection {
       AdbMessage(
         AdbCommand.cnxn,
         adbVersion,
-        adbMaxData,
+        adbHostMaxData,
         Uint8List.fromList(ascii.encode('host::\x00')),
       ),
     );
@@ -220,27 +220,65 @@ class AdbConnection {
   /// Runs `shell:<command>` and returns everything the device wrote before
   /// closing the stream.
   Future<String> shell(String command, {required Duration timeout}) async {
+    final stream = _open('shell:$command', _CollectingStream.new);
+    try {
+      return await stream.collected.future.timeout(timeout);
+    } on TimeoutException {
+      _abandon(stream);
+      throw AdbShellTimeoutException(acknowledged: stream.remoteId != 0);
+    }
+  }
+
+  /// Opens [service] (`sync:`, `shell:`, `exec:...`) as a two-way stream.
+  /// Throws [AdbStreamRefusedException] when the device refuses it.
+  Future<AdbStream> openStream(
+    String service, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final stream = _open(service, AdbStream._);
+    try {
+      await stream._opened.future.timeout(timeout);
+    } on TimeoutException {
+      _abandon(stream);
+      throw AdbShellTimeoutException(acknowledged: false);
+    }
+    return stream;
+  }
+
+  T _open<T extends _Stream>(
+    String service,
+    T Function(AdbConnection connection, int localId) create,
+  ) {
     if (_closed) {
       throw AdbConnectionClosedException('the connection is closed');
     }
-    final payload = Uint8List.fromList([...utf8.encode('shell:$command'), 0]);
+    final payload = Uint8List.fromList([...utf8.encode(service), 0]);
     if (payload.length > min(_deviceMaxData, adbMaxData)) {
       throw ArgumentError('shell command is too long');
     }
     final localId = _nextLocalId;
     _nextLocalId = _nextLocalId == 0x7fffffff ? 1 : _nextLocalId + 1;
-    final stream = _streams[localId] = _ShellStream(localId);
+    final stream = create(this, localId);
+    _streams[localId] = stream;
     _send(AdbMessage(AdbCommand.open, localId, 0, payload));
-    try {
-      return await stream.done.future.timeout(timeout);
-    } on TimeoutException {
-      _streams.remove(localId);
-      if (stream.remoteId != 0 && !_closed) {
-        _send(AdbMessage(AdbCommand.clse, localId, stream.remoteId));
-      }
-      throw AdbShellTimeoutException(acknowledged: stream.remoteId != 0);
-    }
+    return stream;
   }
+
+  void _abandon(_Stream stream) {
+    _streams.remove(stream.localId);
+    if (stream.remoteId != 0 && !_closed) {
+      _send(AdbMessage(AdbCommand.clse, stream.localId, stream.remoteId));
+    }
+    stream._ended(
+      AdbConnectionClosedException(
+        'the stream was abandoned',
+        acknowledged: stream.remoteId != 0,
+      ),
+    );
+  }
+
+  /// The largest WRTE payload the device takes.
+  int get _writeLimit => min(_deviceMaxData, adbHostMaxData);
 
   void _onData(Uint8List chunk) {
     final List<AdbMessage> messages;
@@ -264,23 +302,30 @@ class AdbConnection {
     final stream = _streams[message.arg1];
     switch (message.command) {
       case AdbCommand.okay:
-        if (stream != null && stream.remoteId == 0) {
+        if (stream == null) return;
+        if (stream.remoteId == 0) {
           stream.remoteId = message.arg0;
+          stream._accepted();
+        } else {
+          stream._acknowledged();
         }
       case AdbCommand.wrte:
         if (stream == null) return;
-        if (stream.remoteId == 0) stream.remoteId = message.arg0;
-        stream.add(message.data);
+        if (stream.remoteId == 0) {
+          stream.remoteId = message.arg0;
+          stream._accepted();
+        }
+        stream._received(message.data);
         _send(AdbMessage(AdbCommand.okay, stream.localId, message.arg0));
       case AdbCommand.clse:
         if (stream == null) return;
         _streams.remove(stream.localId);
         if (stream.remoteId == 0 && message.arg0 == 0) {
-          stream.done.completeError(AdbStreamRefusedException());
+          stream._ended(AdbStreamRefusedException());
           return;
         }
         _send(AdbMessage(AdbCommand.clse, stream.localId, message.arg0));
-        stream.done.complete(stream.output);
+        stream._ended(null);
     }
   }
 
@@ -301,7 +346,7 @@ class AdbConnection {
     _socket.destroy();
     _wake();
     for (final stream in _streams.values) {
-      stream.done.completeError(
+      stream._ended(
         AdbConnectionClosedException(
           'the device closed the connection',
           acknowledged: stream.remoteId != 0,
@@ -314,15 +359,32 @@ class AdbConnection {
   void close() => _end();
 }
 
-class _ShellStream {
-  _ShellStream(this.localId);
+/// One ADB stream on a connection: the device's id for it, and what
+/// happens as messages for it arrive.
+abstract class _Stream {
+  _Stream(this._connection, this.localId);
 
+  final AdbConnection _connection;
   final int localId;
   int remoteId = 0;
-  final _output = BytesBuilder(copy: false);
-  final done = Completer<String>();
 
-  void add(Uint8List data) {
+  void _accepted() {}
+  void _acknowledged() {}
+  void _received(Uint8List data);
+
+  /// The stream ended: closed by the device when [error] is null.
+  void _ended(Object? error);
+}
+
+/// A shell stream whose output is gathered until the device closes it.
+class _CollectingStream extends _Stream {
+  _CollectingStream(super.connection, super.localId);
+
+  final _output = BytesBuilder(copy: false);
+  final collected = Completer<String>();
+
+  @override
+  void _received(Uint8List data) {
     final room = _maxShellOutput - _output.length;
     if (room > 0) {
       _output.add(
@@ -331,5 +393,167 @@ class _ShellStream {
     }
   }
 
-  String get output => utf8.decode(_output.toBytes(), allowMalformed: true);
+  @override
+  void _ended(Object? error) {
+    if (collected.isCompleted) return;
+    if (error == null) {
+      collected.complete(utf8.decode(_output.toBytes(), allowMalformed: true));
+    } else {
+      // A shell that timed out is abandoned with nobody waiting.
+      collected.future.ignore();
+      collected.completeError(error);
+    }
+  }
+}
+
+/// A two-way ADB stream, as the sync protocol and an interactive shell use
+/// it. Reads are exact-length or chunk by chunk; each write waits for the
+/// device's OKAY, as legacy ADB allows one unacknowledged WRTE per stream.
+class AdbStream extends _Stream {
+  AdbStream._(super.connection, super.localId);
+
+  final _opened = Completer<void>();
+  final _chunks = ListQueue<Uint8List>();
+  var _buffered = 0;
+  Completer<void>? _arrived;
+  Completer<void>? _ack;
+  Object? _error;
+  var _done = false;
+  final _closed = Completer<void>();
+
+  /// Completes when the device or [close] ends the stream.
+  Future<void> get done => _closed.future;
+
+  bool get isDone => _done;
+
+  @override
+  void _accepted() {
+    if (!_opened.isCompleted) _opened.complete();
+  }
+
+  @override
+  void _acknowledged() {
+    final ack = _ack;
+    _ack = null;
+    if (ack != null && !ack.isCompleted) ack.complete();
+  }
+
+  @override
+  void _received(Uint8List data) {
+    if (data.isEmpty) return;
+    _chunks.add(data);
+    _buffered += data.length;
+    _wakeReader();
+  }
+
+  @override
+  void _ended(Object? error) {
+    if (_done) return;
+    _done = true;
+    _error = error;
+    if (!_opened.isCompleted) {
+      _opened.completeError(error ?? AdbStreamRefusedException());
+      // Nobody may be waiting on it once the open timed out.
+      _opened.future.ignore();
+    }
+    final ack = _ack;
+    _ack = null;
+    if (ack != null && !ack.isCompleted) {
+      ack.completeError(
+        error ?? AdbConnectionClosedException('the device closed the stream'),
+      );
+    }
+    _wakeReader();
+    if (!_closed.isCompleted) _closed.complete();
+  }
+
+  void _wakeReader() {
+    final arrived = _arrived;
+    _arrived = null;
+    if (arrived != null && !arrived.isCompleted) arrived.complete();
+  }
+
+  Exception _endedError() => _error is Exception
+      ? _error! as Exception
+      : AdbConnectionClosedException('the device closed the stream');
+
+  Future<void> _waitForData(Duration? timeout) async {
+    if (_done) throw _endedError();
+    final arrived = _arrived = Completer<void>();
+    if (timeout == null) {
+      await arrived.future;
+    } else {
+      await arrived.future.timeout(timeout);
+    }
+  }
+
+  /// Exactly [length] bytes. Throws when the stream ends first, or
+  /// [TimeoutException] when no data comes for [timeout].
+  Future<Uint8List> read(int length, {Duration? timeout}) async {
+    while (_buffered < length) {
+      await _waitForData(timeout);
+    }
+    final out = Uint8List(length);
+    var filled = 0;
+    while (filled < length) {
+      final head = _chunks.first;
+      final take = min(head.length, length - filled);
+      out.setRange(filled, filled + take, head);
+      filled += take;
+      if (take == head.length) {
+        _chunks.removeFirst();
+      } else {
+        _chunks
+          ..removeFirst()
+          ..addFirst(Uint8List.sublistView(head, take));
+      }
+    }
+    _buffered -= length;
+    return out;
+  }
+
+  /// The next bytes the device sent, or null once the stream has ended and
+  /// everything was read.
+  Future<Uint8List?> readChunk({Duration? timeout}) async {
+    while (_chunks.isEmpty) {
+      if (_done) return null;
+      await _waitForData(timeout);
+    }
+    final head = _chunks.removeFirst();
+    _buffered -= head.length;
+    return head;
+  }
+
+  /// Sends [data], split to the device's message size.
+  Future<void> write(List<int> data, {Duration? timeout}) async {
+    final limit = _connection._writeLimit;
+    for (var offset = 0; offset < data.length; offset += limit) {
+      if (_done) throw _endedError();
+      final end = min(offset + limit, data.length);
+      final ack = _ack = Completer<void>();
+      _connection._send(
+        AdbMessage(
+          AdbCommand.wrte,
+          localId,
+          remoteId,
+          Uint8List.fromList(data.sublist(offset, end)),
+        ),
+      );
+      if (timeout == null) {
+        await ack.future;
+      } else {
+        await ack.future.timeout(timeout);
+      }
+    }
+  }
+
+  /// Closes the stream from this side.
+  void close() {
+    if (_done) return;
+    _connection._streams.remove(localId);
+    if (remoteId != 0 && !_connection._closed) {
+      _connection._send(AdbMessage(AdbCommand.clse, localId, remoteId));
+    }
+    _ended(null);
+  }
 }

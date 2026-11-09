@@ -30,6 +30,34 @@ omni device add hall --driver home_assistant_entity --host 192.168.1.5 --set ent
 omni secret set hall token < ha_token.txt  # a long-lived access token
 ```
 
+An Android TV over ADB is controlled with `omni tv`, the same `tv.*` commands the app's TV control centre calls. Transfers print progress to stderr, and a target that exists is refused unless `--overwrite` is given:
+
+```sh
+omni tv tv state                          # power, app in front, playback, volume
+omni tv tv keys                           # the key catalog by group
+omni tv tv remote home                    # also: --long, --repeat 1..20, or a keycode such as 244 (HDMI 2)
+omni tv tv text 'stranger things'
+omni tv tv volume 25
+omni tv tv apps --filter user --launchable
+omni tv tv apps open|stop|info|clear-cache|clear-data|disable|enable|uninstall com.netflix.ninja
+omni tv tv apps install ./app.apk --replace
+omni tv tv settings catalog               # curated, typed, by category
+omni tv tv settings list global
+omni tv tv settings get|delete global animator_duration_scale
+omni tv tv settings set global animator_duration_scale 1.0
+omni tv tv files ls|stat /sdcard/Download
+omni tv tv files get /sdcard/Download/a.mp4 ./a.mp4 [--overwrite]
+omni tv tv files put ./a.mp4 /sdcard/Download [--overwrite]
+omni tv tv files cp|mv FROM TO [--overwrite]
+omni tv tv files rm /sdcard/Download/old -r
+omni tv tv files mkdir /sdcard/Download/new
+omni tv tv files rename /sdcard/Download/a.mp4 b.mp4
+omni tv tv shell getprop ro.build.version.sdk
+omni device shell tv                      # an interactive shell that keeps its folder
+```
+
+Live TV tests run against a real TV with `dart test -t live --run-skipped test/devices/adb/tv_live_test.dart` (`OMNI_LIVE_HOME`, default `~/.cache/omniflow/tvhome`, and `OMNI_LIVE_TV`, default `tv`). They change only the volume by one step and back, Home when nothing plays, `animator_duration_scale` to 1 and back, and a test folder under `/sdcard/Download` they delete.
+
 SSH host keys are pinned on first use. After a host is reinstalled, `omni device hostkey mac` shows the pinned and offered keys, `omni device hostkey mac --accept SHA256:...` pins the offered key when it is the one you checked, and `--clear` drops the pin. `omni board describe desk` shows what a board offers and the pins it has set.
 
 Adding anything goes through one pipeline. `omni add` lists what every discovery method finds, adds the one picked and walks its setup steps (pair, secrets, settings) as the engine reports them. Secrets are read from stdin, never taken as arguments:

@@ -16,7 +16,10 @@ import '../transports/udp_transport.dart';
 /// The hub: what runs flows on their own and keeps device state live, from
 /// WiZ pushes, board hellos, MQTT watches, state polls and flow timers.
 class HubRuntime {
-  HubRuntime(this._core, this._boards, this._things);
+  HubRuntime(this._core, this._boards, this._things, {this.tvPoll});
+
+  /// Reads one TV's power, app, playback and volume into its state.
+  Future<void> Function(String deviceId)? tvPoll;
 
   final EngineCore _core;
   final BoardRuntime _boards;
@@ -130,6 +133,12 @@ class HubRuntime {
       _track(_wizPush?.add(d) ?? Future.value());
     }
     _polls.remove(d.id)?.cancel();
+    final poll = tvPoll;
+    if (manifest?.transport.type == TransportType.adb && poll != null) {
+      final every = tvPollSeconds(d);
+      if (every > 0) _startTvPoll(d.id, every, poll);
+      return;
+    }
     final seconds = manifest?.statePoll?['intervalSeconds'];
     if (seconds is int && seconds > 0) {
       final id = d.id;
@@ -146,6 +155,41 @@ class HubRuntime {
         }());
       });
     }
+  }
+
+  /// The TV's `statePollSeconds` setting, 5 when unset, 0 for none.
+  static int tvPollSeconds(Device d) {
+    final raw = d.settings['statePollSeconds'];
+    final seconds = raw is int ? raw : int.tryParse('${raw ?? ''}');
+    if (seconds == null) return 5;
+    return seconds.clamp(0, 3600);
+  }
+
+  /// Polls one TV at a time: a read still running when the timer fires is
+  /// not started again beside it, since a TV in standby can take the whole
+  /// ADB timeout to fail.
+  void _startTvPoll(
+    String id,
+    int seconds,
+    Future<void> Function(String) poll,
+  ) {
+    var busy = false;
+    void tick() {
+      if (busy) return;
+      busy = true;
+      _track(() async {
+        try {
+          await poll(id);
+        } catch (e) {
+          _emit({'event': 'device.pollFailed', 'device': id, 'error': '$e'});
+        } finally {
+          busy = false;
+        }
+      }());
+    }
+
+    _polls[id] = Timer.periodic(Duration(seconds: seconds), (_) => tick());
+    tick();
   }
 
   void stopLive(String id) {

@@ -10,6 +10,7 @@ import '../dag/links.dart';
 import '../dag/migrate.dart';
 import '../dag/node_types.dart';
 import '../dag/validator.dart';
+import '../devices/adb/adb_commands.dart' show adbCommandIsHighRisk;
 import '../devices/board.dart';
 import '../devices/device_service.dart' show stateKeyOf;
 import '../manifest/capability.dart';
@@ -302,23 +303,41 @@ class StoredFlows {
 
   static final _globalRef = RegExp(r'\$([A-Za-z_][A-Za-z0-9_]*)');
 
+  /// Whether running [capability] needs the user's approval in a flow: a
+  /// host command, or on a TV over ADB a raw setting or an app's data,
+  /// state or presence.
+  bool capabilityIsHighRisk(
+    DriverManifest manifest,
+    CapabilitySpec capability,
+  ) =>
+      capability.type.isHighRisk ||
+      manifest.transport.type == TransportType.exec ||
+      (manifest.transport.type == TransportType.adb &&
+          adbCommandIsHighRisk(capability.command));
+
   /// The ids of the high-risk flows among [all]: a flow that drives a device
-  /// whose driver runs host commands, that starts a high-risk flow with
+  /// whose driver runs host commands, or a TV step [capabilityIsHighRisk]
+  /// names, that starts a high-risk flow with
   /// run_flow (it could pass arguments the target renders), or that sets a
   /// global a high-risk flow reads.
   Future<Set<String>> highRiskFlows(Iterable<FlowSpec> all) async {
     final drivers = {
       for (final d in await DriftDeviceStore(_db).all()) d.id: d.driverId,
     };
+    bool drivesRisk(NodeSpec n) {
+      if (n.type != 'device_capability' && n.type != 'device_toggle') {
+        return false;
+      }
+      final manifest = _registry[drivers[n.config['deviceId']] ?? ''];
+      if (manifest == null) return false;
+      if (manifest.isHighRisk) return true;
+      final capability = manifest.capability('${n.config['capabilityId']}');
+      return capability != null && capabilityIsHighRisk(manifest, capability);
+    }
+
     final risky = {
       for (final f in all)
-        if (f.nodes.any(
-          (n) =>
-              (n.type == 'device_capability' || n.type == 'device_toggle') &&
-              (_registry[drivers[n.config['deviceId']] ?? '']?.isHighRisk ??
-                  false),
-        ))
-          f.id,
+        if (f.nodes.any(drivesRisk)) f.id,
     };
     Set<String> written(FlowSpec f) => {
       for (final n in f.nodes)

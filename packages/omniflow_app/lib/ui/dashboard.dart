@@ -6,6 +6,8 @@ import 'setup_page.dart';
 import 'device_sheets.dart';
 import 'nfc_ui.dart';
 import 'sheets.dart';
+import 'tv/tv_card.dart';
+import 'tv/tv_page.dart' show isTvDevice;
 
 /// Room cards with one control per capability, built from the capability
 /// types the engine reports. Nothing here knows about a specific device.
@@ -85,7 +87,11 @@ class DeviceCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final caps = (device['capabilities'] as List? ?? const []).cast<Map>();
-    final highRisk = caps.any((c) => isHighRiskCapability(Json.from(c)));
+    // A TV's high-risk capabilities change settings and apps, not run host
+    // commands, and its control centre asks before each of those.
+    final highRisk =
+        !isTvDevice(device) &&
+        caps.any((c) => isHighRiskCapability(Json.from(c)));
     final offline = device['online'] == false;
     return Card(
       key: ValueKey('device-${device['id']}'),
@@ -171,11 +177,14 @@ class DeviceCard extends ConsumerWidget {
                 ),
               ],
             ),
-            for (final c in caps)
-              CapabilityControl(
-                device: device,
-                capability: Map<String, Object?>.from(c),
-              ),
+            if (isTvDevice(device))
+              TvCardBody(device: device)
+            else
+              for (final c in caps)
+                CapabilityControl(
+                  device: device,
+                  capability: Map<String, Object?>.from(c),
+                ),
           ],
         ),
       ),

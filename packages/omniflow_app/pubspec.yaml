@@ -9,6 +9,7 @@ environment:
 resolution: workspace
 
 dependencies:
+  file_picker: ^13.3.2
   flutter:
     sdk: flutter
   flutter_foreground_task: ^11.0.3
