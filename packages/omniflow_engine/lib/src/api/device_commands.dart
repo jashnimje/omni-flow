@@ -6,6 +6,8 @@ import 'command_args.dart';
 import 'engine_core.dart';
 import 'hub_runtime.dart';
 import 'stored_flows.dart';
+import 'thing_setup.dart';
+import 'things_runtime.dart';
 import '../devices/board.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
@@ -19,12 +21,19 @@ import '../template/template_renderer.dart';
 /// The driver, device and secret commands: register drivers, add, find,
 /// list, invoke and remove devices, and store a device's secrets.
 class DeviceCommands {
-  DeviceCommands(this._core, this._boards, this._hub, this._stored);
+  DeviceCommands(
+    this._core,
+    this._boards,
+    this._hub,
+    this._stored,
+    this._things,
+  );
 
   final EngineCore _core;
   final BoardRuntime _boards;
   final HubRuntime _hub;
   final StoredFlows _stored;
+  final ThingsRuntime _things;
 
   OmniDatabase get _db => _core.db;
   DriverRegistry get _registry => _core.registry;
@@ -66,6 +75,30 @@ class DeviceCommands {
     return {'id': m.id, 'highRisk': m.isHighRisk};
   }
 
+  /// A scan by UID picks one tag, so two tags never share a UID. The UID
+  /// is stored the way `tag.save` and a scan normalize it.
+  Future<void> _checkTagUid(String id, Map<String, Object?> settings) async {
+    if (settings['uid'] == null) return;
+    final uid =
+        normalizeUid(settings['uid']) ??
+        (throw ApiError(
+          'invalid',
+          'uid must be 4 to 10 bytes of hex, like 04:A2:2B:1C',
+        ));
+    settings['uid'] = uid;
+    final holder = (await DriftDeviceStore(_db).all())
+        .where(
+          (d) =>
+              d.id != id &&
+              d.driverId == nfcTagDriverId &&
+              normalizeUid(d.settings['uid']) == uid,
+        )
+        .firstOrNull;
+    if (holder != null) {
+      throw ApiError('exists', 'the tag ${holder.id} has that uid');
+    }
+  }
+
   Future<Map<String, Object?>> add(Map<String, Object?> args) async {
     final id = stringArg(args, 'id');
     if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(id)) {
@@ -84,28 +117,13 @@ class DeviceCommands {
     final settings = args['settings'] == null
         ? <String, Object?>{}
         : objectArg(args, 'settings');
-    for (final key in settings.keys) {
-      final spec = manifest.settings.where((s) => s.key == key).firstOrNull;
-      if (spec == null) {
-        throw ApiError('invalid', '$key is not a setting of $driverId');
-      }
-      if (spec.secret) {
-        throw ApiError(
-          'invalid',
-          '$key is a secret. Store it with omni secret set, never in device settings',
-        );
-      }
-    }
-    if (isBoardDriver(manifest)) {
-      parseBoardPins(
-        settings['pins'],
-        reserved: {for (final c in manifest.capabilities) c.id},
-      );
-    }
+    _checkSettings(manifest, settings);
+    if (driverId == nfcTagDriverId) await _checkTagUid(id, settings);
     final port = args['port'];
     if (port != null && (port is! int || port < 1 || port > 65535)) {
       throw ApiError('invalid', 'port must be 1 to 65535');
     }
+    final virtual = manifest.transport.type == TransportType.virtual;
     final stableId =
         optStringArg(args, 'stableId') ??
         stableIdFromSettings(manifest, settings);
@@ -113,19 +131,25 @@ class DeviceCommands {
       id: id,
       name: optStringArg(args, 'name') ?? id,
       driverId: driverId,
-      host: stringArg(args, 'host'),
+      host: virtual
+          ? optStringArg(args, 'host') ?? virtualHost
+          : stringArg(args, 'host'),
       port: port as int?,
       room: optStringArg(args, 'room'),
       stableId: stableId,
       settings: settingsWithStableId(manifest, settings, stableId),
+      state: initialThingState(driverId),
     );
+    if (driverId == placeDriverId) zoneOfPlace(device);
     if (replace) {
       _hub.stopLive(id);
       _boards.markNotSetUp(id);
       _core.tv.forget(id);
       _core.adb.forget(id);
+      _pairedHere.remove(id);
     }
     await DriftDeviceStore(_db).put(device);
+    if (virtual) await _things.reload();
     final missingSecrets = [
       for (final s in manifest.settings.where((s) => s.secret))
         if (await _core.secrets.read(deviceSecretKey(id, s.key)) == null) s.key,
@@ -144,13 +168,147 @@ class DeviceCommands {
       _core.track(_boards.provisionQuietly(id));
     }
     await _stored.reloadFlows();
+    final added = await _core.device(id);
     return {
-      'device': _core.deviceJson(await _core.device(id)),
+      'device': _core.deviceJson(added),
       if (missingSecrets.isNotEmpty) 'missingSecrets': missingSecrets,
       if (missingSettings.isNotEmpty) 'missingSettings': missingSettings,
       'provisioned': ?board,
       'provisionError': ?boardError,
+      'next': await _nextFor(added, manifest),
     };
+  }
+
+  /// Devices whose pairing stores no secret (ADB) that this engine paired,
+  /// as `thing.next {paired: true}` reported after `device.pair`. A restart
+  /// forgets them, and the device then counts as paired once it answers.
+  final _pairedHere = <String>{};
+
+  Future<Map<String, Object?>> _nextFor(
+    Device device,
+    DriverManifest manifest,
+  ) => nextSetupStep(
+    device,
+    manifest,
+    _core.secrets,
+    pairedHere: _pairedHere.contains(device.id),
+  );
+
+  /// `thing.next {id, paired?}`: the setup step [id] is on now, so a client
+  /// can resume adding it. `paired: true` says `device.pair` just succeeded;
+  /// it counts only for a pairing that stores no secret to check (ADB).
+  Future<Map<String, Object?>> next(Map<String, Object?> args) async {
+    final device = await _core.device(stringArg(args, 'id'));
+    final manifest =
+        _registry[device.driverId] ??
+        (throw ApiError('not_found', 'no driver ${device.driverId}'));
+    final paired = args['paired'];
+    if (paired != null && paired is! bool) {
+      throw ApiError('invalid', 'paired must be true or false');
+    }
+    if (paired == true &&
+        manifest.pairingSpec != null &&
+        pairingProofSecret(manifest) == null) {
+      _pairedHere.add(device.id);
+    }
+    return {
+      'device': _core.deviceJson(device),
+      'next': await _nextFor(device, manifest),
+    };
+  }
+
+  /// `thing.configure {id, settings, provision?}`: merges plain settings
+  /// into a device (null removes one), checked as `device.add` checks them,
+  /// and returns the next step. New board pins are sent to the board.
+  Future<Map<String, Object?>> configure(Map<String, Object?> args) async {
+    final id = stringArg(args, 'id');
+    final device = await _core.device(id);
+    final manifest =
+        _registry[device.driverId] ??
+        (throw ApiError('not_found', 'no driver ${device.driverId}'));
+    final changes = objectArg(args, 'settings');
+    if (changes.isEmpty) throw ApiError('invalid', 'settings is empty');
+    final merged = {...device.settings};
+    for (final MapEntry(:key, :value) in changes.entries) {
+      value == null ? merged.remove(key) : merged[key] = value;
+    }
+    _checkSettings(manifest, {
+      for (final key in changes.keys) key: merged[key],
+    }, pins: merged['pins']);
+    if (device.driverId == nfcTagDriverId && changes.containsKey('uid')) {
+      await _checkTagUid(id, merged);
+    }
+    final stableId = device.stableId ?? stableIdFromSettings(manifest, merged);
+    final proposed = device.copyWith(
+      stableId: stableId,
+      settings: settingsWithStableId(manifest, merged, stableId),
+    );
+    if (device.driverId == placeDriverId) zoneOfPlace(proposed);
+    final updated = await _devices.updateDevice(
+      id,
+      (d) => d.copyWith(stableId: stableId, settings: proposed.settings),
+    );
+    if (manifest.transport.type == TransportType.virtual) {
+      await _things.reload();
+    }
+    if (_hub.running) {
+      _hub.stopLive(id);
+      _hub.startLive(updated, provision: false);
+    }
+    Map<String, Object?>? board;
+    String? boardError;
+    if (isBoardDriver(manifest) && changes.containsKey('pins')) {
+      _boards.markNotSetUp(id);
+      if (args['provision'] != false) {
+        try {
+          board = await _boards.provisionBoard(id);
+        } catch (e) {
+          boardError = e is ApiError ? e.message : '$e';
+        }
+      } else if (_hub.running) {
+        _core.track(_boards.provisionQuietly(id));
+      }
+    }
+    await _stored.reloadFlows();
+    final now = await _core.device(id);
+    return {
+      'device': _core.deviceJson(now),
+      'provisioned': ?board,
+      'provisionError': ?boardError,
+      'next': await _nextFor(now, manifest),
+    };
+  }
+
+  /// Plain settings of [manifest] only, never a secret. A board's [pins]
+  /// (all of them, when only some settings are checked) must parse.
+  void _checkSettings(
+    DriverManifest manifest,
+    Map<String, Object?> settings, {
+    Object? pins,
+  }) {
+    for (final key in settings.keys) {
+      final spec = manifest.settings.where((s) => s.key == key).firstOrNull;
+      if (spec == null) {
+        throw ApiError('invalid', '$key is not a setting of ${manifest.id}');
+      }
+      if (spec.secret) {
+        throw ApiError(
+          'invalid',
+          '$key is a secret. Store it with omni secret set, never in device settings',
+        );
+      }
+    }
+    if (isBoardDriver(manifest)) {
+      parseBoardPins(
+        pins ?? settings['pins'],
+        reserved: {for (final c in manifest.capabilities) c.id},
+      );
+    }
+    if (manifest.id == nfcTagDriverId &&
+        settings['uid'] != null &&
+        normalizeUid(settings['uid']) == null) {
+      throw ApiError('invalid', 'uid must be hex, like 04:A2:2B:1C');
+    }
   }
 
   Future<Map<String, Object?>> discover(Map<String, Object?> args) async {
@@ -214,6 +372,7 @@ class DeviceCommands {
     _core.tv.forget(id);
     _core.adb.forget(id);
     _core.flows.deviceStates.remove(id);
+    _pairedHere.remove(id);
     await _core.serial.release(id);
     final removed = await _devices.removeDevice(id);
     for (final s
@@ -221,9 +380,15 @@ class DeviceCommands {
             const <SettingSpec>[]) {
       if (s.secret) await _core.secrets.delete(deviceSecretKey(id, s.key));
     }
+    if (_registry[device?.driverId ?? '']?.transport.type ==
+        TransportType.virtual) {
+      await _things.reload();
+    }
     final disabled = <String>[];
     for (final r in await DriftFlowStore(_db).all()) {
-      if (!r.enabled || !_mentionsDevice(r.json['nodes'], id)) continue;
+      if (!r.enabled || !StoredFlows.mentionsThing(r.json['nodes'], id)) {
+        continue;
+      }
       await _stored.put(
         r.json['id'] as String,
         {...StoredFlows.flowJsonOf(r), 'enabled': false},
@@ -280,17 +445,6 @@ class DeviceCommands {
     }
     return {'stored': deviceSecretKey(device.id, key)};
   }
-
-  /// Whether a node list refers to [deviceId] anywhere in its configs,
-  /// conditions included.
-  static bool _mentionsDevice(Object? value, String deviceId) =>
-      switch (value) {
-        Map m =>
-          m['deviceId'] == deviceId ||
-              m.values.any((v) => _mentionsDevice(v, deviceId)),
-        List l => l.any((v) => _mentionsDevice(v, deviceId)),
-        _ => false,
-      };
 
   /// Each capability of a device with the params it accepts, for UIs and agents.
   List<Map<String, Object?>> _capabilitiesJson(Device device) => [

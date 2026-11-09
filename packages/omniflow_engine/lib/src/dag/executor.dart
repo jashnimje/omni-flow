@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import '../template/template_renderer.dart';
+import 'canonical.dart';
 import 'conditions.dart';
 import 'flow.dart';
+import 'flow_engine.dart' show payloadMatches, stateTriggerFires;
 import 'node_types.dart';
 import 'transformers.dart';
 
@@ -436,33 +438,82 @@ class FlowRunner {
       case 'wait_for_event':
         if (run.dryRun) return ('timeout', msg);
         final name = node.config['event'] as String;
-        final timeout = Duration(milliseconds: node.config['timeoutMs'] as int);
-        // Whichever loses, the event subscription and the timer both end.
-        final got = Completer<Map<String, Object?>?>();
-        final waiting = CancelToken();
-        run.token.whenCancelled.then((_) => waiting.cancel());
-        final subscription = _effects.events.listen((e) {
-          if (e['event'] == name && !got.isCompleted) got.complete(e);
-        });
-        clock
-            .sleep(timeout, waiting)
-            .then(
-              (_) {
-                if (!got.isCompleted) got.complete(null);
-              },
-              onError: (Object e) {
-                if (!got.isCompleted) got.completeError(e);
-              },
-            );
-        try {
-          final event = await got.future;
-          return event == null
-              ? ('timeout', msg)
-              : ('event', {...msg, 'event': event});
-        } finally {
-          waiting.cancel();
-          await subscription.cancel();
+        final event = await _waitForEvent(
+          run,
+          clock,
+          Duration(milliseconds: node.config['timeoutMs'] as int),
+          (e) => e['event'] == name ? e : null,
+        );
+        return event == null
+            ? ('timeout', msg)
+            : ('event', {...msg, 'event': event});
+      case 'wait_until':
+        final c = node.config;
+        final thing = c['thing'] as String;
+        final key = c['key'] as String?;
+        // A rule's steps after a waitFor hang off `matched`, so a dry run
+        // that timed out would never preview them.
+        if (run.dryRun) {
+          return (
+            'matched',
+            {
+              ...msg,
+              'event': {'thing': thing, 'key': ?key},
+            },
+          );
         }
+        // The flow engine updates deviceStates before this listener sees
+        // the event, so the value before it is tracked here.
+        var before = Map<String, Object?>.of(
+          _effects.deviceStates[thing] ?? const {},
+        );
+        Map<String, Object?>? matched(Map<String, Object?> e) {
+          if (c['event'] == true) {
+            if (e['event'] != 'thing.event' ||
+                e['thing'] != thing ||
+                e['key'] != key) {
+              return null;
+            }
+            final payload = e['payload'] is Map
+                ? Map<String, Object?>.from(e['payload'] as Map)
+                : const <String, Object?>{};
+            return payloadMatches(c['match'], payload)
+                ? {'thing': thing, 'key': key, 'payload': payload}
+                : null;
+          }
+          if (e['event'] != 'device.stateChanged') return null;
+          final device = e['device'];
+          if (device is! Map || device['id'] != thing) return null;
+          final state = Map<String, Object?>.from(device['state'] as Map);
+          final previous = before;
+          before = state;
+          final fires = key == null
+              ? canonicalJson(previous) != canonicalJson(state)
+              : stateTriggerFires(c, previous[key], state[key]);
+          return fires
+              ? {
+                  'thing': thing,
+                  if (key != null) ...{
+                    'key': key,
+                    'value': state[key],
+                    'previous': previous[key],
+                  },
+                }
+              : null;
+        }
+
+        final got = await _waitForEvent(
+          run,
+          clock,
+          Duration(milliseconds: c['timeoutMs'] as int),
+          matched,
+        );
+        return got == null
+            ? ('timeout', msg)
+            : ('matched', {...msg, 'event': got});
+      case 'parallel':
+        await _follow(run, node.id, 'branch', msg, clock);
+        return ('done', msg);
       case 'repeat':
         final times = node.config['maxIterations'] as int;
         for (var i = 0; i < times; i++) {
@@ -472,6 +523,41 @@ class FlowRunner {
         return ('done', msg);
     }
     throw ArgumentError('${node.type} is not a flow-control node');
+  }
+
+  /// The first engine event [match] turns into a result, or null when
+  /// [timeout] passes first.
+  Future<Map<String, Object?>?> _waitForEvent(
+    _Run run,
+    FlowClock clock,
+    Duration timeout,
+    Map<String, Object?>? Function(Map<String, Object?> event) match,
+  ) async {
+    // Whichever loses, the event subscription and the timer both end.
+    final got = Completer<Map<String, Object?>?>();
+    final waiting = CancelToken();
+    run.token.whenCancelled.then((_) => waiting.cancel());
+    final subscription = _effects.events.listen((e) {
+      if (got.isCompleted) return;
+      final result = match(e);
+      if (result != null) got.complete(result);
+    });
+    clock
+        .sleep(timeout, waiting)
+        .then(
+          (_) {
+            if (!got.isCompleted) got.complete(null);
+          },
+          onError: (Object e) {
+            if (!got.isCompleted) got.completeError(e);
+          },
+        );
+    try {
+      return await got.future;
+    } finally {
+      waiting.cancel();
+      await subscription.cancel();
+    }
   }
 
   Future<Map<String, Object?>> _action(

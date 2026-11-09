@@ -10,6 +10,7 @@
     { "key": "devId", "label": "Device id" },
     { "key": "localKey", "label": "Local key", "secret": true }
   ],
+  "setup": ["configure:devId", "secret:localKey"],
   "statePush": { "jsonPath": "$.dps" },
   "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
   "reliability": { "timeoutMs": 1500, "retries": 1 },

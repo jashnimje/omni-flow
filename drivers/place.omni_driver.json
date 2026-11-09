@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "place",
+  "name": "Place",
+  "category": "presence",
+  "icon": "place",
+  "transport": { "type": "virtual" },
+  "settings": [
+    { "key": "ble", "label": "Beacon: {matchName, enterDbm, exitDbm, enterDwellMs, exitDwellMs, silenceMs}" },
+    { "key": "wifi", "label": "Wi-Fi: {ssids, bssids, required}" },
+    { "key": "zone", "label": "Zone id this place answers to" }
+  ],
+  "capabilities": [
+    { "id": "inside", "type": "sensor", "label": "Someone inside", "stateJsonPath": "$.inside" },
+    { "id": "people", "type": "sensor", "label": "People inside", "stateJsonPath": "$.people" }
+  ]
+}

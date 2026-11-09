@@ -27,6 +27,21 @@ grep -q '"connected":true,"ip":"127.0.0.1".*"passwordLength":9,"id":2' "$out/hos
 grep -q '"cmd":"pin.mode","pin":4,"value":1,"id":3' "$out/host_board.out"
 grep -q '"event":"sim.rf","protocol":1,"code":5393,"bits":24,"repeat":10' "$out/host_board.out"
 grep -q '"cmd":"rf.send","id":4' "$out/host_board.out"
+# A simulated tag held for 600 ms is reported once, the same tag back within
+# a second is not, and another tag is. The sleeps keep stdin open while the
+# board polls its reader.
+{
+  printf '%s\n' '{"cmd":"periph.set","type":"nfc_rc522","pins":{"ss":8,"rst":9},"id":1}' \
+    '{"cmd":"sim.nfc","uid":"04a1b2c3d4e5f6","ms":600,"id":2}' '{"cmd":"describe","id":3}'
+  sleep 0.9
+  printf '%s\n' '{"cmd":"sim.nfc","uid":"04:A1:B2:C3:D4:E5:F6","id":4}' '{"cmd":"sim.nfc","uid":"deadbeef","ms":300,"id":5}'
+  sleep 0.6
+} | "$out/host_board" --node door > "$out/host_nfc.out"
+grep -q '"event":"ack","cmd":"periph.set","type":"nfc_rc522","id":1' "$out/host_nfc.out"
+grep -q '"periph":\[{"type":"nfc_rc522","pins":{"ss":8,"rst":9,"sck":13,"miso":12,"mosi":11}}\]' "$out/host_nfc.out"
+test "$(grep -c '"event":"nfc.scanned"' "$out/host_nfc.out")" = 2
+grep -q '{"node":"door","event":"nfc.scanned","uid":"04a1b2c3d4e5f6"}' "$out/host_nfc.out"
+grep -q '{"node":"door","event":"nfc.scanned","uid":"deadbeef"}' "$out/host_nfc.out"
 echo "host board checks passed"
 
 for fqbn in arduino:avr:uno esp8266:esp8266:nodemcuv2 rp2040:rp2040:rpipicow esp32:esp32:esp32; do

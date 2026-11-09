@@ -2,12 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
-
-Future<void> showAddDevice(BuildContext context) => showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
-  builder: (_) => const AddDeviceSheet(),
-);
+import 'add_thing.dart' show followNext;
+import 'setup_page.dart' show settingValue;
 
 /// A device id from its name: lower snake case, as the engine requires.
 String deviceIdFor(String name) {
@@ -18,10 +14,23 @@ String deviceIdFor(String name) {
   return RegExp(r'^[a-z]').hasMatch(id) ? id : 'device_$id';
 }
 
-/// Adds a device: pick its driver, scan for it or type its address, then
-/// name it and put it in a room.
+Future<void> showAddDevice(BuildContext context, {String? driver}) =>
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => AddDeviceSheet(driver: driver),
+    );
+
+/// Adds a device by hand: pick its driver, scan for it or type its
+/// address, then name it and put it in a room. A virtual driver (a place,
+/// a person) takes no address. The setup
+/// page then walks the steps the engine says come next (device.add returns
+/// `next` too).
 class AddDeviceSheet extends ConsumerStatefulWidget {
-  const AddDeviceSheet({super.key});
+  const AddDeviceSheet({super.key, this.driver});
+
+  /// The driver picked when the sheet opens.
+  final String? driver;
 
   @override
   ConsumerState<AddDeviceSheet> createState() => _AddDeviceSheetState();
@@ -54,9 +63,14 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
   TextEditingController _settingField(String key) =>
       _settings.putIfAbsent(key, TextEditingController.new);
 
+  bool get _virtual =>
+      _drivers?.where((d) => d['id'] == _driver).firstOrNull?['transport'] ==
+      'virtual';
+
   @override
   void initState() {
     super.initState();
+    _driver = widget.driver;
     _loadDrivers();
   }
 
@@ -119,49 +133,46 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
 
   Future<void> _add() async {
     final devices = ref.read(devicesProvider.notifier);
+    final navigator = Navigator.of(context);
     final name = _name.text.trim();
     final settings = {
       for (final f in _settingFields)
-        if (_settingField('${f['key']}').text.trim().isNotEmpty)
-          '${f['key']}': _settingField('${f['key']}').text.trim(),
+        if (_settingField('${f['key']}').text.trim() case final v
+            when v.isNotEmpty)
+          '${f['key']}': settingValue(v),
     };
+    final id = deviceIdFor(name);
     setState(() => _adding = true);
+    // device.add, not thing.add: thing.add refuses a find that matches a
+    // device by host or stable id, and a hub's lights and entities share
+    // both.
     final result = await callEngine(ref, 'device.add', {
-      'id': deviceIdFor(name),
+      'id': id,
       'name': name,
       'driver': _driver,
-      'host': _host.text.trim(),
+      if (!_virtual) 'host': _host.text.trim(),
       if (_room.text.trim().isNotEmpty) 'room': _room.text.trim(),
-      'stableId': ?_stableId,
+      if (!_virtual) 'stableId': ?_stableId,
       if (settings.isNotEmpty) 'settings': settings,
     });
     if (mounted) setState(() => _adding = false);
     if (result['ok'] != true) return;
     await devices.refresh();
-    if (mounted) Navigator.of(context).pop();
-    final missing = [
-      ...(result['missingSettings'] as List? ?? const []),
-      ...(result['missingSecrets'] as List? ?? const []),
-    ].join(', ');
-    showMessage(
-      [
-        'Added $name.',
-        if (missing.isNotEmpty) 'It still needs: $missing.',
-        if (pairsInApp(result['device'] as Map? ?? const {}))
-          'Pair it from its menu.',
-        if (result['provisionError'] != null)
-          'The board is offline: ${result['provisionError']}',
-      ].join(' '),
-    );
+    if (result['provisionError'] != null) {
+      showMessage('The board is offline: ${result['provisionError']}');
+    }
+    navigator.pop();
+    await followNext(navigator, result, name: name, id: id);
   }
 
   @override
   Widget build(BuildContext context) {
     final drivers = _drivers;
     final found = _found;
+    final virtual = _virtual;
     final ready =
         _driver != null &&
-        _host.text.trim().isNotEmpty &&
+        (virtual || _host.text.trim().isNotEmpty) &&
         _name.text.trim().isNotEmpty &&
         !_adding;
     return Padding(
@@ -202,53 +213,55 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
                 }),
               ),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              key: const ValueKey('add-scan'),
-              onPressed: _driver == null || _scanning ? null : _scan,
-              icon: _scanning
-                  ? const SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.radar),
-              label: const Text('Scan the network'),
-            ),
-            if (found != null && found.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('Nothing found. Type its address below.'),
+            if (!virtual) ...[
+              OutlinedButton.icon(
+                key: const ValueKey('add-scan'),
+                onPressed: _driver == null || _scanning ? null : _scan,
+                icon: _scanning
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.radar),
+                label: const Text('Scan the network'),
               ),
-            if (found != null)
-              for (final f in found)
-                ListTile(
-                  key: ValueKey('found-${f['host']}'),
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    _host.text == f['host']
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                  ),
-                  title: Text('${f['host']}'),
-                  subtitle: switch ((f['stableId'], f['knownAs'])) {
-                    (_, final String known) => Text(
-                      'Already used by ${_deviceName(known)}',
-                      key: ValueKey('found-known-${f['host']}'),
-                    ),
-                    (final String id, _) => Text(id),
-                    _ => null,
-                  },
-                  onTap: () => _pick(f),
+              if (found != null && found.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('Nothing found. Type its address below.'),
                 ),
-            TextField(
-              key: const ValueKey('add-host'),
-              controller: _host,
-              decoration: const InputDecoration(
-                labelText: 'Address',
-                hintText: '192.168.1.40',
+              if (found != null)
+                for (final f in found)
+                  ListTile(
+                    key: ValueKey('found-${f['host']}'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      _host.text == f['host']
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
+                    title: Text('${f['host']}'),
+                    subtitle: switch ((f['stableId'], f['knownAs'])) {
+                      (_, final String known) => Text(
+                        'Already used by ${_deviceName(known)}',
+                        key: ValueKey('found-known-${f['host']}'),
+                      ),
+                      (final String id, _) => Text(id),
+                      _ => null,
+                    },
+                    onTap: () => _pick(f),
+                  ),
+              TextField(
+                key: const ValueKey('add-host'),
+                controller: _host,
+                decoration: const InputDecoration(
+                  labelText: 'Address',
+                  hintText: '192.168.1.40',
+                ),
+                onChanged: (_) => setState(() => _stableId = null),
               ),
-              onChanged: (_) => setState(() => _stableId = null),
-            ),
+            ],
             TextField(
               key: const ValueKey('add-name'),
               controller: _name,
@@ -273,7 +286,10 @@ class _AddDeviceSheetState extends ConsumerState<AddDeviceSheet> {
               TextField(
                 key: ValueKey('add-setting-${f['key']}'),
                 controller: _settingField('${f['key']}'),
-                decoration: InputDecoration(labelText: '${f['label']}'),
+                decoration: InputDecoration(
+                  labelText: '${f['label']}',
+                  helperText: 'Text, or JSON for a list or an object',
+                ),
               ),
             const SizedBox(height: 12),
             FilledButton(
@@ -419,8 +435,9 @@ Future<bool> confirm(
     true;
 
 /// Whether the Pair dialog can finish pairing [device]. A `secret` pairing
-/// ends with the user storing a token, and the app has no secret entry yet,
-/// so it is left out rather than offered as a step that cannot complete.
+/// ends with the user storing a token, which the Pair dialog cannot take, so
+/// it is left to Setup steps rather than offered as a step that cannot
+/// complete.
 bool pairsInApp(Map device) => switch (device['pairing']) {
   {'method': 'secret'} => false,
   Map() => true,

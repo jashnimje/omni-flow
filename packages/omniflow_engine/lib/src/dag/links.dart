@@ -14,7 +14,7 @@ enum LinkMode {
   threshold,
 }
 
-/// One end of a link: `device.key`, where the key is a state key on the
+/// One end of a link: `thing.key`, where the key is a state key on the
 /// source side and a capability on the target side.
 class LinkEnd {
   const LinkEnd(this.deviceId, this.key);
@@ -82,14 +82,31 @@ class LinkRequest {
       '$to set to $set when $from goes ${above != null ? 'above $above' : 'below $below'}',
   };
 
+  /// The link as `link.create` takes it, stored as the automation's spec.
+  Map<String, Object?> toSpec() => {
+    'from': '$from',
+    'to': '$to',
+    'mode': mode.name,
+    'above': ?above,
+    'below': ?below,
+    'set': ?set,
+    if (mode == LinkMode.follow) ...{'fromMin': fromMin, 'fromMax': fromMax},
+    if (mode == LinkMode.toggle) 'onValue': onValue,
+  };
+
   /// The flow JSON. Throws an [ArgumentError] when the mode does not fit
   /// the target capability.
   Map<String, Object?> toFlow() {
+    final crossing = this.mode == LinkMode.threshold
+        ? {if (above != null) 'above': above else 'below': below}
+        : null;
     final trigger = {
       'id': 'source',
-      'type': 'device_state',
-      'label': '$from changes',
-      'config': {'deviceId': from.deviceId, 'key': from.key},
+      'type': 'on',
+      'label': crossing == null
+          ? '$from changes'
+          : '$from goes ${crossing.keys.single} ${crossing.values.single}',
+      'config': {'thing': from.deviceId, 'key': from.key, 'crosses': ?crossing},
       'position': {'x': 0, 'y': 0},
     };
     final nodes = <Map<String, Object?>>[trigger];
@@ -119,9 +136,13 @@ class LinkRequest {
         mode = 'queued';
         add({
           'id': 'pressed',
-          'type': 'var_equals',
+          'type': 'compare',
           'label': '$from is $onValue',
-          'config': {'name': 'msg.value', 'value': onValue},
+          'config': {
+            'left': {'msg': 'value'},
+            'op': '==',
+            'right': {'literal': onValue},
+          },
         }, 'true');
         add({
           'id': 'flip',
@@ -177,33 +198,9 @@ class LinkRequest {
         if (set == null) {
           throw ArgumentError('a threshold link needs the value to set');
         }
+        // The trigger fires on the crossing only, so a value hovering past
+        // the limit does not resend the command.
         mode = 'queued';
-        final op = above != null ? '>' : '<';
-        final limit = above ?? below;
-        add({
-          'id': 'crossed',
-          'type': 'all_of',
-          'label': '$from crosses $op $limit',
-          'config': {
-            'rules': [
-              {
-                'type': 'var_compare',
-                'name': 'msg.value',
-                'op': op,
-                'value': limit,
-              },
-              {
-                'type': 'not',
-                'rule': {
-                  'type': 'var_compare',
-                  'name': 'msg.previous',
-                  'op': op,
-                  'value': limit,
-                },
-              },
-            ],
-          },
-        }, 'true');
         add({
           'id': 'apply',
           'type': 'device_capability',
@@ -226,4 +223,90 @@ class LinkRequest {
       'edges': edges,
     };
   }
+}
+
+/// The link spec of a flow [LinkRequest.toFlow] made, for a link stored
+/// before specs were kept. Null when [flow] is not shaped like a link.
+Map<String, Object?>? linkSpecFromFlow(Map<String, Object?> flow) {
+  Map? node(String id) {
+    for (final n in flow['nodes'] as List? ?? const []) {
+      if (n is Map && n['id'] == id) return n;
+    }
+    return null;
+  }
+
+  Map config(Map? n) => n?['config'] is Map ? n!['config'] as Map : const {};
+  final source = config(node('source'));
+  if (node('source')?['type'] != 'on' || source['thing'] is! String) {
+    return null;
+  }
+  final from = source['key'] == null
+      ? null
+      : '${source['thing']}.${source['key']}';
+  final flip = node('flip');
+  final apply = node('apply');
+  final target = config(flip ?? apply);
+  if (from == null ||
+      target['deviceId'] is! String ||
+      target['capabilityId'] is! String) {
+    return null;
+  }
+  final to = '${target['deviceId']}.${target['capabilityId']}';
+  if (flip != null) {
+    final right = config(node('pressed'))['right'];
+    return {
+      'from': from,
+      'to': to,
+      'mode': LinkMode.toggle.name,
+      'onValue': right is Map ? right['literal'] : true,
+    };
+  }
+  final crosses = source['crosses'];
+  final params = target['params'] is Map ? target['params'] as Map : const {};
+  final limit = crosses is Map && crosses.length == 1
+      ? (crosses.keys.single as String, crosses.values.single)
+      : _legacyCrossing(node('crossed'));
+  if (limit != null) {
+    return {
+      'from': from,
+      'to': to,
+      'mode': LinkMode.threshold.name,
+      limit.$1: limit.$2,
+      'set': params['value'],
+    };
+  }
+  final scale = config(node('scale'));
+  return {
+    'from': from,
+    'to': to,
+    'mode': LinkMode.follow.name,
+    'fromMin': ?scale['inMin'],
+    'fromMax': ?scale['inMax'],
+  };
+}
+
+/// `(above|below, limit)` from the `crossed` node a threshold link was
+/// compiled to before the `on` trigger had `crosses`: an all_of whose first
+/// rule compares msg.value to the limit.
+(String, Object?)? _legacyCrossing(Map? node) {
+  final config = node?['config'];
+  final rules = config is Map ? config['rules'] : null;
+  if (node?['type'] != 'all_of' || rules is! List || rules.isEmpty) {
+    return null;
+  }
+  final first = rules.first;
+  if (first is! Map ||
+      first['type'] != 'compare' ||
+      first['left'] is! Map ||
+      (first['left'] as Map)['msg'] != 'value' ||
+      first['right'] is! Map ||
+      (first['right'] as Map)['literal'] is! num) {
+    return null;
+  }
+  final limit = (first['right'] as Map)['literal'];
+  return switch (first['op']) {
+    '<' => ('below', limit),
+    '>' => ('above', limit),
+    _ => null,
+  };
 }

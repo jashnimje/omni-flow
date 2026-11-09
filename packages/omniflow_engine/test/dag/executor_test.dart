@@ -146,7 +146,12 @@ void main() {
       node('cond', 'all_of', {
         'rules': [
           {'type': 'time_window', 'start': '18:00', 'end': '05:00'},
-          {'type': 'var_equals', 'name': r'$HomeWifiConnected', 'value': true},
+          {
+            'type': 'compare',
+            'left': {'var': r'$HomeWifiConnected'},
+            'op': '==',
+            'right': {'literal': true},
+          },
         ],
       }),
       action('lamp', 'desk_lamp', {'value': true}),
@@ -363,6 +368,136 @@ void main() {
       await run;
       expect(effects.invoked.single.$1, 'mac_mini');
     });
+  });
+
+  group('wait_until', () {
+    FlowSpec until(Map<String, Object?> on) => flow(
+      [
+        node('trig', 'manual'),
+        node('wait', 'wait_until', {...on, 'timeoutMs': 5000}),
+        action('got', 'desk_lamp'),
+        action('late', 'mac_mini'),
+      ],
+      [
+        edge('trig', 'out', 'wait'),
+        edge('wait', 'matched', 'got'),
+        edge('wait', 'timeout', 'late'),
+      ],
+    );
+
+    Map<String, Object?> changed(String id, Map<String, Object?> state) => {
+      'event': 'device.stateChanged',
+      'device': {'id': id, 'state': state},
+    };
+
+    test('matches a state change to a value, not other changes', () async {
+      effects.deviceStates['jade'] = {'home': false};
+      final run = runner(
+        until({
+          'thing': 'jade',
+          'key': 'home',
+          'change': {'to': true},
+        }),
+      ).fire('trig', {});
+      await pump();
+      effects.eventsOut
+        ..add(changed('lamp', {'home': true}))
+        ..add(changed('jade', {'home': false, 'place': 'office'}));
+      await pump();
+      expect(effects.invoked, isEmpty);
+      effects.eventsOut.add(changed('jade', {'home': true}));
+      final trace = await run;
+      expect(effects.invoked.single.$1, 'desk_lamp');
+      final waited = trace.nodes.firstWhere((n) => n.nodeId == 'wait');
+      expect(waited.port, 'matched');
+      expect((waited.output!['event'] as Map)['value'], isTrue);
+    });
+
+    test('matches a crossing once the value goes past it', () async {
+      effects.deviceStates['room'] = {'temp': 30};
+      final run = runner(
+        until({
+          'thing': 'room',
+          'key': 'temp',
+          'crosses': {'below': 25},
+        }),
+      ).fire('trig', {});
+      await pump();
+      effects.eventsOut.add(changed('room', {'temp': 26}));
+      await pump();
+      expect(effects.invoked, isEmpty);
+      effects.eventsOut.add(changed('room', {'temp': 24}));
+      await run;
+      expect(effects.invoked.single.$1, 'desk_lamp');
+    });
+
+    test('matches an event with its payload', () async {
+      final run = runner(
+        until({
+          'thing': 'desk',
+          'key': 'button',
+          'event': true,
+          'match': {'hold': true},
+        }),
+      ).fire('trig', {});
+      await pump();
+      effects.eventsOut.add({
+        'event': 'thing.event',
+        'thing': 'desk',
+        'key': 'button',
+        'payload': {'hold': false},
+      });
+      await pump();
+      expect(effects.invoked, isEmpty);
+      effects.eventsOut.add({
+        'event': 'thing.event',
+        'thing': 'desk',
+        'key': 'button',
+        'payload': {'hold': true},
+      });
+      await run;
+      expect(effects.invoked.single.$1, 'desk_lamp');
+    });
+
+    test('takes the timeout port and stops listening', () async {
+      final run = runner(until({'thing': 'jade', 'key': 'home'}))
+          .fire('trig', {});
+      await pump();
+      await clock.advance(const Duration(seconds: 5));
+      await run;
+      expect(effects.invoked.single.$1, 'mac_mini');
+      expect(effects.eventsOut.hasListener, isFalse);
+    });
+  });
+
+  test('parallel runs its branches side by side, then done once', () async {
+    final f = flow(
+      [
+        node('trig', 'manual'),
+        node('both', 'parallel'),
+        node('slow', 'delay', {'ms': 1000}),
+        action('lamp', 'desk_lamp'),
+        action('mac', 'mac_mini'),
+        action('after', 'hall_plug'),
+      ],
+      [
+        edge('trig', 'out', 'both'),
+        edge('both', 'branch', 'slow'),
+        edge('slow', 'out', 'lamp'),
+        edge('both', 'branch', 'mac'),
+        edge('both', 'done', 'after'),
+      ],
+    );
+    final run = runner(f).fire('trig', {});
+    await pump();
+    expect(effects.invoked.map((i) => i.$1), ['mac_mini']);
+    await clock.advance(const Duration(seconds: 1));
+    await run;
+    expect(effects.invoked.map((i) => i.$1), [
+      'mac_mini',
+      'desk_lamp',
+      'hall_plug',
+    ]);
   });
 
   test('repeat runs its body the set number of times, then done', () async {

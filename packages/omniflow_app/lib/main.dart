@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import 'nfc/nfc.dart';
 import 'service/foreground_runtime.dart';
+import 'service/permissions.dart';
 import 'startup.dart';
+import 'state/providers.dart';
 
 export 'ui/home.dart' show OmniFlowApp;
 
@@ -11,12 +14,20 @@ export 'ui/home.dart' show OmniFlowApp;
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterForegroundTask.initCommunicationPort();
+  final intents = PlatformNfcIntents();
   runApp(
     Launcher(
       start: () => connectToService(
         control: const ForegroundServiceControl(),
         link: ForegroundTaskLink.new,
       ),
+      platform: [
+        nfcAdapterProvider.overrideWithValue(PluginNfcAdapter()),
+        nfcIntentsProvider.overrideWithValue(intents),
+        wifiNamePermissionProvider.overrideWithValue(
+          const Permissions().askForWifiName,
+        ),
+      ],
     ),
   );
 }

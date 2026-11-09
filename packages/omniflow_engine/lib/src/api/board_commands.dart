@@ -125,34 +125,7 @@ class BoardCommands {
         'name is lower snake case, at most 23 characters, like desk_board',
       );
     }
-    final manifest = _core.registry['omniflow_board']!;
-    final probe = Device(
-      id: '_setup_${port.hashCode.abs()}',
-      name: port,
-      driverId: manifest.id,
-      host: port,
-    );
-    Future<Map<String, Object?>> send(Map<String, Object?> command) async =>
-        (await _core.serial.send(
-          ChannelRequest(
-            device: probe,
-            manifest: manifest,
-            command: command,
-            context: const TemplateContext(),
-          ),
-        )).json ??
-        const {};
-    try {
-      // Opening the port resets an Uno or an ESP32, so the first describe
-      // can go unanswered while the board boots.
-      Map<String, Object?>? describe;
-      for (var attempt = 0; describe == null; attempt++) {
-        try {
-          describe = await send(const {'cmd': 'describe'});
-        } on TransportTimeoutException {
-          if (attempt == 1) rethrow;
-        }
-      }
+    return _onPort(port, (send, describe) async {
       if (name != null) {
         await send({'cmd': 'node.set', 'name': name});
         await _renameBoard(port, describe['node'], name);
@@ -195,10 +168,123 @@ class BoardCommands {
           'ip': ?wifi['ip'],
         },
       };
+    });
+  }
+
+  /// Runs [work] with the board on the USB serial [port], after its first
+  /// describe, and lets the port go after.
+  Future<Map<String, Object?>> _onPort(
+    String port,
+    Future<Map<String, Object?>> Function(
+      Future<Map<String, Object?>> Function(Map<String, Object?>) send,
+      Map<String, Object?> describe,
+    )
+    work,
+  ) async {
+    final manifest = _core.registry['omniflow_board']!;
+    final probe = Device(
+      id: '_setup_${port.hashCode.abs()}',
+      name: port,
+      driverId: manifest.id,
+      host: port,
+    );
+    Future<Map<String, Object?>> send(Map<String, Object?> command) async =>
+        (await _core.serial.send(
+          ChannelRequest(
+            device: probe,
+            manifest: manifest,
+            command: command,
+            context: const TemplateContext(),
+          ),
+        )).json ??
+        const {};
+    try {
+      // Opening the port resets an Uno or an ESP32, so the first describe
+      // can go unanswered while the board boots.
+      Map<String, Object?>? describe;
+      for (var attempt = 0; describe == null; attempt++) {
+        try {
+          describe = await send(const {'cmd': 'describe'});
+        } on TransportTimeoutException {
+          if (attempt == 1) rethrow;
+        }
+      }
+      return await work(send, describe);
     } finally {
       await _core.serial.release(probe.id);
     }
   }
+
+  /// `{id | port, type, pins?, clear?}`: binds a peripheral (an IR or RF
+  /// transmitter, an RC522 or PN532 NFC reader) to pins on a board, kept in
+  /// its flash, or clears it. The firmware takes this over USB only, so
+  /// [id] must be a board on USB, or [port] the USB port of a board on
+  /// Wi-Fi. The board's describe is read back, so the board device offers
+  /// what the peripheral raises (`nfc.scanned` for a reader).
+  Future<Map<String, Object?>> periph(Map<String, Object?> args) async {
+    final type = stringArg(args, 'type');
+    if (!boardPeriphTypes.contains(type)) {
+      throw ApiError('invalid', 'type is ${boardPeriphTypes.join(', ')}');
+    }
+    final clear = args['clear'] == true;
+    final pins = args['pins'] == null
+        ? const <String, Object?>{}
+        : objectArg(args, 'pins');
+    if (clear && pins.isNotEmpty) {
+      throw ApiError('invalid', 'clear takes no pins');
+    }
+    if (pins.values.any((v) => v is! int)) {
+      throw ApiError('invalid', 'pins maps a name to a GPIO number');
+    }
+    final command = clear
+        ? {'cmd': 'periph.clear', 'type': type}
+        : {'cmd': 'periph.set', 'type': type, 'pins': pins};
+    final id = optStringArg(args, 'id');
+    final port = optStringArg(args, 'port');
+    if ((id == null) == (port == null)) {
+      throw ApiError('invalid', 'needs id (a board on USB) or port');
+    }
+    final Map<String, Object?> describe;
+    final List<String> devices;
+    if (id != null) {
+      final board = await _board(id);
+      if (!isSerialHost(board.host)) {
+        throw ApiError(
+          'invalid',
+          'a board takes peripherals over USB only. Plug $id in and pass '
+              'its port',
+        );
+      }
+      await _devices.sendCommand(id, command);
+      describe = await _boards.describeBoard(id);
+      devices = [id];
+    } else {
+      describe = await _onPort(port!, (send, _) async {
+        await send(command);
+        return boardDescribeOf(await send(const {'cmd': 'describe'}));
+      });
+      devices = await _boardsNamed(describe['node']);
+      for (final d in devices) {
+        await _boards.rememberDescribe(d, describe);
+      }
+    }
+    return {
+      'type': type,
+      'cleared': clear,
+      'node': describe['node'],
+      'periph': describe['periph'] ?? const [],
+      'periphTypes': describe['periphTypes'] ?? const [],
+      'devices': devices,
+    };
+  }
+
+  Future<List<String>> _boardsNamed(Object? node) async => [
+    if (node is String)
+      for (final d in await DriftDeviceStore(_core.db).all())
+        if (isBoardDriver(_core.registry[d.driverId]) &&
+            d.stableId?.toLowerCase() == node.toLowerCase())
+          d.id,
+  ];
 
   /// A board device follows its board's new name: the one on this port, or
   /// the one known by the old name, so its events are not dropped.

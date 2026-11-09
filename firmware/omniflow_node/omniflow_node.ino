@@ -14,9 +14,18 @@
 //     ESP32   RMT for both, carrier in hardware
 //     Uno     IR on pin 3: Timer2 drives OC2B; other pins and RF: busy-wait
 //     ESP8266, Pico W  busy-wait on the CPU cycle counter, direct pin writes
+//
+//   NFC readers, with only the SPI and Wire libraries every core ships: an
+//   RC522 on the hardware SPI bus, driven register by register, and (not on
+//   the Uno) a PN532 on the default I2C bus, asked with InListPassiveTarget
+//   without blocking the loop.
 #include <EEPROM.h>
+#include <SPI.h>
 
 #include "omni_core.h"
+#if OMNI_HAS_PN532
+#include <Wire.h>
+#endif
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_IDF_TARGET_ESP32)
 #include <ESPmDNS.h>
@@ -66,8 +75,10 @@ using omni::Mode;
 static const uint16_t UDP_PORT = 38950;
 static const uint16_t HELLO_PORT = 38951;
 static const unsigned long HELLO_EVERY_MS = 30000;
-static const uint32_t SETTINGS_MAGIC = 0x4F4D4E33;  // "OMN3"
-// Version 2 had no rfPin; that byte was struct padding (zero) or unwritten.
+static const uint32_t SETTINGS_MAGIC = 0x4F4D4E34;  // "OMN4"
+// The older layouts end earlier, so the fields they lack are padding (zero)
+// or bytes never written: version 2 had no rfPin, version 3 no NFC reader.
+static const uint32_t SETTINGS_MAGIC_V3 = 0x4F4D4E33;
 static const uint32_t SETTINGS_MAGIC_V2 = 0x4F4D4E32;
 
 static omni::Settings settings;
@@ -84,15 +95,17 @@ static void loadSettings() {
   EEPROM.begin(sizeof(settings));
 #endif
   EEPROM.get(0, settings);
-  if (settings.magic == SETTINGS_MAGIC_V2) {
+  if (settings.magic == SETTINGS_MAGIC_V2 || settings.magic == SETTINGS_MAGIC_V3) {
+    if (settings.magic == SETTINGS_MAGIC_V2) settings.periph.rfPin = -1;
     settings.magic = SETTINGS_MAGIC;
-    settings.rfPin = -1;
+    settings.periph.nfc = omni::PERIPH_NONE;
+    settings.periph.nfcSs = -1;
+    settings.periph.nfcRst = -1;
     saveSettings();
   } else if (settings.magic != SETTINGS_MAGIC) {
     memset(&settings, 0, sizeof(settings));
     settings.magic = SETTINGS_MAGIC;
-    settings.irPin = -1;
-    settings.rfPin = -1;
+    settings.periph = {-1, -1, omni::PERIPH_NONE, -1, -1};
   }
   omni::sanitizeSettings(settings, OMNI_BOARD);
 }
@@ -350,6 +363,300 @@ static void transmitRf(int pin, const omni::RfProtocol& protocol, uint32_t code,
 }
 #endif
 
+// ---------------------------------------------------------------- NFC
+
+// The core reserves each board's SPI and Wire pins from its profile, so they
+// must be the ones SPI.begin() and Wire.begin() take.
+#if defined(ARDUINO_ARCH_ESP32)
+static_assert(SCK == 18 && MISO == 19 && MOSI == 23 && SDA == 21 && SCL == 22, "BOARD_ESP32 bus pins");
+#elif defined(ARDUINO_ARCH_ESP8266)
+static_assert(SCK == 14 && MISO == 12 && MOSI == 13 && SDA == 4 && SCL == 5, "BOARD_ESP8266 bus pins");
+#elif defined(ARDUINO_RASPBERRY_PI_PICO_W)
+static_assert(PIN_SPI0_SCK == 18 && PIN_SPI0_MISO == 16 && PIN_SPI0_MOSI == 19, "BOARD_PICO_W SPI pins");
+static_assert(PIN_WIRE0_SDA == 4 && PIN_WIRE0_SCL == 5, "BOARD_PICO_W I2C pins");
+#else
+static_assert(SCK == 13 && MISO == 12 && MOSI == 11 && SS == 10, "BOARD_UNO SPI pins");
+#endif
+
+// An MFRC522 (datasheet 9.2), set up the way ISO 14443 type A needs it.
+class Rc522 : public omni::NfcTransceiver {
+ public:
+  void begin(int ss, int rst) {
+    ss_ = (int8_t)ss;
+    rst_ = (int8_t)rst;
+    digitalWrite(ss_, HIGH);
+    pinMode(ss_, OUTPUT);
+    SPI.begin();
+    init();
+  }
+  void end() {
+    if (ss_ < 0) return;
+    SPI.end();
+    pinMode(ss_, INPUT);
+    if (rst_ >= 0) pinMode(rst_, INPUT);
+    ss_ = -1;
+  }
+  int read(uint8_t* uid) {
+    if (!ok_) {
+      if (millis() - tried_ < RETRY_MS) return 0;
+      init();
+      if (!ok_) return 0;
+    }
+    // Bits after a collision are cleared, so a collision never looks like a UID.
+    setReg(REG_COLL, reg(REG_COLL) & 0x7F);
+    return omni::readTypeAUid(*this, uid);
+  }
+  int transceive(const uint8_t* tx, int txLen, uint8_t txLastBits, uint8_t* rx, int rxMax) override {
+    setReg(REG_COMMAND, IDLE);
+    setReg(REG_COM_IRQ, 0x7F);
+    setReg(REG_FIFO_LEVEL, 0x80);
+    for (int i = 0; i < txLen; i++) setReg(REG_FIFO_DATA, tx[i]);
+    setReg(REG_BIT_FRAMING, txLastBits);
+    setReg(REG_COMMAND, TRANSCEIVE);
+    setReg(REG_BIT_FRAMING, 0x80 | txLastBits);  // StartSend
+    // RxIRq or IdleIRq end it; TimerIRq is the 10 ms timer running out.
+    unsigned long start = millis();
+    for (;;) {
+      uint8_t irq = reg(REG_COM_IRQ);
+      if (irq & 0x30) break;
+      if ((irq & 0x01) || millis() - start > 20) return -1;
+    }
+    // BufferOvfl, CollErr, ParityErr, ProtocolErr.
+    if (reg(REG_ERROR) & 0x1B) return -1;
+    int n = reg(REG_FIFO_LEVEL) & 0x7F;
+    if (n > rxMax) return -1;
+    for (int i = 0; i < n; i++) rx[i] = reg(REG_FIFO_DATA);
+    return n;
+  }
+
+ private:
+  enum Reg : uint8_t {
+    REG_COMMAND = 0x01,
+    REG_COM_IRQ = 0x04,
+    REG_ERROR = 0x06,
+    REG_FIFO_DATA = 0x09,
+    REG_FIFO_LEVEL = 0x0A,
+    REG_BIT_FRAMING = 0x0D,
+    REG_COLL = 0x0E,
+    REG_MODE = 0x11,
+    REG_TX_MODE = 0x12,
+    REG_RX_MODE = 0x13,
+    REG_TX_CONTROL = 0x14,
+    REG_TX_ASK = 0x15,
+    REG_MOD_WIDTH = 0x24,
+    REG_T_MODE = 0x2A,
+    REG_T_PRESCALER = 0x2B,
+    REG_T_RELOAD_H = 0x2C,
+    REG_T_RELOAD_L = 0x2D,
+    REG_VERSION = 0x37,
+  };
+  static const uint8_t IDLE = 0x00;
+  static const uint8_t TRANSCEIVE = 0x0C;
+  static const uint8_t SOFT_RESET = 0x0F;
+  static const unsigned long RETRY_MS = 2000;
+
+  void init() {
+    tried_ = millis();
+    if (rst_ >= 0) {
+      digitalWrite(rst_, LOW);
+      pinMode(rst_, OUTPUT);
+      delayMicroseconds(2);
+      digitalWrite(rst_, HIGH);
+    } else {
+      setReg(REG_COMMAND, SOFT_RESET);
+    }
+    delay(50);  // the oscillator start-up after a reset
+    setReg(REG_TX_MODE, 0x00);
+    setReg(REG_RX_MODE, 0x00);
+    setReg(REG_MOD_WIDTH, 0x26);
+    // The timer: 13.56 MHz / (2 * 169 + 1) = 40 kHz, 400 ticks = 10 ms, started
+    // at the end of each send, so a field with no tag answers within 10 ms.
+    setReg(REG_T_MODE, 0x80);
+    setReg(REG_T_PRESCALER, 0xA9);
+    setReg(REG_T_RELOAD_H, 0x01);
+    setReg(REG_T_RELOAD_L, 0x90);
+    setReg(REG_TX_ASK, 0x40);  // 100% ASK
+    setReg(REG_MODE, 0x3D);  // CRC preset 6363, as ISO 14443 type A
+    uint8_t antenna = reg(REG_TX_CONTROL);
+    if ((antenna & 0x03) != 0x03) setReg(REG_TX_CONTROL, antenna | 0x03);
+    uint8_t version = reg(REG_VERSION);
+    ok_ = version != 0x00 && version != 0xFF;  // nothing on the bus reads 00 or FF
+  }
+  // The address byte is the register shifted left one, with bit 7 set to read.
+  void setReg(uint8_t address, uint8_t value) {
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(ss_, LOW);
+    SPI.transfer((uint8_t)((address << 1) & 0x7E));
+    SPI.transfer(value);
+    digitalWrite(ss_, HIGH);
+    SPI.endTransaction();
+  }
+  uint8_t reg(uint8_t address) {
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(ss_, LOW);
+    SPI.transfer((uint8_t)(0x80 | ((address << 1) & 0x7E)));
+    uint8_t value = SPI.transfer(0);
+    digitalWrite(ss_, HIGH);
+    SPI.endTransaction();
+    return value;
+  }
+
+  int8_t ss_ = -1;
+  int8_t rst_ = -1;
+  bool ok_ = false;
+  unsigned long tried_ = 0;
+};
+
+#if OMNI_HAS_PN532
+// A PN532 on I2C (user manual 6.2.4): every read starts with a status byte
+// whose bit 0 says a frame is ready. A command is answered first by an ACK
+// frame, then by its reply. The read runs as a state machine, one status
+// check per call at most every 5 ms, so a slow reply never stalls the loop.
+class Pn532 {
+ public:
+  void begin() {
+    Wire.begin();
+    Wire.setClock(100000);
+    state_ = OFF;
+    tried_ = millis() - RETRY_MS;
+  }
+  void end() {
+#if defined(ARDUINO_ARCH_ESP8266)
+    // The ESP8266's Wire has no end(); its I2C is bit-banged on plain pins.
+    pinMode(SDA, INPUT);
+    pinMode(SCL, INPUT);
+#else
+    Wire.end();
+#endif
+    state_ = OFF;
+  }
+  int poll(uint8_t* uid) {
+    unsigned long now = millis();
+    if (state_ == OFF) {
+      if (now - tried_ < RETRY_MS) return 0;
+      tried_ = now;
+      if (!configure()) return 0;
+      state_ = IDLE;
+    }
+    if (state_ == IDLE) {
+      // One target, 106 kbps type A.
+      static const uint8_t LIST[] = {0x4A, 0x01, 0x00};
+      if (!send(LIST, sizeof(LIST))) return fail();
+      state_ = WAIT_ACK;
+      since_ = checked_ = now;
+      return -1;
+    }
+    if (now - checked_ < CHECK_MS) return -1;
+    checked_ = now;
+    unsigned long limit = REPLY_MS;
+    if (state_ == WAIT_ACK) limit = ACK_MS;
+    if (!ready()) return now - since_ > limit ? fail() : -1;
+    if (state_ == WAIT_ACK) {
+      if (!readAck()) return fail();
+      state_ = WAIT_REPLY;
+      since_ = now;
+      return -1;
+    }
+    state_ = IDLE;
+    uint8_t frame[32];
+    const uint8_t* payload;
+    int n = readFrame(frame, sizeof(frame)) ? omni::pn532Payload(frame, sizeof(frame), &payload) : -1;
+    return n < 0 ? 0 : omni::pn532ListedUid(payload, n, uid);
+  }
+
+ private:
+  enum State : uint8_t { OFF, IDLE, WAIT_ACK, WAIT_REPLY };
+  static const uint8_t ADDRESS = 0x24;
+  static const unsigned long RETRY_MS = 2000;
+  static const unsigned long CHECK_MS = 5;
+  static const unsigned long ACK_MS = 30;
+  // One passive activation retry answers in well under this with no tag.
+  static const unsigned long REPLY_MS = 300;
+
+  // The reader stopped answering: set it up again after RETRY_MS.
+  int fail() {
+    state_ = OFF;
+    return 0;
+  }
+  bool send(const uint8_t* command, int len) {
+    uint8_t frame[16];
+    int n = omni::pn532Frame(command, len, frame);
+    Wire.beginTransmission(ADDRESS);
+    Wire.write(frame, n);
+    return Wire.endTransmission() == 0;
+  }
+  bool ready() {
+    if (Wire.requestFrom(ADDRESS, (size_t)1, true) != 1) return false;
+    return Wire.read() & 1;
+  }
+  // Reads len frame bytes after the status byte. False when none was ready.
+  bool readFrame(uint8_t* frame, int len) {
+    int got = (int)Wire.requestFrom(ADDRESS, (size_t)(len + 1), true);
+    bool isReady = got > 0 && (Wire.read() & 1);
+    for (int i = 0; i < len; i++) frame[i] = i + 1 < got ? (uint8_t)Wire.read() : 0;
+    return isReady && got == len + 1;
+  }
+  bool readAck() {
+    static const uint8_t ACK[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+    uint8_t frame[sizeof(ACK)];
+    return readFrame(frame, sizeof(frame)) && memcmp(frame, ACK, sizeof(ACK)) == 0;
+  }
+  bool waitReady(unsigned long ms) {
+    unsigned long start = millis();
+    while (!ready()) {
+      if (millis() - start > ms) return false;
+      delay(1);
+    }
+    return true;
+  }
+  // Sends a setup command and checks its reply code (the command plus one).
+  bool command(const uint8_t* command, int len) {
+    if (!send(command, len) || !waitReady(ACK_MS) || !readAck() || !waitReady(100)) return false;
+    uint8_t frame[16];
+    const uint8_t* payload;
+    if (!readFrame(frame, sizeof(frame))) return false;
+    return omni::pn532Payload(frame, sizeof(frame), &payload) >= 1 && payload[0] == command[0] + 1;
+  }
+  bool configure() {
+    // SAMConfiguration: normal mode, no secure module. RFConfiguration item
+    // 5: ATR and PSL retries as the defaults, one passive activation try, so
+    // InListPassiveTarget answers "no tag" at once instead of waiting forever.
+    static const uint8_t SAM[] = {0x14, 0x01, 0x14, 0x01};
+    static const uint8_t RETRIES[] = {0x32, 0x05, 0xFF, 0x01, 0x01};
+    return command(SAM, sizeof(SAM)) && command(RETRIES, sizeof(RETRIES));
+  }
+
+  State state_ = OFF;
+  unsigned long tried_ = 0;
+  unsigned long since_ = 0;
+  unsigned long checked_ = 0;
+};
+#endif
+
+static Rc522 rc522;
+#if OMNI_HAS_PN532
+static Pn532 pn532;
+#endif
+static uint8_t nfcRunning = omni::PERIPH_NONE;
+
+static void startNfc(uint8_t type, int ss, int rst) {
+  if (nfcRunning == omni::PERIPH_NFC_RC522) rc522.end();
+#if OMNI_HAS_PN532
+  if (nfcRunning == omni::PERIPH_NFC_PN532) pn532.end();
+  if (type == omni::PERIPH_NFC_PN532) pn532.begin();
+#endif
+  if (type == omni::PERIPH_NFC_RC522) rc522.begin(ss, rst);
+  nfcRunning = type;
+}
+
+static int pollNfc(uint8_t* uid) {
+  if (nfcRunning == omni::PERIPH_NFC_RC522) return rc522.read(uid);
+#if OMNI_HAS_PN532
+  if (nfcRunning == omni::PERIPH_NFC_PN532) return pn532.poll(uid);
+#endif
+  return 0;
+}
+
 // ---------------------------------------------------------------- pins
 
 // Sets the output latch while the pin is still an input, so an output starts
@@ -418,14 +725,16 @@ class BoardHal : public omni::Hal {
     if (slot >= 0) servos[slot].write(degrees);
 #endif
   }
-  bool hasIr() override { return settings.irPin >= 0; }
+  bool hasIr() override { return settings.periph.irPin >= 0; }
   void sendIr(uint32_t bits) override {
-    if (settings.irPin >= 0) transmitIr(settings.irPin, bits);
+    if (settings.periph.irPin >= 0) transmitIr(settings.periph.irPin, bits);
   }
-  bool hasRf() override { return settings.rfPin >= 0; }
+  bool hasRf() override { return settings.periph.rfPin >= 0; }
   void sendRf(const omni::RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) override {
-    if (settings.rfPin >= 0) transmitRf(settings.rfPin, protocol, code, bits, repeat);
+    if (settings.periph.rfPin >= 0) transmitRf(settings.periph.rfPin, protocol, code, bits, repeat);
   }
+  void startNfc(uint8_t type, int ss, int rst) override { ::startNfc(type, ss, rst); }
+  int pollNfc(uint8_t* uid) override { return ::pollNfc(uid); }
   unsigned long millis() override { return ::millis(); }
 
  private:
@@ -818,8 +1127,7 @@ void setup() {
   loadSettings();
   defaultNodeName();
   core.setNode(settings.node);
-  core.setIrPin(settings.irPin);
-  core.setRfPin(settings.rfPin);
+  core.setPeriphs(settings.periph);  // starts the NFC reader
   core.setExtension(&setupCommands);
   core.boot(serialOut);
   startWifi();

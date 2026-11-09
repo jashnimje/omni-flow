@@ -11,6 +11,7 @@
     { "key": "username", "label": "Broker user" },
     { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
   ],
+  "setup": ["configure:commandTopic", "configure:stateTopic", "configure:username?", "secret:password?"],
   "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "state" }] },
   "reliability": { "timeoutMs": 3000, "retries": 0 },
   "capabilities": [

@@ -40,8 +40,7 @@ void main() {
         ],
       };
       await pumpApp(tester, engine);
-      await tester.tap(find.byKey(const ValueKey('add-device')));
-      await tester.pumpAndSettle();
+      await openDriverSheet(tester);
       await tester.tap(find.byKey(const ValueKey('add-driver')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Philips WiZ').last);
@@ -78,7 +77,7 @@ void main() {
         'room': 'Hall',
         'stableId': 'a8bb50aa',
       });
-      expect(find.text('Added Hall lamp.'), findsOneWidget);
+      expect(find.text('Added Hall lamp'), findsOneWidget);
     });
 
     testWidgets('a bridge already used by one light is offered for the next', (
@@ -108,8 +107,7 @@ void main() {
         ],
       };
       await pumpApp(tester, engine);
-      await tester.tap(find.byKey(const ValueKey('add-device')));
-      await tester.pumpAndSettle();
+      await openDriverSheet(tester);
       await tester.tap(find.byKey(const ValueKey('add-driver')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Philips Hue light').last);

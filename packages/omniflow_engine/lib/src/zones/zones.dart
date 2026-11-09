@@ -163,7 +163,9 @@ class ZoneSpec {
       },
   };
 
-  static ZoneSpec parse(Object? json) {
+  /// A place may have no input yet ([requireInput] false), and then is
+  /// never entered.
+  static ZoneSpec parse(Object? json, {bool requireInput = true}) {
     final issues = IssueCollector();
     if (json is! Map) {
       throw ValidationException('zone', [
@@ -228,7 +230,7 @@ class ZoneSpec {
         issues.add(r'$.wifi', 'needs ssids or bssids');
       }
     }
-    if (ble == null && wifi == null && rawBle == null) {
+    if (requireInput && ble == null && wifi == null && rawBle == null) {
       issues.add(r'$', 'a zone needs a ble or wifi input');
     }
     if (issues.hasIssues || id == null) {
@@ -239,7 +241,7 @@ class ZoneSpec {
 }
 
 /// Every zone's state, fed by sensor readings. Returns the zone changes each
-/// reading causes, which become `zone_change` triggers.
+/// reading causes, which set each place's `inside` state.
 ///
 /// A zone with a BLE input is entered when its beacon is present and, when
 /// its Wi-Fi input is required, the Wi-Fi matches. A zone with only Wi-Fi is
@@ -318,7 +320,9 @@ class ZoneTracker {
     final wifiOk =
         zone.wifi == null || (_wifiKnown && zone.wifi!.matches(_ssid, _bssid));
     final bool nowInside;
-    if (zone.ble != null) {
+    if (zone.ble == null && zone.wifi == null) {
+      nowInside = false;
+    } else if (zone.ble != null) {
       final blePresent = _ble[zoneId]!.isPresent;
       nowInside = blePresent && (zone.wifi?.required != true || wifiOk);
     } else {

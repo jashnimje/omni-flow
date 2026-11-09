@@ -53,9 +53,19 @@ const int MAX_ARGS = 8;
 #else
 #define OMNI_HAS_WIFI 1
 #endif
+// The PN532 needs Wire, whose buffers take 182 bytes of the Uno's RAM, more
+// than it has left, so the Uno takes only the RC522 (SPI, no buffers).
+#ifndef OMNI_HAS_PN532
+#if defined(__AVR__) || defined(OMNI_SMALL)
+#define OMNI_HAS_PN532 0
+#else
+#define OMNI_HAS_PN532 1
+#endif
+#endif
 
-// One parsed command: a flat JSON object of string, number and boolean
-// values. Parsing needs no heap.
+// One parsed command: a JSON object of string, number and boolean values.
+// One nested object of those is flattened, so {"pins":{"ss":10}} is the
+// field "pins.ss". Parsing needs no heap.
 struct Args {
   struct Field {
     char key[12];
@@ -83,6 +93,10 @@ bool named(const char* cmd, const char* literal);
 struct BoardProfile {
   const char* name;
   uint8_t (*caps)(int pin);
+  // The hardware SPI bus: sck, miso, mosi, then the pin an SPI master must
+  // keep as an output (the Uno's 10), or -1.
+  int8_t spi[4];
+  int8_t i2c[2];  // sda, scl of the default Wire bus
 };
 
 uint8_t esp32Caps(int pin);
@@ -124,6 +138,19 @@ class Hal {
   // Sends the code repeat times on the RF pin; rfPulse gives the timing.
   virtual void sendRf(const RfProtocol& protocol, uint32_t code, uint8_t bits, uint8_t repeat) = 0;
   virtual bool hasRf() = 0;
+  // Starts the NFC reader of that type (a PeriphType) on its pins, or stops
+  // the one running for PERIPH_NONE.
+  virtual void startNfc(uint8_t type, int ss, int rst) {
+    (void)type;
+    (void)ss;
+    (void)rst;
+  }
+  // Starts or carries on one read of the tag in the field. Returns its UID
+  // length, 0 for no tag, or -1 while the read is still going.
+  virtual int pollNfc(uint8_t* uid) {
+    (void)uid;
+    return 0;
+  }
   virtual unsigned long millis() = 0;
 };
 
@@ -158,6 +185,86 @@ bool rfProtocol(long number, RfProtocol* out);
 void rfPulse(const RfProtocol& protocol, uint32_t code, uint8_t bits, int i, uint16_t* highUs, uint16_t* lowUs);
 const int RF_MAX_REPEAT = 20;
 
+// ---------------------------------------------------------------- peripherals
+
+enum PeriphType : uint8_t { PERIPH_NONE, PERIPH_IR, PERIPH_RF, PERIPH_NFC_RC522, PERIPH_NFC_PN532 };
+// Returns PERIPH_NONE for a name this firmware does not know.
+PeriphType periphFromName(const char* name);
+const char* periphName(PeriphType type);
+// Whether this build can drive the type (the Uno has no PN532).
+bool periphBuiltIn(PeriphType type);
+
+// What is attached to which pins. -1 is no pin. The field order is part of
+// the stored Settings layout.
+struct Periphs {
+  int8_t irPin;
+  int8_t rfPin;
+  uint8_t nfc;  // PERIPH_NONE, PERIPH_NFC_RC522 or PERIPH_NFC_PN532
+  int8_t nfcSs;  // RC522 chip select
+  int8_t nfcRst;  // RC522 reset, or -1 for a soft reset
+};
+
+// Why a set of peripherals cannot be on these pins.
+enum PeriphIssue : uint8_t {
+  PERIPH_OK,
+  PERIPH_NOT_OUTPUT,  // a pin of its own is not an output pin on this board
+  PERIPH_SAME_PIN,  // two of its own pins, or its pin and its bus, are one pin
+  PERIPH_IS_IR,  // a pin it takes is the IR pin
+  PERIPH_IS_RF,
+  PERIPH_IS_NFC,
+};
+// Checks every pin that changed takes (its own and its bus) against the
+// board and against the other peripherals in p.
+PeriphIssue checkPeriphs(const Periphs& p, const BoardProfile& board, PeriphType changed);
+// Lists the pins type takes in p, its bus included, into pins (room for 6).
+int periphPins(const Periphs& p, const BoardProfile& board, PeriphType type, int8_t* pins);
+
+// ISO 14443-3 CRC_A, low byte first, as it goes on air.
+void crcA(const uint8_t* data, int len, uint8_t out[2]);
+
+// One ISO 14443 type A exchange through a reader (the RC522). txLastBits is
+// how many bits of the last byte to send, 0 for all 8. Returns the bytes
+// received, or -1 for a timeout, a collision or a bad frame.
+class NfcTransceiver {
+ public:
+  virtual ~NfcTransceiver() {}
+  virtual int transceive(const uint8_t* tx, int txLen, uint8_t txLastBits, uint8_t* rx, int rxMax) = 0;
+};
+const int NFC_UID_MAX = 10;
+// Wakes the tag in the field (WUPA, so a halted one answers too), runs the
+// cascade levels to read its UID, then halts it, so the next wake-up finds
+// it again while it stays. Returns the UID length (4, 7 or 10), or 0.
+int readTypeAUid(NfcTransceiver& reader, uint8_t uid[NFC_UID_MAX]);
+
+#if OMNI_HAS_PN532
+// PN532 host frames (user manual 6.2.1): preamble, start code, length and
+// its checksum, TFI D4, the command and its data, data checksum, postamble.
+// out needs len + 8 bytes. Returns the frame length.
+int pn532Frame(const uint8_t* command, int len, uint8_t* out);
+// Checks a frame from the PN532 and finds its payload after TFI D5. Returns
+// the payload length, or -1.
+int pn532Payload(const uint8_t* frame, int len, const uint8_t** payload);
+// The UID in an InListPassiveTarget (4A) reply payload, or 0 for no target.
+int pn532ListedUid(const uint8_t* payload, int len, uint8_t uid[NFC_UID_MAX]);
+#endif
+
+// Reports a tag once per presentation: a new UID at once, the same UID again
+// only after the reader has not seen it for goneMs.
+class NfcDebounce {
+ public:
+  explicit NfcDebounce(uint16_t goneMs) : goneMs_(goneMs) {}
+  // Call with every UID the reader reads. Returns true to report it.
+  bool seen(const uint8_t* uid, int len, unsigned long now);
+
+ private:
+  uint16_t goneMs_;
+  uint8_t uid_[NFC_UID_MAX];
+  uint8_t len_ = 0;
+  unsigned long seen_ = 0;
+};
+const unsigned long NFC_POLL_MS = 100;
+const uint16_t NFC_GONE_MS = 1000;
+
 class Out;
 
 // Board-specific commands (Wi-Fi setup, flash settings) that the core does
@@ -186,18 +293,19 @@ class Core {
   const char* node() const { return node_; }
   void setNode(const char* node) { node_ = node; }
   const BoardProfile& board() const { return board_; }
-  // The IR LED and RF transmitter pins are kept from pin commands and
-  // describe; -1 for none.
-  void setIrPin(int pin) { irPin_ = (int8_t)pin; }
-  void setRfPin(int pin) { rfPin_ = (int8_t)pin; }
-  int irPin() const { return irPin_; }
-  int rfPin() const { return rfPin_; }
+  // The peripherals' pins (and an NFC reader's bus) are kept from pin
+  // commands and describe. Starts or stops the NFC reader when it changed.
+  void setPeriphs(const Periphs& periphs);
+  const Periphs& periphs() const { return periph_; }
+  int irPin() const { return periph_.irPin; }
+  int rfPin() const { return periph_.rfPin; }
   // What a pin offers to pin commands: its profile capabilities, or none for
-  // the IR and RF pins and pins outside the profile.
+  // a peripheral's pins and pins outside the profile.
   uint8_t capsOf(int pin) const;
 
   void error(Out& out, long id, const char* message);
   void ack(Out& out, long id, const char* cmd, int pin, bool hasValue, int value);
+  void periphAck(Out& out, long id, const char* cmd, PeriphType type);
 
  private:
   struct Watch {
@@ -210,6 +318,8 @@ class Core {
 
   int readValue(int pin);
   void describe(Out& out, long id);
+  void describePeriphs(Out& out);
+  void pollNfc(Out& out, unsigned long now);
   Watch* findWatch(int pin);
   void setPinMode(Out& out, long id, int pin, Mode mode, int level);
   void sendRf(Out& out, long id, const Args& m);
@@ -221,8 +331,10 @@ class Core {
   const BoardProfile& board_;
   Hal& hal_;
   Extension* extension_ = 0;
-  int8_t irPin_ = -1;
-  int8_t rfPin_ = -1;
+  Periphs periph_ = {-1, -1, PERIPH_NONE, -1, -1};
+  bool nfcBusy_ = false;
+  unsigned long nfcPolled_ = 0;
+  NfcDebounce nfcSeen_{NFC_GONE_MS};
   Mode modes_[MAX_PINS];
   int written_[MAX_PINS];
   // Set once pin.write has chosen an output's level, so a resent pin.mode
@@ -239,8 +351,9 @@ struct Settings {
   char password[65];
 #endif
   char node[24];
-  int8_t irPin;
-  int8_t rfPin;  // added in settings version 3
+  // Version 2 stored only irPin, version 3 added rfPin, version 4 the NFC
+  // reader. Older ones are read with the later fields set to none.
+  Periphs periph;
 };
 
 // A node name is a lower case letter, then up to 22 lower case letters,
@@ -248,7 +361,7 @@ struct Settings {
 bool validNodeName(const char* name);
 // Makes settings read back from flash safe to use: terminates the strings,
 // drops a node name that is not valid, so the board builds its default again,
-// and drops an IR or RF pin the board cannot drive.
+// and drops each peripheral the board cannot take, in the order IR, RF, NFC.
 void sanitizeSettings(Settings& settings, const BoardProfile& board);
 
 // What the setup commands need from the board.
@@ -269,9 +382,11 @@ class SetupHal {
   virtual void statusExtra(Out&) {}
 };
 
-// The setup commands: wifi.set, wifi.clear, wifi.status, node.set, ir.pin, rf.pin.
-// All but wifi.status change how the board joins the network or what it is
-// called, so they are taken only from USB serial, never from the Wi-Fi.
+// The setup commands: wifi.set, wifi.clear, wifi.status, node.set,
+// periph.set, periph.clear, and ir.pin and rf.pin, the older form of
+// periph.set for IR and RF. All but wifi.status change how the board joins
+// the network, what it is called or what is wired to it, so they are taken
+// only from USB serial, never from the Wi-Fi.
 class Setup : public Extension {
  public:
   Setup(Core& core, Settings& settings, SetupHal& hal, int udpPort);
@@ -281,6 +396,10 @@ class Setup : public Extension {
   bool fromSerial = false;
 
  private:
+  void setPeriph(Out& out, long id, const Args& args, bool alias, PeriphType type);
+  void clearPeriph(Out& out, long id, PeriphType type);
+  void applyPeriphs(Out& out, long id, const Periphs& next, PeriphType changed, bool alias);
+
   Core& core_;
   Settings& settings_;
   SetupHal& hal_;

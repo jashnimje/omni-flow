@@ -13,6 +13,7 @@ const builtInDriverSources = <String, String>{
   "settings": [
     { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" }
   ],
+  "setup": ["pair", "configure:mac?"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },
   "capabilities": [
     { "id": "wake", "type": "action", "label": "Wake", "command": { "op": "key", "key": "wakeup" } },
@@ -69,6 +70,7 @@ const builtInDriverSources = <String, String>{
     { "key": "domain", "label": "Entity domain: light, switch, fan or input_boolean" },
     { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
   ],
+  "setup": ["secret:token", "configure:entityId", "configure:domain"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [
@@ -114,6 +116,7 @@ const builtInDriverSources = <String, String>{
     { "key": "entityId", "label": "Entity id, such as sensor.living_room_temperature" },
     { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
   ],
+  "setup": ["secret:token", "configure:entityId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [
@@ -144,6 +147,7 @@ const builtInDriverSources = <String, String>{
     { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true },
     { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true }
   ],
+  "setup": ["pair"],
   "statePoll": { "intervalSeconds": 60, "command": { "uri": "ssap://audio/getVolume" } },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [
@@ -197,6 +201,7 @@ const builtInDriverSources = <String, String>{
     { "key": "username", "label": "Username" },
     { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
   ],
+  "setup": ["configure:username", "secret:sshPrivateKey"],
   "reliability": { "timeoutMs": 15000, "retries": 0 },
   "capabilities": [
     {
@@ -234,6 +239,7 @@ const builtInDriverSources = <String, String>{
     { "key": "username", "label": "Username" },
     { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
   ],
+  "setup": ["configure:username", "secret:sshPrivateKey"],
   "reliability": { "timeoutMs": 10000, "retries": 0 },
   "capabilities": [
     {
@@ -281,6 +287,7 @@ const builtInDriverSources = <String, String>{
     { "key": "username", "label": "Broker user" },
     { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
   ],
+  "setup": ["configure:stateTopic", "configure:username?", "secret:password?"],
   "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "value" }] },
   "capabilities": [{ "id": "value", "type": "sensor", "label": "Value", "stateJsonPath": "$.value" }]
 }
@@ -299,6 +306,7 @@ const builtInDriverSources = <String, String>{
     { "key": "username", "label": "Broker user" },
     { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
   ],
+  "setup": ["configure:commandTopic", "configure:stateTopic", "configure:username?", "secret:password?"],
   "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "state" }] },
   "reliability": { "timeoutMs": 3000, "retries": 0 },
   "capabilities": [
@@ -310,6 +318,23 @@ const builtInDriverSources = <String, String>{
       "command": { "topic": "{{device.commandTopic}}", "payload": "{{value}}" },
       "stateJsonPath": "$.state"
     }
+  ]
+}
+''',
+  'nfc_tag.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "nfc_tag",
+  "name": "NFC tag",
+  "category": "tag",
+  "icon": "nfc",
+  "transport": { "type": "virtual" },
+  "settings": [
+    { "key": "uid", "label": "Tag UID, hex" }
+  ],
+  "capabilities": [
+    { "id": "last_scanned", "type": "sensor", "label": "Last scanned", "stateJsonPath": "$.last_scanned" },
+    { "id": "scanned", "type": "event", "label": "Scanned" }
   ]
 }
 ''',
@@ -327,6 +352,7 @@ const builtInDriverSources = <String, String>{
     { "method": "serial" }
   ],
   "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
+  "setup": ["configure:pins"],
   "reliability": { "timeoutMs": 800, "retries": 2 },
   "capabilities": [
     {
@@ -361,6 +387,21 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
+  'person.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "person",
+  "name": "Person",
+  "category": "presence",
+  "icon": "person",
+  "transport": { "type": "virtual" },
+  "settings": [{ "key": "homePlace", "label": "Place that counts as home (default home)" }],
+  "capabilities": [
+    { "id": "home", "type": "sensor", "label": "At home", "stateJsonPath": "$.home" },
+    { "id": "place", "type": "sensor", "label": "Place", "stateJsonPath": "$.place" }
+  ]
+}
+''',
   'philips_hue_light.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -369,12 +410,13 @@ const builtInDriverSources = <String, String>{
   "category": "lighting",
   "icon": "lightbulb",
   "transport": { "type": "http", "port": 80, "authErrorTypes": [1] },
-  "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid" }],
+  "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid", "usePort": false }],
   "pairing": { "method": "hue_bridge" },
   "settings": [
     { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
     { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true }
   ],
+  "setup": ["pair", "configure:lightId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [
@@ -469,6 +511,43 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
+  'phone.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "phone",
+  "name": "Phone",
+  "category": "phone",
+  "icon": "smartphone",
+  "transport": { "type": "virtual" },
+  "settings": [{ "key": "person", "label": "Person who carries this phone" }],
+  "capabilities": [
+    { "id": "wifi_ssid", "type": "sensor", "label": "Wi-Fi network", "stateJsonPath": "$.wifi_ssid" },
+    { "id": "wifi_bssid", "type": "sensor", "label": "Wi-Fi access point", "stateJsonPath": "$.wifi_bssid" },
+    { "id": "battery", "type": "sensor", "label": "Battery", "stateJsonPath": "$.battery" },
+    { "id": "charging", "type": "sensor", "label": "Charging", "stateJsonPath": "$.charging" },
+    { "id": "nfc_scanned", "type": "event", "label": "NFC tag scanned" }
+  ]
+}
+''',
+  'place.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "place",
+  "name": "Place",
+  "category": "presence",
+  "icon": "place",
+  "transport": { "type": "virtual" },
+  "settings": [
+    { "key": "ble", "label": "Beacon: {matchName, enterDbm, exitDbm, enterDwellMs, exitDwellMs, silenceMs}" },
+    { "key": "wifi", "label": "Wi-Fi: {ssids, bssids, required}" },
+    { "key": "zone", "label": "Zone id this place answers to" }
+  ],
+  "capabilities": [
+    { "id": "inside", "type": "sensor", "label": "Someone inside", "stateJsonPath": "$.inside" },
+    { "id": "people", "type": "sensor", "label": "People inside", "stateJsonPath": "$.people" }
+  ]
+}
+''',
   'samsung_tizen_tv.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -487,6 +566,7 @@ const builtInDriverSources = <String, String>{
     { "key": "token", "label": "Pairing token (issued when you allow OmniFlow on the TV)", "secret": true },
     { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect)", "secret": true }
   ],
+  "setup": ["pair"],
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [
     {
@@ -555,6 +635,7 @@ const builtInDriverSources = <String, String>{
     { "key": "username", "label": "Broker user" },
     { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
   ],
+  "setup": ["configure:topic", "configure:username?", "secret:password?"],
   "statePush": {
     "topics": [
       { "topic": "stat/{{device.topic}}/RESULT" },
@@ -597,6 +678,7 @@ const builtInDriverSources = <String, String>{
     { "key": "devId", "label": "Device id" },
     { "key": "localKey", "label": "Local key", "secret": true }
   ],
+  "setup": ["configure:devId", "secret:localKey"],
   "statePush": { "jsonPath": "$.dps" },
   "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
   "reliability": { "timeoutMs": 1500, "retries": 1 },
@@ -625,6 +707,7 @@ const builtInDriverSources = <String, String>{
     { "key": "username", "label": "Broker user" },
     { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
   ],
+  "setup": ["configure:friendlyName", "configure:baseTopic?", "configure:username?", "secret:password?"],
   "statePush": {
     "topics": [{ "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}" }],
     "refresh": { "topic": "{{device.baseTopic|'zigbee2mqtt'}}/{{device.friendlyName}}/get", "payload": { "state": "" } }

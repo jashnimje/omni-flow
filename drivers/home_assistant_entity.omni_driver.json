@@ -21,6 +21,7 @@
     { "key": "domain", "label": "Entity domain: light, switch, fan or input_boolean" },
     { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
   ],
+  "setup": ["secret:token", "configure:entityId", "configure:domain"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [

@@ -123,7 +123,7 @@ void _tools({required bool viaHub}) {
     expect((packets.single as Map)['text'], '{"method":"getPilot"}');
   });
 
-  test('lists the thirteen tools', () async {
+  test('lists the seventeen tools', () async {
     final tools = (await client.listTools()).tools.map((t) => t.name).toSet();
     expect(tools, {
       'discover_devices_and_capabilities',
@@ -131,16 +131,64 @@ void _tools({required bool viaHub}) {
       'register_custom_driver_manifest',
       'deploy_automation_flow_dag',
       'list_flows',
+      'list_tags',
       'simulate_flow_dry_run',
       'sniff_live_packets',
       'generate_mcu_firmware',
       'link_devices',
+      'create_rule',
+      'find_things',
+      'next_setup_step',
       'configure_board_pins',
       'describe_board',
       'pair_device',
       'trust_ssh_host_key',
     });
   });
+
+  test('find_things never opens a USB port, and next_setup_step reads where '
+      'a device stands', () async {
+    final found = body(
+      await call('find_things', {
+        'drivers': ['nfc_tag'],
+      }),
+    );
+    expect(found['ok'], isTrue, reason: '$found');
+    expect(found['methods'], isNot(contains('serial')));
+    expect(
+      [for (final m in found['manual'] as List) (m as Map)['driver']],
+      ['nfc_tag'],
+    );
+    final next = body(await call('next_setup_step', {'deviceId': 'mac_mini'}));
+    expect((next['next'] as Map)['step'], 'configure');
+    expect(
+      [
+        for (final k in (next['next'] as Map)['keys'] as List)
+          (k as Map)['key'],
+      ],
+      ['username'],
+    );
+  });
+
+  test(
+    'list_tags reads the named tags, and no tool names or scans one',
+    () async {
+      await engine.handle('tag.save', {
+        'id': 'front_door',
+        'name': 'Front door',
+        'uid': '04A22B1C',
+      });
+      final listed = body(await call('list_tags'));
+      expect(listed['ok'], isTrue, reason: '$listed');
+      expect(listed['tags'], [
+        {'id': 'front_door', 'name': 'Front door', 'uid': '04A22B1C'},
+      ]);
+      final tools = (await client.listTools()).tools.map((t) => t.name);
+      expect(tools.where((t) => t.contains('tag') || t.contains('nfc')), [
+        'list_tags',
+      ]);
+    },
+  );
 
   test('configure_board_pins tells an agent to keep active-low pins', () async {
     final pins = (await client.listTools()).tools.firstWhere(
@@ -506,7 +554,7 @@ void _stdio() {
             .firstWhere((l) => l.contains('"id":2'))
             .timeout(const Duration(seconds: 20)),
       ) as Map;
-      expect(((list['result'] as Map)['tools'] as List), hasLength(13));
+      expect(((list['result'] as Map)['tools'] as List), hasLength(17));
       await process.stdin.close();
       expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
     },

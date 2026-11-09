@@ -87,7 +87,32 @@ class VirtualBoard {
     int helloEveryMs = 300,
   }) async {
     final binary = (await build())!;
-    final port = udp ? (udpPort ?? await freePort()) : null;
+    // A port picked here can be taken by a parallel test before the board
+    // binds it; the board then exits at once, so start again on a new port.
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await _startOnce(
+          binary,
+          node: node,
+          pty: pty,
+          port: udp ? (udpPort ?? await freePort()) : null,
+          helloTo: helloTo,
+          helloEveryMs: helloEveryMs,
+        );
+      } on StateError {
+        if (!udp || udpPort != null || attempt == 3) rethrow;
+      }
+    }
+  }
+
+  static Future<VirtualBoard> _startOnce(
+    String binary, {
+    required String node,
+    required bool pty,
+    required int? port,
+    required int? helloTo,
+    required int helloEveryMs,
+  }) async {
     final process = await Process.start(binary, [
       '--node',
       node,
@@ -103,8 +128,13 @@ class VirtualBoard {
         .asBroadcastStream();
     // The first line is the pty path, or the boot line, which the board
     // prints after its UDP socket is bound.
-    final first = (await lines.first.timeout(const Duration(seconds: 5)))
-        .trim();
+    final String first;
+    try {
+      first = (await lines.first.timeout(const Duration(seconds: 5))).trim();
+    } on StateError {
+      process.kill();
+      rethrow;
+    }
     final tty = pty ? first : null;
     lines.listen((_) {});
     process.stderr.drain<void>();

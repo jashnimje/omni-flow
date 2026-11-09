@@ -9,6 +9,8 @@ import '../version.dart';
 
 typedef _Board = ({String fqbn, bool wifi, String pins});
 
+const _agentFindMethods = ['udp_broadcast', 'mdns', 'tuya_broadcast', 'hello'];
+
 /// The boards firmware/omniflow_node builds for, and the pins each offers
 /// (the board profiles in omni_core.cpp).
 const Map<String, _Board> _boards = {
@@ -205,6 +207,79 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
   );
 
   server.registerTool(
+    'create_rule',
+    description:
+        'Saves a rule: when any trigger fires, only if every condition holds, run the steps in '
+        'order. rule is {name, when: [...], onlyIf?: [...], then: [...], mode?}. '
+        'A trigger is {on: "thing.key", event: true, match?} (an event like front_door.scanned), '
+        '{on: "thing.key", change: {to?: value}} (a state change, like jade.home to true), '
+        '{on: "thing.key", crosses: {above | below: number}}, {time: "HH:MM", days?: ["mon", ...]}, '
+        '{interval: seconds} or {manual: true}. Several triggers start the same steps. '
+        'A condition is {state: "thing.key" | var: "\$Name" | msg: "key", op: "==" | "!=" | "<" | '
+        '"<=" | ">" | ">=", value}, {between: ["HH:MM", "HH:MM"]}, {days: [...]}, {not: condition}, '
+        '{anyOf: [...]} or {allOf: [...]}. '
+        'A step is {do: "thing.action", params?}, {toggle: "thing.action"}, {wait: ms}, '
+        '{waitFor: {on, event | change | crosses, timeoutMs, onTimeout?: [steps]}} (a timeout ends '
+        'the rule after onTimeout), {if: [conditions], then: [steps], else?: [steps]}, '
+        '{together: [[steps], [steps]]} (side by side, then on), {notify: {title}}, '
+        '{set: {var: "\$Name", value}} or {run: "automation_id"}. Shorthand strings work in any list: '
+        '"home:entered", "nfc:front_door", "time:18:00", "lamp.power=true", "wait:2s", '
+        '"notify:Welcome home". Issues come back at rule paths like then[2].do. A rule whose id '
+        '(from its name) another rule has is refused with exists: give it another name. Saved untrusted: '
+        'a rule that drives a host-command device waits for the user to approve it.',
+    inputSchema: JsonSchema.object(
+      properties: {'rule': freeObject},
+      required: ['rule'],
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('automation.save', {
+        'form': 'rule',
+        'spec': args['rule'],
+        'trusted': false,
+      }),
+    ),
+  );
+
+  server.registerTool(
+    'find_things',
+    description:
+        'Looks for devices on the local network at once (UDP broadcast, mDNS, Tuya broadcasts, '
+        'board hellos) and returns candidates grouped by driver, with a suggested id and '
+        'knownAs when one is a device already. Drivers no method finds are listed under '
+        'manual. Adding a find is the user\'s step: they run omni add, or use Add in the app. '
+        'windowMs is how long to listen, 100 to 60000.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'windowMs': JsonSchema.integer(),
+        'drivers': JsonSchema.array(items: JsonSchema.string()),
+      },
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('thing.add', {
+        if (args['windowMs'] != null) 'windowMs': args['windowMs'],
+        if (args['drivers'] != null) 'drivers': args['drivers'],
+        // Opening a USB port resets an ESP32 or an Uno, which an agent
+        // must not do to a board that is running.
+        'methods': _agentFindMethods,
+      }),
+    ),
+  );
+
+  server.registerTool(
+    'next_setup_step',
+    description:
+        'What a device still needs before it works: pair (the user at the device), secret '
+        '(a token or key only the user stores), configure (settings such as board pins) or '
+        'done, with the instruction to give the user.',
+    inputSchema: JsonSchema.object(
+      properties: {'deviceId': JsonSchema.string()},
+      required: ['deviceId'],
+    ),
+    callback: (args, _) async =>
+        reply(await engine.handle('thing.next', {'id': args['deviceId']})),
+  );
+
+  server.registerTool(
     'configure_board_pins',
     description:
         'Names the pins of an OmniFlow board device and sets them up on the board. pins maps a '
@@ -306,6 +381,18 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'Lists flows with whether they are enabled, approved and running.',
     inputSchema: JsonSchema.object(),
     callback: (_, _) async => reply(await engine.handle('flow.list', {})),
+  );
+
+  // Read only: naming, writing or scanning a tag stays with the user, so
+  // agent-written text never names a tag or fakes a scan.
+  server.registerTool(
+    'list_tags',
+    description:
+        'Lists the NFC tags the user has named, with their ids, for rules that start '
+        'when one is scanned ("when": ["nfc:<tag id>"]). Naming, writing and scanning '
+        'a tag are the user\'s steps, in the app or with omni tag.',
+    inputSchema: JsonSchema.object(),
+    callback: (_, _) async => reply(await engine.handle('tag.list', {})),
   );
 
   server.registerTool(

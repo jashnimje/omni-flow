@@ -75,6 +75,16 @@ class EngineCore {
 
   Future<void> closeEvents() => _events.close();
 
+  /// The thing [thing] raised the event [key], which `on` triggers with
+  /// `event: true` fire on.
+  void raiseEvent(String thing, String key, Map<String, Object?> payload) =>
+      emit({
+        'event': 'thing.event',
+        'thing': thing,
+        'key': key,
+        'payload': payload,
+      });
+
   final _pending = <Future<void>>{};
 
   /// Runs background work so a failure becomes an event, and so close()

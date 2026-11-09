@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/engine_calls.dart';
 import '../state/providers.dart';
 import 'device_sheets.dart';
+import 'rule_builder.dart';
 import 'theme.dart';
 
 /// Flows: enable, run, review for approval, remove, and open the card view.
@@ -39,8 +41,8 @@ class FlowsScreen extends ConsumerWidget {
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  'No flows yet. Link two devices from a device menu on '
-                  'the Devices tab.',
+                  'No automations yet. Make a rule with New rule, or link '
+                  'two devices from a device menu on the Devices tab.',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -69,14 +71,16 @@ class FlowsScreen extends ConsumerWidget {
                               ),
                             ),
                           ),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => FlowCardsPage(
-                          flowId: f['id'] as String,
-                          name: '${f['name']}',
-                        ),
-                      ),
-                    ),
+                    onTap: () => EngineCalls.formOf(f) == 'rule'
+                        ? openRuleBuilder(context, id: f['id'] as String)
+                        : Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => FlowCardsPage(
+                                flowId: f['id'] as String,
+                                name: '${f['name']}',
+                              ),
+                            ),
+                          ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [

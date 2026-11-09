@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "nfc_tag",
+  "name": "NFC tag",
+  "category": "tag",
+  "icon": "nfc",
+  "transport": { "type": "virtual" },
+  "settings": [
+    { "key": "uid", "label": "Tag UID, hex" }
+  ],
+  "capabilities": [
+    { "id": "last_scanned", "type": "sensor", "label": "Last scanned", "stateJsonPath": "$.last_scanned" },
+    { "id": "scanned", "type": "event", "label": "Scanned" }
+  ]
+}

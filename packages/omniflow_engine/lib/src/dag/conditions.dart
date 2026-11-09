@@ -1,3 +1,5 @@
+import 'canonical.dart';
+
 /// What a condition rule can look at while a run is in progress.
 class EvalContext {
   const EvalContext({
@@ -22,8 +24,39 @@ class EvalContext {
       : name.startsWith('%')
       ? flowVars[name.substring(1)]
       : name.startsWith('msg.')
-      ? msg[name.substring(4)]
+      ? _path(msg, name.substring(4))
       : null;
+
+  /// One side of a `compare`: `{literal}`, `{state: "thing.key"}` (the
+  /// thing's current state), `{msg: "key"}` (the message, dotted paths
+  /// allowed) or `{var: "$Name" | "%name"}`.
+  Object? value(Object? side) {
+    if (side is! Map || side.length != 1) return null;
+    final ref = side.values.single;
+    switch (side.keys.single) {
+      case 'literal':
+        return ref;
+      case 'msg':
+        return ref is String ? _path(msg, ref) : null;
+      case 'var':
+        return ref is String ? variable(ref) : null;
+      case 'state':
+        if (ref is! String) return null;
+        final dot = ref.indexOf('.');
+        if (dot < 1) return null;
+        return deviceStates[ref.substring(0, dot)]?[ref.substring(dot + 1)];
+    }
+    return null;
+  }
+
+  static Object? _path(Map<String, Object?> from, String path) {
+    Object? at = from;
+    for (final part in path.split('.')) {
+      if (at is! Map) return null;
+      at = at[part];
+    }
+    return at;
+  }
 }
 
 /// Evaluates one condition rule (the shapes `checkRule` accepts).
@@ -43,33 +76,41 @@ bool evaluateRule(Map<String, Object?> rule, EvalContext ctx) {
         rule['start'] as String,
         rule['end'] as String,
       );
-    case 'var_equals':
-      return _equal(ctx.variable(rule['name'] as String), rule['value']);
-    case 'var_compare':
-      final left = ctx.variable(rule['name'] as String);
-      final right = rule['value'];
-      if (left is! num || right is! num) return false;
-      return switch (rule['op']) {
-        '<' => left < right,
-        '<=' => left <= right,
-        '>' => left > right,
-        '>=' => left >= right,
-        '==' => left == right,
-        '!=' => left != right,
-        _ => false,
-      };
-    case 'device_state_is':
-      final state = ctx.deviceStates[rule['deviceId']];
-      return state != null && _equal(state[rule['key']], rule['value']);
+    case 'days':
+      return (rule['days'] as List).contains(_weekdays[ctx.now.weekday - 1]);
+    case 'compare':
+      return compareValues(
+        ctx.value(rule['left']),
+        rule['op'] as String,
+        ctx.value(rule['right']),
+      );
   }
   throw ArgumentError('unknown rule type ${rule['type']}');
 }
 
+const _weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/// `==` and `!=` take any values, numbers by value and lists and objects by
+/// content. The ordering operators hold only between two numbers, so a
+/// missing value never passes a threshold.
+bool compareValues(Object? left, String op, Object? right) => switch (op) {
+  '==' => valuesEqual(left, right),
+  '!=' => !valuesEqual(left, right),
+  _ when left is! num || right is! num => false,
+  '<' => left < right,
+  '<=' => left <= right,
+  '>' => left > right,
+  '>=' => left >= right,
+  _ => false,
+};
+
 Iterable<Map<String, Object?>> _rules(Map<String, Object?> rule) =>
     (rule['rules'] as List).map((r) => Map<String, Object?>.from(r as Map));
 
-/// Numbers compare by value (80 equals 80.0), everything else with ==.
-bool _equal(Object? a, Object? b) => (a is num && b is num) ? a == b : a == b;
+/// Numbers by value (80 equals 80.0), lists and objects by content.
+bool valuesEqual(Object? a, Object? b) => (a is List || a is Map)
+    ? (b is List || b is Map) && canonicalJson(a) == canonicalJson(b)
+    : a == b;
 
 /// True when [now] is inside `start..end`, both `HH:MM`. A window whose end
 /// is earlier than its start crosses midnight, so 18:00 to 05:00 includes

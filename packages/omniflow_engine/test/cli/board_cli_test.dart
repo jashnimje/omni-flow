@@ -5,6 +5,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:args/command_runner.dart' show UsageException;
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
@@ -257,4 +258,69 @@ void main() {
     ]);
     expect((removed['board'] as Map)['pins'], ['button', 'knob']);
   });
+
+  test(
+    'board periph binds a reader over USB to a board added on Wi-Fi',
+    () async {
+      if (await VirtualBoard.build() == null) {
+        markTestSkipped('no C++ compiler for the virtual board');
+        return;
+      }
+      final usb = await VirtualBoard.start(node: 'desk_board', pty: true);
+      boards.add(usb);
+      final engine = await OmniEngine.open(home: home, secrets: secrets);
+      final added = await engine.handle('device.add', {
+        'id': 'desk',
+        'driver': 'omniflow_board',
+        'host': '192.0.2.30',
+        'stableId': 'desk_board',
+        'provision': false,
+      });
+      expect(added['ok'], isTrue, reason: '$added');
+      await engine.close();
+
+      final (code, set) = await omni([
+        'board',
+        'periph',
+        usb.tty!,
+        'nfc_rc522',
+        '--pin',
+        'ss=8',
+        '--pin',
+        'rst=9',
+      ]);
+      expect(code, 0, reason: '$set');
+      expect(set['devices'], ['desk']);
+      expect((set['periph'] as List).single, containsPair('type', 'nfc_rc522'));
+      final (_, got) = await omni(['device', 'get', 'desk']);
+      expect(
+        ((got['device'] as Map)['settings'] as Map)['periph'],
+        contains('nfc_rc522'),
+      );
+
+      final (clearCode, cleared) = await omni([
+        'board',
+        'periph',
+        usb.tty!,
+        'nfc_rc522',
+        '--clear',
+      ]);
+      expect(clearCode, 0, reason: '$cleared');
+      expect(cleared['periph'], isEmpty);
+
+      await expectLater(
+        OmniCommandRunner(out: StringBuffer()).run([
+          '--home',
+          home.path,
+          'board',
+          'periph',
+          usb.tty!,
+          'ir',
+          '--pin',
+          'tx',
+        ]),
+        throwsA(isA<UsageException>()),
+      );
+    },
+  );
 }

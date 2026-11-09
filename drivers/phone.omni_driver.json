@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "phone",
+  "name": "Phone",
+  "category": "phone",
+  "icon": "smartphone",
+  "transport": { "type": "virtual" },
+  "settings": [{ "key": "person", "label": "Person who carries this phone" }],
+  "capabilities": [
+    { "id": "wifi_ssid", "type": "sensor", "label": "Wi-Fi network", "stateJsonPath": "$.wifi_ssid" },
+    { "id": "wifi_bssid", "type": "sensor", "label": "Wi-Fi access point", "stateJsonPath": "$.wifi_bssid" },
+    { "id": "battery", "type": "sensor", "label": "Battery", "stateJsonPath": "$.battery" },
+    { "id": "charging", "type": "sensor", "label": "Charging", "stateJsonPath": "$.charging" },
+    { "id": "nfc_scanned", "type": "event", "label": "NFC tag scanned" }
+  ]
+}

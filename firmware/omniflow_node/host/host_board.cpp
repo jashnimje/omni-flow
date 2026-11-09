@@ -15,6 +15,10 @@
 // brings it back, which sends a hello at once, as a board does on a rejoin).
 // Every IR frame is reported as {"event":"sim.ir","bits":"0x..."}, and every
 // RF send as {"event":"sim.rf","protocol":1,"code":5393,"bits":24,"repeat":10}.
+// {"cmd":"sim.nfc","uid":"04a1b2c3d4e5f6","ms":500} holds a tag on the NFC
+// reader set with periph.set (either type) for ms milliseconds, or for one
+// read without ms. The core reads it like a real tag, so the board reports
+// {"event":"nfc.scanned","uid":"04a1b2c3d4e5f6"} once per presentation.
 // Wi-Fi joins at once and reports the loopback address, and wifi.status adds
 // "passwordLength" so a test can see the password arrived. A node.set that
 // changes the name sends a hello under the new name at once.
@@ -39,6 +43,12 @@ static Out* irOut = 0;
 static Core* simCore = 0;
 static bool simWifiUp = true;
 static Link* simLink = 0;
+// The simulated tag on the reader: its UID, and until when it stays.
+static uint8_t simUid[NFC_UID_MAX];
+static int simUidLen = 0;
+static bool simUidOnce = false;
+static unsigned long simUidUntil = 0;
+static uint8_t simReader = PERIPH_NONE;
 
 static unsigned long monotonicMs() {
   struct timespec ts;
@@ -73,8 +83,47 @@ class SimHal : public Hal {
     irOut->write(buf);
     irOut->end();
   }
+  void startNfc(uint8_t type, int, int) override {
+    simReader = type;
+    simUidLen = 0;
+  }
+  int pollNfc(uint8_t* uid) override {
+    if (!simUidLen) return 0;
+    if (!simUidOnce && (long)(millis() - simUidUntil) >= 0) {
+      simUidLen = 0;
+      return 0;
+    }
+    simUidOnce = false;
+    memcpy(uid, simUid, (size_t)simUidLen);
+    return simUidLen;
+  }
   unsigned long millis() override { return monotonicMs() - start; }
 };
+
+static int hexDigit(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+// Reads hex, with any ':' between bytes ignored. Returns the byte count, or
+// 0 unless it is a type A UID length (4, 7 or 10).
+static int parseUid(const char* text, uint8_t* uid) {
+  int n = 0;
+  for (const char* p = text; *p;) {
+    if (*p == ':') {
+      p++;
+      continue;
+    }
+    int hi = hexDigit(p[0]);
+    int lo = hi < 0 ? -1 : hexDigit(p[1]);
+    if (lo < 0 || n == NFC_UID_MAX) return 0;
+    uid[n++] = (uint8_t)(hi * 16 + lo);
+    p += 2;
+  }
+  return n == 4 || n == 7 || n == 10 ? n : 0;
+}
 
 static Settings settings;
 
@@ -212,7 +261,46 @@ class EventOut : public Out {
   Hal& hal_;
 };
 
-static bool simCommand(const char* line, Out& out) {
+static void simAck(Out& out, long id) {
+  char buf[96];
+  if (id >= 0) {
+    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"event\":\"sim.ack\",\"id\":%ld}\n", simCore->node(), id);
+  } else {
+    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"event\":\"sim.ack\"}\n", simCore->node());
+  }
+  out.write(buf);
+  out.end();
+}
+
+static bool simNfc(const char* line, Out& out, unsigned long now) {
+  Args args;
+  if (parseArgs(line, args)) return false;
+  const char* cmd = args.str("cmd");
+  if (!cmd || strcmp(cmd, "sim.nfc") != 0) return false;
+  long id = -1, ms = 0;
+  args.num("id", &id);
+  args.num("ms", &ms);
+  uint8_t uid[NFC_UID_MAX];
+  const char* text = args.str("uid");
+  int n = text ? parseUid(text, uid) : 0;
+  if (simReader == PERIPH_NONE) {
+    simCore->error(out, id, "no NFC reader is set, send periph.set first");
+  } else if (!n) {
+    simCore->error(out, id, "uid is 4, 7 or 10 bytes of hex");
+  } else if (ms < 0 || ms > 600000) {
+    simCore->error(out, id, "ms is 0 to 600000");
+  } else {
+    memcpy(simUid, uid, (size_t)n);
+    simUidLen = n;
+    simUidOnce = true;
+    simUidUntil = now + (unsigned long)ms;
+    simAck(out, id);
+  }
+  return true;
+}
+
+static bool simCommand(const char* line, Out& out, unsigned long now) {
+  if (strstr(line, "\"sim.nfc\"")) return simNfc(line, out, now);
   bool wifi = strstr(line, "\"sim.wifi\"") != 0;
   if (!wifi && !strstr(line, "\"sim.set\"")) return false;
   const char* p = strstr(line, "\"pin\"");
@@ -231,14 +319,7 @@ static bool simCommand(const char* line, Out& out) {
   }
   const char* id = strstr(line, "\"id\"");
   const char* ic = id ? strchr(id, ':') : 0;
-  char buf[96];
-  if (ic) {
-    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"event\":\"sim.ack\",\"id\":%ld}\n", simCore->node(), atol(ic + 1));
-  } else {
-    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"event\":\"sim.ack\"}\n", simCore->node());
-  }
-  out.write(buf);
-  out.end();
+  simAck(out, ic ? atol(ic + 1) : -1);
   return true;
 }
 
@@ -258,8 +339,8 @@ int main(int argc, char** argv) {
     if (!strcmp(argv[i], "--hello-every")) helloEvery = atoi(argv[i + 1]);
     i++;
   }
-  settings.irPin = -1;
-  settings.rfPin = -1;
+  settings.periph.irPin = -1;
+  settings.periph.rfPin = -1;
   snprintf(settings.node, sizeof(settings.node), "%s", node);
   SimHal hal;
   Core core(settings.node, "omniflow-node/2 host", BOARD_HOST, hal);
@@ -325,7 +406,7 @@ int main(int argc, char** argv) {
           line[lineLen] = 0;
           if (lineTooLong) {
             core.error(serial, -1, "line too long");
-          } else if (lineLen && !simCommand(line, serial)) {
+          } else if (lineLen && !simCommand(line, serial, hal.millis())) {
             setup.fromSerial = true;
             core.handleLine(line, serial);
             setup.fromSerial = false;
@@ -352,7 +433,7 @@ int main(int argc, char** argv) {
         reply.fd = udp.fd;
         reply.to = from;
         reply.set = true;
-        if (!simCommand(buf, reply) && core.handleLine(buf, reply)) addPeer(from, hal.millis());
+        if (!simCommand(buf, reply, hal.millis()) && core.handleLine(buf, reply)) addPeer(from, hal.millis());
       }
     }
     // The first update is the join, which says hello at once.

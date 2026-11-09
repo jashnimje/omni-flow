@@ -2,10 +2,13 @@ import 'dart:io';
 
 import 'api_error.dart';
 import 'engine_core.dart';
+import 'nfc_tags.dart';
+import '../dag/conditions.dart' show valuesEqual;
 import '../devices/board.dart';
 import '../devices/channels.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
+import '../manifest/capability.dart' show eventKeyPattern;
 import '../manifest/driver_registry.dart';
 import '../storage/database.dart';
 import '../template/template_renderer.dart';
@@ -14,9 +17,13 @@ import '../transports/udp_transport.dart';
 /// What the engine does with OmniFlow boards as they talk to it: board
 /// events, hellos, moves, and bringing a board to its configured pins.
 class BoardRuntime {
-  BoardRuntime(this._core);
+  BoardRuntime(this._core, {this._capabilitiesChanged});
 
   final EngineCore _core;
+
+  /// Called when a board's peripherals change what it offers, so flows that
+  /// name its events load again.
+  final Future<void> Function()? _capabilitiesChanged;
 
   OmniDatabase get _db => _core.db;
   DriverRegistry get _registry => _core.registry;
@@ -51,8 +58,27 @@ class BoardRuntime {
     return describe;
   }
 
-  Future<void> _remember(String id, Map<String, Object?> describe) =>
-      DriftBoardDescribeStore(_db).put(id, describe, DateTime.now().toUtc());
+  /// Keeps the describe, and the peripherals it lists as the board's
+  /// `periph` setting, which [manifestFor] reads to give the board the
+  /// events they raise.
+  Future<void> rememberDescribe(String id, Map<String, Object?> describe) =>
+      _remember(id, describe);
+
+  Future<void> _remember(String id, Map<String, Object?> describe) async {
+    await DriftBoardDescribeStore(_db)
+        .put(id, describe, DateTime.now().toUtc());
+    final periph = periphTypesOf(describe);
+    if (periph == null) return;
+    final device = await DriftDeviceStore(_db).get(id);
+    if (device == null || valuesEqual(device.settings['periph'], periph)) {
+      return;
+    }
+    await _devices.updateDevice(
+      id,
+      (d) => d.copyWith(settings: {...d.settings, 'periph': periph}),
+    );
+    await _capabilitiesChanged?.call();
+  }
 
   /// Unsolicited board lines (button presses, knob turns) become
   /// `board.event`. Replies (ack, error, describe) are not events. A pin
@@ -82,15 +108,27 @@ class BoardRuntime {
   ) async {
     if (!isLocalNetworkAddress(from)) return;
     final devices = await DriftDeviceStore(_db).all();
-    final sender = devices
+    final node = '${json['node']}'.toLowerCase();
+    final candidates = devices
         .where((d) => d.host == from.address)
         .where(
           (d) =>
               !isBoardDriver(_registry[d.driverId]) ||
               d.stableId == null ||
-              d.stableId!.toLowerCase() == '${json['node']}'.toLowerCase(),
+              d.stableId!.toLowerCase() == node,
         )
-        .firstOrNull;
+        .toList();
+    // Several devices can share one address (a hub, loopback fakes), and
+    // the board's events belong to the one that is that node.
+    final sender =
+        candidates
+            .where(
+              (d) =>
+                  d.stableId?.toLowerCase() == node ||
+                  d.id == node.replaceAll('-', '_'),
+            )
+            .firstOrNull ??
+        candidates.firstOrNull;
     if (sender == null) return;
     boardEvent(json, sender.id, from.address);
   }
@@ -107,18 +145,52 @@ class BoardRuntime {
     if (type == 'hello') return _onHello(json, device, from);
     if (device == null) return;
     final manifest = _registry[device.driverId];
-    if (!isBoardDriver(manifest)) return;
-    if (type == 'boot') {
-      await provisionBoard(device.id);
-    } else if (type == 'pin.changed') {
-      final value = json['value'];
-      final pin = boardPinsOf(
-        device,
-        manifest!,
-      ).where((p) => p.pin == json['pin']).firstOrNull;
-      if (pin == null || value is! num) return;
-      await _devices.mergeState(device.id, {pin.name: pin.stateValue(value)});
+    final value = json['value'];
+    final pin = type == 'pin.changed' && isBoardDriver(manifest)
+        ? boardPinsOf(
+            device,
+            manifest!,
+          ).where((p) => p.pin == json['pin']).firstOrNull
+        : null;
+    if (pin != null && value is num) {
+      final logical = pin.stateValue(value);
+      await _devices.mergeState(device.id, {pin.name: logical});
+      final payload = {'pin': pin.pin, 'value': logical};
+      for (final key in pin.eventKeys) {
+        if (key.endsWith('.changed') ||
+            key.endsWith(logical == true ? '.pressed' : '.released')) {
+          _core.raiseEvent(device.id, key, payload);
+        }
+      }
+      return;
     }
+    // Only a board has a reader. Another device at the same address must not
+    // fire a tag, as the nfc.scanned command refuses a non-board source.
+    if (type == boardNfcEvent) {
+      if (isBoardDriver(manifest)) await _onNfc(device, json);
+      return;
+    }
+    // Lines the firmware or a v1 board sends on its own (boot, wifi,
+    // button_press) are events on the board under their own name.
+    if (type is String && eventKeyPattern.hasMatch(type)) {
+      _core.raiseEvent(device.id, type, json);
+    }
+    if (isBoardDriver(manifest) && type == 'boot') {
+      await provisionBoard(device.id);
+    }
+  }
+
+  /// The board's reader saw a tag. It goes the way `nfc.scanned` with the
+  /// board as its source does: `scanned` on the tag thing with that UID,
+  /// then `nfc.scanned` on the board. A line with no valid UID is dropped.
+  Future<void> _onNfc(Device board, Map<String, Object?> json) async {
+    final uid = normalizeUid(json['uid']);
+    if (uid == null) return;
+    await NfcTags(_core).scan(
+      uid: uid,
+      reader: (source: board.id, thing: board.id, event: boardNfcEvent),
+      at: DateTime.now(),
+    );
   }
 
   Future<Device?> _boardByNode(Object? node) async {

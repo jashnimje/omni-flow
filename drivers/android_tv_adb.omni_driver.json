@@ -8,6 +8,7 @@
   "settings": [
     { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" }
   ],
+  "setup": ["pair", "configure:mac?"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },
   "capabilities": [
     { "id": "wake", "type": "action", "label": "Wake", "command": { "op": "key", "key": "wakeup" } },

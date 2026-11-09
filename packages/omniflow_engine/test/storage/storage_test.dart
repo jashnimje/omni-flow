@@ -71,6 +71,15 @@ const v2Schema = [
   'CREATE TABLE "execution_log" ("id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "run_id" TEXT NOT NULL, "flow_id" TEXT NOT NULL, "outcome" TEXT NOT NULL, "started_at" INTEGER NOT NULL, "trace_json" TEXT NOT NULL)',
 ];
 
+/// The schema at version 3: version 2, a trusted column and board describes.
+final v3Schema = [
+  for (final statement in v2Schema)
+    statement.startsWith('CREATE TABLE "flows"')
+        ? 'CREATE TABLE "flows" ("id" TEXT NOT NULL, "flow_json" TEXT NOT NULL, "enabled" INTEGER NOT NULL DEFAULT 1 CHECK ("enabled" IN (0, 1)), "approved" INTEGER NOT NULL DEFAULT 1 CHECK ("approved" IN (0, 1)), "trusted" INTEGER NOT NULL DEFAULT 0 CHECK ("trusted" IN (0, 1)), "updated_at" INTEGER NOT NULL, PRIMARY KEY ("id"))'
+        : statement,
+  'CREATE TABLE "board_describes" ("device_id" TEXT NOT NULL, "describe_json" TEXT NOT NULL, "seen_at" INTEGER NOT NULL, PRIMARY KEY ("device_id"))',
+];
+
 void main() {
   deviceStoreContract('InMemoryDeviceStore', () async => InMemoryDeviceStore());
   deviceStoreContract('DriftDeviceStore', () async {
@@ -145,7 +154,7 @@ void main() {
       ]);
       expect(await DriftGlobalStore(db).all(), {'HomeMode': 'home'});
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 3);
+      expect(version.read<int>('user_version'), 4);
     },
   );
 
@@ -195,7 +204,7 @@ void main() {
         'board': 'esp32',
       });
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 3);
+      expect(version.read<int>('user_version'), 4);
     },
   );
 
@@ -228,6 +237,83 @@ void main() {
       at: DateTime.utc(2026),
     );
     expect((await store.get('a'))!.trusted, isFalse);
+  });
+
+  test('a v3 database marks links as links and the rest as graphs', () async {
+    final dir = await Directory.systemTemp.createTemp('omni_migrate_v3');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/omniflow.sqlite');
+    final v3 = sqlite3.open(file.path);
+    for (final statement in v3Schema) {
+      v3.execute(statement);
+    }
+    for (final id in ['link_0123456789ab', 'linked_lamps', 'evening']) {
+      v3.execute(
+        'INSERT INTO flows (id, flow_json, enabled, approved, trusted, updated_at) '
+        'VALUES (?, ?, 1, 0, 1, 0)',
+        [id, '{"id":"$id"}'],
+      );
+    }
+    v3.execute('PRAGMA user_version = 3');
+    v3.close();
+
+    final db = OmniDatabase.file(file);
+    addTearDown(db.close);
+    final flows = {
+      for (final r in await DriftFlowStore(db).all()) r.json['id']: r,
+    };
+    expect(flows['link_0123456789ab']!.source, FlowRecord.link);
+    expect(flows['linked_lamps']!.source, FlowRecord.graph);
+    expect(flows['evening']!.source, FlowRecord.graph);
+    for (final r in flows.values) {
+      expect(r.spec, isNull);
+      expect((r.enabled, r.approved, r.trusted), (true, false, true));
+    }
+    final version = await db.customSelect('PRAGMA user_version').getSingle();
+    expect(version.read<int>('user_version'), 4);
+  });
+
+  test('a flow keeps its source and spec unless put names a source', () async {
+    final db = OmniDatabase.memory();
+    addTearDown(db.close);
+    final store = DriftFlowStore(db);
+    final at = DateTime.utc(2026);
+    await store.put('g', {'id': 'g'}, enabled: true, approved: true, at: at);
+    expect((await store.get('g'))!.source, FlowRecord.graph);
+    await store.put(
+      'r',
+      {'id': 'r'},
+      enabled: true,
+      approved: true,
+      at: at,
+      source: FlowRecord.rule,
+      spec: {'name': 'R'},
+    );
+    await store.put('r', {'id': 'r'}, enabled: false, approved: true, at: at);
+    final kept = (await store.get('r'))!;
+    expect((kept.source, kept.enabled), (FlowRecord.rule, false));
+    expect(kept.spec, {'name': 'R'});
+    await store.put(
+      'r',
+      {'id': 'r'},
+      enabled: true,
+      approved: true,
+      at: at,
+      source: FlowRecord.graph,
+    );
+    final promoted = (await store.get('r'))!;
+    expect((promoted.source, promoted.spec), (FlowRecord.graph, null));
+    expect(
+      () => store.put(
+        'x',
+        {'id': 'x'},
+        enabled: true,
+        approved: true,
+        at: at,
+        source: 'script',
+      ),
+      throwsArgumentError,
+    );
   });
 
   test('the last describe of each board is kept and replaced', () async {

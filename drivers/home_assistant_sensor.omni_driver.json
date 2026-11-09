@@ -20,6 +20,7 @@
     { "key": "entityId", "label": "Entity id, such as sensor.living_room_temperature" },
     { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
   ],
+  "setup": ["secret:token", "configure:entityId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [

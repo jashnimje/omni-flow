@@ -211,6 +211,106 @@ void main() {
     expect(bulbReceived.map((m) => m['method']), ['setState']);
   });
 
+  test('a migrated board_event flow reads the board node from the line it '
+      'sent', () async {
+    final board = await UdpTransport.bind();
+    addTearDown(board.close);
+    board.incoming.listen((d) {
+      final cmd = jsonDecode(d.text) as Map;
+      board.send(
+        d.address,
+        d.port,
+        utf8.encode(
+          jsonEncode({'node': 'pico', 'event': 'describe', 'id': cmd['id']}),
+        ),
+      );
+      board.send(
+        d.address,
+        d.port,
+        utf8.encode(jsonEncode({'node': 'pico', 'event': 'button_press'})),
+      );
+    });
+    final titles = <Object?>[];
+    final sub = engine.events.listen((e) {
+      if (e['event'] == 'flow.announce') titles.add(e['title']);
+    });
+    addTearDown(sub.cancel);
+    await ok('driver.register', {
+      'manifest': jsonDecode(v1DriverSources['v1_board_udp.omni_driver.json']!),
+    });
+    await ok('device.add', {
+      'id': 'pico',
+      'driver': 'omniflow_mcu_node',
+      'host': '127.0.0.1',
+      'port': board.localPort,
+    });
+    await ok('flow.save', {
+      'flow': {
+        'schemaVersion': 1,
+        'id': 'button_note',
+        'name': 'Button note',
+        'nodes': [
+          {
+            'id': 'press',
+            'type': 'board_event',
+            'config': {'event': 'button_press', 'node': 'pico'},
+          },
+          {
+            'id': 'note',
+            'type': 'notify',
+            'config': {'title': '{{msg.node}} pressed'},
+          },
+        ],
+        'edges': [edge('press', 'out', 'note')],
+      },
+    });
+    await ok('device.refresh', {'id': 'pico'});
+    await until(() => titles.isNotEmpty);
+    expect(titles, ['pico pressed']);
+  });
+
+  test('a board_event migrates onto a v1 board, and an unknown node is '
+      'refused', () async {
+    await ok('driver.register', {
+      'manifest': jsonDecode(v1DriverSources['v1_board_udp.omni_driver.json']!),
+    });
+    await ok('device.add', {
+      'id': 'desk_button',
+      'driver': 'omniflow_mcu_node',
+      'host': '192.0.2.40',
+    });
+    Map<String, Object?> old(String id, Map<String, Object?> config) => {
+      'schemaVersion': 1,
+      'id': id,
+      'name': id,
+      'nodes': [
+        {'id': 'press', 'type': 'board_event', 'config': config},
+      ],
+      'edges': <Object?>[],
+    };
+    Future<Object?> thingOf(String id) async {
+      final flow = (await ok('flow.get', {'id': id}))['flow'] as Map;
+      final node = (flow['nodes'] as List).single as Map;
+      return (node['config'] as Map)['thing'];
+    }
+
+    await ok('flow.save', {
+      'flow': old('any', {'event': 'button_press'}),
+    });
+    expect(await thingOf('any'), 'desk_button');
+    await ok('flow.save', {
+      'flow': old('named', {'event': 'button_press', 'node': 'desk-button'}),
+    });
+    expect(await thingOf('named'), 'desk_button');
+
+    final refused = await engine.handle('flow.save', {
+      'flow': old('pico', {'event': 'button_press', 'node': 'pico'}),
+    });
+    expect(refused['ok'], isFalse);
+    expect((refused['error'] as Map)['type'], 'invalid');
+    expect('${(refused['error'] as Map)['message']}', contains('pico'));
+  });
+
   test(
     'a high-risk flow from an untrusted caller waits for approval',
     () async {
@@ -275,7 +375,7 @@ void main() {
       expect(result['ok'], isFalse);
       expect(
         ((result['error'] as Map)['issues'] as List).join(),
-        contains('no zone nowhere'),
+        contains('no thing nowhere'),
       );
       expect((await ok('flow.list', {}))['flows'], isEmpty);
     },

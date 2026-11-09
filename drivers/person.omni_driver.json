@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "person",
+  "name": "Person",
+  "category": "presence",
+  "icon": "person",
+  "transport": { "type": "virtual" },
+  "settings": [{ "key": "homePlace", "label": "Place that counts as home (default home)" }],
+  "capabilities": [
+    { "id": "home", "type": "sensor", "label": "At home", "stateJsonPath": "$.home" },
+    { "id": "place", "type": "sensor", "label": "Place", "stateJsonPath": "$.place" }
+  ]
+}

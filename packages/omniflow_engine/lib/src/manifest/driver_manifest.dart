@@ -21,7 +21,11 @@ enum TransportType {
   omniflow('omniflow'),
 
   /// JSON over a WebSocket (LG webOS, Samsung Tizen TVs).
-  websocket('websocket');
+  websocket('websocket'),
+
+  /// No network at all: the engine itself keeps the thing's state, from
+  /// inputs such as the phone's sensors (the phone, people, places, tags).
+  virtual('virtual');
 
   const TransportType(this.wireName);
 
@@ -104,6 +108,47 @@ class PairingSpec {
   final String? instructions;
 }
 
+/// The kinds of step a device of a driver goes through after it is added.
+enum SetupKind {
+  /// Runs the driver's pairing (`device.pair`).
+  pair('pair'),
+
+  /// The user stores a secret setting (`secret.set`).
+  secret('secret'),
+
+  /// The user sets a plain setting (`thing.configure`).
+  configure('configure');
+
+  const SetupKind(this.wireName);
+
+  final String wireName;
+
+  static SetupKind? fromWire(Object? name) =>
+      values.where((k) => k.wireName == name).firstOrNull;
+}
+
+/// One entry of a manifest's `setup`: `pair`, `secret:<key>` or
+/// `configure:<key>`, with a trailing `?` when the step can be skipped.
+class SetupStep {
+  const SetupStep(this.kind, {this.key, this.optional = false});
+
+  final SetupKind kind;
+
+  /// The setting the step fills, for [SetupKind.secret] and
+  /// [SetupKind.configure].
+  final String? key;
+
+  /// An optional step is offered but never blocks `done`.
+  final bool optional;
+
+  String get wireName =>
+      '${kind.wireName}${key == null ? '' : ':$key'}${optional ? '?' : ''}';
+
+  static final pattern = RegExp(
+    r'^(pair|secret|configure)(?::([A-Za-z][A-Za-z0-9_]*))?(\?)?$',
+  );
+}
+
 class TransportSpec {
   const TransportSpec({
     required this.type,
@@ -163,6 +208,7 @@ class DriverManifest {
     this.statePoll,
     this.reliability = const Reliability(),
     this.pairing,
+    this.setup = const [],
   });
 
   final String id;
@@ -178,6 +224,10 @@ class DriverManifest {
   final List<CapabilitySpec> capabilities;
   final PairingSpec? pairing;
 
+  /// What a device of this driver needs after it is added, in order. The
+  /// engine reports the first step not done yet as `next`.
+  final List<SetupStep> setup;
+
   /// How [pairing] or the transport says a device is paired, or null when
   /// it needs no pairing.
   PairingSpec? get pairingSpec =>
@@ -191,24 +241,45 @@ class DriverManifest {
   CapabilitySpec? capability(String id) =>
       capabilities.where((c) => c.id == id).firstOrNull;
 
+  /// True when the device's state is the whole object it pushes or answers
+  /// a poll with (a Zigbee button's `action`, WiZ `rssi`), so it can hold
+  /// keys no capability declares. False when every pushed topic lands under
+  /// one named key and nothing is polled.
+  bool get reportsUndeclaredState {
+    if (statePoll != null) return true;
+    final push = statePush;
+    if (push == null) return false;
+    final topics = push['topics'];
+    if (topics is! List) return true;
+    return topics.any((t) => t is! Map || t['key'] is! String);
+  }
+
   /// This manifest with [extra] capabilities after its own, for drivers whose
-  /// capabilities depend on the device (an OmniFlow board's pins).
-  DriverManifest withCapabilities(List<CapabilitySpec> extra) => extra.isEmpty
-      ? this
-      : DriverManifest(
-          id: id,
-          name: name,
-          category: category,
-          icon: icon,
-          transport: transport,
-          discovery: discovery,
-          settings: settings,
-          statePush: statePush,
-          statePoll: statePoll,
-          reliability: reliability,
-          capabilities: List.unmodifiable([...capabilities, ...extra]),
-          pairing: pairing,
-        );
+  /// capabilities depend on the device (an OmniFlow board's pins and
+  /// peripherals). When [keep] is given, only the own capabilities it
+  /// accepts stay.
+  DriverManifest withCapabilities(
+    List<CapabilitySpec> extra, {
+    bool Function(CapabilitySpec capability)? keep,
+  }) {
+    final kept = keep == null ? capabilities : capabilities.where(keep);
+    if (extra.isEmpty && kept.length == capabilities.length) return this;
+    return DriverManifest(
+      id: id,
+      name: name,
+      category: category,
+      icon: icon,
+      transport: transport,
+      discovery: discovery,
+      settings: settings,
+      statePush: statePush,
+      statePoll: statePoll,
+      reliability: reliability,
+      capabilities: List.unmodifiable([...kept, ...extra]),
+      pairing: pairing,
+      setup: setup,
+    );
+  }
 
   /// High risk when any capability, or the transport itself, executes commands on a host.
   bool get isHighRisk =>
@@ -376,6 +447,17 @@ class DriverManifest {
         if (s.secret) s.key,
     }, transport?.type);
 
+    final setup = _parseSetup(
+      issues.optionalList(map, 'setup', root),
+      '$root.setup',
+      issues,
+      settings,
+      canPair:
+          pairing != null ||
+          transport?.type == TransportType.adb ||
+          transport?.type == TransportType.websocket,
+    );
+
     final statePush = issues.optionalMap(map, 'statePush', root);
     final statePoll = issues.optionalMap(map, 'statePoll', root);
     issues.jsonPath(statePush?['jsonPath'], '$root.statePush.jsonPath');
@@ -404,7 +486,61 @@ class DriverManifest {
       reliability: reliability,
       capabilities: List.unmodifiable(capabilities),
       pairing: pairing,
+      setup: List.unmodifiable(setup),
     );
+  }
+
+  static List<SetupStep> _parseSetup(
+    List<Object?> raw,
+    String path,
+    IssueCollector issues,
+    List<SettingSpec> settings, {
+    required bool canPair,
+  }) {
+    final steps = <SetupStep>[];
+    final seen = <String>{};
+    for (var i = 0; i < raw.length; i++) {
+      final at = '$path[$i]';
+      final entry = raw[i];
+      final match = entry is String
+          ? SetupStep.pattern.firstMatch(entry)
+          : null;
+      if (match == null) {
+        issues.add(at, 'must be pair, secret:<key> or configure:<key>');
+        continue;
+      }
+      final kind = SetupKind.fromWire(match.group(1))!;
+      final key = match.group(2);
+      final optional = match.group(3) != null;
+      final setting = settings.where((s) => s.key == key).firstOrNull;
+      switch (kind) {
+        case SetupKind.pair:
+          if (key != null || optional) {
+            issues.add(at, 'pair takes no key and cannot be optional');
+            continue;
+          }
+          if (!canPair) {
+            issues.add(at, 'pair needs a pairing entry or a TV transport');
+            continue;
+          }
+        case SetupKind.secret:
+          if (setting == null || !setting.secret) {
+            issues.add(at, '${key ?? 'secret'} needs a secret setting key');
+            continue;
+          }
+        case SetupKind.configure:
+          if (setting == null || setting.secret) {
+            issues.add(at, '${key ?? 'configure'} needs a plain setting key');
+            continue;
+          }
+      }
+      if (!seen.add('${kind.wireName}:$key')) {
+        issues.add(at, 'duplicates ${entry as String}');
+        continue;
+      }
+      steps.add(SetupStep(kind, key: key, optional: optional));
+    }
+    return steps;
   }
 
   static PairingSpec? _parsePairing(

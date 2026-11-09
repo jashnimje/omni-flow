@@ -2,13 +2,26 @@ import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
 final _registry = DriverRegistry.withBuiltIns();
-const _devices = {'desk_lamp': 'philips_wiz_udp', 'mac_mini': 'macos_host'};
+const _devices = {
+  'desk_lamp': 'philips_wiz_udp',
+  'mac_mini': 'macos_host',
+  'desk': 'place',
+};
+
+Set<String>? _of(String thing, bool event) => {
+  for (final c in _registry[_devices[thing]!]!.capabilities)
+    if (event && c.type == CapabilityType.event)
+      c.id
+    else if (!event)
+      ?stateKeyOf(c.stateJsonPath),
+};
 
 final refs = FlowReferences(
   devices: _devices.keys.toSet(),
-  zones: const {'desk'},
   flows: const {'other_flow'},
   capabilityOf: (d, c) => _registry[_devices[d]!]?.capability(c),
+  stateKeysOf: (t) => _devices.containsKey(t) ? _of(t, false) : {},
+  eventsOf: (t) => _devices.containsKey(t) ? _of(t, true) : {},
 );
 
 /// The evening-desk flow from docs/DESIGN.md.
@@ -22,8 +35,12 @@ Map<String, Object?> eveningFlow() => {
   'nodes': <Object?>[
     {
       'id': 'trig_desk',
-      'type': 'zone_change',
-      'config': {'zoneId': 'desk', 'transition': 'entered'},
+      'type': 'on',
+      'config': {
+        'thing': 'desk',
+        'key': 'inside',
+        'change': {'to': true},
+      },
     },
     {
       'id': 'cond_evening',
@@ -31,7 +48,12 @@ Map<String, Object?> eveningFlow() => {
       'config': {
         'rules': [
           {'type': 'time_window', 'start': '18:00', 'end': '05:00'},
-          {'type': 'var_equals', 'name': r'$HomeWifiConnected', 'value': true},
+          {
+            'type': 'compare',
+            'left': {'var': r'$HomeWifiConnected'},
+            'op': '==',
+            'right': {'literal': true},
+          },
         ],
       },
     },
@@ -183,11 +205,42 @@ void main() {
   });
 
   group('config errors', () {
-    test('a bad time, an unknown zone and transition', () {
+    test('wait_until checks its thing like a trigger, and needs a timeout', () {
+      final json = eveningFlow();
+      nodesOf(json)[1] = {
+        'id': 'cond_evening',
+        'type': 'wait_until',
+        'config': {
+          'thing': 'desk',
+          'key': 'outside',
+          'change': {'to': false},
+        },
+      };
+      final got = issues(json);
+      expect(
+        got,
+        contains(
+          startsWith(r'$.nodes[1].config.key: desk has no state outside'),
+        ),
+      );
+      expect(got, contains(r'$.nodes[1].config.timeoutMs: is required'));
+      expect(
+        got,
+        contains(
+          startsWith(
+            r'$.edges[1].from.port: wait_until has no output port true',
+          ),
+        ),
+      );
+    });
+
+    test('a bad time, an unknown thing and a second trigger mode', () {
       final json = eveningFlow();
       nodesOf(json)[0]['config'] = {
-        'zoneId': 'garage',
-        'transition': 'hovering',
+        'thing': 'garage',
+        'key': 'inside',
+        'change': {'to': true},
+        'crosses': {'above': 1},
       };
       ((nodesOf(json)[1]['config'] as Map)['rules'] as List)[0] = {
         'type': 'time_window',
@@ -195,8 +248,7 @@ void main() {
         'end': '05:00',
       };
       final got = issues(json).join('\n');
-      expect(got, contains('no zone garage'));
-      expect(got, contains('must be one of entered, exited'));
+      expect(got, contains('takes one of event, change or crosses'));
       expect(got, contains('must be a 24-hour time'));
     });
 
@@ -241,10 +293,16 @@ void main() {
               'type': 'any_of',
               'rules': [
                 {
-                  'type': 'var_compare',
-                  'name': 'HomeMode',
+                  'type': 'compare',
+                  'left': {'var': 'HomeMode'},
                   'op': '~',
-                  'value': 'x',
+                  'right': {'literal': 'x'},
+                },
+                {
+                  'type': 'compare',
+                  'left': {'msg': 'value'},
+                  'op': '<',
+                  'right': {'literal': 'x'},
                 },
               ],
             },
@@ -252,9 +310,9 @@ void main() {
         ],
       };
       final got = issues(json).join('\n');
-      expect(got, contains(r'must be $Name, %name or msg.key'));
+      expect(got, contains(r'must be $Name (global) or %name (run)'));
       expect(got, contains('must be one of <, <=, >, >=, ==, !='));
-      expect(got, contains('value: must be a number'));
+      expect(got, contains('literal: must be a number for <'));
     });
 
     test('transformer and flow control configs', () {

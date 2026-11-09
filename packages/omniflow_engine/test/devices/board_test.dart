@@ -102,6 +102,50 @@ void main() {
     expect(registry['omniflow_board']!.capabilities, hasLength(3));
   });
 
+  test('a board that reported its peripherals offers only the transmitters '
+      'and readers it has', () {
+    final registry = DriverRegistry.withBuiltIns();
+    List<String> idsWith(Object? periph) => [
+      for (final c in manifestFor(
+        registry,
+        Device(
+          id: 'desk',
+          name: 'Desk',
+          driverId: 'omniflow_board',
+          host: '/dev/cu.usbserial-1',
+          settings: {'periph': ?periph},
+        ),
+      )!.capabilities)
+        c.id,
+    ];
+    expect(idsWith(null), ['ir_nec', 'ir_code', 'rf_send']);
+    expect(idsWith(<String>[]), isEmpty);
+    expect(idsWith(['rf']), ['rf_send']);
+    expect(idsWith(['ir', 'nfc_pn532']), ['ir_nec', 'ir_code', 'nfc.scanned']);
+  });
+
+  test('a describe gives the peripheral types, then the ir and rf flags', () {
+    expect(periphTypesOf(const {'board': 'esp32'}), isNull);
+    expect(periphTypesOf(const {'ir': false, 'rf': true}), ['rf']);
+    expect(
+      periphTypesOf(const {
+        'ir': true,
+        'rf': false,
+        'periph': [
+          {
+            'type': 'nfc_rc522',
+            'pins': {'ss': 8},
+          },
+          {
+            'type': 'ir',
+            'pins': {'tx': 4},
+          },
+        ],
+      }),
+      ['nfc_rc522', 'ir'],
+    );
+  });
+
   test('pins the board does not offer are named with what it can do', () {
     final pins = parseBoardPins({
       'radio': {'pin': 25, 'mode': 'out'},

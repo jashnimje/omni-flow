@@ -5,6 +5,7 @@ import 'dart:io';
 import 'api_error.dart';
 import 'board_runtime.dart';
 import 'engine_core.dart';
+import 'things_runtime.dart';
 import '../devices/board.dart';
 import '../devices/device.dart';
 import '../devices/wiz_push.dart';
@@ -15,10 +16,11 @@ import '../transports/udp_transport.dart';
 /// The hub: what runs flows on their own and keeps device state live, from
 /// WiZ pushes, board hellos, MQTT watches, state polls and flow timers.
 class HubRuntime {
-  HubRuntime(this._core, this._boards);
+  HubRuntime(this._core, this._boards, this._things);
 
   final EngineCore _core;
   final BoardRuntime _boards;
+  final ThingsRuntime _things;
 
   void _emit(Map<String, Object?> event) => _core.emit(event);
   void _track(Future<void> work) => _core.track(work);
@@ -67,7 +69,7 @@ class HubRuntime {
       _hubTimers.add(
         Timer.periodic(
           const Duration(seconds: 1),
-          (_) => _core.flows.zoneTick(DateTime.now()),
+          (_) => _track(_things.tick(DateTime.now())),
         ),
       );
     } catch (_) {

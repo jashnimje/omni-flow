@@ -44,6 +44,18 @@ class DiscoveredDevice {
   };
 }
 
+/// What [DeviceDiscovery.discoverAll] found, by driver id, and the methods
+/// that could not open their sockets.
+class DiscoverySweep {
+  const DiscoverySweep(this.found, this.failures, this.runs);
+
+  final Map<String, List<DiscoveredDevice>> found;
+  final List<String> failures;
+
+  /// How many listens ran. When every one failed nothing could be heard.
+  final int runs;
+}
+
 /// Runs every network discovery method a driver declares and merges the
 /// results: `udp_broadcast`, `tuya_broadcast` and `mdns`. Serial discovery
 /// stays with the serial channel, which owns the ports.
@@ -76,71 +88,153 @@ class DeviceDiscovery {
     Duration window = const Duration(seconds: 2),
     int? portOverride,
   }) async {
-    final runs = <Future<List<DiscoveredDevice>>>[];
-    final failures = <String>[];
-    void add(String method, Future<List<DiscoveredDevice>> run) => runs.add(
-      run.catchError((Object e) {
-        failures.add(_cannotListen(method, e as SocketException));
-        return const <DiscoveredDevice>[];
-      }, test: (e) => e is SocketException),
+    final sweep = await discoverAll(
+      [driver],
+      window: window,
+      portOverride: portOverride,
     );
-    for (final spec in driver.discovery) {
-      final specWindow = _longer(window, spec.config['windowMs']);
-      switch (spec.method) {
-        case 'udp_broadcast':
-          add(
-            spec.method,
-            udp
-                .discover(
-                  driver,
-                  window: specWindow,
-                  portOverride: portOverride,
-                )
-                .then(
-                  (found) => [
-                    for (final f in found)
-                      DiscoveredDevice(
-                        host: f.host,
-                        stableId: f.stableId,
-                        reply: f.reply,
-                        method: spec.method,
+    if (sweep.runs > 0 && sweep.failures.length == sweep.runs) {
+      throw ApiError('unavailable', sweep.failures.join('. '));
+    }
+    return sweep.found[driver.id] ?? const [];
+  }
+
+  /// Runs the network discovery of every driver in [drivers] at once, each
+  /// listen shared by the drivers that need it: one Tuya listen and one
+  /// browse per mDNS service, however many drivers declare them. [methods]
+  /// limits which methods run (all when null). A method that cannot open
+  /// its socket is reported in [DiscoverySweep.failures] and the rest go on.
+  Future<DiscoverySweep> discoverAll(
+    List<DriverManifest> drivers, {
+    Duration window = const Duration(seconds: 2),
+    Set<String>? methods,
+    int? portOverride,
+  }) async {
+    bool wanted(String method) => methods == null || methods.contains(method);
+    // Each run yields (driver id, device) pairs, merged in the order the
+    // runs were started so the result does not depend on which answers first.
+    final runs = <Future<List<(String, DiscoveredDevice)>>>[];
+    final failures = <String>[];
+    void run(String method, Future<List<(String, DiscoveredDevice)>> work) =>
+        runs.add(
+          work.catchError((Object e) {
+            failures.add(_cannotListen(method, e as SocketException));
+            return const <(String, DiscoveredDevice)>[];
+          }, test: (e) => e is SocketException),
+        );
+
+    for (final driver in drivers) {
+      final spec = _spec(driver, 'udp_broadcast');
+      if (spec == null || !wanted(spec.method)) continue;
+      run(
+        spec.method,
+        udp
+            .discover(
+              driver,
+              window: _longer(window, spec.config['windowMs']),
+              portOverride: portOverride,
+            )
+            .then(
+              (hits) => [
+                for (final f in hits)
+                  (
+                    driver.id,
+                    DiscoveredDevice(
+                      host: f.host,
+                      stableId: f.stableId,
+                      reply: f.reply,
+                      method: spec.method,
+                    ),
+                  ),
+              ],
+            ),
+      );
+    }
+
+    final tuyaDrivers = [
+      for (final d in drivers)
+        if (_spec(d, tuyaBroadcastMethod) case final spec?) (d, spec),
+    ];
+    if (tuyaDrivers.isNotEmpty && wanted(tuyaBroadcastMethod)) {
+      var tuyaWindow = tuyaMinimumWindow;
+      for (final (_, spec) in tuyaDrivers) {
+        tuyaWindow = _atLeast(
+          tuyaWindow,
+          _longer(window, spec.config['windowMs']),
+        );
+      }
+      run(
+        tuyaBroadcastMethod,
+        tuya
+            .discover(window: tuyaWindow)
+            .then(
+              (sightings) => [
+                for (final (driver, _) in tuyaDrivers)
+                  for (final s in sightings) (driver.id, _fromTuya(s)),
+              ],
+            ),
+      );
+    }
+
+    final byService = <String, List<(DriverManifest, DiscoverySpec)>>{};
+    for (final driver in drivers) {
+      for (final spec in driver.discovery) {
+        final service = spec.config['service'];
+        if (spec.method != mdnsMethod || service is! String) continue;
+        (byService[service] ??= []).add((driver, spec));
+      }
+    }
+    if (wanted(mdnsMethod)) {
+      for (final MapEntry(key: service, value: users) in byService.entries) {
+        var serviceWindow = window;
+        for (final (_, spec) in users) {
+          serviceWindow = _longer(serviceWindow, spec.config['windowMs']);
+        }
+        run(
+          mdnsMethod,
+          mdns
+              .browse(service, window: serviceWindow)
+              .then(
+                (instances) => [
+                  for (final (driver, spec) in users)
+                    for (final s in instances)
+                      (
+                        driver.id,
+                        _fromMdns(
+                          s,
+                          spec.config['idTxt'] as String?,
+                          spec.config['idInstance'] == true,
+                        ),
                       ),
-                  ],
-                ),
-          );
-        case tuyaBroadcastMethod:
-          add(
-            spec.method,
-            tuya
-                .discover(window: _atLeast(specWindow, tuyaMinimumWindow))
-                .then((found) => [for (final s in found) _fromTuya(s)]),
-          );
-        case mdnsMethod:
-          final service = spec.config['service'];
-          if (service is! String) continue;
-          final idTxt = spec.config['idTxt'] as String?;
-          final idInstance = spec.config['idInstance'] == true;
-          add(
-            spec.method,
-            mdns
-                .browse(service, window: specWindow)
-                .then(
-                  (found) => [
-                    for (final s in found) _fromMdns(s, idTxt, idInstance),
-                  ],
-                ),
-          );
+                ],
+              ),
+        );
       }
     }
-    final results = await Future.wait(runs);
-    if (runs.isNotEmpty && failures.length == runs.length) {
-      throw ApiError('unavailable', failures.join('. '));
+
+    final found = <String, List<DiscoveredDevice>>{
+      for (final d in drivers) d.id: [],
+    };
+    for (final results in await Future.wait(runs)) {
+      for (final (driverId, device) in results) {
+        found[driverId]!.add(device);
+      }
     }
+    return DiscoverySweep(
+      {for (final MapEntry(:key, :value) in found.entries) key: _merged(value)},
+      failures,
+      runs.length,
+    );
+  }
+
+  static DiscoverySpec? _spec(DriverManifest driver, String method) =>
+      driver.discovery.where((d) => d.method == method).firstOrNull;
+
+  /// One device per stable id, or per address when it has none.
+  static List<DiscoveredDevice> _merged(List<DiscoveredDevice> found) {
     final merged = <String, DiscoveredDevice>{};
-    for (final found in results) {
-      for (final d in found) {
-        merged[(d.stableId ?? 'host:${d.host}').toLowerCase()] ??= d;
-      }
+    for (final d in found) {
+      merged[(d.stableId ?? 'host:${d.host}').toLowerCase()] ??= d;
     }
     return merged.values.toList();
   }

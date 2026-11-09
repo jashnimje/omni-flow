@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'add_commands.dart';
 import 'api_error.dart';
+import 'automation_commands.dart';
 import 'board_commands.dart';
 import 'board_runtime.dart';
 import 'command_args.dart';
@@ -13,9 +15,11 @@ import 'flow_commands.dart';
 import 'host_key_commands.dart';
 import 'hub_runtime.dart';
 import 'link_commands.dart';
+import 'nfc_tags.dart';
 import 'pairing_commands.dart';
 import 'state_commands.dart';
 import 'stored_flows.dart';
+import 'things_runtime.dart';
 import '../dag/expression.dart';
 import '../dag/flow_engine.dart';
 import '../devices/adb/adb_channel.dart';
@@ -31,6 +35,7 @@ import '../devices/serial_channel.dart';
 import '../devices/tuya_channel.dart';
 import '../devices/tv/tv_socket.dart';
 import '../devices/tv/tv_channel.dart';
+import '../devices/virtual_channel.dart';
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../manifest/validation.dart';
@@ -80,6 +85,7 @@ class OmniEngine {
           );
         }
       }),
+      _core.events.listen(_addCommands.observe),
     ]);
     devices.events.listen(
       (e) => _core.emit({
@@ -164,6 +170,7 @@ class OmniEngine {
           TransportType.mqtt: mqtt,
           TransportType.websocket: tv,
           TransportType.adb: adb,
+          TransportType.virtual: const VirtualChannel(),
         },
       );
       final socket = udp;
@@ -197,6 +204,9 @@ class OmniEngine {
       );
       engine._core.issues['driver'] = driverIssues;
       await _backfillStableIds(engine._core);
+      await engine._things.migrateZoneRows();
+      await engine._things.reload(quiet: true);
+      await engine._stored.migrateStored();
       await engine._stored.loadState();
       return engine;
     } catch (_) {
@@ -247,16 +257,34 @@ class OmniEngine {
   final _inputs = <StreamSubscription<Object?>>[];
   late final FlowEngine flows;
 
-  late final _boards = BoardRuntime(_core);
-  late final _hub = HubRuntime(_core, _boards);
-  late final _stored = StoredFlows(_core);
+  late final _boards = BoardRuntime(
+    _core,
+    capabilitiesChanged: () => _stored.reloadFlows(),
+  );
+  late final _things = ThingsRuntime(_core);
+  late final _hub = HubRuntime(_core, _boards, _things);
+  late final _stored = StoredFlows(_core, _things);
   late final _flowCommands = FlowCommands(_core, _stored);
-  late final _stateCommands = StateCommands(_core, _stored);
   late final _linkCommands = LinkCommands(_core, _flowCommands);
+  late final _automationCommands = AutomationCommands(
+    _core,
+    _stored,
+    _flowCommands,
+    _linkCommands,
+  );
   late final _boardCommands = BoardCommands(_core, _boards);
-  late final _deviceCommands = DeviceCommands(_core, _boards, _hub, _stored);
+  late final _deviceCommands = DeviceCommands(
+    _core,
+    _boards,
+    _hub,
+    _stored,
+    _things,
+  );
+  late final _stateCommands = StateCommands(_core, _things, _deviceCommands);
   late final _hostKeyCommands = HostKeyCommands(_core);
   late final _pairingCommands = PairingCommands(_core);
+  late final _addCommands = AddCommands(_core, _deviceCommands);
+  late final _tagCommands = TagCommands(_core, _things, _deviceCommands);
 
   /// Stored records that could not be loaded, by kind (driver, zone, flow).
   /// They stay in the database and are reported, so one bad row never
@@ -324,6 +352,11 @@ class OmniEngine {
     'board.describe': _boardCommands.describe,
     'board.pins': _boardCommands.pins,
     'board.setup': _boardCommands.setup,
+    'board.periph': _boardCommands.periph,
+    ..._automationCommands.commands,
+    'thing.add': _addCommands.add,
+    'thing.next': _deviceCommands.next,
+    'thing.configure': _deviceCommands.configure,
     'link.create': _linkCommands.create,
     'link.options': _linkCommands.options,
     'link.list': _linkCommands.list,
@@ -346,8 +379,12 @@ class OmniEngine {
     'zone.save': _stateCommands.zoneSave,
     'zone.list': _stateCommands.zoneList,
     'zone.remove': _stateCommands.zoneRemove,
-    'sensor.ble': _stateCommands.sensorBle,
-    'sensor.wifi': _stateCommands.sensorWifi,
+    'sensor.ble': _stateCommands.phoneBle,
+    'sensor.wifi': _stateCommands.phoneWifi,
+    'phone.wifi': _stateCommands.phoneWifi,
+    'phone.ble': _stateCommands.phoneBle,
+    'phone.battery': _stateCommands.phoneBattery,
+    ..._tagCommands.commands,
     'device.discover': _deviceCommands.discover,
     'device.list': _deviceCommands.list,
     'device.get': _deviceCommands.get,

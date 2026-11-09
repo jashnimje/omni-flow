@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
+import 'setup_page.dart';
 import 'device_sheets.dart';
+import 'nfc_ui.dart';
 import 'sheets.dart';
 
 /// Room cards with one control per capability, built from the capability
@@ -61,6 +63,16 @@ class Dashboard extends ConsumerWidget {
   }
 }
 
+Future<void> _askWifiName(WidgetRef ref) async {
+  final granted = await ref.read(wifiNamePermissionProvider)();
+  showMessage(
+    granted
+        ? 'OmniFlow can read the Wi-Fi name now'
+        : 'Without location access Android hides the Wi-Fi name, so '
+              'Wi-Fi places cannot tell where you are',
+  );
+}
+
 /// True for a device that runs commands on a host, where a tap can do harm.
 bool isHighRiskCapability(Json cap) =>
     cap['highRisk'] == true || cap['type'] == 'exec';
@@ -115,6 +127,9 @@ class DeviceCard extends ConsumerWidget {
                   onSelected: (choice) => switch (choice) {
                     'edit' => showEditDevice(context, device),
                     'pair' => showPairDevice(context, device),
+                    'setup' => openSetup(context, device),
+                    'write-tag' => writeTag(context, ref, device),
+                    'wifi-name' => _askWifiName(ref),
                     'remove' => confirmRemoveDevice(context, ref, device),
                     _ => showModalBottomSheet<void>(
                       context: context,
@@ -125,6 +140,20 @@ class DeviceCard extends ConsumerWidget {
                     ),
                   },
                   itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'setup',
+                      child: Text('Setup steps'),
+                    ),
+                    if (device['driver'] == 'nfc_tag')
+                      const PopupMenuItem(
+                        value: 'write-tag',
+                        child: Text('Write to a tag'),
+                      ),
+                    if (device['driver'] == 'phone')
+                      const PopupMenuItem(
+                        value: 'wifi-name',
+                        child: Text('Read the Wi-Fi name'),
+                      ),
                     if (device['board'] == true)
                       const PopupMenuItem(value: 'pins', child: Text('Pins')),
                     if (pairsInApp(device))
@@ -360,6 +389,14 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
             key: ValueKey('sensor-$deviceId.$id'),
           ),
         );
+      case 'event':
+        return ListTile(
+          key: key,
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: label,
+          subtitle: const Text('Something it does. Use it in a rule'),
+        );
       default:
         return ListTile(
           key: key,
@@ -473,11 +510,19 @@ class ParamsForm extends StatefulWidget {
     required this.label,
     required this.params,
     required this.onSubmit,
+    this.submitLabel,
+    this.initial = const {},
   });
 
   final String label;
   final Map<String, Json> params;
   final Future<bool> Function(Json params) onSubmit;
+
+  /// The button's text, `Send <label>` when null.
+  final String? submitLabel;
+
+  /// Values to start from, for editing params already chosen.
+  final Json initial;
 
   @override
   State<ParamsForm> createState() => _ParamsFormState();
@@ -487,9 +532,14 @@ class _ParamsFormState extends State<ParamsForm> {
   late final _text = {
     for (final e in widget.params.entries)
       if (e.value['type'] != 'boolean' && e.value['values'] == null)
-        e.key: TextEditingController(),
+        e.key: TextEditingController(
+          text: widget.initial[e.key] == null ? '' : '${widget.initial[e.key]}',
+        ),
   };
-  final _choice = <String, Object?>{};
+  late final _choice = <String, Object?>{
+    for (final e in widget.initial.entries)
+      if (!_text.containsKey(e.key)) e.key: e.value,
+  };
 
   @override
   void dispose() {
@@ -599,7 +649,7 @@ class _ParamsFormState extends State<ParamsForm> {
         OutlinedButton(
           key: ValueKey('params-run-${widget.label}'),
           onPressed: values == null ? null : () => widget.onSubmit(values),
-          child: Text('Send ${widget.label}'),
+          child: Text(widget.submitLabel ?? 'Send ${widget.label}'),
         ),
       ],
     );

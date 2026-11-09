@@ -37,6 +37,7 @@ class Device {
       lastSeen != null && now.difference(lastSeen!) <= window;
 
   Device copyWith({
+    String? name,
     String? host,
     int? port,
     String? stableId,
@@ -45,7 +46,7 @@ class Device {
     DateTime? lastSeen,
   }) => Device(
     id: id,
-    name: name,
+    name: name ?? this.name,
     driverId: driverId,
     host: host ?? this.host,
     port: port ?? this.port,

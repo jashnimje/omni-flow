@@ -32,7 +32,34 @@ omni secret set hall token < ha_token.txt  # a long-lived access token
 
 SSH host keys are pinned on first use. After a host is reinstalled, `omni device hostkey mac` shows the pinned and offered keys, `omni device hostkey mac --accept SHA256:...` pins the offered key when it is the one you checked, and `--clear` drops the pin. `omni board describe desk` shows what a board offers and the pins it has set.
 
-After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build`.
+Adding anything goes through one pipeline. `omni add` lists what every discovery method finds, adds the one picked and walks its setup steps (pair, secrets, settings) as the engine reports them. Secrets are read from stdin, never taken as arguments:
+
+```sh
+omni add                                  # list what is on the network
+omni add --pick 2                         # add the second find and set it up
+omni add --driver home_assistant_entity --host 192.168.1.5 --name Hall
+omni add --resume hall                    # continue a setup left half way
+```
+
+Rules say when, only if, then, in the same words the app and Claude use:
+
+```sh
+omni rule add 'Welcome home' --when home:entered --only-if 'lamp.power!=true' --then lamp.power=true --then 'notify:Welcome home'
+omni rule add 'Front door' --when nfc:front_door --then hall.power=true --then wait:2s --then 'set:$Door=open'
+omni rule list
+```
+
+NFC tags, the phone's inputs by hand, and a reader on a board over USB:
+
+```sh
+omni tag add front_door 'Front door' --uid 04:A2:2B:1C
+omni tag scan 04A22B1C                    # as if the phone read it
+omni phone wifi HomeNet                   # the phone joined the home Wi-Fi
+omni phone battery 15 unplugged
+omni board periph /dev/cu.usbserial-110 nfc_rc522 --pin ss=8 --pin rst=9
+```
+
+After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build --delete-conflicting-outputs`.
 
 Flows. Save the sample flow from `docs/DESIGN.md` (Flows, Schema v1) to a file first. Its id is `flow_arrive_desk_evening`.
 

@@ -10,7 +10,10 @@ export 'src/api/local_client.dart'
         LocalSocketException,
         localSocketPath;
 export 'src/api/local_server.dart' show LocalServer, preparePrivateHome;
+export 'src/api/nfc_tags.dart' show normalizeUid, nfcTagDriverId;
 export 'src/api/omni_engine.dart';
+export 'src/api/thing_setup.dart'
+    show nextSetupStep, pairingProofSecret, settingPresent;
 export 'src/cli/omni_command_runner.dart';
 export 'src/codecs/crc32.dart';
 export 'src/codecs/tuya_codec.dart';
@@ -19,9 +22,12 @@ export 'src/dag/conditions.dart';
 export 'src/dag/executor.dart';
 export 'src/dag/flow_engine.dart';
 export 'src/dag/links.dart';
+export 'src/dag/migrate.dart';
 export 'src/dag/expression.dart';
 export 'src/dag/flow.dart';
 export 'src/dag/node_types.dart';
+export 'src/dag/rule_shorthand.dart';
+export 'src/dag/rules.dart';
 export 'src/dag/transformers.dart';
 export 'src/dag/validator.dart';
 export 'src/devices/adb/adb_channel.dart';
@@ -36,8 +42,10 @@ export 'src/devices/discovery/mdns_discovery.dart';
 export 'src/devices/discovery/tuya_broadcast.dart';
 export 'src/devices/http_channel.dart';
 export 'src/devices/mqtt_channel.dart';
+export 'src/devices/nfc/ndef.dart';
 export 'src/devices/serial_channel.dart';
 export 'src/devices/tuya_channel.dart';
+export 'src/devices/virtual_channel.dart';
 export 'src/devices/tv/tv_channel.dart';
 export 'src/devices/tv/tv_socket.dart'
     show TvPairingException, TvCertificateMismatchException, certificateSha256;

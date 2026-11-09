@@ -944,6 +944,27 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _sourceMeta = const VerificationMeta('source');
+  @override
+  late final GeneratedColumn<String> source = GeneratedColumn<String>(
+    'source',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(FlowRecord.graph),
+  );
+  static const VerificationMeta _specJsonMeta = const VerificationMeta(
+    'specJson',
+  );
+  @override
+  late final GeneratedColumn<String> specJson = GeneratedColumn<String>(
+    'spec_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -962,6 +983,8 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
     enabled,
     approved,
     trusted,
+    source,
+    specJson,
     updatedAt,
   ];
   @override
@@ -1007,6 +1030,18 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
         trusted.isAcceptableOrUnknown(data['trusted']!, _trustedMeta),
       );
     }
+    if (data.containsKey('source')) {
+      context.handle(
+        _sourceMeta,
+        source.isAcceptableOrUnknown(data['source']!, _sourceMeta),
+      );
+    }
+    if (data.containsKey('spec_json')) {
+      context.handle(
+        _specJsonMeta,
+        specJson.isAcceptableOrUnknown(data['spec_json']!, _specJsonMeta),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -1044,6 +1079,14 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
         DriftSqlType.bool,
         data['${effectivePrefix}trusted'],
       )!,
+      source: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source'],
+      )!,
+      specJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}spec_json'],
+      ),
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
@@ -1069,6 +1112,14 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
   /// True when the user saved or approved this version of the flow, so a
   /// later rise in its risk does not revoke the approval.
   final bool trusted;
+
+  /// The form the automation was written in: `link`, `rule` or `graph`,
+  /// so each surface reopens it as it was written.
+  final String source;
+
+  /// The link or rule the flow was compiled from. Null for a graph, which
+  /// is its own spec.
+  final String? specJson;
   final DateTime updatedAt;
   const FlowRow({
     required this.id,
@@ -1076,6 +1127,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     required this.enabled,
     required this.approved,
     required this.trusted,
+    required this.source,
+    this.specJson,
     required this.updatedAt,
   });
   @override
@@ -1086,6 +1139,10 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     map['enabled'] = Variable<bool>(enabled);
     map['approved'] = Variable<bool>(approved);
     map['trusted'] = Variable<bool>(trusted);
+    map['source'] = Variable<String>(source);
+    if (!nullToAbsent || specJson != null) {
+      map['spec_json'] = Variable<String>(specJson);
+    }
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
@@ -1097,6 +1154,10 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       enabled: Value(enabled),
       approved: Value(approved),
       trusted: Value(trusted),
+      source: Value(source),
+      specJson: specJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(specJson),
       updatedAt: Value(updatedAt),
     );
   }
@@ -1112,6 +1173,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       enabled: serializer.fromJson<bool>(json['enabled']),
       approved: serializer.fromJson<bool>(json['approved']),
       trusted: serializer.fromJson<bool>(json['trusted']),
+      source: serializer.fromJson<String>(json['source']),
+      specJson: serializer.fromJson<String?>(json['specJson']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
@@ -1124,6 +1187,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       'enabled': serializer.toJson<bool>(enabled),
       'approved': serializer.toJson<bool>(approved),
       'trusted': serializer.toJson<bool>(trusted),
+      'source': serializer.toJson<String>(source),
+      'specJson': serializer.toJson<String?>(specJson),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
@@ -1134,6 +1199,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     bool? enabled,
     bool? approved,
     bool? trusted,
+    String? source,
+    Value<String?> specJson = const Value.absent(),
     DateTime? updatedAt,
   }) => FlowRow(
     id: id ?? this.id,
@@ -1141,6 +1208,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     enabled: enabled ?? this.enabled,
     approved: approved ?? this.approved,
     trusted: trusted ?? this.trusted,
+    source: source ?? this.source,
+    specJson: specJson.present ? specJson.value : this.specJson,
     updatedAt: updatedAt ?? this.updatedAt,
   );
   FlowRow copyWithCompanion(FlowsCompanion data) {
@@ -1150,6 +1219,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       enabled: data.enabled.present ? data.enabled.value : this.enabled,
       approved: data.approved.present ? data.approved.value : this.approved,
       trusted: data.trusted.present ? data.trusted.value : this.trusted,
+      source: data.source.present ? data.source.value : this.source,
+      specJson: data.specJson.present ? data.specJson.value : this.specJson,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -1162,14 +1233,24 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
           ..write('enabled: $enabled, ')
           ..write('approved: $approved, ')
           ..write('trusted: $trusted, ')
+          ..write('source: $source, ')
+          ..write('specJson: $specJson, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, flowJson, enabled, approved, trusted, updatedAt);
+  int get hashCode => Object.hash(
+    id,
+    flowJson,
+    enabled,
+    approved,
+    trusted,
+    source,
+    specJson,
+    updatedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1179,6 +1260,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
           other.enabled == this.enabled &&
           other.approved == this.approved &&
           other.trusted == this.trusted &&
+          other.source == this.source &&
+          other.specJson == this.specJson &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -1188,6 +1271,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
   final Value<bool> enabled;
   final Value<bool> approved;
   final Value<bool> trusted;
+  final Value<String> source;
+  final Value<String?> specJson;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
   const FlowsCompanion({
@@ -1196,6 +1281,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     this.enabled = const Value.absent(),
     this.approved = const Value.absent(),
     this.trusted = const Value.absent(),
+    this.source = const Value.absent(),
+    this.specJson = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -1205,6 +1292,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     this.enabled = const Value.absent(),
     this.approved = const Value.absent(),
     this.trusted = const Value.absent(),
+    this.source = const Value.absent(),
+    this.specJson = const Value.absent(),
     required DateTime updatedAt,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -1216,6 +1305,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     Expression<bool>? enabled,
     Expression<bool>? approved,
     Expression<bool>? trusted,
+    Expression<String>? source,
+    Expression<String>? specJson,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
   }) {
@@ -1225,6 +1316,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
       if (enabled != null) 'enabled': enabled,
       if (approved != null) 'approved': approved,
       if (trusted != null) 'trusted': trusted,
+      if (source != null) 'source': source,
+      if (specJson != null) 'spec_json': specJson,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -1236,6 +1329,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     Value<bool>? enabled,
     Value<bool>? approved,
     Value<bool>? trusted,
+    Value<String>? source,
+    Value<String?>? specJson,
     Value<DateTime>? updatedAt,
     Value<int>? rowid,
   }) {
@@ -1245,6 +1340,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
       enabled: enabled ?? this.enabled,
       approved: approved ?? this.approved,
       trusted: trusted ?? this.trusted,
+      source: source ?? this.source,
+      specJson: specJson ?? this.specJson,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -1268,6 +1365,12 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     if (trusted.present) {
       map['trusted'] = Variable<bool>(trusted.value);
     }
+    if (source.present) {
+      map['source'] = Variable<String>(source.value);
+    }
+    if (specJson.present) {
+      map['spec_json'] = Variable<String>(specJson.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
@@ -1285,6 +1388,8 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
           ..write('enabled: $enabled, ')
           ..write('approved: $approved, ')
           ..write('trusted: $trusted, ')
+          ..write('source: $source, ')
+          ..write('specJson: $specJson, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2939,6 +3044,8 @@ typedef $$FlowsTableCreateCompanionBuilder = FlowsCompanion Function({
   Value<bool> enabled,
   Value<bool> approved,
   Value<bool> trusted,
+  Value<String> source,
+  Value<String?> specJson,
   required DateTime updatedAt,
   Value<int> rowid,
 });
@@ -2948,6 +3055,8 @@ typedef $$FlowsTableUpdateCompanionBuilder = FlowsCompanion Function({
   Value<bool> enabled,
   Value<bool> approved,
   Value<bool> trusted,
+  Value<String> source,
+  Value<String?> specJson,
   Value<DateTime> updatedAt,
   Value<int> rowid,
 });
@@ -2982,6 +3091,16 @@ class $$FlowsTableFilterComposer extends Composer<_$OmniDatabase, $FlowsTable> {
 
   ColumnFilters<bool> get trusted => $composableBuilder(
     column: $table.trusted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get source => $composableBuilder(
+    column: $table.source,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get specJson => $composableBuilder(
+    column: $table.specJson,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3025,6 +3144,16 @@ class $$FlowsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get source => $composableBuilder(
+    column: $table.source,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get specJson => $composableBuilder(
+    column: $table.specJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
@@ -3054,6 +3183,12 @@ class $$FlowsTableAnnotationComposer
 
   GeneratedColumn<bool> get trusted =>
       $composableBuilder(column: $table.trusted, builder: (column) => column);
+
+  GeneratedColumn<String> get source =>
+      $composableBuilder(column: $table.source, builder: (column) => column);
+
+  GeneratedColumn<String> get specJson =>
+      $composableBuilder(column: $table.specJson, builder: (column) => column);
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
@@ -3092,6 +3227,8 @@ class $$FlowsTableTableManager
                 Value<bool> enabled = const Value.absent(),
                 Value<bool> approved = const Value.absent(),
                 Value<bool> trusted = const Value.absent(),
+                Value<String> source = const Value.absent(),
+                Value<String?> specJson = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => FlowsCompanion(
@@ -3100,6 +3237,8 @@ class $$FlowsTableTableManager
                 enabled: enabled,
                 approved: approved,
                 trusted: trusted,
+                source: source,
+                specJson: specJson,
                 updatedAt: updatedAt,
                 rowid: rowid,
               ),
@@ -3110,6 +3249,8 @@ class $$FlowsTableTableManager
                 Value<bool> enabled = const Value.absent(),
                 Value<bool> approved = const Value.absent(),
                 Value<bool> trusted = const Value.absent(),
+                Value<String> source = const Value.absent(),
+                Value<String?> specJson = const Value.absent(),
                 required DateTime updatedAt,
                 Value<int> rowid = const Value.absent(),
               }) => FlowsCompanion.insert(
@@ -3118,6 +3259,8 @@ class $$FlowsTableTableManager
                 enabled: enabled,
                 approved: approved,
                 trusted: trusted,
+                source: source,
+                specJson: specJson,
                 updatedAt: updatedAt,
                 rowid: rowid,
               ),

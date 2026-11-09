@@ -5,12 +5,13 @@
   "category": "lighting",
   "icon": "lightbulb",
   "transport": { "type": "http", "port": 80, "authErrorTypes": [1] },
-  "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid" }],
+  "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid", "usePort": false }],
   "pairing": { "method": "hue_bridge" },
   "settings": [
     { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
     { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true }
   ],
+  "setup": ["pair", "configure:lightId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [

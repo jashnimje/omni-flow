@@ -107,6 +107,25 @@ class BoardPin {
     ),
   };
 
+  /// The events this pin raises as `<name>.<event>`: a watched input
+  /// `changed`, and a digital one also `pressed` when it turns true and
+  /// `released` when it turns false.
+  List<String> get eventKeys => [
+    if (mode.isInput) '$name.changed',
+    if (mode.isDigitalInput) ...['$name.pressed', '$name.released'],
+  ];
+
+  List<CapabilitySpec> get events => [
+    for (final key in eventKeys)
+      CapabilitySpec(
+        id: key,
+        type: CapabilityType.event,
+        label: key.replaceAll('.', ' '),
+        params: const {},
+        command: null,
+      ),
+  ];
+
   Map<String, Object?> toJson() => {
     'pin': pin,
     'mode': mode.wireName,
@@ -236,13 +255,63 @@ List<BoardPin> boardPinsOf(Device device, DriverManifest manifest) =>
       )
     : const [];
 
+/// The event a board raises when its NFC reader sees a tag, `{uid}`.
+const boardNfcEvent = 'nfc.scanned';
+
+/// The peripheral types firmware 3 knows: `periph.set` takes these.
+const boardPeriphTypes = ['ir', 'rf', 'nfc_rc522', 'nfc_pn532'];
+
+bool _isNfcReader(Object? type) => type == 'nfc_rc522' || type == 'nfc_pn532';
+
+/// The board driver's actions that need a transmitter, by peripheral type.
+const _periphActions = {'ir_nec': 'ir', 'ir_code': 'ir', 'rf_send': 'rf'};
+
+/// What a board's peripherals let it do, from its describe reply: the types
+/// listed under `periph`, in order, then `ir` and `rf` when the describe's
+/// `ir` or `rf` flag says the board can send them without one (the native
+/// virtual board, or a carrier built into the board). Null for firmware
+/// that reports neither.
+List<String>? periphTypesOf(Map<String, Object?> describe) {
+  final periph = describe['periph'];
+  final ir = describe['ir'];
+  final rf = describe['rf'];
+  if (periph is! List && ir is! bool && rf is! bool) return null;
+  final types = [
+    if (periph is List)
+      for (final p in periph)
+        if (p is Map && p['type'] is String) p['type'] as String,
+  ];
+  if (ir == true && !types.contains('ir')) types.add('ir');
+  if (rf == true && !types.contains('rf')) types.add('rf');
+  return types;
+}
+
 /// The manifest as it applies to [device]: a board device adds one
-/// capability per named pin. Null when the driver is unknown.
+/// capability per named pin, and the `nfc.scanned` event when the board
+/// reported an NFC reader in its `periph` setting. Once the board has
+/// reported its peripherals, `ir_nec` and `ir_code` need `ir` among them
+/// and `rf_send` needs `rf`, so a flow cannot use a transmitter the board
+/// lacks. Null when the driver is unknown.
 DriverManifest? manifestFor(DriverRegistry registry, Device device) {
   final base = registry[device.driverId];
   if (base == null || !isBoardDriver(base)) return base;
-  return base.withCapabilities([
-    for (final p in boardPinsOf(device, base)) p.capability,
+  final pins = boardPinsOf(device, base);
+  final periph = device.settings['periph'];
+  bool offered(CapabilitySpec c) => switch (_periphActions[c.id]) {
+    null => true,
+    final type => (periph as List).contains(type),
+  };
+  return base.withCapabilities(keep: periph is List ? offered : null, [
+    for (final p in pins) p.capability,
+    for (final p in pins) ...p.events,
+    if (periph is List && periph.any(_isNfcReader))
+      const CapabilitySpec(
+        id: boardNfcEvent,
+        type: CapabilityType.event,
+        label: 'NFC tag scanned',
+        params: {},
+        command: null,
+      ),
   ]);
 }
 

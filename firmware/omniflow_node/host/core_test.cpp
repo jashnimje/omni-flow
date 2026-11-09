@@ -64,6 +64,25 @@ class FakeHal : public Hal {
   }
   bool hasRf() override { return rfPresent; }
   bool rfPresent = true;
+  // The reader the core started last, and what each read returns: busyReads
+  // reads still going, then the tag in nfcUid (none when empty).
+  int nfcType = -1, nfcSs = -2, nfcRst = -2, nfcStarts = 0, nfcReads = 0, busyReads = 0;
+  std::vector<uint8_t> nfcUid;
+  void startNfc(uint8_t type, int ss, int rst) override {
+    nfcType = type;
+    nfcSs = ss;
+    nfcRst = rst;
+    nfcStarts++;
+  }
+  int pollNfc(uint8_t* uid) override {
+    nfcReads++;
+    if (busyReads) {
+      busyReads--;
+      return -1;
+    }
+    for (size_t i = 0; i < nfcUid.size(); i++) uid[i] = nfcUid[i];
+    return (int)nfcUid.size();
+  }
   unsigned long millis() override { return now; }
 };
 
@@ -248,8 +267,8 @@ static void testSetup() {
   FakeHal hal;
   Settings settings;
   memset(&settings, 0, sizeof(settings));
-  settings.irPin = -1;
-  settings.rfPin = -1;
+  settings.periph.irPin = -1;
+  settings.periph.rfPin = -1;
   strcpy(settings.node, "fresh");
   Core core(settings.node, "fw", BOARD_HOST, hal);
   FakeSetupHal setupHal;
@@ -313,7 +332,7 @@ static void testSetup() {
   memset(&stored, 'x', sizeof(stored));
   sanitizeSettings(stored, BOARD_HOST);
   CHECK(strlen(stored.node) == sizeof(stored.node) - 1);
-  CHECK(stored.irPin == -1 && stored.rfPin == -1);  // 'x' is pin 120
+  CHECK(stored.periph.irPin == -1 && stored.periph.rfPin == -1);  // 'x' is pin 120
   strcpy(stored.node, "Bad\"Name");
   sanitizeSettings(stored, BOARD_HOST);
   CHECK(stored.node[0] == 0);
@@ -321,17 +340,17 @@ static void testSetup() {
   sanitizeSettings(stored, BOARD_HOST);
   CHECK(strcmp(stored.node, "good_name") == 0);
   // Stored IR and RF pins must be outputs, and not the same pin.
-  stored.irPin = 4;
-  stored.rfPin = 4;
+  stored.periph.irPin = 4;
+  stored.periph.rfPin = 4;
   sanitizeSettings(stored, BOARD_HOST);
-  CHECK(stored.irPin == 4 && stored.rfPin == -1);
-  stored.irPin = 16;  // input only on the host profile
-  stored.rfPin = 5;
+  CHECK(stored.periph.irPin == 4 && stored.periph.rfPin == -1);
+  stored.periph.irPin = 16;  // input only on the host profile
+  stored.periph.rfPin = 5;
   sanitizeSettings(stored, BOARD_HOST);
-  CHECK(stored.irPin == -1 && stored.rfPin == 5);
-  stored.rfPin = 1;  // the Uno's serial port
+  CHECK(stored.periph.irPin == -1 && stored.periph.rfPin == 5);
+  stored.periph.rfPin = 1;  // the Uno's serial port
   sanitizeSettings(stored, BOARD_UNO);
-  CHECK(stored.rfPin == -1);
+  CHECK(stored.periph.rfPin == -1);
 
   // The IR pin is kept from pin commands, and only a free output pin can be it.
   run(core, "{\"cmd\":\"pin.mode\",\"pin\":6,\"mode\":\"out\"}");
@@ -339,30 +358,30 @@ static void testSetup() {
   CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":16}"), "pin must be an output pin"));
   CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":true}"), "pin must be an output pin"));
   CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":3}"), "\"cmd\":\"ir.pin\",\"pin\":3"));
-  CHECK(settings.irPin == 3);
+  CHECK(settings.periph.irPin == 3);
   CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":3,\"mode\":\"in\"}"), "pin not available"));
   CHECK(has(run(core, "{\"cmd\":\"gpio_write\",\"pin\":3,\"value\":1}"), "pin not allowed"));
   CHECK(!has(run(core, "{\"cmd\":\"describe\"}"), "{\"pin\":3,"));
   CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":-1}"), "\"cmd\":\"ir.pin\""));
-  CHECK(settings.irPin == -1);
+  CHECK(settings.periph.irPin == -1);
   CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":3,\"mode\":\"in\"}"), "\"event\":\"ack\""));
 
   // The RF pin works the same way, and never shares a pin with IR.
   CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":3}"), "set pin.mode none first"));
   CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":16}"), "pin must be an output pin"));
   CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":7,\"id\":20}"), "\"cmd\":\"rf.pin\",\"pin\":7,\"id\":20"));
-  CHECK(settings.rfPin == 7 && core.rfPin() == 7);
+  CHECK(settings.periph.rfPin == 7 && core.rfPin() == 7);
   CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":7,\"mode\":\"out\"}"), "pin not available"));
   CHECK(!has(run(core, "{\"cmd\":\"describe\"}"), "{\"pin\":7,"));
   CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":7}"), "that pin is the RF pin"));
   CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":8}"), "\"cmd\":\"ir.pin\",\"pin\":8"));
   CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":8}"), "that pin is the IR pin"));
-  CHECK(settings.rfPin == 7);
+  CHECK(settings.periph.rfPin == 7);
   setup.fromSerial = false;
   CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":-1}"), "setup commands are only taken over USB"));
   setup.fromSerial = true;
   CHECK(has(run(core, "{\"cmd\":\"rf.pin\",\"pin\":-1}"), "\"cmd\":\"rf.pin\""));
-  CHECK(settings.rfPin == -1 && core.rfPin() == -1);
+  CHECK(settings.periph.rfPin == -1 && core.rfPin() == -1);
 
   // A rename tells the board to restart mDNS; the same name does not.
   int renames = setupHal.renames;
@@ -740,6 +759,455 @@ static void testDescribeFits() {
 }
 #endif
 
+static void testNestedArgs() {
+  Args a;
+  CHECK(parseArgs("{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":10,\"rst\":-1},\"id\":3}", a) == 0);
+  CHECK(a.count == 5);
+  long v = 0;
+  CHECK(a.num("pins.ss", &v) && v == 10);
+  CHECK(a.num("pins.rst", &v) && v == -1);
+  CHECK(a.num("id", &v) && v == 3);
+  CHECK(!a.get("pins"));
+  CHECK(parseArgs("{\"pins\":{},\"cmd\":\"x\"}", a) == 0 && a.count == 1 && strcmp(a.str("cmd"), "x") == 0);
+  CHECK(parseArgs("{\"pins\" : { \"tx\" : 4 } }", a) == 0 && a.num("pins.tx", &v) && v == 4);
+  // One level only, and still no arrays.
+  CHECK(parseArgs("{\"a\":{\"b\":{\"c\":1}}}", a) != 0);
+  CHECK(parseArgs("{\"a\":{\"b\":[1]}}", a) != 0);
+  CHECK(parseArgs("{\"a\":{\"b\":1}", a) != 0);
+  CHECK(parseArgs("{\"a\":{\"b\" 1}}", a) != 0);
+  // The joined name has to fit a key.
+  const char* error = parseArgs("{\"pins\":{\"abcdefg\":1}}", a);
+  CHECK(error && strcmp(error, "value too long") == 0);
+  CHECK(parseArgs("{\"pins\":{\"abcdef\":1}}", a) == 0);
+}
+
+static void testPeriphNames() {
+  CHECK(periphFromName("ir") == PERIPH_IR && periphFromName("rf") == PERIPH_RF);
+  CHECK(periphFromName("nfc_rc522") == PERIPH_NFC_RC522 && periphFromName("nfc_pn532") == PERIPH_NFC_PN532);
+  CHECK(periphFromName("nfc") == PERIPH_NONE && periphFromName("") == PERIPH_NONE && periphFromName("IR") == PERIPH_NONE);
+  CHECK(strcmp(periphName(PERIPH_NFC_RC522), "nfc_rc522") == 0 && periphName(PERIPH_NONE) == 0);
+  CHECK(periphBuiltIn(PERIPH_IR) && periphBuiltIn(PERIPH_NFC_RC522) && !periphBuiltIn(PERIPH_NONE));
+  CHECK(periphBuiltIn(PERIPH_NFC_PN532) == (OMNI_HAS_PN532 != 0));
+
+  // An RC522 takes its own pins and the SPI bus; the Uno's also keeps 10.
+  Periphs p = {-1, -1, PERIPH_NFC_RC522, 8, 9};
+  int8_t pins[6];
+  CHECK(periphPins(p, BOARD_UNO, PERIPH_NFC_RC522, pins) == 6);
+  CHECK(pins[0] == 8 && pins[1] == 9 && pins[2] == 13 && pins[3] == 12 && pins[4] == 11 && pins[5] == 10);
+  p.nfcSs = 10;
+  p.nfcRst = -1;
+  CHECK(periphPins(p, BOARD_UNO, PERIPH_NFC_RC522, pins) == 4 && pins[0] == 10);
+  CHECK(periphPins(p, BOARD_ESP32, PERIPH_NFC_RC522, pins) == 4 && pins[1] == 18 && pins[2] == 19 && pins[3] == 23);
+  CHECK(periphPins(p, BOARD_UNO, PERIPH_IR, pins) == 0);
+  Periphs i2c = {-1, -1, PERIPH_NFC_PN532, -1, -1};
+  CHECK(periphPins(i2c, BOARD_PICO_W, PERIPH_NFC_PN532, pins) == 2 && pins[0] == 4 && pins[1] == 5);
+  CHECK(periphPins(i2c, BOARD_PICO_W, PERIPH_NFC_RC522, pins) == 0);
+
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_NFC_RC522) == PERIPH_OK);
+  p.nfcSs = 13;  // the SPI clock
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_NFC_RC522) == PERIPH_SAME_PIN);
+  p.nfcSs = 8;
+  p.nfcRst = 8;
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_NFC_RC522) == PERIPH_SAME_PIN);
+  p.nfcRst = 1;  // the Uno's serial port
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_NFC_RC522) == PERIPH_NOT_OUTPUT);
+  p.nfcRst = -1;
+  p.irPin = 12;
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_NFC_RC522) == PERIPH_IS_IR);
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_IR) == PERIPH_IS_NFC);
+  p.irPin = 3;
+  p.rfPin = 8;
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_NFC_RC522) == PERIPH_IS_RF);
+  CHECK(checkPeriphs(p, BOARD_UNO, PERIPH_IR) == PERIPH_OK);
+  i2c.irPin = 21;
+  CHECK(checkPeriphs(i2c, BOARD_ESP32, PERIPH_NFC_PN532) == PERIPH_IS_IR);
+}
+
+// periph.set and periph.clear on the host profile: SPI 13, 12, 11, I2C 14, 15.
+static void testPeriphCommands() {
+  FakeHal hal;
+  Settings settings;
+  memset(&settings, 0, sizeof(settings));
+  settings.periph = {-1, -1, PERIPH_NONE, -1, -1};
+  strcpy(settings.node, "bench");
+  Core core(settings.node, "fw", BOARD_HOST, hal);
+  FakeSetupHal setupHal;
+  Setup setup(core, settings, setupHal, 38950);
+  core.setExtension(&setup);
+
+  const char* setLines[] = {"{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":4}}",
+                            "{\"cmd\":\"periph.clear\",\"type\":\"ir\"}"};
+  for (unsigned i = 0; i < sizeof(setLines) / sizeof(setLines[0]); i++) {
+    CHECK(has(run(core, setLines[i]), "setup commands are only taken over USB"));
+  }
+  CHECK(setupHal.saves == 0 && core.irPin() == -1);
+  setup.fromSerial = true;
+
+  // IR and RF through periph.set are the same as ir.pin and rf.pin.
+  CHECK(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":4},\"id\":1}") ==
+        "{\"node\":\"bench\",\"event\":\"ack\",\"cmd\":\"periph.set\",\"type\":\"ir\",\"id\":1}\n");
+  CHECK(settings.periph.irPin == 4 && core.irPin() == 4 && setupHal.saves == 1);
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"rf\",\"pins\":{\"tx\":4}}"), "that pin is the IR pin"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"rf\",\"pins\":{\"tx\":5}}"), "\"type\":\"rf\""));
+  CHECK(core.rfPin() == 5);
+  CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":5}"), "that pin is the RF pin"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":16}}"), "pins must be output pins"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":-1}}"), "pins must be output pins"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":\"4\"}}"), "pins must be output pins"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":300}}"), "pins must be output pins"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\"}"), "needs pins.tx"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":4}"), "pins is an object"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"ss\":4}}"), "pins has a name"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc\",\"pins\":{}}"), "type is ir, rf, nfc_rc522 or nfc_pn532"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.clear\"}"), "type is ir, rf"));
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":6,\"mode\":\"out\"}");
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":6}}"), "set pin.mode none first"));
+  CHECK(core.irPin() == 4);
+  // Moving IR frees its old pin.
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"ir\",\"pins\":{\"tx\":7}}"), "\"event\":\"ack\""));
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"in\"}"), "\"event\":\"ack\""));
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":4,\"mode\":\"none\"}");
+
+  // An RC522 takes ss, rst and the SPI bus, all free and none an IR or RF pin.
+  CHECK(hal.nfcStarts == 0);
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":12,\"mode\":\"in\"}");
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8,\"rst\":9}}"),
+            "a pin the reader needs has a mode"));
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":12,\"mode\":\"none\"}");
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":7}}"), "is the IR pin"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":11}}"), "neither on the SPI bus"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8,\"rst\":8}}"), "two pins"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"rst\":9}}"), "pins.ss for nfc_rc522"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8,\"rst\":99}}"), "pins must be output"));
+  CHECK(hal.nfcStarts == 0 && settings.periph.nfc == PERIPH_NONE);
+  CHECK(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8,\"rst\":9},\"id\":7}") ==
+        "{\"node\":\"bench\",\"event\":\"ack\",\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"id\":7}\n");
+  CHECK(hal.nfcStarts == 1 && hal.nfcType == PERIPH_NFC_RC522 && hal.nfcSs == 8 && hal.nfcRst == 9);
+  CHECK(settings.periph.nfc == PERIPH_NFC_RC522 && settings.periph.nfcSs == 8 && settings.periph.nfcRst == 9);
+  const int taken[] = {8, 9, 11, 12, 13};
+  std::string d = run(core, "{\"cmd\":\"describe\"}");
+  for (unsigned i = 0; i < sizeof(taken) / sizeof(taken[0]); i++) {
+    char pin[16];
+    snprintf(pin, sizeof(pin), "{\"pin\":%d,", taken[i]);
+    CHECK(!has(d, pin));
+    char line[64];
+    snprintf(line, sizeof(line), "{\"cmd\":\"pin.mode\",\"pin\":%d,\"mode\":\"out\"}", taken[i]);
+    CHECK(has(run(core, line), "pin not available"));
+  }
+  CHECK(has(d, "\"periph\":[{\"type\":\"ir\",\"pins\":{\"tx\":7}},{\"type\":\"rf\",\"pins\":{\"tx\":5}},"
+               "{\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8,\"rst\":9,\"sck\":13,\"miso\":12,\"mosi\":11}}]"));
+  CHECK(has(d, OMNI_HAS_PN532 ? "\"periphTypes\":[\"ir\",\"rf\",\"nfc_rc522\",\"nfc_pn532\"]"
+                              : "\"periphTypes\":[\"ir\",\"rf\",\"nfc_rc522\"]"));
+  CHECK(has(d, "\"ir\":true,\"rf\":true"));
+  CHECK(has(run(core, "{\"cmd\":\"ir.pin\",\"pin\":13}"), "that pin is used by the NFC reader"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"rf\",\"pins\":{\"tx\":9}}"), "used by the NFC reader"));
+  // Setting the same reader again with the same pins does not restart it.
+  run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8,\"rst\":9}}");
+  CHECK(hal.nfcStarts == 1);
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":10}}"), "\"event\":\"ack\""));
+  CHECK(hal.nfcStarts == 2 && hal.nfcSs == 10 && hal.nfcRst == -1);
+  CHECK(has(run(core, "{\"cmd\":\"describe\"}"), "{\"type\":\"nfc_rc522\",\"pins\":{\"ss\":10,\"sck\":13,"));
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":8,\"mode\":\"in\"}"), "\"event\":\"ack\""));
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":8,\"mode\":\"none\"}");
+
+#if OMNI_HAS_PN532
+  // One reader at a time; the PN532 takes no pins of its own.
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_pn532\"}"), "periph.clear it first"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_pn532\",\"pins\":{\"ss\":3}}"), "pins has a name"));
+#else
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_pn532\"}"), "has no driver for that type"));
+#endif
+  CHECK(run(core, "{\"cmd\":\"periph.clear\",\"type\":\"nfc_rc522\",\"id\":8}") ==
+        "{\"node\":\"bench\",\"event\":\"ack\",\"cmd\":\"periph.clear\",\"type\":\"nfc_rc522\",\"id\":8}\n");
+  CHECK(hal.nfcStarts == 3 && hal.nfcType == PERIPH_NONE && settings.periph.nfc == PERIPH_NONE);
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":13,\"mode\":\"out\"}"), "\"event\":\"ack\""));
+  // Clearing what is not set is still an ack, and starts nothing.
+  CHECK(has(run(core, "{\"cmd\":\"periph.clear\",\"type\":\"nfc_rc522\"}"), "\"event\":\"ack\""));
+  CHECK(hal.nfcStarts == 3);
+#if OMNI_HAS_PN532
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":14,\"mode\":\"in\"}");
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_pn532\",\"pins\":{}}"), "a pin the reader needs has a mode"));
+  run(core, "{\"cmd\":\"pin.mode\",\"pin\":14,\"mode\":\"none\"}");
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_pn532\",\"pins\":{}}"), "\"type\":\"nfc_pn532\""));
+  CHECK(hal.nfcType == PERIPH_NFC_PN532 && hal.nfcSs == -1 && hal.nfcRst == -1);
+  CHECK(has(run(core, "{\"cmd\":\"describe\"}"), "{\"type\":\"nfc_pn532\",\"pins\":{\"sda\":14,\"scl\":15}}]"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8}}"), "periph.clear it first"));
+  run(core, "{\"cmd\":\"periph.clear\",\"type\":\"nfc_pn532\"}");
+#endif
+  CHECK(has(run(core, "{\"cmd\":\"periph.clear\",\"type\":\"ir\"}"), "\"type\":\"ir\""));
+  CHECK(has(run(core, "{\"cmd\":\"periph.clear\",\"type\":\"rf\"}"), "\"type\":\"rf\""));
+  CHECK(core.irPin() == -1 && core.rfPin() == -1 && settings.periph.irPin == -1 && settings.periph.rfPin == -1);
+  CHECK(has(run(core, "{\"cmd\":\"describe\"}"), "\"periph\":[],"));
+}
+
+// The Uno's SPI master keeps 10 as an output, so 10 is taken unless it is ss.
+static void testUnoReader() {
+  FakeHal hal;
+  Settings settings;
+  memset(&settings, 0, sizeof(settings));
+  settings.periph = {-1, -1, PERIPH_NONE, -1, -1};
+  Core core("uno", "fw", BOARD_UNO, hal);
+  FakeSetupHal setupHal;
+  Setup setup(core, settings, setupHal, 0);
+  core.setExtension(&setup);
+  setup.fromSerial = true;
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":8,\"rst\":9}}"), "\"event\":\"ack\""));
+  CHECK(has(run(core, "{\"cmd\":\"describe\"}"), "\"pins\":{\"ss\":8,\"rst\":9,\"sck\":13,\"miso\":12,\"mosi\":11,\"hw_ss\":10}}"));
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":10,\"mode\":\"in\"}"), "pin not available"));
+  CHECK(has(run(core, "{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":10,\"rst\":9}}"), "\"event\":\"ack\""));
+  CHECK(has(run(core, "{\"cmd\":\"describe\"}"), "\"pins\":{\"ss\":10,\"rst\":9,\"sck\":13,\"miso\":12,\"mosi\":11}}"));
+  CHECK(has(run(core, "{\"cmd\":\"pin.mode\",\"pin\":8,\"mode\":\"in\"}"), "\"event\":\"ack\""));
+  // The longest periph.set fits the Uno's 96-byte line.
+  CHECK(strlen("{\"cmd\":\"periph.set\",\"type\":\"nfc_rc522\",\"pins\":{\"ss\":10,\"rst\":9},\"id\":2147483647}") < 96);
+}
+
+static void testPeriphSettings() {
+  Settings s;
+  memset(&s, 0, sizeof(s));
+  strcpy(s.node, "good");
+  s.periph = {3, 7, PERIPH_NFC_RC522, 8, 9};
+  sanitizeSettings(s, BOARD_HOST);
+  CHECK(s.periph.irPin == 3 && s.periph.rfPin == 7 && s.periph.nfc == PERIPH_NFC_RC522);
+  CHECK(s.periph.nfcSs == 8 && s.periph.nfcRst == 9);
+  // A reader on the IR pin or its bus goes; IR and RF were there first.
+  s.periph = {3, 7, PERIPH_NFC_RC522, 3, -1};
+  sanitizeSettings(s, BOARD_HOST);
+  CHECK(s.periph.irPin == 3 && s.periph.nfc == PERIPH_NONE && s.periph.nfcSs == -1);
+  s.periph = {13, -1, PERIPH_NFC_RC522, 8, -1};
+  sanitizeSettings(s, BOARD_HOST);
+  CHECK(s.periph.irPin == 13 && s.periph.nfc == PERIPH_NONE);
+  // Unwritten flash: no type, and a reset pin below -1 is none.
+  s.periph = {-1, -1, 0xFF, 8, -1};
+  sanitizeSettings(s, BOARD_HOST);
+  CHECK(s.periph.nfc == PERIPH_NONE && s.periph.nfcSs == -1);
+  s.periph = {-7, -9, PERIPH_NFC_RC522, 8, -100};
+  sanitizeSettings(s, BOARD_HOST);
+  CHECK(s.periph.irPin == -1 && s.periph.rfPin == -1 && s.periph.nfc == PERIPH_NFC_RC522 && s.periph.nfcRst == -1);
+  s.periph = {-1, -1, PERIPH_NFC_PN532, 8, 9};
+  sanitizeSettings(s, BOARD_ESP32);
+  CHECK(s.periph.nfc == (OMNI_HAS_PN532 ? PERIPH_NFC_PN532 : PERIPH_NONE) && s.periph.nfcSs == -1 && s.periph.nfcRst == -1);
+}
+
+static void testNfcDebounce() {
+  NfcDebounce d(1000);
+  const uint8_t a[] = {0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6};
+  const uint8_t b[] = {0xde, 0xad, 0xbe, 0xef};
+  CHECK(d.seen(a, 7, 5000));
+  // Held on the reader: read again and again, reported once.
+  for (unsigned long t = 5100; t < 9000; t += 100) CHECK(!d.seen(a, 7, t));
+  // A missed read or two while held is not a new presentation.
+  CHECK(!d.seen(a, 7, 9800));
+  // Gone for a second, then back: a new presentation.
+  CHECK(d.seen(a, 7, 10800));
+  CHECK(!d.seen(a, 7, 10950));
+  // Another tag is reported at once, and so is the first again after it.
+  CHECK(d.seen(b, 4, 11000));
+  CHECK(d.seen(a, 7, 11100));
+  // The same first bytes with another length is another tag.
+  CHECK(d.seen(a, 4, 11200));
+  CHECK(!d.seen(a, 0, 20000) && !d.seen(a, 11, 20000));
+  // millis() wrapping does not stop a held tag from being held.
+  NfcDebounce w(1000);
+  CHECK(w.seen(b, 4, (unsigned long)0 - 256));
+  CHECK(!w.seen(b, 4, 0x50));
+  CHECK(w.seen(b, 4, 0x50 + 1000));
+}
+
+// The core reads every NFC_POLL_MS and reports each presentation once.
+static void testNfcPolling() {
+  FakeHal hal;
+  Core core("door", "fw", BOARD_HOST, hal);
+  Capture out;
+  hal.nfcUid = {0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6};
+  core.poll(out);
+  CHECK(hal.nfcReads == 0);  // no reader set
+  core.setPeriphs({-1, -1, PERIPH_NFC_RC522, 8, -1});
+  core.poll(out);
+  CHECK(out.take() == "{\"node\":\"door\",\"event\":\"nfc.scanned\",\"uid\":\"04a1b2c3d4e5f6\"}\n");
+  CHECK(hal.nfcReads == 1);
+  hal.now += 50;
+  core.poll(out);
+  CHECK(hal.nfcReads == 1);
+  for (int i = 0; i < 30; i++) {
+    hal.now += NFC_POLL_MS;
+    core.poll(out);
+  }
+  CHECK(out.take().empty() && hal.nfcReads == 31);
+  hal.nfcUid.clear();
+  for (int i = 0; i < 10; i++) {
+    hal.now += NFC_POLL_MS;
+    core.poll(out);
+  }
+  CHECK(out.take().empty());
+  hal.nfcUid = {0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6};
+  hal.now += NFC_POLL_MS;
+  core.poll(out);
+  CHECK(has(out.take(), "\"uid\":\"04a1b2c3d4e5f6\""));
+  // A read still going is carried on at once on every poll.
+  hal.nfcUid = {0xde, 0xad, 0xbe, 0xef};
+  hal.busyReads = 2;
+  hal.now += NFC_POLL_MS;
+  int reads = hal.nfcReads;
+  core.poll(out);
+  core.poll(out);
+  CHECK(out.take().empty());
+  core.poll(out);
+  CHECK(hal.nfcReads == reads + 3);
+  CHECK(out.take() == "{\"node\":\"door\",\"event\":\"nfc.scanned\",\"uid\":\"deadbeef\"}\n");
+  // Clearing the reader stops the reads.
+  core.setPeriphs({-1, -1, PERIPH_NONE, -1, -1});
+  reads = hal.nfcReads;
+  hal.now += 10 * NFC_POLL_MS;
+  core.poll(out);
+  CHECK(hal.nfcReads == reads && hal.nfcType == PERIPH_NONE);
+}
+
+static void testCrcA() {
+  // ISO 14443-3 annex B examples.
+  uint8_t crc[2];
+  const uint8_t zero[] = {0x00, 0x00};
+  crcA(zero, 2, crc);
+  CHECK(crc[0] == 0xA0 && crc[1] == 0x1E);
+  const uint8_t data[] = {0x12, 0x34};
+  crcA(data, 2, crc);
+  CHECK(crc[0] == 0x26 && crc[1] == 0xCF);
+  // HLTA, as every reader library sends it.
+  const uint8_t halt[] = {0x50, 0x00};
+  crcA(halt, 2, crc);
+  CHECK(crc[0] == 0x57 && crc[1] == 0xCD);
+}
+
+// A type A tag behind a reader, answering the way ISO 14443-3 says.
+class FakeTag : public NfcTransceiver {
+ public:
+  std::vector<uint8_t> uid;
+  bool present = true, badBcc = false, badCrc = false, halted = false;
+  int halts = 0;
+  int transceive(const uint8_t* tx, int txLen, uint8_t txLastBits, uint8_t* rx, int rxMax) override {
+    if (!present) return -1;
+    if (txLen == 1 && txLastBits == 7 && tx[0] == 0x52) {
+      halted = false;
+      rx[0] = 0x44;
+      rx[1] = 0x00;
+      return 2;
+    }
+    if (txLastBits || halted) return -1;
+    uint8_t crc[2];
+    if (txLen == 4 && tx[0] == 0x50 && tx[1] == 0x00) {
+      crcA(tx, 2, crc);
+      if (crc[0] == tx[2] && crc[1] == tx[3]) {
+        halted = true;
+        halts++;
+      }
+      return -1;
+    }
+    int level = (tx[0] - 0x93) / 2;
+    if (tx[0] < 0x93 || tx[0] > 0x97 || (tx[0] & 1) == 0) return -1;
+    int levels = uid.size() == 4 ? 1 : uid.size() == 7 ? 2 : 3;
+    if (level >= levels) return -1;
+    uint8_t part[5];
+    bool more = level < levels - 1;
+    int from = level * 3;
+    if (more) {
+      part[0] = 0x88;
+      memcpy(part + 1, &uid[from], 3);
+    } else {
+      memcpy(part, &uid[from], 4);
+    }
+    part[4] = part[0] ^ part[1] ^ part[2] ^ part[3];
+    if (txLen == 2 && tx[1] == 0x20) {
+      if (rxMax < 5) return -1;
+      memcpy(rx, part, 5);
+      if (badBcc) rx[4] ^= 1;
+      return 5;
+    }
+    if (txLen == 9 && tx[1] == 0x70 && memcmp(tx + 2, part, 5) == 0) {
+      crcA(tx, 7, crc);
+      if (crc[0] != tx[7] || crc[1] != tx[8] || rxMax < 3) return -1;
+      rx[0] = more ? 0x04 : 0x08;
+      crcA(rx, 1, rx + 1);
+      if (badCrc) rx[2] ^= 1;
+      return 3;
+    }
+    return -1;
+  }
+};
+
+static void testTypeA() {
+  FakeTag tag;
+  uint8_t uid[NFC_UID_MAX];
+  const uint8_t four[] = {0xde, 0xad, 0xbe, 0xef};
+  tag.uid.assign(four, four + 4);
+  CHECK(readTypeAUid(tag, uid) == 4 && memcmp(uid, four, 4) == 0);
+  CHECK(tag.halts == 1);
+  // A halted tag is woken again, so it reads while it stays.
+  CHECK(readTypeAUid(tag, uid) == 4 && tag.halts == 2);
+  const uint8_t seven[] = {0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6};
+  tag.uid.assign(seven, seven + 7);
+  CHECK(readTypeAUid(tag, uid) == 7 && memcmp(uid, seven, 7) == 0);
+  const uint8_t ten[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  tag.uid.assign(ten, ten + 10);
+  CHECK(readTypeAUid(tag, uid) == 10 && memcmp(uid, ten, 10) == 0);
+  tag.badBcc = true;
+  CHECK(readTypeAUid(tag, uid) == 0);
+  tag.badBcc = false;
+  tag.badCrc = true;
+  CHECK(readTypeAUid(tag, uid) == 0);
+  tag.badCrc = false;
+  tag.present = false;
+  CHECK(readTypeAUid(tag, uid) == 0);
+}
+
+#if OMNI_HAS_PN532
+static void testPn532Frames() {
+  uint8_t frame[16];
+  // The frames every PN532 driver sends: GetFirmwareVersion, SAMConfiguration
+  // normal mode, InListPassiveTarget for one 106 kbps type A target.
+  const uint8_t version[] = {0x02};
+  CHECK(pn532Frame(version, 1, frame) == 9);
+  const uint8_t versionFrame[] = {0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD4, 0x02, 0x2A, 0x00};
+  CHECK(memcmp(frame, versionFrame, 9) == 0);
+  const uint8_t sam[] = {0x14, 0x01, 0x14, 0x01};
+  const uint8_t samFrame[] = {0x00, 0x00, 0xFF, 0x05, 0xFB, 0xD4, 0x14, 0x01, 0x14, 0x01, 0x02, 0x00};
+  CHECK(pn532Frame(sam, 4, frame) == 12 && memcmp(frame, samFrame, 12) == 0);
+  const uint8_t list[] = {0x4A, 0x01, 0x00};
+  const uint8_t listFrame[] = {0x00, 0x00, 0xFF, 0x04, 0xFC, 0xD4, 0x4A, 0x01, 0x00, 0xE1, 0x00};
+  CHECK(pn532Frame(list, 3, frame) == 11 && memcmp(frame, listFrame, 11) == 0);
+
+  // A reply listing one tag with a 7-byte UID.
+  uint8_t reply[] = {0x00, 0x00, 0xFF, 0x0F, 0xF1, 0xD5, 0x4B, 0x01, 0x01, 0x00, 0x44, 0x00,
+                     0x07, 0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x00, 0x00};
+  uint8_t sum = 0;
+  for (int i = 5; i < 20; i++) sum = (uint8_t)(sum + reply[i]);
+  reply[20] = (uint8_t)(0x100 - sum);
+  const uint8_t* payload = 0;
+  int n = pn532Payload(reply, sizeof(reply), &payload);
+  CHECK(n == 14 && payload == reply + 6);
+  uint8_t uid[NFC_UID_MAX];
+  CHECK(pn532ListedUid(payload, n, uid) == 7 && uid[0] == 0x04 && uid[6] == 0xf6);
+  // No tag in the field.
+  const uint8_t none[] = {0x00, 0x00, 0xFF, 0x03, 0xFD, 0xD5, 0x4B, 0x00, 0xE0, 0x00};
+  n = pn532Payload(none, sizeof(none), &payload);
+  CHECK(n == 2 && pn532ListedUid(payload, n, uid) == 0);
+  // Bad checksums, the ACK frame, truncation and a frame from the host are not replies.
+  reply[20] ^= 1;
+  CHECK(pn532Payload(reply, sizeof(reply), &payload) == -1);
+  reply[20] ^= 1;
+  reply[4] ^= 1;
+  CHECK(pn532Payload(reply, sizeof(reply), &payload) == -1);
+  reply[4] ^= 1;
+  CHECK(pn532Payload(reply, 15, &payload) == -1);
+  const uint8_t ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+  CHECK(pn532Payload(ack, sizeof(ack), &payload) == -1);
+  CHECK(pn532Payload(listFrame, sizeof(listFrame), &payload) == -1);
+  // A UID length a type A tag cannot have.
+  const uint8_t odd[] = {0x4B, 0x01, 0x01, 0x00, 0x44, 0x00, 0x05, 1, 2, 3, 4, 5};
+  CHECK(pn532ListedUid(odd, sizeof(odd), uid) == 0);
+  const uint8_t shortUid[] = {0x4B, 0x01, 0x01, 0x00, 0x44, 0x00, 0x07, 1, 2, 3};
+  CHECK(pn532ListedUid(shortUid, sizeof(shortUid), uid) == 0);
+}
+#endif
+
 int main() {
   // NEC: LG power, the classic MSB-first 0x20DF10EF, is address 4, command 8.
   CHECK(necFrame(4, 8) == necFromMsbCode(0x20DF10EF));
@@ -756,6 +1224,18 @@ int main() {
   testRfSend();
   testU32();
   testLink();
+  testNestedArgs();
+  testPeriphNames();
+  testPeriphCommands();
+  testUnoReader();
+  testPeriphSettings();
+  testNfcDebounce();
+  testNfcPolling();
+  testCrcA();
+  testTypeA();
+#if OMNI_HAS_PN532
+  testPn532Frames();
+#endif
 #ifndef OMNI_SMALL
   testPicoCore();
   testDescribeFits();

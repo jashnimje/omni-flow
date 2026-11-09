@@ -10,6 +10,7 @@
     { "key": "username", "label": "Broker user" },
     { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
   ],
+  "setup": ["configure:topic", "configure:username?", "secret:password?"],
   "statePush": {
     "topics": [
       { "topic": "stat/{{device.topic}}/RESULT" },

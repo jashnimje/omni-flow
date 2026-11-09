@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:omniflow_engine/omniflow_engine.dart';
 
 import 'api/engine_client.dart';
@@ -41,9 +42,12 @@ Future<Started> startEngine({
 /// service stops (its notification's Stop button), it says so and offers to
 /// start it again.
 class Launcher extends StatefulWidget {
-  const Launcher({super.key, required this.start});
+  const Launcher({super.key, required this.start, this.platform = const []});
 
   final Future<Started> Function() start;
+
+  /// The phone's own adapters (NFC, permissions), which tests leave out.
+  final List<Override> platform;
 
   @override
   State<Launcher> createState() => _LauncherState();
@@ -121,6 +125,7 @@ class _LauncherState extends State<Launcher> {
           overrides: [
             engineClientProvider.overrideWithValue(started.client),
             hubErrorProvider.overrideWithValue(started.hubError),
+            ...widget.platform,
           ],
           child: const OmniFlowApp(),
         );

@@ -9,6 +9,7 @@
     { "key": "username", "label": "Username" },
     { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
   ],
+  "setup": ["configure:username", "secret:sshPrivateKey"],
   "reliability": { "timeoutMs": 10000, "retries": 0 },
   "capabilities": [
     {

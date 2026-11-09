@@ -9,11 +9,15 @@ import 'package:mcp_dart/mcp_dart.dart' show StdioServerTransport;
 import '../api/local_client.dart';
 import '../api/local_server.dart';
 import '../api/omni_engine.dart';
+import '../devices/board.dart' show boardPeriphTypes, isSerialHost;
+import '../devices/nfc/ndef.dart' show tagUriPrefix, uriRecord;
 import '../mcp/omni_mcp.dart';
 import '../storage/database.dart' show DatabaseInUseException;
 import '../storage/keychain_secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../version.dart';
+import 'add_cli.dart';
+import 'rule_cli.dart';
 
 typedef EngineFactory = Future<OmniEngine> Function(
   Directory home, {
@@ -134,6 +138,7 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(
       _Group('board', 'Set up OmniFlow boards and name their pins.', [
         _BoardSetup(),
+        _BoardPeriph(),
         _BoardPin(),
         _ApiCommand(
           'pins',
@@ -179,6 +184,8 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(_Watch());
     addCommand(_Hub());
     addCommand(_Mcp());
+    addCommand(RuleCommand());
+    addCommand(AddCommand());
     String id(List<String> rest) => _one(rest, 'ID');
     addCommand(
       _Group('flow', 'Validate, save, run and inspect flows.', [
@@ -295,30 +302,111 @@ class OmniCommandRunner extends CommandRunner<int> {
       ]),
     );
     addCommand(
-      _Group('sensor', 'Feed sensor readings by hand, for testing zones.', [
-        _ApiCommand(
-          'ble',
-          'One BLE reading: omni sensor ble OMNI_PICO_DESK -55',
-          'sensor.ble',
-          (rest, _) async {
-            if (rest.length != 2 || num.tryParse(rest[1]) == null) {
-              throw UsageException('needs NAME RSSI', '');
-            }
-            return {'name': rest[0], 'rssi': num.parse(rest[1])};
-          },
-          usage: 'NAME RSSI',
-        ),
+      _Group(
+        'sensor',
+        'The earlier name of omni phone wifi and omni phone ble.',
+        [
+          _BleReading(
+            'One BLE reading: omni sensor ble OMNI_PICO_DESK -55',
+            'sensor.ble',
+          ),
+          _ApiCommand(
+            'wifi',
+            'The current Wi-Fi: omni sensor wifi HomeNet',
+            'sensor.wifi',
+            (rest, _) async => {
+              if (rest.isNotEmpty) 'ssid': rest[0],
+              if (rest.length > 1) 'bssid': rest[1],
+            },
+            usage: '[SSID] [BSSID]',
+          ),
+        ],
+      ),
+    );
+    addCommand(
+      _Group('phone', 'Feed the phone thing by hand, as the app does.', [
         _ApiCommand(
           'wifi',
-          'The current Wi-Fi: omni sensor wifi HomeNet',
-          'sensor.wifi',
-          (rest, _) async => {
-            if (rest.isNotEmpty) 'ssid': rest[0],
-            if (rest.length > 1) 'bssid': rest[1],
+          'The current Wi-Fi, none when left out: omni phone wifi HomeNet',
+          'phone.wifi',
+          (rest, _) async {
+            if (rest.length > 2) {
+              throw UsageException('needs [SSID] [BSSID]', '');
+            }
+            return {
+              if (rest.isNotEmpty) 'ssid': rest[0],
+              if (rest.length > 1) 'bssid': rest[1],
+            };
           },
           usage: '[SSID] [BSSID]',
         ),
+        _BleReading(
+          'One BLE reading: omni phone ble OMNI_PICO_DESK -55',
+          'phone.ble',
+        ),
+        _ApiCommand(
+          'battery',
+          'The battery level, and whether it charges: omni phone battery 80 charging',
+          'phone.battery',
+          (rest, _) async {
+            final level = rest.isEmpty ? null : num.tryParse(rest[0]);
+            if (rest.isEmpty ||
+                rest.length > 2 ||
+                level == null ||
+                (rest.length == 2 &&
+                    !const {'charging', 'unplugged'}.contains(rest[1]))) {
+              throw UsageException('needs LEVEL [charging|unplugged]', '');
+            }
+            return {
+              'level': level,
+              if (rest.length == 2) 'charging': rest[1] == 'charging',
+            };
+          },
+          usage: 'LEVEL [charging|unplugged]',
+        ),
+        _ApiCommand(
+          'nfc',
+          'An NFC scan, as omni tag scan UID: omni phone nfc 04:A2:2B:1C [TAG_ID]',
+          'nfc.scanned',
+          (rest, _) async {
+            if (rest.isEmpty || rest.length > 2) {
+              throw UsageException('needs UID [TAG_ID]', '');
+            }
+            return {
+              'uid': rest[0],
+              'source': 'phone',
+              if (rest.length == 2)
+                'ndef': [uriRecord('$tagUriPrefix${rest[1]}')],
+            };
+          },
+          usage: 'UID [TAG_ID]',
+        ),
       ]),
+    );
+    addCommand(
+      _Group(
+        'tag',
+        'NFC tags: name them, write them, and feed scans by hand.',
+        [
+          _TagAdd(),
+          _ApiCommand('list', 'List the tags.', 'tag.list', (_, _) async => {}),
+          _ApiCommand(
+            'remove',
+            'Remove a tag. The flows that name it are disabled.',
+            'tag.remove',
+            (rest, _) async => {'id': _one(rest, 'ID')},
+            usage: 'ID',
+          ),
+          _ApiCommand(
+            'payload',
+            'The NDEF records the phone writes on a tag for it.',
+            'tag.write_payload',
+            (rest, _) async => {'id': _one(rest, 'ID')},
+            usage: 'ID',
+          ),
+          _TagScan(),
+        ],
+      ),
     );
     addCommand(
       _Group('secret', 'Store device secrets in the keychain.', [
@@ -437,6 +525,30 @@ Map<String, Object?> parseKeyValues(Iterable<String> pairs) {
   return map;
 }
 
+/// Parses `key=value` device settings. A JSON object or list stays
+/// structured (a board's pins), anything else stays the text as typed, so
+/// a UID like 12E45678 or an id like 0042 is never read as a number.
+Map<String, Object?> parseSettings(Iterable<String> pairs) {
+  final map = <String, Object?>{};
+  for (final pair in pairs) {
+    final eq = pair.indexOf('=');
+    if (eq <= 0) throw UsageException('expected key=value, got "$pair"', '');
+    map[pair.substring(0, eq)] = settingValue(pair.substring(eq + 1));
+  }
+  return map;
+}
+
+/// One setting value, as [parseSettings] reads it.
+Object? settingValue(String raw) {
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is Map || decoded is List) return decoded;
+  } on FormatException {
+    // Plain text.
+  }
+  return raw;
+}
+
 class _Group extends Command<int> {
   _Group(this.name, this.description, List<Command<int>> children) {
     children.forEach(addSubcommand);
@@ -532,8 +644,9 @@ class _DeviceAdd extends _ApiCommand {
       )
       ..addOption(
         'host',
-        mandatory: true,
-        help: 'IP address, host name, or local.',
+        help:
+            'IP address, host name, or local. Not needed for a virtual '
+            'thing (phone, person, place, nfc_tag).',
       )
       ..addOption('port', help: "Overrides the driver's port.")
       ..addOption('name', help: 'Display name.')
@@ -545,6 +658,7 @@ class _DeviceAdd extends _ApiCommand {
       ..addMultiOption(
         'set',
         help: 'A non-secret setting, key=value. Repeatable.',
+        splitCommas: false,
       )
       ..addFlag(
         'replace',
@@ -562,19 +676,12 @@ class _DeviceAdd extends _ApiCommand {
       'id': id,
       if (a.flag('replace')) 'replace': true,
       'driver': a.option('driver'),
-      'host': a.option('host'),
+      if (a.option('host') != null) 'host': a.option('host'),
       if (port != null) 'port': int.tryParse(port) ?? port,
       if (a.option('name') != null) 'name': a.option('name'),
       if (a.option('room') != null) 'room': a.option('room'),
       if (a.option('stable-id') != null) 'stableId': a.option('stable-id'),
-      // Objects (a board's pins) stay structured; scalars stay text, so a
-      // user name like 1234 is not turned into a number.
-      'settings': parseKeyValues(a.multiOption('set')).map(
-        (k, v) => MapEntry(
-          k,
-          v is Map || v is List || v is String ? v : jsonEncode(v),
-        ),
-      ),
+      'settings': parseSettings(a.multiOption('set')),
     };
   }
 }
@@ -1115,6 +1222,53 @@ class _BoardSetup extends _ApiCommand {
   }
 }
 
+/// `omni board periph /dev/cu.usbserial-0001 nfc_rc522 --pin ss=5 --pin
+/// rst=27` binds a reader to pins over USB; `--clear` takes it off.
+class _BoardPeriph extends _ApiCommand {
+  _BoardPeriph()
+    : super(
+        'periph',
+        'Bind a peripheral to pins over USB: omni board periph PORT nfc_rc522 --pin ss=5 '
+            '(types: ${boardPeriphTypes.join(', ')}). The board is a USB port, or the id of a '
+            'board on USB.',
+        'board.periph',
+        (_, _) async => {},
+        usage: 'PORT|ID TYPE',
+      ) {
+    argParser
+      ..addMultiOption(
+        'pin',
+        valueHelp: 'NAME=GPIO',
+        help: 'One pin: tx for ir and rf, ss and rst for nfc_rc522.',
+      )
+      ..addFlag('clear', negatable: false, help: 'Take the peripheral off.');
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    if (a.rest.length != 2) {
+      throw UsageException('needs PORT|ID and TYPE', usage);
+    }
+    final pins = <String, Object?>{};
+    for (final p in a.multiOption('pin')) {
+      final at = p.indexOf('=');
+      final gpio = at < 1 ? null : int.tryParse(p.substring(at + 1));
+      if (gpio == null) {
+        throw UsageException('--pin is NAME=GPIO, like ss=5', usage);
+      }
+      pins[p.substring(0, at)] = gpio;
+    }
+    final target = a.rest[0];
+    return {
+      if (isSerialHost(target)) 'port': target else 'id': target,
+      'type': a.rest[1],
+      if (pins.isNotEmpty) 'pins': pins,
+      if (a.flag('clear')) 'clear': true,
+    };
+  }
+}
+
 /// `omni board pin desk relay 4 out` names one pin and sets it up;
 /// `omni board pin desk relay --remove` forgets it.
 class _BoardPin extends _ApiCommand {
@@ -1264,4 +1418,80 @@ class _LinkAdd extends _ApiCommand {
       if (set != null) 'set': parseKeyValues(['v=$set'])['v'],
     };
   }
+}
+
+/// `omni tag add front_door "Front door" --uid 04:A2:2B:1C` adds a tag or
+/// renames it and sets its UID.
+class _TagAdd extends _ApiCommand {
+  _TagAdd()
+    : super(
+        'add',
+        'Add a tag, or rename it: omni tag add front_door "Front door" --uid 04:A2:2B:1C',
+        'tag.save',
+        (_, _) async => {},
+        usage: 'ID NAME',
+      ) {
+    argParser.addOption('uid', valueHelp: 'HEX', help: 'The tag UID.');
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    if (a.rest.length != 2) throw UsageException('needs ID and NAME', usage);
+    return {'id': a.rest[0], 'name': a.rest[1], 'uid': ?a.option('uid')};
+  }
+}
+
+/// `omni tag scan 04A22B1C --source desk --uri omniflow://tag/front_door`
+/// feeds `nfc.scanned` as a reader would, the phone unless `--source` names
+/// a board.
+class _TagScan extends _ApiCommand {
+  _TagScan()
+    : super(
+        'scan',
+        'A scan, as a reader sends it: omni tag scan 04A22B1C [--source BOARD] [--uri omniflow://tag/ID]',
+        'nfc.scanned',
+        (_, _) async => {},
+        usage: 'UID',
+      ) {
+    argParser
+      ..addOption(
+        'source',
+        defaultsTo: 'phone',
+        valueHelp: 'phone|BOARD',
+        help: 'The reader: the phone, or the id of a board.',
+      )
+      ..addOption(
+        'uri',
+        valueHelp: 'URI',
+        help: 'A URI record the tag carries.',
+      );
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    if (a.rest.length != 1) throw UsageException('needs UID', usage);
+    final uri = a.option('uri');
+    return {
+      'uid': a.rest.single,
+      'source': a.option('source'),
+      if (uri != null) 'ndef': [uriRecord(uri)],
+    };
+  }
+}
+
+/// One BLE reading. Options end at the first argument, so a negative RSSI
+/// such as -55 is not read as an option.
+class _BleReading extends _ApiCommand {
+  _BleReading(String description, String apiCommand)
+    : super('ble', description, apiCommand, (rest, _) async {
+        if (rest.length != 2 || num.tryParse(rest[1]) == null) {
+          throw UsageException('needs NAME RSSI', '');
+        }
+        return {'name': rest[0], 'rssi': num.parse(rest[1])};
+      }, usage: 'NAME RSSI');
+
+  @override
+  final argParser = ArgParser(allowTrailingOptions: false);
 }

@@ -10,22 +10,32 @@ class FlowReferences {
   const FlowReferences({
     this.capabilityOf = _none,
     this.devices = const {},
-    this.zones = const {},
     this.flows = const {},
     this.calls = const {},
+    this.stateKeysOf = _unknown,
+    this.eventsOf = _unknown,
   });
 
   /// The capability [capabilityId] of device [deviceId], or null.
   final CapabilitySpec? Function(String deviceId, String capabilityId)
   capabilityOf;
+
+  /// Every thing a flow may name: devices, the phone, people, places, tags.
   final Set<String> devices;
-  final Set<String> zones;
   final Set<String> flows;
 
   /// The flows each stored flow starts with `run_flow`, to find call cycles.
   final Map<String, Set<String>> calls;
 
+  /// The state keys thing [thing] reports, or null when any key is taken.
+  final Set<String>? Function(String thing) stateKeysOf;
+
+  /// The events thing [thing] raises, or null when it may raise events its
+  /// driver does not declare (a board's firmware lines), so any is taken.
+  final Set<String>? Function(String thing) eventsOf;
+
   static CapabilitySpec? _none(String _, String _) => null;
+  static Set<String>? _unknown(String _) => null;
 }
 
 typedef ConfigCheck = void Function(
@@ -50,7 +60,6 @@ class NodeType {
 
 final _hhmm = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
 const _days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const _compareOps = ['<', '<=', '>', '>=', '==', '!='];
 
 /// The built-in node types, keyed by type name.
 final Map<String, NodeType> builtInNodeTypes = {
@@ -59,45 +68,19 @@ final Map<String, NodeType> builtInNodeTypes = {
     NodeType('manual', NodeCategory.trigger, ['out'], (_, _, _, _) {}),
     NodeType('time_of_day', NodeCategory.trigger, ['out'], (c, p, i, _) {
       _time(c, 'at', p, i);
-      final days = c['days'];
-      if (days != null &&
-          (days is! List ||
-              days.isEmpty ||
-              days.any((d) => !_days.contains(d)))) {
-        i.add('$p.days', 'must be a non-empty list of ${_days.join(', ')}');
-      }
+      _dayList(c, 'days', p, i);
     }),
     NodeType('interval', NodeCategory.trigger, [
       'out',
     ], (c, p, i, _) => _int(c, 'seconds', p, i, min: 1)),
-    NodeType('zone_change', NodeCategory.trigger, ['out'], (c, p, i, r) {
-      _ref(c, 'zoneId', r.zones, 'zone', p, i);
-      _oneOf(c, 'transition', ['entered', 'exited'], p, i);
-    }),
-    NodeType('device_state', NodeCategory.trigger, ['out'], (c, p, i, r) {
-      _ref(c, 'deviceId', r.devices, 'device', p, i);
-      _optionalString(c, 'key', p, i);
-    }),
-    NodeType('board_event', NodeCategory.trigger, ['out'], (c, p, i, _) {
-      _string(c, 'event', p, i);
-      _optionalString(c, 'node', p, i);
-    }),
-    NodeType('wifi_change', NodeCategory.trigger, [
-      'out',
-    ], (c, p, i, _) => _optionalString(c, 'ssid', p, i)),
+    NodeType('on', NodeCategory.trigger, ['out'], _checkOn),
     // Conditions.
     for (final composite in ['all_of', 'any_of', 'xor'])
       NodeType(composite, NodeCategory.condition, [
         'true',
         'false',
       ], (c, p, i, r) => checkRule({...c, 'type': composite}, p, i, r)),
-    for (final simple in [
-      'not',
-      'time_window',
-      'var_equals',
-      'var_compare',
-      'device_state_is',
-    ])
+    for (final simple in ['not', 'time_window', 'compare', 'days'])
       NodeType(simple, NodeCategory.condition, [
         'true',
         'false',
@@ -158,10 +141,25 @@ final Map<String, NodeType> builtInNodeTypes = {
       _string(c, 'event', p, i);
       _int(c, 'timeoutMs', p, i, min: 1, max: 86400000);
     }),
+    // Waits for what an `on` trigger would fire on, or gives up.
+    NodeType('wait_until', NodeCategory.flowControl, ['matched', 'timeout'], (
+      c,
+      p,
+      i,
+      r,
+    ) {
+      _checkOn({...c}..remove('timeoutMs'), p, i, r);
+      _int(c, 'timeoutMs', p, i, min: 1, max: 86400000);
+    }),
     NodeType('repeat', NodeCategory.flowControl, [
       'body',
       'done',
     ], (c, p, i, _) => _int(c, 'maxIterations', p, i, min: 1, max: 1000)),
+    // Every branch edge runs side by side, then done once all have ended.
+    NodeType('parallel', NodeCategory.flowControl, [
+      'branch',
+      'done',
+    ], (_, _, _, _) {}),
     // Actions.
     NodeType('device_capability', NodeCategory.action, [
       'out',
@@ -296,28 +294,168 @@ void checkRule(Object? rule, String p, IssueCollector i, FlowReferences r) {
     case 'time_window':
       _time(c, 'start', p, i);
       _time(c, 'end', p, i);
-    case 'var_equals':
-      _variableName(c, p, i);
-      if (!c.containsKey('value')) i.add('$p.value', 'is required');
-    case 'var_compare':
-      _variableName(c, p, i);
-      _oneOf(c, 'op', _compareOps, p, i);
-      if (c['value'] is! num) i.add('$p.value', 'must be a number');
-    case 'device_state_is':
-      _ref(c, 'deviceId', r.devices, 'device', p, i);
-      _string(c, 'key', p, i);
-      if (!c.containsKey('value')) i.add('$p.value', 'is required');
+    case 'days':
+      _dayList(c, 'days', p, i, required: true);
+    case 'compare':
+      _oneOf(c, 'op', compareOps, p, i);
+      _value(c['left'], '$p.left', i, r);
+      _value(c['right'], '$p.right', i, r);
+      if (const {'<', '<=', '>', '>='}.contains(c['op'])) {
+        for (final side in ['left', 'right']) {
+          final v = c[side];
+          if (v is Map && v.containsKey('literal') && v['literal'] is! num) {
+            i.add('$p.$side.literal', 'must be a number for ${c['op']}');
+          }
+        }
+      }
     default:
       i.add('$p.type', 'unknown rule type ${c['type']}');
   }
 }
 
-final _msgField = RegExp(r'^msg\.[A-Za-z_][A-Za-z0-9_]*$');
+/// The comparison operators of `compare`.
+const compareOps = ['<', '<=', '>', '>=', '==', '!='];
 
-void _variableName(Map<String, Object?> c, String p, IssueCollector i) {
-  final name = _string(c, 'name', p, i);
-  if (name != null && !_variable.hasMatch(name) && !_msgField.hasMatch(name)) {
-    i.add('$p.name', r'must be $Name, %name or msg.key');
+/// The ways `compare` reads a value, each the only key of its object.
+const compareSources = ['literal', 'state', 'msg', 'var'];
+
+final _msgPath = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$');
+
+/// A `thing.key` reference: the thing, then its (possibly dotted) key.
+final thingKeyPattern = RegExp(r'^([a-z][a-z0-9_]*)\.(\S+)$');
+
+void _value(Object? v, String p, IssueCollector i, FlowReferences r) {
+  if (v is! Map || v.length != 1 || !compareSources.contains(v.keys.single)) {
+    i.add(
+      p,
+      'must be one of {literal}, {state: "thing.key"}, {msg: "key"}, {var: "\$Name"}',
+    );
+    return;
+  }
+  final source = v.keys.single as String;
+  final ref = v[source];
+  switch (source) {
+    case 'state':
+      final m = ref is String ? thingKeyPattern.firstMatch(ref) : null;
+      if (m == null) {
+        i.add('$p.state', 'must be thing.key, like jade.home');
+        return;
+      }
+      _thingKey(m.group(1)!, m.group(2)!, '$p.state', i, r, event: false);
+    case 'msg':
+      if (ref is! String || !_msgPath.hasMatch(ref)) {
+        i.add('$p.msg', 'must be a message key like value or payload.temp');
+      }
+    case 'var':
+      if (ref is! String || !_variable.hasMatch(ref)) {
+        i.add('$p.var', r'must be $Name (global) or %name (run)');
+      }
+  }
+}
+
+/// Checks that [thing] exists and has the state key or event [key].
+void _thingKey(
+  String thing,
+  String key,
+  String p,
+  IssueCollector i,
+  FlowReferences r, {
+  required bool event,
+}) {
+  if (!r.devices.contains(thing)) {
+    i.add(p, 'no thing $thing');
+    return;
+  }
+  final known = event ? r.eventsOf(thing) : r.stateKeysOf(thing);
+  if (known == null || known.contains(key)) return;
+  final what = event ? 'event' : 'state';
+  i.add(
+    p,
+    known.isEmpty
+        ? '$thing has no $what $key, and no ${what}s at all'
+        : '$thing has no $what $key (it has ${(known.toList()..sort()).join(', ')})',
+  );
+}
+
+/// An `on` trigger: an event, a state change (optionally to one value), or
+/// a number crossing a threshold, on one thing.
+void _checkOn(
+  Map<String, Object?> c,
+  String p,
+  IssueCollector i,
+  FlowReferences r,
+) {
+  final thing = _string(c, 'thing', p, i);
+  final key = c['key'];
+  if (key != null && (key is! String || key.isEmpty)) {
+    i.add('$p.key', 'must be a non-empty string');
+    return;
+  }
+  final modes = [
+    for (final m in ['event', 'change', 'crosses'])
+      if (c[m] != null) m,
+  ];
+  if (modes.length > 1) {
+    i.add(
+      p,
+      'takes one of event, change or crosses, not ${modes.join(' and ')}',
+    );
+    return;
+  }
+  final mode = modes.firstOrNull ?? 'change';
+  if (c['match'] != null && mode != 'event') {
+    i.add('$p.match', 'is only for an event');
+  }
+  switch (mode) {
+    case 'event':
+      if (c['event'] != true) i.add('$p.event', 'must be true');
+      final match = c['match'];
+      if (match != null && match is! Map) {
+        i.add('$p.match', 'must be an object of payload values');
+      }
+    case 'change':
+      final change = c['change'];
+      if (change != null &&
+          (change is! Map || change.keys.any((k) => k != 'to'))) {
+        i.add('$p.change', 'must be {} or {"to": value}');
+      }
+      if (change is Map && change.containsKey('to') && key == null) {
+        i.add('$p.key', 'is required to change to a value');
+      }
+    case 'crosses':
+      final crosses = c['crosses'];
+      if (crosses is! Map ||
+          crosses.length != 1 ||
+          !const {'above', 'below'}.contains(crosses.keys.single) ||
+          crosses.values.single is! num) {
+        i.add('$p.crosses', 'must be {"above": number} or {"below": number}');
+      }
+  }
+  if (key == null && mode != 'change') {
+    i.add(
+      '$p.key',
+      'is required for ${mode == 'event' ? 'an event' : 'crosses'}',
+    );
+  }
+  if (thing == null) return;
+  if (!r.devices.contains(thing)) {
+    i.add('$p.thing', 'no thing $thing');
+  } else if (key != null) {
+    _thingKey(thing, key as String, '$p.key', i, r, event: mode == 'event');
+  }
+}
+
+void _dayList(
+  Map<String, Object?> c,
+  String key,
+  String p,
+  IssueCollector i, {
+  bool required = false,
+}) {
+  final days = c[key];
+  if (days == null && !required) return;
+  if (days is! List || days.isEmpty || days.any((d) => !_days.contains(d))) {
+    i.add('$p.$key', 'must be a non-empty list of ${_days.join(', ')}');
   }
 }
 
@@ -327,13 +465,6 @@ String? _string(
   String p,
   IssueCollector i,
 ) => i.requiredString(c, key, p);
-
-void _optionalString(
-  Map<String, Object?> c,
-  String key,
-  String p,
-  IssueCollector i,
-) => i.optionalString(c, key, p);
 
 void _int(
   Map<String, Object?> c,

@@ -140,6 +140,11 @@ class DeviceService {
     Map<String, Object?> params, {
     bool allowPairing = true,
   }) async {
+    if (!capability.type.hasCommand) {
+      throw ArgumentError(
+        '${device.id}.${capability.id} is a ${capability.type.wireName} and takes no command',
+      );
+    }
     final validated = capability.validateParams(params);
     final (current, reply) = await _sendHealing(
       device,

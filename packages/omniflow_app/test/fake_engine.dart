@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/api/engine_client.dart';
 import 'package:omniflow_app/state/providers.dart';
@@ -150,6 +151,7 @@ Future<void> pumpApp(
   WidgetTester tester,
   FakeEngine engine, {
   String? hubError,
+  List<Override> overrides = const [],
 }) async {
   // A phone-wide screen (412 dp), tall enough that the Add device button
   // does not cover the controls under test.
@@ -160,10 +162,19 @@ Future<void> pumpApp(
       overrides: [
         engineClientProvider.overrideWithValue(engine),
         hubErrorProvider.overrideWithValue(hubError),
+        ...overrides,
       ],
       child: const OmniFlowApp(),
     ),
   );
+  await tester.pumpAndSettle();
+}
+
+/// Opens the Add page, then the sheet that adds a device by its driver.
+Future<void> openDriverSheet(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('add-device')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('add-by-driver')));
   await tester.pumpAndSettle();
 }
 

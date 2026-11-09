@@ -78,4 +78,31 @@ void main() {
     expect(rangeMap(59, config), 63);
     expect(rangeMap(59, {...config, 'round': false}), closeTo(63.1, 1e-9));
   });
+
+  test('a link spec comes back from the flow it made', () {
+    const dimmer = CapabilitySpec(
+      id: 'dimmer',
+      type: CapabilityType.level,
+      label: 'dimmer',
+      params: {'value': ParamSpec(type: ParamType.number, min: 0, max: 255)},
+      command: {'cmd': 'dim'},
+    );
+    final links = [
+      link('desk.button', 'lamp.relay', mode: LinkMode.toggle),
+      link('desk.light', 'hall.relay', below: 30, set: true),
+      link('desk.light', 'hall.relay', above: 60, set: false),
+      LinkRequest(
+        from: LinkEnd.parse('desk.knob', 'from'),
+        to: LinkEnd.parse('lamp.dimmer', 'to'),
+        mode: LinkMode.follow,
+        target: dimmer,
+        fromMin: 0,
+        fromMax: 1023,
+      ),
+    ];
+    for (final l in links) {
+      expect(linkSpecFromFlow(l.toFlow()), l.toSpec(), reason: l.name);
+    }
+    expect(linkSpecFromFlow({'nodes': <Object?>[]}), isNull);
+  });
 }

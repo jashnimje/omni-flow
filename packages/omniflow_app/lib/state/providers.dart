@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/engine_calls.dart' show Json;
 import '../api/engine_client.dart';
+import '../nfc/nfc.dart';
 
-typedef Json = Map<String, Object?>;
+export '../api/engine_calls.dart' show Json;
 
 /// Overridden in main() with the real engine, and in tests with a fake.
 final engineClientProvider = Provider<EngineClient>(
@@ -14,6 +16,20 @@ final engineClientProvider = Provider<EngineClient>(
 
 /// Why the hub did not start at launch, or null when it runs.
 final hubErrorProvider = Provider<String?>((ref) => null);
+
+/// The phone's NFC reader. main() puts in the plugin; without it the app
+/// behaves as on a phone with no NFC.
+final nfcAdapterProvider = Provider<NfcAdapter>((ref) => const NoNfc());
+
+/// Tags Android opened the app for.
+final nfcIntentsProvider = Provider<NfcIntents>((ref) => const NoNfcIntents());
+
+/// Asks for the location permission Android requires before it tells an
+/// app the Wi-Fi network's name. True when it was granted.
+final wifiNamePermissionProvider = Provider<Future<bool> Function()>(
+  (ref) =>
+      () async => false,
+);
 
 /// Shows API errors without each screen handling them.
 final messengerKey = GlobalKey<ScaffoldMessengerState>();

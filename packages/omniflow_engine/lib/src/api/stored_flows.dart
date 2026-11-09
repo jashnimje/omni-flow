@@ -1,23 +1,36 @@
 import 'dart:convert';
 
+import 'api_error.dart';
 import 'engine_core.dart';
+import 'things_runtime.dart';
 import '../dag/canonical.dart';
 import '../dag/flow.dart';
 import '../dag/flow_engine.dart';
+import '../dag/links.dart';
+import '../dag/migrate.dart';
 import '../dag/node_types.dart';
 import '../dag/validator.dart';
 import '../devices/board.dart';
+import '../devices/device_service.dart' show stateKeyOf;
+import '../manifest/capability.dart';
+import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../storage/database.dart';
-import '../zones/zones.dart';
 
-/// The stored flows and zones as the flow engine runs them: the trust mark
-/// and revision of each flow, which flows are high risk, and reloading
-/// what is enabled and approved.
+/// The stored flows as the flow engine runs them: the trust mark and
+/// revision of each flow, which flows are high risk, migrating flows from
+/// retired node types, and reloading what is enabled and approved.
 class StoredFlows {
-  StoredFlows(this._core);
+  StoredFlows(this._core, this._things);
 
   final EngineCore _core;
+  final ThingsRuntime _things;
+
+  /// The phone, people and places, which rule shorthand resolves against.
+  ThingsRuntime get things => _things;
+
+  /// Why a stored flow still on retired node types could not be migrated.
+  final _migrationErrors = <String, String>{};
 
   OmniDatabase get _db => _core.db;
   DriverRegistry get _registry => _core.registry;
@@ -28,23 +41,127 @@ class StoredFlows {
     for (final d in await DriftDeviceStore(_db).all()) {
       _flows.deviceStates[d.id] = d.state;
     }
-    await reloadZones();
     await reloadFlows();
   }
 
-  Future<void> reloadZones() async {
-    final zones = <ZoneSpec>[];
-    final issues = <Map<String, Object?>>[];
-    for (final z in await DriftZoneStore(_db).all()) {
-      try {
-        zones.add(ZoneSpec.parse(z));
-      } catch (e) {
-        issues.add(loadIssue('zone', z['id'], e));
+  /// What the migration needs from the stored things: the place each zone
+  /// became, and the board each node name is. Every board counts, the
+  /// firmware's and a v1 board on a UDP or serial driver: by its stable id
+  /// (the firmware's node name), or by its own id when it has none.
+  Future<FlowMigrationContext> migrationContext() async {
+    final devices = await DriftDeviceStore(_db).all();
+    return FlowMigrationContext(
+      places: {
+        for (final d in devices)
+          if (d.driverId == placeDriverId) zoneIdOf(d): d.id,
+      },
+      boards: {
+        for (final d in devices)
+          if (_isBoard(_registry[d.driverId]))
+            (d.stableId ?? d.id).toLowerCase(): d.id,
+      },
+    );
+  }
+
+  /// A board sends its own event lines: the firmware's driver, or a v1
+  /// board's `microcontroller` driver over UDP or serial.
+  static bool _isBoard(DriverManifest? manifest) =>
+      isBoardDriver(manifest) ||
+      (manifest != null &&
+          manifest.category == 'microcontroller' &&
+          _rawLineTransports.contains(manifest.transport.type));
+
+  /// [flow] migrated with [context], refusing a `board_event` whose node is
+  /// no board: it would become a trigger on a thing that does not exist,
+  /// which loads without an issue and never fires.
+  Future<Map<String, Object?>> _migrate(
+    Map<String, Object?> flow,
+    FlowMigrationContext context,
+  ) async {
+    final nodes = flow['nodes'];
+    if (nodes is List) {
+      final ids = {for (final d in await DriftDeviceStore(_db).all()) d.id};
+      for (final n in nodes) {
+        if (n is! Map || n['type'] != 'board_event') continue;
+        final config = n['config'];
+        final node = config is Map ? config['node'] : null;
+        if (node is String && !ids.contains(context.boardFor(node))) {
+          throw FlowMigrationException(
+            'node ${n['id']} waits for an event from the board $node, and '
+            'no board has that name. Add the board, or set the node to '
+            'the id of one',
+          );
+        }
       }
     }
-    _flows.setZones(zones);
-    _core.setIssues('zone', issues);
+    return migrateFlow(flow, context);
   }
+
+  /// [json] rewritten from retired node types, for a flow being saved or
+  /// validated. The phone is made when the flow names it.
+  Future<Map<String, Object?>> migrateInput(Map<String, Object?> json) async {
+    final Map<String, Object?> migrated;
+    try {
+      migrated = await _migrate(json, await migrationContext());
+    } on FlowMigrationException catch (e) {
+      throw ApiError('invalid', e.message);
+    }
+    await _ensurePhone(migrated);
+    return migrated;
+  }
+
+  Future<void> _ensurePhone(Map<String, Object?> json) async {
+    if (mentionsThing(json['nodes'], defaultPhoneId) &&
+        await DriftDeviceStore(_db).get(defaultPhoneId) == null) {
+      await _things.phone();
+    }
+  }
+
+  /// Rewrites every stored flow still on retired node types, once, keeping
+  /// its enabled, approved and trusted marks: the rewrite means the same.
+  /// A link stored before specs were kept gets its spec back from its flow.
+  Future<void> migrateStored() async {
+    final context = await migrationContext();
+    for (final r in await DriftFlowStore(_db).all()) {
+      final json = flowJsonOf(r);
+      final id = '${json['id']}';
+      var migrated = json;
+      try {
+        migrated = await _migrate(json, context);
+        _migrationErrors.remove(id);
+      } on FlowMigrationException catch (e) {
+        _migrationErrors[id] = e.message;
+      }
+      // A link stored before specs were kept is read back from the flow it
+      // compiled to, which only the migrated node types describe.
+      final spec = r.source == FlowRecord.link && r.spec == null
+          ? linkSpecFromFlow(migrated)
+          : null;
+      if (identical(migrated, json) && spec == null) continue;
+      if (!identical(migrated, json)) await _ensurePhone(migrated);
+      await put(
+        id,
+        migrated,
+        enabled: r.enabled,
+        approved: r.approved,
+        trusted: trustedOf(r),
+        source: spec == null ? null : FlowRecord.link,
+        spec: spec,
+      );
+    }
+  }
+
+  /// Whether a flow's nodes name the thing [id] anywhere: a trigger, an
+  /// action, or a `compare` reading its state.
+  static bool mentionsThing(Object? value, String id) => switch (value) {
+    Map m =>
+      m['deviceId'] == id ||
+          m['thing'] == id ||
+          (m['state'] is String && (m['state'] as String).startsWith('$id.')) ||
+          m.values.any((v) => mentionsThing(v, id)),
+    List l => l.any((v) => mentionsThing(v, id)),
+    _ => false,
+  };
 
   /// The flow JSON of a stored record, as a copy the caller may change.
   static Map<String, Object?> flowJsonOf(FlowRecord r) => {...r.json};
@@ -56,12 +173,16 @@ class StoredFlows {
   static String revisionOf(Map<String, Object?> flowJson) =>
       sha256Hex(canonicalJson(flowJson));
 
+  /// Saves a flow. With no [source] the stored source and spec stay, so
+  /// enabling, approving or migrating a rule keeps it a rule.
   Future<void> put(
     String id,
     Map<String, Object?> flowJson, {
     required bool enabled,
     required bool approved,
     required bool trusted,
+    String? source,
+    Map<String, Object?>? spec,
   }) => DriftFlowStore(_db).put(
     id,
     flowJson,
@@ -69,6 +190,8 @@ class StoredFlows {
     approved: approved,
     trusted: trusted,
     at: DateTime.now().toUtc(),
+    source: source,
+    spec: spec,
   );
 
   /// Every stored flow that parses, by id. The rest are load issues.
@@ -112,7 +235,14 @@ class StoredFlows {
       if (r.enabled && approved) load.add(spec);
     }
     for (final e in _flows.load(load).entries) {
-      issues.add({'kind': 'flow', 'id': e.key, 'error': e.value});
+      final migration = _migrationErrors[e.key];
+      issues.add({
+        'kind': 'flow',
+        'id': e.key,
+        'error': migration == null
+            ? e.value
+            : '${e.value}, and it cannot be migrated: $migration',
+      });
     }
     _core.setIssues('flow', issues);
   }
@@ -122,19 +252,46 @@ class StoredFlows {
       for (final d in await DriftDeviceStore(_db).all())
         d.id: manifestFor(_registry, d),
     };
+    final states = {
+      for (final d in await DriftDeviceStore(_db).all()) d.id: d.state,
+    };
     final (_, specs, _) = await stored();
     return FlowReferences(
       devices: devices.keys.toSet(),
-      zones: {
-        for (final z in await DriftZoneStore(_db).all()) z['id'] as String,
-      },
       flows: {
         for (final f in await DriftFlowStore(_db).all()) f.json['id'] as String,
       },
       capabilityOf: (d, c) => devices[d]?.capability(c),
       calls: {for (final f in specs.values) f.id: runFlowTargets(f)},
+      stateKeysOf: (t) {
+        final manifest = devices[t];
+        if (manifest == null) return devices.containsKey(t) ? null : {};
+        if (manifest.reportsUndeclaredState) return null;
+        return {
+          ...?states[t]?.keys,
+          for (final c in manifest.capabilities) ?stateKeyOf(c.stateJsonPath),
+        };
+      },
+      eventsOf: (t) {
+        final manifest = devices[t];
+        if (manifest == null) return devices.containsKey(t) ? null : {};
+        if (_rawLineTransports.contains(manifest.transport.type)) return null;
+        return {
+          for (final c in manifest.capabilities)
+            if (c.type == CapabilityType.event) c.id,
+        };
+      },
     );
   }
+
+  /// Transports whose devices send their own lines (a board's firmware, a
+  /// v1 board over UDP), each an event under its own name, so an event a
+  /// manifest does not declare is still one the device can raise.
+  static const _rawLineTransports = {
+    TransportType.omniflow,
+    TransportType.udp,
+    TransportType.serial,
+  };
 
   /// True when [flow], saved over the stored flows, would be high risk.
   Future<bool> isHighRisk(FlowSpec flow) async {

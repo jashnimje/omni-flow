@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:args/command_runner.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
@@ -150,6 +151,27 @@ void main() {
     expect(
       ((await ok(['zone', 'list']))['zones'] as List).single,
       containsPair('inside', false),
+    );
+  });
+
+  test('the phone battery and NFC scans from the CLI', () async {
+    expect((await ok(['phone', 'battery', '80', 'charging']))['state'], {
+      'battery': 80,
+      'charging': true,
+    });
+    await ok([
+      'device',
+      'add',
+      'front_door',
+      '--driver',
+      'nfc_tag',
+      '--set',
+      'uid=04A22B1C',
+    ]);
+    expect((await ok(['phone', 'nfc', '04:a2:2b:1c']))['tag'], 'front_door');
+    expect(
+      () => omni(['phone', 'battery', 'full']),
+      throwsA(isA<UsageException>()),
     );
   });
 

@@ -11,6 +11,7 @@
     { "method": "serial" }
   ],
   "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
+  "setup": ["configure:pins"],
   "reliability": { "timeoutMs": 800, "retries": 2 },
   "capabilities": [
     {

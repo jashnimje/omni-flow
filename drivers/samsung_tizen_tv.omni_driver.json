@@ -15,6 +15,7 @@
     { "key": "token", "label": "Pairing token (issued when you allow OmniFlow on the TV)", "secret": true },
     { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect)", "secret": true }
   ],
+  "setup": ["pair"],
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [
     {

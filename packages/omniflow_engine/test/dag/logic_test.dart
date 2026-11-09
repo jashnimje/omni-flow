@@ -38,7 +38,12 @@ void main() {
         'type': 'all_of',
         'rules': [
           {'type': 'time_window', 'start': '18:00', 'end': '05:00'},
-          {'type': 'var_equals', 'name': r'$HomeWifiConnected', 'value': true},
+          {
+            'type': 'compare',
+            'left': {'var': r'$HomeWifiConnected'},
+            'op': '==',
+            'right': {'literal': true},
+          },
         ],
       };
       expect(evaluateRule(rule, ctx), isTrue);
@@ -50,9 +55,10 @@ void main() {
 
     test('any_of, xor, not and nesting', () {
       Map<String, Object?> v(String n, Object? value) => {
-        'type': 'var_equals',
-        'name': n,
-        'value': value,
+        'type': 'compare',
+        'left': {'var': n},
+        'op': '==',
+        'right': {'literal': value},
       };
       expect(
         evaluateRule({
@@ -81,41 +87,28 @@ void main() {
       );
     });
 
-    test(
-      'var_compare is numeric and false for missing or non-numeric values',
-      () {
-        Map<String, Object?> c(String n, String op, num value) => {
-          'type': 'var_compare',
-          'name': n,
-          'op': op,
-          'value': value,
-        };
-        expect(evaluateRule(c(r'$Lux', '<', 200), ctx), isTrue);
-        expect(evaluateRule(c(r'$Lux', '>=', 120), ctx), isTrue);
-        expect(evaluateRule(c(r'$Missing', '<', 200), ctx), isFalse);
-        expect(evaluateRule(c(r'$Mode', '<', 200), ctx), isFalse);
-      },
-    );
+    test('an ordering compare is numeric and false for missing or non-numeric values', () {
+      Map<String, Object?> c(String n, String op, num value) => {
+        'type': 'compare',
+        'left': {'var': n},
+        'op': op,
+        'right': {'literal': value},
+      };
+      expect(evaluateRule(c(r'$Lux', '<', 200), ctx), isTrue);
+      expect(evaluateRule(c(r'$Lux', '>=', 120), ctx), isTrue);
+      expect(evaluateRule(c(r'$Missing', '<', 200), ctx), isFalse);
+      expect(evaluateRule(c(r'$Mode', '<', 200), ctx), isFalse);
+    });
 
-    test('device_state_is compares numbers by value', () {
-      expect(
-        evaluateRule({
-          'type': 'device_state_is',
-          'deviceId': 'desk_lamp',
-          'key': 'dimming',
-          'value': 80,
-        }, ctx),
-        isTrue,
-      );
-      expect(
-        evaluateRule({
-          'type': 'device_state_is',
-          'deviceId': 'nobody',
-          'key': 'state',
-          'value': true,
-        }, ctx),
-        isFalse,
-      );
+    test('a compare on thing state compares numbers by value', () {
+      Map<String, Object?> s(String ref, Object? value) => {
+        'type': 'compare',
+        'left': {'state': ref},
+        'op': '==',
+        'right': {'literal': value},
+      };
+      expect(evaluateRule(s('desk_lamp.dimming', 80), ctx), isTrue);
+      expect(evaluateRule(s('nobody.state', true), ctx), isFalse);
     });
   });
 

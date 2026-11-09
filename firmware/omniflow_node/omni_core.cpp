@@ -81,11 +81,15 @@ uint8_t hostCaps(int pin) {
   return 0;
 }
 
-const BoardProfile BOARD_ESP32 = {"esp32", esp32Caps};
-const BoardProfile BOARD_ESP8266 = {"esp8266", esp8266Caps};
-const BoardProfile BOARD_PICO_W = {"pico_w", picoWCaps};
-const BoardProfile BOARD_UNO = {"uno", unoCaps};
-const BoardProfile BOARD_HOST = {"host", hostCaps};
+// The bus pins are each core's SPI and Wire defaults (pins_arduino.h), which
+// omniflow_node.ino checks at compile time.
+const BoardProfile BOARD_ESP32 = {"esp32", esp32Caps, {18, 19, 23, -1}, {21, 22}};
+const BoardProfile BOARD_ESP8266 = {"esp8266", esp8266Caps, {14, 12, 13, -1}, {4, 5}};
+const BoardProfile BOARD_PICO_W = {"pico_w", picoWCaps, {18, 16, 19, -1}, {4, 5}};
+// An AVR SPI master drops out of master mode when its SS pin (10) is an
+// input pulled low, so 10 stays an output while the RC522 is on.
+const BoardProfile BOARD_UNO = {"uno", unoCaps, {13, 12, 11, 10}, {18, 19}};
+const BoardProfile BOARD_HOST = {"host", hostCaps, {13, 12, 11, -1}, {14, 15}};
 
 // ---------------------------------------------------------------- NEC
 
@@ -157,6 +161,201 @@ void rfPulse(const RfProtocol& p, uint32_t code, uint8_t bits, int i, uint16_t* 
   }
   *highUs = (uint16_t)(high * p.pulseUs);
   *lowUs = (uint16_t)(low * p.pulseUs);
+}
+
+// ---------------------------------------------------------------- peripherals
+
+static const char NAME_IR[] OMNI_FLASH = "ir";
+static const char NAME_RF[] OMNI_FLASH = "rf";
+static const char NAME_RC522[] OMNI_FLASH = "nfc_rc522";
+static const char NAME_PN532[] OMNI_FLASH = "nfc_pn532";
+
+// A literal for Out::writeP.
+const char* periphName(PeriphType type) {
+  switch (type) {
+    case PERIPH_IR: return NAME_IR;
+    case PERIPH_RF: return NAME_RF;
+    case PERIPH_NFC_RC522: return NAME_RC522;
+    case PERIPH_NFC_PN532: return NAME_PN532;
+    default: return 0;
+  }
+}
+
+PeriphType periphFromName(const char* name) {
+  for (uint8_t t = PERIPH_IR; t <= PERIPH_NFC_PN532; t++) {
+    if (named(name, periphName((PeriphType)t))) return (PeriphType)t;
+  }
+  return PERIPH_NONE;
+}
+
+bool periphBuiltIn(PeriphType type) {
+  if (type == PERIPH_NFC_PN532) return OMNI_HAS_PN532;
+  return type != PERIPH_NONE && type <= PERIPH_NFC_PN532;
+}
+
+static bool drivable(int pin, const BoardProfile& board) {
+  return pin >= 0 && pin < MAX_PINS && (board.caps(pin) & CAP_OUT);
+}
+
+// The pins type takes in p: its own first (*own of them), then its bus.
+static int pinsOf(const Periphs& p, const BoardProfile& board, PeriphType type, int8_t* pins, int* own) {
+  int n = 0;
+  *own = 0;
+  if (type == PERIPH_IR && p.irPin >= 0) pins[n++] = p.irPin;
+  if (type == PERIPH_RF && p.rfPin >= 0) pins[n++] = p.rfPin;
+  if (type == PERIPH_NFC_RC522 && p.nfc == PERIPH_NFC_RC522) {
+    pins[n++] = p.nfcSs;
+    if (p.nfcRst >= 0) pins[n++] = p.nfcRst;
+  }
+  *own = n;
+  if (type == PERIPH_NFC_RC522 && p.nfc == PERIPH_NFC_RC522) {
+    for (int i = 0; i < 3; i++) pins[n++] = board.spi[i];
+    int8_t keep = board.spi[3];
+    if (keep >= 0 && keep != p.nfcSs && keep != p.nfcRst) pins[n++] = keep;
+  }
+  if (type == PERIPH_NFC_PN532 && p.nfc == PERIPH_NFC_PN532) {
+    pins[n++] = board.i2c[0];
+    pins[n++] = board.i2c[1];
+  }
+  return n;
+}
+
+int periphPins(const Periphs& p, const BoardProfile& board, PeriphType type, int8_t* pins) {
+  int own;
+  return pinsOf(p, board, type, pins, &own);
+}
+
+PeriphIssue checkPeriphs(const Periphs& p, const BoardProfile& board, PeriphType changed) {
+  int8_t mine[6];
+  int own;
+  int n = pinsOf(p, board, changed, mine, &own);
+  for (int i = 0; i < own; i++) {
+    if (!drivable(mine[i], board)) return PERIPH_NOT_OUTPUT;
+  }
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < i; j++) {
+      if (mine[i] == mine[j]) return PERIPH_SAME_PIN;
+    }
+  }
+  const PeriphType others[] = {PERIPH_IR, PERIPH_RF, (PeriphType)p.nfc};
+  for (unsigned t = 0; t < sizeof(others) / sizeof(others[0]); t++) {
+    if (others[t] == changed || others[t] == PERIPH_NONE) continue;
+    int8_t theirs[6];
+    int m = pinsOf(p, board, others[t], theirs, &own);
+    for (int i = 0; i < n; i++) {
+      for (int j = 0; j < m; j++) {
+        if (mine[i] != theirs[j]) continue;
+        if (others[t] == PERIPH_IR) return PERIPH_IS_IR;
+        return others[t] == PERIPH_RF ? PERIPH_IS_RF : PERIPH_IS_NFC;
+      }
+    }
+  }
+  return PERIPH_OK;
+}
+
+// ---------------------------------------------------------------- NFC
+
+// ISO 14443-3 annex B: CRC-16 with x^16 + x^12 + x^5 + 1, reflected, from 6363.
+void crcA(const uint8_t* data, int len, uint8_t out[2]) {
+  uint16_t crc = 0x6363;
+  for (int i = 0; i < len; i++) {
+    uint8_t b = (uint8_t)(data[i] ^ (uint8_t)(crc & 0xFF));
+    b = (uint8_t)(b ^ (uint8_t)(b << 4));
+    crc = (uint16_t)((crc >> 8) ^ ((uint16_t)b << 8) ^ ((uint16_t)b << 3) ^ (b >> 4));
+  }
+  out[0] = (uint8_t)(crc & 0xFF);
+  out[1] = (uint8_t)(crc >> 8);
+}
+
+// ISO 14443-3 commands: WUPA (7 bits), the select codes of cascade levels 1
+// to 3, and HLTA. A UID part that starts with the cascade tag 88 continues
+// at the next level, which the SAK's bit 2 also says.
+static const uint8_t WUPA = 0x52;
+static const uint8_t CASCADE_TAG = 0x88;
+static const uint8_t SAK_MORE = 0x04;
+
+int readTypeAUid(NfcTransceiver& reader, uint8_t uid[NFC_UID_MAX]) {
+  uint8_t rx[5];
+  if (reader.transceive(&WUPA, 1, 7, rx, sizeof(rx)) != 2) return 0;
+  int len = 0;
+  for (int level = 0; level < 3; level++) {
+    uint8_t cmd[9] = {(uint8_t)(0x93 + 2 * level), 0x20};
+    if (reader.transceive(cmd, 2, 0, rx, sizeof(rx)) != 5) return 0;
+    if ((rx[0] ^ rx[1] ^ rx[2] ^ rx[3]) != rx[4]) return 0;
+    cmd[1] = 0x70;
+    memcpy(cmd + 2, rx, 5);
+    crcA(cmd, 7, cmd + 7);
+    uint8_t sak[3], crc[2];
+    if (reader.transceive(cmd, 9, 0, sak, sizeof(sak)) != 3) return 0;
+    crcA(sak, 1, crc);
+    if (crc[0] != sak[1] || crc[1] != sak[2]) return 0;
+    if (!(sak[0] & SAK_MORE)) {
+      memcpy(uid + len, rx, 4);
+      uint8_t halt[4] = {0x50, 0x00};
+      crcA(halt, 2, halt + 2);
+      reader.transceive(halt, 4, 0, rx, sizeof(rx));  // a halted tag never answers
+      return len + 4;
+    }
+    if (rx[0] != CASCADE_TAG) return 0;
+    memcpy(uid + len, rx + 1, 3);
+    len += 3;
+  }
+  return 0;
+}
+
+#if OMNI_HAS_PN532
+static const uint8_t PN532_TO = 0xD4;
+static const uint8_t PN532_FROM = 0xD5;
+
+int pn532Frame(const uint8_t* command, int len, uint8_t* out) {
+  out[0] = 0x00;
+  out[1] = 0x00;
+  out[2] = 0xFF;
+  out[3] = (uint8_t)(len + 1);
+  out[4] = (uint8_t)(0x100 - out[3]);
+  out[5] = PN532_TO;
+  uint8_t sum = PN532_TO;
+  for (int i = 0; i < len; i++) {
+    out[6 + i] = command[i];
+    sum = (uint8_t)(sum + command[i]);
+  }
+  out[6 + len] = (uint8_t)(0x100 - sum);
+  out[7 + len] = 0x00;
+  return len + 8;
+}
+
+int pn532Payload(const uint8_t* frame, int len, const uint8_t** payload) {
+  int i = 0;
+  while (i < len && frame[i] == 0x00) i++;
+  if (i == 0 || i + 3 > len || frame[i] != 0xFF) return -1;
+  uint8_t n = frame[i + 1];
+  if (n < 2 || (uint8_t)(n + frame[i + 2]) != 0 || i + 4 + n > len || frame[i + 3] != PN532_FROM) return -1;
+  uint8_t sum = 0;
+  for (int k = 0; k <= n; k++) sum = (uint8_t)(sum + frame[i + 3 + k]);
+  if (sum) return -1;
+  *payload = frame + i + 4;
+  return n - 1;
+}
+
+int pn532ListedUid(const uint8_t* payload, int len, uint8_t uid[NFC_UID_MAX]) {
+  // 4B, the number of targets, then the target: Tg, SENS_RES (2), SEL_RES,
+  // the NFCID1 length and the NFCID1.
+  if (len < 7 || payload[0] != 0x4B || payload[1] < 1) return 0;
+  int n = payload[6];
+  if ((n != 4 && n != 7 && n != 10) || 7 + n > len) return 0;
+  memcpy(uid, payload + 7, n);
+  return n;
+}
+#endif
+
+bool NfcDebounce::seen(const uint8_t* uid, int len, unsigned long now) {
+  if (len <= 0 || len > NFC_UID_MAX) return false;
+  bool same = len == len_ && memcmp(uid, uid_, len) == 0;
+  bool report = !same || now - seen_ >= goneMs_;
+  memcpy(uid_, uid, len);
+  len_ = (uint8_t)len;
+  seen_ = now;
+  return report;
 }
 
 // ---------------------------------------------------------------- tiny JSON
@@ -251,66 +450,98 @@ static long scanId(const char* line) {
   return strtol(p, 0, 10);
 }
 
-const char* parseArgs(const char* line, Args& msg) {
-  msg.count = 0;
-  const char* p = skipSpace(line);
-  if (*p != '{') return NOT_JSON;
-  p = skipSpace(p + 1);
-  if (*p == '}') return 0;
-  const char* error;
+// Reads a string, number, boolean or null into f. On failure returns 0 and
+// sets *error.
+static const char* readScalar(const char* p, Args::Field& f, const char** error) {
+  *error = NOT_JSON;
+  if (*p == '"') {
+    p = readString(p, f.text, sizeof(f.text), error);
+    f.kind = 1;
+    return p;
+  }
+  if (strncmp(p, "true", 4) == 0) {
+    f.kind = 3;
+    f.number = 1;
+    return p + 4;
+  }
+  if (strncmp(p, "false", 5) == 0) {
+    f.kind = 3;
+    return p + 5;
+  }
+  if (strncmp(p, "null", 4) == 0) {
+    f.kind = 4;
+    return p + 4;
+  }
+  if (*p != '-' && (*p < '0' || *p > '9')) return 0;  // arrays and deeper objects are not commands
+  char* end;
+  f.number = strtol(p, &end, 10);
+  if (*end == '.') {  // keep the integer part of a decimal
+    end++;
+    while (*end >= '0' && *end <= '9') end++;
+  }
+  // The literal too, for numbers a long cannot hold.
+  size_t n = (size_t)(end - p);
+  if (n < sizeof(f.text)) {
+    memcpy(f.text, p, n);
+    f.text[n] = 0;
+  }
+  f.kind = 2;
+  return end;
+}
+
+// Reads "key": value pairs up to the closing brace. Inside a nested object,
+// prefix is its key, and each field is named prefix.key.
+static const char* readMembers(const char* p, Args& msg, const char* prefix, const char** error) {
+  *error = NOT_JSON;
+  p = skipSpace(p);
+  if (*p == '}') return p + 1;
   while (*p) {
-    if (msg.count >= (int)(sizeof(msg.fields) / sizeof(msg.fields[0]))) return NOT_JSON;
+    if (msg.count >= (int)(sizeof(msg.fields) / sizeof(msg.fields[0]))) return 0;
     Args::Field& f = msg.fields[msg.count];
     f.kind = 0;
     f.number = 0;
     f.text[0] = 0;
-    p = readString(p, f.key, sizeof(f.key), &error);
-    if (!p) return error;
-    p = skipSpace(p);
-    if (*p != ':') return NOT_JSON;
-    p = skipSpace(p + 1);
-    if (*p == '"') {
-      p = readString(p, f.text, sizeof(f.text), &error);
-      if (!p) return error;
-      f.kind = 1;
-    } else if (strncmp(p, "true", 4) == 0) {
-      f.kind = 3;
-      f.number = 1;
-      p += 4;
-    } else if (strncmp(p, "false", 5) == 0) {
-      f.kind = 3;
-      f.number = 0;
-      p += 5;
-    } else if (strncmp(p, "null", 4) == 0) {
-      f.kind = 4;
-      p += 4;
-    } else if (*p == '-' || (*p >= '0' && *p <= '9')) {
-      char* end;
-      f.number = strtol(p, &end, 10);
-      if (*end == '.') {  // keep the integer part of a decimal
-        end++;
-        while (*end >= '0' && *end <= '9') end++;
+    char key[sizeof(f.key)];
+    p = readString(p, key, sizeof(key), error);
+    if (!p) return 0;
+    if (prefix) {
+      size_t head = strlen(prefix);
+      size_t tail = strlen(key);
+      if (head + 1 + tail >= sizeof(f.key)) {
+        *error = TOO_LONG;
+        return 0;
       }
-      // The literal too, for numbers a long cannot hold.
-      size_t n = (size_t)(end - p);
-      if (n < sizeof(f.text)) {
-        memcpy(f.text, p, n);
-        f.text[n] = 0;
-      }
-      p = end;
-      f.kind = 2;
+      memcpy(f.key, prefix, head);
+      f.key[head] = '.';
+      memcpy(f.key + head + 1, key, tail + 1);
     } else {
-      return NOT_JSON;  // nested objects and arrays are not commands
+      memcpy(f.key, key, sizeof(key));
     }
-    msg.count++;
     p = skipSpace(p);
-    if (*p == ',') {
-      p = skipSpace(p + 1);
-      continue;
+    if (*p != ':') return 0;
+    p = skipSpace(p + 1);
+    if (*p == '{' && !prefix) {
+      p = readMembers(p + 1, msg, key, error);
+    } else {
+      p = readScalar(p, f, error);
+      if (p) msg.count++;
     }
-    return *p == '}' ? 0 : NOT_JSON;
+    if (!p) return 0;
+    *error = NOT_JSON;
+    p = skipSpace(p);
+    if (*p == '}') return p + 1;
+    if (*p != ',') return 0;
+    p = skipSpace(p + 1);
   }
-  return NOT_JSON;
+  return 0;
+}
+
+const char* parseArgs(const char* line, Args& msg) {
+  msg.count = 0;
+  const char* p = skipSpace(line);
+  if (*p != '{') return NOT_JSON;
+  const char* error;
+  return readMembers(p + 1, msg, 0, &error) ? 0 : error;
 }
 
 // ---------------------------------------------------------------- core
@@ -422,6 +653,7 @@ void Core::describe(Out& out, long id) {
   out.writeP(OMNI_P(",\"rf\":"));
   out.write(hal_.hasRf() ? "true" : "false");
   writeNumber(out, "watches", MAX_WATCHES);
+  describePeriphs(out);
   out.writeP(OMNI_P(",\"pins\":["));
   bool first = true;
   for (int pin = 0; pin < MAX_PINS; pin++) {
@@ -464,9 +696,113 @@ void Core::describe(Out& out, long id) {
   out.end();
 }
 
+// The peripherals with the pins they take, and the types this build knows,
+// so the host can tell an Uno (no PN532) from a board that is not set up.
+// The name of the i-th pin pinsOf lists, own pins first: a literal for writeP.
+static const char* pinKey(PeriphType type, int i, int own) {
+  if (type == PERIPH_IR || type == PERIPH_RF) return OMNI_P("tx");
+  if (type == PERIPH_NFC_PN532) return i ? OMNI_P("scl") : OMNI_P("sda");
+  if (i < own) return i ? OMNI_P("rst") : OMNI_P("ss");
+  switch (i - own) {
+    case 0: return OMNI_P("sck");
+    case 1: return OMNI_P("miso");
+    case 2: return OMNI_P("mosi");
+    default: return OMNI_P("hw_ss");
+  }
+}
+
+void Core::describePeriphs(Out& out) {
+  out.writeP(OMNI_P(",\"periph\":["));
+  bool first = true;
+  const PeriphType types[] = {PERIPH_IR, PERIPH_RF, (PeriphType)periph_.nfc};
+  for (unsigned t = 0; t < sizeof(types) / sizeof(types[0]); t++) {
+    int8_t pins[6];
+    int own;
+    int n = types[t] ? pinsOf(periph_, board_, types[t], pins, &own) : 0;
+    if (!n) continue;
+    out.writeP(first ? OMNI_P("{\"type\":\"") : OMNI_P(",{\"type\":\""));
+    out.writeP(periphName(types[t]));
+    out.writeP(OMNI_P("\",\"pins\":{"));
+    for (int i = 0; i < n; i++) {
+      out.writeP(i ? OMNI_P(",\"") : OMNI_P("\""));
+      out.writeP(pinKey(types[t], i, own));
+      char buf[8];
+      snprintf(buf, sizeof(buf), "\":%d", pins[i]);
+      out.write(buf);
+    }
+    out.writeP(OMNI_P("}}"));
+    first = false;
+  }
+  out.writeP(OMNI_P("],\"periphTypes\":["));
+  first = true;
+  for (uint8_t t = PERIPH_IR; t <= PERIPH_NFC_PN532; t++) {
+    if (!periphBuiltIn((PeriphType)t)) continue;
+    out.writeP(first ? OMNI_P("\"") : OMNI_P(",\""));
+    out.writeP(periphName((PeriphType)t));
+    out.writeP(OMNI_P("\""));
+    first = false;
+  }
+  out.writeP(OMNI_P("]"));
+}
+
 uint8_t Core::capsOf(int pin) const {
-  if (pin < 0 || pin >= MAX_PINS || pin == irPin_ || pin == rfPin_) return 0;
+  if (pin < 0 || pin >= MAX_PINS) return 0;
+  const PeriphType types[] = {PERIPH_IR, PERIPH_RF, (PeriphType)periph_.nfc};
+  for (unsigned t = 0; t < sizeof(types) / sizeof(types[0]); t++) {
+    if (!types[t]) continue;
+    int8_t pins[6];
+    int n = periphPins(periph_, board_, types[t], pins);
+    for (int i = 0; i < n; i++) {
+      if (pins[i] == pin) return 0;
+    }
+  }
   return board_.caps(pin);
+}
+
+void Core::setPeriphs(const Periphs& p) {
+  bool nfcChanged = p.nfc != periph_.nfc || p.nfcSs != periph_.nfcSs || p.nfcRst != periph_.nfcRst;
+  periph_ = p;
+  if (!nfcChanged) return;
+  nfcBusy_ = false;
+  hal_.startNfc(p.nfc, p.nfcSs, p.nfcRst);
+}
+
+void Core::periphAck(Out& out, long id, const char* cmd, PeriphType type) {
+  writeHead(out, node_, OMNI_P("ack"));
+  out.writeP(OMNI_P(",\"cmd\":\""));
+  out.writeP(cmd);
+  out.writeP(OMNI_P("\",\"type\":\""));
+  out.writeP(periphName(type));
+  out.writeP(OMNI_P("\""));
+  writeId(out, id);
+  out.writeP(OMNI_P("}\n"));
+  out.end();
+}
+
+// One read every NFC_POLL_MS, carried on every call while the reader is busy.
+void Core::pollNfc(Out& out, unsigned long now) {
+  if (periph_.nfc == PERIPH_NONE) return;
+  if (!nfcBusy_) {
+    if (now - nfcPolled_ < NFC_POLL_MS) return;
+    nfcPolled_ = now;
+  }
+  uint8_t uid[NFC_UID_MAX];
+  int n = hal_.pollNfc(uid);
+  nfcBusy_ = n < 0;
+  if (n <= 0 || n > NFC_UID_MAX || !nfcSeen_.seen(uid, n, hal_.millis())) return;
+  writeHead(out, node_, OMNI_P("nfc.scanned"));
+  out.writeP(OMNI_P(",\"uid\":\""));
+  char hex[2 * NFC_UID_MAX + 1];
+  for (int i = 0; i < n; i++) {
+    for (int half = 0; half < 2; half++) {
+      uint8_t digit = (uint8_t)((uid[i] >> (half ? 0 : 4)) & 0x0F);
+      hex[2 * i + half] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+    }
+  }
+  hex[2 * n] = 0;
+  out.write(hex);
+  out.writeP(OMNI_P("\"}\n"));
+  out.end();
 }
 
 void Core::hello(Out& out, int udpPort) {
@@ -779,6 +1115,7 @@ void Core::poll(Out& out) {
     out.writeP(OMNI_P("}\n"));
     out.end();
   }
+  pollNfc(out, now);
 }
 
 // ---------------------------------------------------------------- setup
@@ -793,10 +1130,6 @@ bool validNodeName(const char* name) {
   return n < (int)sizeof(Settings::node);
 }
 
-static bool drivable(int pin, const BoardProfile& board) {
-  return pin >= 0 && pin < MAX_PINS && (board.caps(pin) & CAP_OUT);
-}
-
 void sanitizeSettings(Settings& settings, const BoardProfile& board) {
 #if OMNI_HAS_WIFI
   settings.ssid[sizeof(settings.ssid) - 1] = 0;
@@ -804,8 +1137,27 @@ void sanitizeSettings(Settings& settings, const BoardProfile& board) {
 #endif
   settings.node[sizeof(settings.node) - 1] = 0;
   if (!validNodeName(settings.node)) settings.node[0] = 0;
-  if (!drivable(settings.irPin, board)) settings.irPin = -1;
-  if (!drivable(settings.rfPin, board) || settings.rfPin == settings.irPin) settings.rfPin = -1;
+  // Each peripheral is checked against the ones before it.
+  const Periphs& stored = settings.periph;
+  Periphs kept = {-1, -1, PERIPH_NONE, -1, -1};
+  kept.irPin = stored.irPin;
+  if (kept.irPin < 0 || checkPeriphs(kept, board, PERIPH_IR)) kept.irPin = -1;
+  kept.rfPin = stored.rfPin;
+  if (kept.rfPin < 0 || checkPeriphs(kept, board, PERIPH_RF)) kept.rfPin = -1;
+  PeriphType nfc = (PeriphType)stored.nfc;
+  if ((nfc == PERIPH_NFC_RC522 || nfc == PERIPH_NFC_PN532) && periphBuiltIn(nfc)) {
+    kept.nfc = nfc;
+    if (nfc == PERIPH_NFC_RC522) {
+      kept.nfcSs = stored.nfcSs;
+      kept.nfcRst = stored.nfcRst < 0 ? -1 : stored.nfcRst;
+    }
+    if (checkPeriphs(kept, board, nfc)) {
+      kept.nfc = PERIPH_NONE;
+      kept.nfcSs = -1;
+      kept.nfcRst = -1;
+    }
+  }
+  settings.periph = kept;
 }
 
 #if OMNI_HAS_WIFI
@@ -857,7 +1209,9 @@ bool Setup::handle(const char* cmd, const Args& args, long id, Out& out) {
   bool nodeSet = named(cmd, OMNI_P("node.set"));
   bool irPin = named(cmd, OMNI_P("ir.pin"));
   bool rfPin = named(cmd, OMNI_P("rf.pin"));
-  if ((wifiSet || wifiClear || nodeSet || irPin || rfPin) && !fromSerial) {
+  bool periphSet = named(cmd, OMNI_P("periph.set"));
+  bool periphClear = named(cmd, OMNI_P("periph.clear"));
+  if ((wifiSet || wifiClear || nodeSet || irPin || rfPin || periphSet || periphClear) && !fromSerial) {
     core_.error(out, id, OMNI_P("setup commands are only taken over USB"));
     return true;
   }
@@ -909,31 +1263,137 @@ bool Setup::handle(const char* cmd, const Args& args, long id, Out& out) {
     if (renamed) hal_.nodeRenamed();
     return true;
   }
-  if (irPin || rfPin) {
-    const Args::Field* f = args.get("pin");
-    long pin = f && f->kind == 2 ? f->number : -2;
-    bool none = pin == -1;
-    int other = irPin ? core_.rfPin() : core_.irPin();
-    if (!none && !drivable((int)pin, core_.board())) {
-      core_.error(out, id, OMNI_P("pin must be an output pin, or -1 for none"));
-    } else if (!none && core_.modeOf((int)pin) != MODE_NONE) {
-      core_.error(out, id, OMNI_P("that pin has a mode, set pin.mode none first"));
-    } else if (!none && pin == other) {
-      core_.error(out, id, irPin ? OMNI_P("that pin is the RF pin") : OMNI_P("that pin is the IR pin"));
-    } else if (irPin) {
-      settings_.irPin = (int8_t)pin;
-      core_.setIrPin(settings_.irPin);
-      hal_.saveSettings();
-      core_.ack(out, id, OMNI_P("ir.pin"), settings_.irPin, false, 0);
+  if (periphSet || periphClear) {
+    const char* name = args.str("type");
+    PeriphType type = name ? periphFromName(name) : PERIPH_NONE;
+    if (!type) {
+      core_.error(out, id, OMNI_P("type is ir, rf, nfc_rc522 or nfc_pn532"));
+    } else if (!periphBuiltIn(type)) {
+      core_.error(out, id, OMNI_P("this board's firmware has no driver for that type"));
+    } else if (periphSet) {
+      setPeriph(out, id, args, false, type);
     } else {
-      settings_.rfPin = (int8_t)pin;
-      core_.setRfPin(settings_.rfPin);
-      hal_.saveSettings();
-      core_.ack(out, id, OMNI_P("rf.pin"), settings_.rfPin, false, 0);
+      clearPeriph(out, id, type);
     }
     return true;
   }
+  if (irPin || rfPin) {
+    setPeriph(out, id, args, true, irPin ? PERIPH_IR : PERIPH_RF);
+    return true;
+  }
   return false;
+}
+
+// A pin number, -1 for none, or -2 for anything that is not one.
+static int pinValue(const Args::Field* f) {
+  if (!f || f->kind != 2 || f->number < -1 || f->number >= MAX_PINS) return -2;
+  return (int)f->number;
+}
+
+static bool prefixed(const char* text, const char* literal) {
+#ifdef __AVR__
+  return strncmp_P(text, literal, strlen_P(literal)) == 0;
+#else
+  return strncmp(text, literal, strlen(literal)) == 0;
+#endif
+}
+
+// alias is ir.pin or rf.pin, {"pin": n} with -1 for none.
+void Setup::setPeriph(Out& out, long id, const Args& args, bool alias, PeriphType type) {
+  Periphs next = core_.periphs();
+  if (alias) {
+    int pin = pinValue(args.get("pin"));
+    if (pin == -2) return core_.error(out, id, OMNI_P("pin must be an output pin, or -1 for none"));
+    if (type == PERIPH_IR) {
+      next.irPin = (int8_t)pin;
+    } else {
+      next.rfPin = (int8_t)pin;
+    }
+    return applyPeriphs(out, id, next, type, true);
+  }
+  // pins.tx for IR and RF, pins.ss and the optional pins.rst for the RC522,
+  // none for the PN532, whose I2C bus is fixed.
+  const Args::Field* own[2] = {0, 0};
+  for (int i = 0; i < args.count; i++) {
+    const char* key = args.fields[i].key;
+    if (named(key, OMNI_P("pins"))) return core_.error(out, id, OMNI_P("pins is an object of pin numbers"));
+    if (!prefixed(key, OMNI_P("pins."))) continue;
+    key += 5;
+    int slot = -1;
+    if ((type == PERIPH_IR || type == PERIPH_RF) && named(key, OMNI_P("tx"))) slot = 0;
+    if (type == PERIPH_NFC_RC522 && named(key, OMNI_P("ss"))) slot = 0;
+    if (type == PERIPH_NFC_RC522 && named(key, OMNI_P("rst"))) slot = 1;
+    if (slot < 0) return core_.error(out, id, OMNI_P("pins has a name this type does not take"));
+    own[slot] = &args.fields[i];
+  }
+  int first = pinValue(own[0]);
+  int second = own[1] ? pinValue(own[1]) : -1;
+  if (type != PERIPH_NFC_PN532 && !own[0]) {
+    return core_.error(out, id, OMNI_P("needs pins.tx for ir and rf, pins.ss for nfc_rc522"));
+  }
+  if ((type != PERIPH_NFC_PN532 && first < 0) || second == -2) {
+    return core_.error(out, id, OMNI_P("pins must be output pins on this board"));
+  }
+  if (type == PERIPH_IR) {
+    next.irPin = (int8_t)first;
+  } else if (type == PERIPH_RF) {
+    next.rfPin = (int8_t)first;
+  } else {
+    if (next.nfc != PERIPH_NONE && next.nfc != type) {
+      return core_.error(out, id, OMNI_P("the board has the other NFC reader, periph.clear it first"));
+    }
+    next.nfc = type;
+    next.nfcSs = type == PERIPH_NFC_RC522 ? (int8_t)first : -1;
+    next.nfcRst = type == PERIPH_NFC_RC522 ? (int8_t)second : -1;
+  }
+  applyPeriphs(out, id, next, type, false);
+}
+
+void Setup::applyPeriphs(Out& out, long id, const Periphs& next, PeriphType changed, bool alias) {
+  const BoardProfile& board = core_.board();
+  bool nfc = changed == PERIPH_NFC_RC522 || changed == PERIPH_NFC_PN532;
+  PeriphIssue issue = checkPeriphs(next, board, changed);
+  if (issue == PERIPH_NOT_OUTPUT) {
+    return core_.error(out, id, alias ? OMNI_P("pin must be an output pin, or -1 for none")
+                                      : OMNI_P("pins must be output pins on this board"));
+  }
+  int8_t pins[6];
+  int n = periphPins(next, board, changed, pins);
+  for (int i = 0; i < n; i++) {
+    if (core_.modeOf(pins[i]) == MODE_NONE) continue;
+    return core_.error(out, id, nfc ? OMNI_P("a pin the reader needs has a mode, set pin.mode none first")
+                                    : OMNI_P("that pin has a mode, set pin.mode none first"));
+  }
+  switch (issue) {
+    case PERIPH_SAME_PIN: return core_.error(out, id, OMNI_P("ss and rst must be two pins, neither on the SPI bus"));
+    case PERIPH_IS_IR:
+      return core_.error(out, id, nfc ? OMNI_P("a pin the reader needs is the IR pin") : OMNI_P("that pin is the IR pin"));
+    case PERIPH_IS_RF:
+      return core_.error(out, id, nfc ? OMNI_P("a pin the reader needs is the RF pin") : OMNI_P("that pin is the RF pin"));
+    case PERIPH_IS_NFC: return core_.error(out, id, OMNI_P("that pin is used by the NFC reader"));
+    default: break;
+  }
+  settings_.periph = next;
+  core_.setPeriphs(next);
+  hal_.saveSettings();
+  if (!alias) return core_.periphAck(out, id, OMNI_P("periph.set"), changed);
+  bool ir = changed == PERIPH_IR;
+  core_.ack(out, id, ir ? OMNI_P("ir.pin") : OMNI_P("rf.pin"), ir ? next.irPin : next.rfPin, false, 0);
+}
+
+void Setup::clearPeriph(Out& out, long id, PeriphType type) {
+  Periphs next = core_.periphs();
+  if (type == PERIPH_IR) next.irPin = -1;
+  if (type == PERIPH_RF) next.rfPin = -1;
+  if (next.nfc == type) {
+    next.nfc = PERIPH_NONE;
+    next.nfcSs = -1;
+    next.nfcRst = -1;
+  }
+  settings_.periph = next;
+  core_.setPeriphs(next);
+  hal_.saveSettings();
+  core_.periphAck(out, id, OMNI_P("periph.clear"), type);
 }
 
 #if OMNI_HAS_WIFI

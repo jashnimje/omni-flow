@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import '../zones/zones.dart';
 import 'canonical.dart';
+import 'conditions.dart';
 import 'executor.dart';
 import 'flow.dart';
 
@@ -39,7 +39,6 @@ class FlowEngine implements FlowEffects {
   final _runners = <String, FlowRunner>{};
   final _timers = <String, List<Timer>>{};
   late final StreamSubscription<Map<String, Object?>> _subscription;
-  final ZoneTracker _zones = ZoneTracker(const []);
   bool _timersOn = false;
   final _pending = <Future<void>>{};
 
@@ -57,8 +56,6 @@ class FlowEngine implements FlowEffects {
 
   @override
   Stream<Map<String, Object?>> get events => _host.events;
-
-  ZoneTracker get zones => _zones;
 
   Iterable<String> get loadedFlows => _runners.keys;
 
@@ -93,8 +90,6 @@ class FlowEngine implements FlowEffects {
     }
     return failures;
   }
-
-  void setZones(Iterable<ZoneSpec> zones) => _zones.update(zones);
 
   /// Starts time_of_day and interval triggers (the hub calls this).
   void startTimers() {
@@ -227,70 +222,46 @@ class FlowEngine implements FlowEffects {
         final state = Map<String, Object?>.from(device['state'] as Map);
         final before = deviceStates[id] ?? const {};
         deviceStates[id] = state;
-        for (final (r, n) in _triggers('device_state')) {
-          if (n.config['deviceId'] != id) continue;
-          final key = n.config['key'] as String?;
-          if (key != null && before[key] == state[key]) continue;
-          // Heartbeats and polls save the device with nothing changed.
-          if (key == null && canonicalJson(before) == canonicalJson(state)) {
+        for (final (r, n) in _triggers('on')) {
+          final c = n.config;
+          if (c['thing'] != id || c['event'] == true) continue;
+          final key = c['key'] as String?;
+          if (key == null) {
+            // Heartbeats and polls save the device with nothing changed.
+            if (canonicalJson(before) == canonicalJson(state)) continue;
+          } else if (!stateTriggerFires(c, before[key], state[key])) {
             continue;
           }
           _fire(r, n, {
             'payload': state,
+            'thing': id,
             'deviceId': id,
-            if (key != null) 'value': state[key],
-            if (key != null) 'previous': before[key],
+            if (key != null) ...{
+              'key': key,
+              'value': state[key],
+              'previous': before[key],
+            },
           });
         }
-      case 'zone.changed':
-        for (final (r, n) in _triggers('zone_change')) {
-          if (n.config['zoneId'] == e['zone'] &&
-              n.config['transition'] == e['transition']) {
-            _fire(r, n, {'payload': e, 'zone': e['zone']});
-          }
-        }
-      case 'board.event':
-        for (final (r, n) in _triggers('board_event')) {
-          if (n.config['event'] != e['type']) continue;
-          if (n.config['node'] != null && n.config['node'] != e['node']) {
+      case 'thing.event':
+        final payload = e['payload'] is Map
+            ? Map<String, Object?>.from(e['payload'] as Map)
+            : const <String, Object?>{};
+        for (final (r, n) in _triggers('on')) {
+          final c = n.config;
+          if (c['event'] != true ||
+              c['thing'] != e['thing'] ||
+              c['key'] != e['key'] ||
+              !payloadMatches(c['match'], payload)) {
             continue;
           }
-          _fire(r, n, {'payload': e['payload'], 'node': e['node']});
+          _fire(r, n, {
+            'payload': payload,
+            'thing': e['thing'],
+            'deviceId': e['thing'],
+            'key': e['key'],
+          });
         }
-      case 'wifi.changed':
-        for (final (r, n) in _triggers('wifi_change')) {
-          if (n.config['ssid'] == null || n.config['ssid'] == e['ssid']) {
-            _fire(r, n, {'payload': e, 'ssid': e['ssid']});
-          }
-        }
-    }
-  }
-
-  /// Feeds a BLE reading to the zones and emits any zone changes.
-  void bleReading(String name, double rssi, DateTime at) =>
-      _emitZones(_zones.bleReading(name, rssi, at));
-
-  /// Feeds the current Wi-Fi. Keeps `$WifiSsid` and `$HomeWifiConnected`
-  /// current; home networks are the global `$HomeSsids` list.
-  Future<void> wifi(String? ssid, String? bssid, DateTime at) async {
-    final homes = globals['HomeSsids'];
-    await setGlobal('WifiSsid', ssid);
-    await setGlobal(
-      'HomeWifiConnected',
-      ssid != null && homes is List && homes.contains(ssid),
-    );
-    _host.emit({'event': 'wifi.changed', 'ssid': ssid, 'bssid': bssid});
-    _emitZones(_zones.wifi(ssid, bssid, at));
-  }
-
-  void zoneTick(DateTime at) => _emitZones(_zones.tick(at));
-
-  void _emitZones(List<ZoneChange> changes) {
-    for (final c in changes) {
-      _track(
-        setGlobal('Zone_${c.zoneId}', c.transition == ZoneTransition.entered),
-      );
-      _host.emit({'event': 'zone.changed', ...c.toJson()});
     }
   }
 
@@ -364,6 +335,35 @@ class FlowEngine implements FlowEffects {
 }
 
 const _weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/// Whether an `on` trigger [config] on a state key fires for a change from
+/// [previous] to [value]: any change, a change to `change.to`, or a number
+/// crossing `crosses.above` or `crosses.below`, once per crossing.
+bool stateTriggerFires(
+  Map<String, Object?> config,
+  Object? previous,
+  Object? value,
+) {
+  if (valuesEqual(previous, value)) return false;
+  final crosses = config['crosses'];
+  if (crosses is Map) {
+    final above = crosses['above'];
+    final below = crosses['below'];
+    final limit = (above ?? below) as num;
+    bool past(Object? v) => v is num && (above != null ? v > limit : v < limit);
+    return past(value) && !past(previous);
+  }
+  final change = config['change'];
+  if (change is Map && change.containsKey('to')) {
+    return valuesEqual(value, change['to']);
+  }
+  return true;
+}
+
+/// Whether every value in [match] equals the payload's value at that key.
+bool payloadMatches(Object? match, Map<String, Object?> payload) =>
+    match is! Map ||
+    match.entries.every((m) => valuesEqual(payload[m.key], m.value));
 
 /// The next local time at `HH:MM` after [now], on one of [days] when given.
 /// Built from local calendar fields, so a DST change moves it with the wall

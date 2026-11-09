@@ -51,6 +51,15 @@ class Flows extends Table {
   /// True when the user saved or approved this version of the flow, so a
   /// later rise in its risk does not revoke the approval.
   BoolColumn get trusted => boolean().withDefault(const Constant(false))();
+
+  /// The form the automation was written in: `link`, `rule` or `graph`,
+  /// so each surface reopens it as it was written.
+  TextColumn get source =>
+      text().withDefault(const Constant(FlowRecord.graph))();
+
+  /// The link or rule the flow was compiled from. Null for a graph, which
+  /// is its own spec.
+  TextColumn get specJson => text().nullable()();
   DateTimeColumn get updatedAt => dateTime()();
 
   @override
@@ -123,7 +132,7 @@ class OmniDatabase extends _$OmniDatabase {
   factory OmniDatabase.memory() => OmniDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   /// The key version 2 kept the trust mark under, inside the flow JSON.
   static const legacyTrustedKey = '_trusted';
@@ -143,6 +152,14 @@ class OmniDatabase extends _$OmniDatabase {
         await _moveTrustMarksToColumn();
       }
       if (from < 3) await m.createTable(boardDescribes);
+      if (from >= 2 && from < 4) {
+        await m.addColumn(flows, flows.source);
+        await m.addColumn(flows, flows.specJson);
+        // A link's spec is rebuilt from its flow when the engine opens.
+        await customStatement(
+          "UPDATE flows SET source = 'link' WHERE id LIKE 'link\\_%' ESCAPE '\\'",
+        );
+      }
     },
   );
 
@@ -172,7 +189,14 @@ class FlowRecord {
     required this.enabled,
     required this.approved,
     this.trusted = false,
+    this.source = graph,
+    this.spec,
   });
+
+  static const link = 'link';
+  static const rule = 'rule';
+  static const graph = 'graph';
+  static const sources = [link, rule, graph];
 
   final Map<String, Object?> json;
   final bool enabled;
@@ -180,6 +204,12 @@ class FlowRecord {
 
   /// Whether the user saved or approved this version of the flow.
   final bool trusted;
+
+  /// How the automation was written: [link], [rule] or [graph].
+  final String source;
+
+  /// The link or rule [json] was compiled from, or null for a graph.
+  final Map<String, Object?>? spec;
 }
 
 class DriftFlowStore {
@@ -206,8 +236,22 @@ class DriftFlowStore {
     enabled: r.enabled,
     approved: r.approved,
     trusted: r.trusted,
+    source: r.source,
+    spec: _specOf(r.specJson),
   );
 
+  static Map<String, Object?>? _specOf(String? json) {
+    if (json == null) return null;
+    try {
+      final decoded = jsonDecode(json);
+      return decoded is Map ? Map<String, Object?>.from(decoded) : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Saves a flow. With no [source], a stored row keeps its source and spec
+  /// (enabling, approving), and a new row is a graph.
   Future<void> put(
     String id,
     Map<String, Object?> json, {
@@ -215,18 +259,29 @@ class DriftFlowStore {
     required bool approved,
     bool trusted = false,
     required DateTime at,
-  }) => _db
-      .into(_db.flows)
-      .insertOnConflictUpdate(
-        FlowsCompanion.insert(
-          id: id,
-          flowJson: jsonEncode(json),
-          enabled: Value(enabled),
-          approved: Value(approved),
-          trusted: Value(trusted),
-          updatedAt: at,
-        ),
-      );
+    String? source,
+    Map<String, Object?>? spec,
+  }) {
+    if (source != null && !FlowRecord.sources.contains(source)) {
+      throw ArgumentError('source must be one of ${FlowRecord.sources}');
+    }
+    return _db
+        .into(_db.flows)
+        .insertOnConflictUpdate(
+          FlowsCompanion.insert(
+            id: id,
+            flowJson: jsonEncode(json),
+            enabled: Value(enabled),
+            approved: Value(approved),
+            trusted: Value(trusted),
+            source: source == null ? const Value.absent() : Value(source),
+            specJson: source == null
+                ? const Value.absent()
+                : Value(spec == null ? null : jsonEncode(spec)),
+            updatedAt: at,
+          ),
+        );
+  }
 
   Future<bool> remove(String id) async =>
       await (_db.delete(_db.flows)..where((f) => f.id.equals(id))).go() > 0;

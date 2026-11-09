@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:omniflow_app/ui/setup_page.dart';
+
 import 'fake_engine.dart';
 
 void main() {
@@ -97,10 +99,16 @@ void main() {
       },
       'missingSettings': ['entityId'],
       'missingSecrets': ['token'],
+      'next': {
+        'step': 'secret',
+        'keys': [
+          {'step': 'secret', 'key': 'token', 'label': 'Access token'},
+        ],
+        'instruction': 'Enter the Access token for hall',
+      },
     };
     await pumpApp(tester, engine);
-    await tester.tap(find.byKey(const ValueKey('add-device')));
-    await tester.pumpAndSettle();
+    await openDriverSheet(tester);
     await tester.tap(find.byKey(const ValueKey('add-driver')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Home Assistant entity').last);
@@ -113,10 +121,9 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('add-save')));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Added Hall. It still needs: entityId, token.'),
-      findsOneWidget,
-    );
+    expect(find.byType(SetupPage), findsOneWidget);
+    expect(find.text('Enter the Access token for hall'), findsOneWidget);
+    expect(find.byKey(const ValueKey('setup-pair')), findsNothing);
   });
 
   testWidgets('a refused pairing shows why and offers a retry', (tester) async {
@@ -178,10 +185,14 @@ void main() {
         'pairing': {'method': 'hue_bridge'},
       },
       'missingSecrets': ['username'],
+      'next': {
+        'step': 'pair',
+        'method': 'hue_bridge',
+        'instruction': 'Press the link button on the bridge',
+      },
     };
     await pumpApp(tester, engine);
-    await tester.tap(find.byKey(const ValueKey('add-device')));
-    await tester.pumpAndSettle();
+    await openDriverSheet(tester);
     await tester.tap(find.byKey(const ValueKey('add-driver')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('OmniFlow board').last);
@@ -212,9 +223,7 @@ void main() {
       'host': '192.168.1.20',
       'settings': {'lightId': '3'},
     });
-    expect(
-      find.text('Added Hall. It still needs: username. Pair it from its menu.'),
-      findsOneWidget,
-    );
+    expect(find.byType(SetupPage), findsOneWidget);
+    expect(find.text('Press the link button on the bridge'), findsOneWidget);
   });
 }

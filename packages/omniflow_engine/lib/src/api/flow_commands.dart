@@ -24,7 +24,9 @@ class FlowCommands {
   FlowEngine get _flows => _core.flows;
 
   Future<Map<String, Object?>> validate(Map<String, Object?> args) async {
-    final flow = FlowSpec.parse(objectArg(args, 'flow'));
+    final flow = FlowSpec.parse(
+      await _stored.migrateInput(objectArg(args, 'flow')),
+    );
     final issues = validateFlow(flow, refs: await _stored.references());
     if (issues.isNotEmpty) {
       throw ValidationException('flow ${flow.id}', issues);
@@ -32,18 +34,54 @@ class FlowCommands {
     return {'id': flow.id, 'highRisk': await _stored.isHighRisk(flow)};
   }
 
-  Future<Map<String, Object?>> save(Map<String, Object?> args) async {
-    final flow = FlowSpec.parse(objectArg(args, 'flow'));
+  /// A flow written with retired node types is saved migrated, so old
+  /// files keep loading. A flow saved over a link or rule promotes it to a
+  /// graph.
+  Future<Map<String, Object?>> save(Map<String, Object?> args) => saveAs(
+    objectArg(args, 'flow'),
+    trusted: args['trusted'] == true,
+    source: FlowRecord.graph,
+  );
+
+  /// [flowJson] migrated, parsed and validated against the stored things
+  /// and flows. Throws a [ValidationException] with every issue.
+  Future<FlowSpec> checked(
+    Map<String, Object?> flowJson, {
+    String? subject,
+    List<ValidationIssue> Function(List<ValidationIssue>)? toSpecPaths,
+  }) async {
+    final flow = FlowSpec.parse(await _stored.migrateInput(flowJson));
     final issues = validateFlow(flow, refs: await _stored.references());
     if (issues.isNotEmpty) {
-      throw ValidationException('flow ${flow.id}', issues);
+      throw ValidationException(
+        subject ?? 'flow ${flow.id}',
+        toSpecPaths == null ? issues : toSpecPaths(issues),
+      );
     }
+    return flow;
+  }
+
+  /// Validates and stores the flow [flowJson], written as [source] from [spec].
+  /// [subject] and [toSpecPaths] tell validation issues in the terms of
+  /// the form it was written in.
+  Future<Map<String, Object?>> saveAs(
+    Map<String, Object?> flowJson, {
+    required bool trusted,
+    required String source,
+    Map<String, Object?>? spec,
+    String? subject,
+    List<ValidationIssue> Function(List<ValidationIssue>)? toSpecPaths,
+  }) async {
+    final flow = await checked(
+      flowJson,
+      subject: subject,
+      toSpecPaths: toSpecPaths,
+    );
     final highRisk = await _stored.isHighRisk(flow);
     // Only the user's own tools (the CLI, the app) pass trusted: true.
     // Anything else (MCP, the architect, an import) is untrusted: its
     // high-risk flows wait for approval, and it cannot quietly replace a
     // flow the user saved or approved.
-    final trusted = args['trusted'] == true;
     final existing = await DriftFlowStore(_db).get(flow.id);
     final approved = trusted || (!highRisk && !StoredFlows.trustedOf(existing));
     final json = flow.toJson();
@@ -53,10 +91,13 @@ class FlowCommands {
       enabled: flow.enabled,
       approved: approved,
       trusted: trusted,
+      source: source,
+      spec: spec,
     );
     await _stored.reloadFlows();
     return {
       'id': flow.id,
+      'source': source,
       'highRisk': highRisk,
       'approved': approved,
       'revision': StoredFlows.revisionOf(json),
@@ -96,6 +137,7 @@ class FlowCommands {
           {
             'id': r.json['id'],
             'name': r.json['name'],
+            'source': r.source,
             'enabled': r.enabled,
             'approved': r.approved,
             'highRisk': risky.contains(r.json['id']),
@@ -114,6 +156,8 @@ class FlowCommands {
     final json = StoredFlows.flowJsonOf(record);
     return {
       'flow': json,
+      'source': record.source,
+      'spec': ?record.spec,
       'enabled': record.enabled,
       'approved': record.approved,
       'revision': StoredFlows.revisionOf(json),
@@ -155,7 +199,16 @@ class FlowCommands {
     final id = stringArg(args, 'id');
     final record = await DriftFlowStore(_db).get(id);
     if (record == null) throw ApiError('not_found', 'no flow $id');
-    final flow = FlowSpec.parse(StoredFlows.flowJsonOf(record));
+    return dryRunFlow(FlowSpec.parse(StoredFlows.flowJsonOf(record)), args);
+  }
+
+  /// A dry run of [flow], stored or not, with the `trigger`, `at` and `msg`
+  /// in [args].
+  Future<Map<String, Object?>> dryRunFlow(
+    FlowSpec flow,
+    Map<String, Object?> args,
+  ) async {
+    final id = flow.id;
     final trigger =
         optStringArg(args, 'trigger') ??
         flow.nodes
@@ -173,7 +226,19 @@ class FlowCommands {
       'trigger': 'dry_run',
       ...msg,
     }, at);
-    return {'run': trace.toJson()};
+    // A compiled rule's node labels are its steps as written, which reads
+    // better in a trace than the node ids the compiler made up.
+    final labels = {for (final n in flow.nodes) n.id: n.label};
+    final run = trace.toJson();
+    return {
+      'run': {
+        ...run,
+        'nodes': [
+          for (final n in (run['nodes'] as List).cast<Map<String, Object?>>())
+            {...n, 'label': ?labels[n['node']]},
+        ],
+      },
+    };
   }
 
   Future<Map<String, Object?>> log(Map<String, Object?> args) async => {

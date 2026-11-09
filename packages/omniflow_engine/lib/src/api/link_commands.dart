@@ -124,17 +124,19 @@ class LinkCommands {
     } on ArgumentError catch (e) {
       throw ApiError('invalid', '${e.message}');
     }
-    if (args['replace'] != true &&
-        await DriftFlowStore(_core.db).get(request.id) != null) {
+    final existing = await DriftFlowStore(_core.db).get(request.id);
+    if (args['replace'] != true && existing != null) {
       throw ApiError(
         'exists',
         'this link exists as ${request.id}. Pass replace: true to save it again',
       );
     }
-    final saved = await _flowCommands.save({
-      'flow': flow,
-      'trusted': args['trusted'] == true,
-    });
+    final saved = await _flowCommands.saveAs(
+      flow,
+      trusted: args['trusted'] == true,
+      source: FlowRecord.link,
+      spec: request.toSpec(),
+    );
     return {...saved, 'name': request.name};
   }
 
@@ -172,19 +174,23 @@ class LinkCommands {
   Future<Map<String, Object?>> list(Map<String, Object?> _) async => {
     'links': [
       for (final r in await DriftFlowStore(_core.db).all())
-        if ((r.json['id'] as String).startsWith('link_'))
+        if (r.source == FlowRecord.link)
           {
             'id': r.json['id'],
             'name': r.json['name'],
             'enabled': r.enabled,
             'approved': r.approved,
+            'spec': ?r.spec,
           },
     ],
   };
 
   Future<Map<String, Object?>> remove(Map<String, Object?> args) async {
     final id = stringArg(args, 'id');
-    if (!id.startsWith('link_')) {
+    final record = await DriftFlowStore(_core.db).get(id);
+    if (record == null
+        ? !id.startsWith('link_')
+        : record.source != FlowRecord.link) {
       throw ApiError('invalid', '$id is not a link');
     }
     return _flowCommands.remove({'id': id});

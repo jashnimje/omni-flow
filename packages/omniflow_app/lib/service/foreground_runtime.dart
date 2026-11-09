@@ -11,6 +11,7 @@ import '../startup.dart';
 import 'engine_host.dart';
 import 'engine_link.dart';
 import 'multicast_lock.dart';
+import 'phone_inputs.dart';
 import 'service_engine_client.dart';
 
 /// The id of the notification's Stop button.
@@ -167,6 +168,7 @@ void startOmniService() => FlutterForegroundTask.setTaskHandler(
     open: openServiceEngine,
     send: FlutterForegroundTask.sendDataToMain,
     stopService: FlutterForegroundTask.stopService,
+    inputs: PhoneInputs.new,
   ),
 );
 
@@ -189,8 +191,14 @@ class OmniTaskHandler extends TaskHandler {
     required void Function(String message) send,
     required this.stopService,
     MulticastLock? lock,
+    this.inputs,
   }) : _host = EngineHost(send: send),
        _lock = lock ?? MulticastLock();
+
+  /// The phone's battery and Wi-Fi readings, fed to the engine once it is
+  /// open. Null leaves the phone thing to the CLI.
+  final PhoneInputs Function(EngineClient engine)? inputs;
+  PhoneInputs? _inputs;
 
   final Future<Started> Function() open;
   final Future<Object?> Function() stopService;
@@ -205,6 +213,7 @@ class OmniTaskHandler extends TaskHandler {
       final started = await open();
       _engine = started.client;
       _host.attach(started.client, hubError: started.hubError);
+      _inputs = inputs?.call(started.client)?..start();
     } on Object catch (e) {
       _host.fail('$e');
     }
@@ -225,6 +234,7 @@ class OmniTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    await _inputs?.stop();
     await _host.stop(
       isTimeout
           ? 'Android stopped the service at its time limit'

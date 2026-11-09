@@ -11,7 +11,11 @@ enum CapabilityType {
   textCommand('text_command'),
   exec('exec'),
   sensor('sensor'),
-  action('action');
+  action('action'),
+
+  /// Something that happens: momentary, with a payload, keeping no state
+  /// and taking no command (a button press, an NFC scan).
+  event('event');
 
   const CapabilityType(this.wireName);
 
@@ -38,15 +42,19 @@ enum CapabilityType {
       ),
     },
     textCommand => const {'value': ParamSpec(type: ParamType.string)},
-    exec || sensor || action => const {},
+    exec || sensor || action || event => const {},
   };
 
-  bool get hasCommand => this != sensor;
+  bool get hasCommand => this != sensor && this != event;
 
   bool get isHighRisk => this == exec;
 }
 
 final _idPattern = RegExp(r'^[a-z][a-z0-9_]*$');
+
+/// An event key may be dotted, so a part of a thing can raise its own
+/// events: `button.pressed` on a board.
+final eventKeyPattern = RegExp(r'^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$');
 const _prefixedRoots = ['state.', 'device.', 'msg.', r'$', '%'];
 
 class CapabilitySpec {
@@ -102,10 +110,18 @@ class CapabilitySpec {
     final map = Map<String, Object?>.from(json);
     final before = issues.issues.length;
     final id = issues.requiredString(map, 'id', path);
-    if (id != null && !_idPattern.hasMatch(id)) {
-      issues.add('$path.id', 'must be lower snake case');
-    }
     final type = CapabilityType.fromWire(map['type']);
+    if (id != null &&
+        !(type == CapabilityType.event ? eventKeyPattern : _idPattern).hasMatch(
+          id,
+        )) {
+      issues.add(
+        '$path.id',
+        type == CapabilityType.event
+            ? 'must be lower snake case, dotted parts allowed'
+            : 'must be lower snake case',
+      );
+    }
     if (type == null) {
       issues.add(
         '$path.type',
@@ -130,10 +146,16 @@ class CapabilitySpec {
     if (type == CapabilityType.sensor && command != null) {
       issues.add('$path.command', 'a sensor has no command');
     }
+    if (type == CapabilityType.event && command != null) {
+      issues.add('$path.command', 'an event has no command');
+    }
     if (command != null) {
       _checkPlaceholders(command, params, '$path.command', issues);
     }
     final stateJsonPath = issues.optionalString(map, 'stateJsonPath', path);
+    if (type == CapabilityType.event && stateJsonPath != null) {
+      issues.add('$path.stateJsonPath', 'an event keeps no state');
+    }
     issues.jsonPath(stateJsonPath, '$path.stateJsonPath');
     final rawOnOff = map['onOff'];
     (Object, Object)? onOff;

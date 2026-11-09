@@ -14,6 +14,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Reading and writing NFC tags (nfc_manager), and the tag intent
+         below. Phones without NFC can still install the app. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <!-- Android names the Wi-Fi network only to an app with location access,
+         and Wi-Fi places need the name (PhoneSensorsBridge). The app asks for
+         it from the phone's menu, never at launch. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- No backup: secrets are keystore-bound, so a restored copy on another
          phone cannot be decrypted. -->
     <application
@@ -43,6 +52,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- A tag OmniFlow wrote opens the app even when it is closed,
+                 and MainActivity hands the scan to the engine. -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="omniflow" android:host="tag" android:pathPrefix="/"/>
             </intent-filter>
         </activity>
         <!-- flutter_foreground_task's service, which must keep this name. No

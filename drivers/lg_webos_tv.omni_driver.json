@@ -15,6 +15,7 @@
     { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true },
     { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true }
   ],
+  "setup": ["pair"],
   "statePoll": { "intervalSeconds": 60, "command": { "uri": "ssap://audio/getVolume" } },
   "reliability": { "timeoutMs": 3000, "retries": 1 },
   "capabilities": [

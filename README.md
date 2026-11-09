@@ -2,7 +2,7 @@
 
 ## Purpose
 
-OmniFlow is a local-first automation studio. It controls LAN smart devices, desktop hosts and microcontrollers directly, and wires them together with flows that run on the phone itself. Design: `docs/DESIGN.md`. Plan and status: `docs/ROADMAP.md`.
+OmniFlow is a local-first automation studio. It controls LAN smart devices, desktop hosts and microcontrollers directly, treats the phone, people, places and NFC tags as things too, and wires all of them together with automations (links, rules and graphs) that run on the phone itself. Design: `docs/DESIGN.md`. Plan and status: `docs/ROADMAP.md`.
 
 ## Contents
 
