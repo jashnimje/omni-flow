@@ -115,6 +115,66 @@ void main() {
     expect(find.text('Saved Evening lights'), findsOneWidget);
   });
 
+  testWidgets('a TV launch step picks the app from the TV app list', (
+    tester,
+  ) async {
+    engine.devices = [
+      {
+        'id': 'tv',
+        'name': 'TV',
+        'driver': 'android_tv_adb',
+        'host': '192.168.1.60',
+        'state': const <String, Object?>{},
+        'capabilities': [
+          {
+            'id': 'launch_app',
+            'type': 'action',
+            'label': 'Launch app',
+            'params': {
+              'package': {'type': 'string'},
+            },
+          },
+        ],
+      },
+    ];
+    engine.answers['tv.apps'] = {
+      'ok': true,
+      'apps': [
+        {
+          'package': 'com.android.tv.settings',
+          'label': 'Settings',
+          'system': true,
+          'launchable': true,
+        },
+        {'package': 'com.android.shell', 'system': true},
+        {
+          'package': 'com.netflix.ninja',
+          'label': 'Netflix',
+          'launchable': true,
+        },
+      ],
+    };
+    await pumpPushed(tester, engine, const RuleEditorPage());
+    await tapText(tester, 'Add step');
+    await tapKey(tester, 'pick-device-tv');
+    await tapKey(tester, 'act-launch_app');
+    await tapKey(tester, 'param-package-pick');
+    expect(engine.callsOf('tv.apps').single.$2, {'id': 'tv', 'filter': 'all'});
+    expect(
+      find.byKey(const ValueKey('choice-com.android.shell')),
+      findsNothing,
+    );
+    await tester.enterText(find.byKey(const ValueKey('choice-search')), 'sett');
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('choice-com.netflix.ninja')),
+      findsNothing,
+    );
+    await tapKey(tester, 'choice-com.android.tv.settings');
+    await tapKey(tester, 'form-done');
+    expect(find.textContaining('com.android.tv.settings'), findsOneWidget);
+  });
+
   testWidgets('a number trigger reads as a short form in plain words', (
     tester,
   ) async {
@@ -366,6 +426,96 @@ void main() {
             'params': {'value': false},
           },
         ],
+      },
+    ]);
+  });
+
+  Future<void> notifyIn(WidgetTester tester, String block, String title) async {
+    await tapIn(tester, block, 'Add step');
+    await tapKey(tester, 'pick-notify');
+    await tester.enterText(find.byKey(const ValueKey('notify-title')), title);
+    await tester.pump();
+    await tapKey(tester, 'form-done');
+  }
+
+  Future<void> pumpBlank(WidgetTester tester) => pumpPushed(
+    tester,
+    engine,
+    const RuleEditorPage(
+      initial: {
+        'name': 'Film night',
+        'when': [
+          {'manual': true},
+        ],
+        'then': [],
+      },
+    ),
+  );
+
+  testWidgets('a try step saves its steps and its fallback', (tester) async {
+    await pumpBlank(tester);
+    await tapText(tester, 'Add step');
+    await tapKey(tester, 'pick-try');
+    expect(find.text('Try, with a fallback'), findsWidgets);
+    await notifyIn(tester, 'block-then[0].try', 'Prime');
+    await notifyIn(tester, 'block-then[0].otherwise', 'Living room TV');
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('Try these, with a fallback'), findsOneWidget);
+    await tapKey(tester, 'rule-save');
+    expect(savedSpec(engine)['then'], [
+      {
+        'try': [
+          {
+            'notify': {'title': 'Prime'},
+          },
+        ],
+        'otherwise': [
+          {
+            'notify': {'title': 'Living room TV'},
+          },
+        ],
+      },
+    ]);
+  });
+
+  testWidgets('a repeat step saves how often, when to stop and its steps', (
+    tester,
+  ) async {
+    await pumpBlank(tester);
+    await tapText(tester, 'Add step');
+    await tapKey(tester, 'pick-repeat');
+    await tapKey(tester, 'repeat-how');
+    await tester.enterText(find.byKey(const ValueKey('repeat-times')), '5');
+    await tester.pump();
+    await tapKey(tester, 'form-done');
+    await tapIn(tester, 'block-then[0].repeat.until', 'Add condition');
+    await tapKey(tester, 'pick-between');
+    await tapKey(tester, 'form-done');
+    await notifyIn(tester, 'block-then[0].repeat.do', 'Again');
+    expect(
+      find.textContaining('up to 5 times, every 3 s, until between'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'rule-save');
+    expect(savedSpec(engine)['then'], [
+      {
+        'repeat': {
+          'do': [
+            {
+              'notify': {'title': 'Again'},
+            },
+          ],
+          'times': 5,
+          'every': 3000,
+          'until': [
+            {
+              'between': ['18:00', '23:30'],
+            },
+          ],
+        },
       },
     ]);
   });

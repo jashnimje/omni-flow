@@ -58,11 +58,18 @@ abstract final class RuleKeys {
     'waitFor',
     'if',
     'together',
+    'repeat',
+    'try',
     'notify',
     'set',
     'run',
     'keep',
   ];
+
+  /// The most passes a repeat step makes, and how many it makes when it
+  /// only names when to stop.
+  static const repeatMax = 1000;
+  static const repeatDefault = 100;
 
   /// The run modes a rule with a keep step may use: a hold must answer
   /// every change, even while an earlier run is still going.
@@ -501,6 +508,54 @@ class _Normalizer {
               steps(groups[g], '$path.together[$g]'),
           ],
         };
+      case 'try':
+        _only(map, path, {'try', 'otherwise'}, 'a try step');
+        return {
+          'try': steps(map['try'], '$path.try'),
+          if (map['otherwise'] != null)
+            'otherwise': steps(map['otherwise'], '$path.otherwise'),
+        };
+      case 'repeat':
+        _only(map, path, {'repeat'}, 'a repeat step');
+        final r = map['repeat'];
+        final at = '$path.repeat';
+        if (r is! Map) {
+          issues.add(at, 'must be {do, times?, until?, every?}');
+          return null;
+        }
+        _only(Map<String, Object?>.from(r), at, {
+          'do',
+          'times',
+          'until',
+          'every',
+        }, 'a repeat');
+        final times = r['times'];
+        if (times != null &&
+            (times is! int || times < 1 || times > RuleKeys.repeatMax)) {
+          issues.add('$at.times', 'must be 1 to ${RuleKeys.repeatMax}');
+        }
+        if (times == null && r['until'] == null) {
+          issues.add(at, 'needs times, until, or both, so it always ends');
+        }
+        final every = r['every'];
+        if (every != null && (every is! int || every < 0 || every > 86400000)) {
+          issues.add('$at.every', 'must be milliseconds, 0 to 86400000');
+        }
+        final until = r['until'];
+        return {
+          'repeat': {
+            'do': steps(r['do'], '$at.do'),
+            'times': ?times,
+            if (until != null)
+              'until': list(
+                until is List ? until : [until],
+                '$at.until',
+                condition,
+                required: true,
+              ),
+            'every': ?every,
+          },
+        };
       case 'notify':
         _only(map, path, {'notify'}, 'a notify step');
         final n = map['notify'];
@@ -653,13 +708,21 @@ class RuleCompilation {
 ///
 /// A state read through [refs] may name the capability instead of the state
 /// key it reports under (`lamp.power` for a lamp that reports `state`).
+/// The words a compiled node is labelled with: a trigger or a device step
+/// in the names the user gave things. Null keeps the rule's own text.
+typedef RuleWords = ({
+  String Function(Map<String, Object?> trigger) trigger,
+  String Function(Map<String, Object?> step) step,
+});
+
 RuleCompilation compileRule(
   Map<String, Object?> rule, {
   bool enabled = true,
   FlowReferences refs = const FlowReferences(),
+  RuleWords? words,
 }) {
   final when = (rule['when'] as List).cast<Map<String, Object?>>();
-  final c = _Compiler(when.length, refs, '${rule['id']}');
+  final c = _Compiler(when.length, refs, '${rule['id']}', words);
   var open = <(String, String)>[];
   for (var i = 0; i < when.length; i++) {
     open.add((c.trigger(when[i], 'when[$i]', row: i), 'out'));
@@ -695,9 +758,10 @@ RuleCompilation compileRule(
 }
 
 class _Compiler {
-  _Compiler(this._rows, this._refs, this._ruleId);
+  _Compiler(this._rows, this._refs, this._ruleId, this._words);
 
   final FlowReferences _refs;
+  final RuleWords? _words;
   final String _ruleId;
 
   final nodes = <Map<String, Object?>>[];
@@ -803,7 +867,8 @@ class _Compiler {
           : (t['change'] as Map).containsKey('to')
           ? 'turns ${(t['change'] as Map)['to']}'
           : 'changes';
-      return add(id, 'on', '${t['on']} $how', config, origin, col: 0, row: row);
+      final label = _words?.trigger(t) ?? '${t['on']} $how';
+      return add(id, 'on', label, config, origin, col: 0, row: row);
     }
     if (t.containsKey('time')) {
       return add(
@@ -829,6 +894,28 @@ class _Compiler {
     }
     return add(id, 'manual', 'run by hand', {}, {'': path}, col: 0, row: row);
   }
+
+  /// [conditions] as one rule a node can evaluate: the condition itself, or
+  /// an all_of of them. Their paths go into [origin] under [prefix].
+  Map<String, Object?> ruleOf(
+    List<Map<String, Object?>> conditions,
+    String path,
+    String prefix,
+    Map<String, String> origin,
+  ) => conditions.length == 1
+      ? condition(conditions.single, '$path[0]', prefix, origin)
+      : {
+          'type': 'all_of',
+          'rules': [
+            for (var j = 0; j < conditions.length; j++)
+              condition(
+                conditions[j],
+                '$path[$j]',
+                _join(prefix, 'rules[$j]'),
+                origin,
+              ),
+          ],
+        };
 
   /// One condition node for [conditions] at [path]: the condition itself, or
   /// an all_of of them.
@@ -996,7 +1083,9 @@ class _Compiler {
       final ref = (toggle ? s['toggle'] : s['do']) as String;
       final dot = ref.indexOf('.');
       final params = s['params'] as Map?;
-      final label = toggle
+      final label = _words != null
+          ? _words.step(s)
+          : toggle
           ? 'toggle $ref'
           : params == null || params.isEmpty
           ? 'do $ref'
@@ -1085,6 +1174,53 @@ class _Compiler {
           row: g == 0 ? row : _rows++,
         );
       }
+      return [(id, 'done')];
+    }
+    if (s.containsKey('try')) {
+      // Every device step inside it sends a failure to `otherwise`, which
+      // then takes the place of the rest of the try.
+      final first = nodes.length;
+      final tried = steps(
+        (s['try'] as List).cast(),
+        '$path.try',
+        open,
+        col: col,
+        row: row,
+      );
+      final failed = [
+        for (final n in nodes.skip(first))
+          if (n['type'] == 'device_capability' || n['type'] == 'device_toggle')
+            ('${n['id']}', 'error'),
+      ];
+      final otherwise = (s['otherwise'] as List?)?.cast<Map<String, Object?>>();
+      if (otherwise == null || otherwise.isEmpty) return [...tried, ...failed];
+      return [
+        ...tried,
+        ...steps(otherwise, '$path.otherwise', failed, col: col, row: _rows++),
+      ];
+    }
+    if (s.containsKey('repeat')) {
+      final r = Map<String, Object?>.from(s['repeat'] as Map);
+      final at = '$path.repeat';
+      final until = (r['until'] as List?)?.cast<Map<String, Object?>>();
+      final origin = <String, String>{
+        'maxIterations': '$at.times',
+        'everyMs': '$at.every',
+      };
+      final label = _words?.step(s) ?? 'repeat';
+      node('repeat', label, {
+        'maxIterations': r['times'] ?? RuleKeys.repeatDefault,
+        if (r['every'] != null) 'everyMs': r['every'],
+        if (until != null && until.isNotEmpty)
+          'until': ruleOf(until, '$at.until', 'until', origin),
+      }, origin);
+      steps(
+        (r['do'] as List).cast(),
+        '$at.do',
+        [(id, 'body')],
+        col: col + 1,
+        row: row,
+      );
       return [(id, 'done')];
     }
     if (s.containsKey('keep')) {

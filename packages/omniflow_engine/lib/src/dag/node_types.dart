@@ -151,10 +151,18 @@ final Map<String, NodeType> builtInNodeTypes = {
       _checkOn({...c}..remove('timeoutMs'), p, i, r);
       _int(c, 'timeoutMs', p, i, min: 1, max: 86400000);
     }),
-    NodeType('repeat', NodeCategory.flowControl, [
-      'body',
-      'done',
-    ], (c, p, i, _) => _int(c, 'maxIterations', p, i, min: 1, max: 1000)),
+    NodeType('repeat', NodeCategory.flowControl, ['body', 'done'], (
+      c,
+      p,
+      i,
+      r,
+    ) {
+      _int(c, 'maxIterations', p, i, min: 1, max: 1000);
+      if (c['everyMs'] != null) {
+        _int(c, 'everyMs', p, i, min: 0, max: 86400000);
+      }
+      if (c['until'] != null) checkRule(c['until'], '$p.until', i, r);
+    }),
     // Every branch edge runs side by side, then done once all have ended.
     NodeType('parallel', NodeCategory.flowControl, [
       'branch',

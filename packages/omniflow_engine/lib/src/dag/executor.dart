@@ -524,9 +524,23 @@ class FlowRunner {
         await _follow(run, node.id, 'branch', msg, clock);
         return ('done', msg);
       case 'repeat':
+        // Up to maxIterations times, stopping before a pass once `until`
+        // holds, with `everyMs` between passes.
         final times = node.config['maxIterations'] as int;
+        final until = node.config['until'];
+        final every = node.config['everyMs'] as int? ?? 0;
         for (var i = 0; i < times; i++) {
           run.token.check();
+          if (i > 0 && every > 0) {
+            await clock.sleep(Duration(milliseconds: every), run.token);
+          }
+          if (until is Map &&
+              evaluateRule(
+                Map<String, Object?>.from(until),
+                _context(run, msg, clock),
+              )) {
+            break;
+          }
           await _follow(run, node.id, 'body', {...msg, 'iteration': i}, clock);
         }
         return ('done', msg);

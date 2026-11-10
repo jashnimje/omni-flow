@@ -65,6 +65,14 @@ class Thing {
       if (c['type'] == 'toggle' && c['stateKey'] != null) c,
   ];
 
+  /// True for a thing turned on and off by its wake and sleep actions (a
+  /// TV), which a template takes as `id.power`.
+  bool get wakesAndSleeps => [
+    'wake',
+    'sleep',
+    'power',
+  ].every((id) => capability(id)?['type'] == 'action');
+
   Json? capability(String id) =>
       capabilities.where((c) => c['id'] == id).firstOrNull;
 

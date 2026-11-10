@@ -21,7 +21,11 @@ void main() {
     hostKey = AdbHostKey.generateSync();
   });
 
-  AdbChannel newChannel({Duration pairing = const Duration(seconds: 5)}) {
+  AdbChannel newChannel({
+    Duration pairing = const Duration(seconds: 5),
+    Future<void> Function()? onWake,
+    Duration wakeWait = const Duration(seconds: 45),
+  }) {
     final channel = AdbChannel(
       secrets,
       keyName: 'omniflow@test',
@@ -31,7 +35,12 @@ void main() {
         return hostKey;
       },
       onPairingPrompt: prompts.add,
-      wakeOnLan: (packet) async => wakePackets.add(packet),
+      wakeOnLan: (packet) async {
+        wakePackets.add(packet);
+        await onWake?.call();
+      },
+      wakeWait: wakeWait,
+      wakeRetry: const Duration(milliseconds: 50),
     );
     channels.add(channel);
     return channel;
@@ -348,6 +357,59 @@ void main() {
       0x22,
     ]);
     expect(adbd.connections, 0);
+  });
+
+  group('wake on a TV in deep standby', () {
+    late int asleepPort;
+    setUp(() async {
+      final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      asleepPort = probe.port;
+      await probe.close();
+      await store.remove('tv');
+      await addTv(
+        port: asleepPort,
+        settings: const {'mac': 'AA:BB:CC:00:11:22'},
+      );
+    });
+
+    test('sends Wake-on-LAN, then the key once ADB is back', () async {
+      FakeAdbd? woken;
+      addTearDown(() async => woken?.close());
+      final channel = newChannel(
+        onWake: () async {
+          woken = await FakeAdbd.start(port: asleepPort);
+          woken!.trusted.addAll(adbd.trusted);
+        },
+      );
+      await serviceFor(channel).invoke('tv', 'wake', const {});
+      expect(wakePackets, hasLength(1));
+      expect(woken!.connections, greaterThan(0));
+    });
+
+    test('says what to turn on when the TV never comes back', () async {
+      await expectLater(
+        serviceFor(newChannel(wakeWait: const Duration(milliseconds: 200)))
+            .invoke('tv', 'wake', const {}),
+        throwsA(
+          isA<TransportTimeoutException>().having(
+            (e) => e.message,
+            'message',
+            contains('network standby'),
+          ),
+        ),
+      );
+      expect(wakePackets, hasLength(1));
+    });
+
+    test('no mac setting fails at once with no packet', () async {
+      await store.remove('tv');
+      await addTv(port: asleepPort);
+      await expectLater(
+        serviceFor(newChannel()).invoke('tv', 'wake', const {}),
+        throwsA(isA<TransportTimeoutException>()),
+      );
+      expect(wakePackets, isEmpty);
+    });
   });
 
   test('Wake-on-LAN without a valid mac setting is refused', () async {

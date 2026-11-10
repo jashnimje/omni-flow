@@ -357,7 +357,9 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
   Widget build(BuildContext context) {
     final step = _step;
     return OmniPage(
-      title: 'Add ${widget.name}',
+      title: widget.stepsBefore == 0
+          ? 'Set up ${widget.name}'
+          : 'Add ${widget.name}',
       body: ListView(
         key: const ValueKey('guided-steps'),
         padding: const EdgeInsets.only(bottom: OmniSpace.xl),
@@ -447,7 +449,9 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
         enableSuggestions: !secret,
         keyboardType: secret ? TextInputType.visiblePassword : null,
         decoration: InputDecoration(
-          labelText: k.optional ? '${k.label} (optional)' : k.label,
+          labelText: k.optional && !k.label.contains('(optional)')
+              ? '${k.label} (optional)'
+              : k.label,
           suffixIcon: secret
               ? OmniIconAction(
                   icon: shown

@@ -85,8 +85,8 @@ class FakeAdbd {
     _server.listen(_serve);
   }
 
-  static Future<FakeAdbd> start() async =>
-      FakeAdbd._(await ServerSocket.bind(InternetAddress.loopbackIPv4, 0));
+  static Future<FakeAdbd> start({int port = 0}) async =>
+      FakeAdbd._(await ServerSocket.bind(InternetAddress.loopbackIPv4, port));
 
   final ServerSocket _server;
   final _random = Random(7);

@@ -160,7 +160,7 @@ class RuleAddCommand extends _RuleCommandBase {
         help:
             'A step, repeatable, in order: thing.action, thing.action=value, '
             'toggle:thing.action, wait:2s, notify:text, set:\$Var=value, '
-            'run:ID, or a JSON object for if, together and waitFor.',
+            'run:ID, or a JSON object for if, together, repeat, try and waitFor.',
       )
       ..addOption('id', help: 'The id to save it under. Defaults from NAME.')
       ..addOption(

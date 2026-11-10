@@ -678,6 +678,53 @@ void main() {
     );
   });
 
+  test('a TV picked as a switch in a template wakes and sleeps', () async {
+    await ok('device.add', {
+      'id': 'tv',
+      'name': 'TV',
+      'driver': 'android_tv_adb',
+      'host': '192.168.1.60',
+    });
+    Future<List<Object?>> stepsOf(String id, List<String> things) async {
+      final filled =
+          ((await ok('automation.templates', {
+                        'id': id,
+                        'values': {
+                          if (id != 'bedtime') 'person': 'jade',
+                          'things': things,
+                        },
+                      }))['templates']
+                      as List)
+                  .single
+              as Map;
+      return (filled['spec'] as Map)['then'] as List;
+    }
+
+    final arrive = await stepsOf('arrive_home', ['tv.power', 'lamp.power']);
+    expect(arrive, [
+      {'do': 'tv.wake'},
+      {
+        'do': 'lamp.power',
+        'params': {'value': true},
+      },
+    ]);
+    expect(await stepsOf('leave_home_all_off', ['tv.power']), [
+      {'do': 'tv.sleep'},
+    ]);
+    expect((await stepsOf('bedtime', ['tv.wake'])).first, {'do': 'tv.sleep'});
+    await saveRule({
+      'id': 'tv_home',
+      'name': 'TV home',
+      'when': [
+        {
+          'on': 'jade.home',
+          'change': {'to': true},
+        },
+      ],
+      'then': arrive,
+    });
+  });
+
   test('templates list the five starting points and fill into a rule that '
       'saves', () async {
     final all = (await ok('automation.templates', {}))['templates'] as List;

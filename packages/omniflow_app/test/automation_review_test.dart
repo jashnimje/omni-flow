@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omniflow_app/api/engine_calls.dart' show RunRecord;
 import 'package:omniflow_app/ui/automations/automations.dart';
 
 import 'automations_fixtures.dart';
@@ -240,6 +241,43 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Hall bulb · on, 70%'), findsOneWidget);
+    });
+
+    testWidgets('Run it now runs it for real and opens that run', (
+      tester,
+    ) async {
+      engine.answers['automation.dry_run'] = {
+        'ok': true,
+        'run': _run('dry', ok: true, dryRun: true),
+      };
+      engine.answers['automation.log'] = {'ok': true, 'runs': []};
+      engine.answers['automation.run'] = {
+        'ok': true,
+        'runs': [_run('now', ok: true)],
+      };
+      await pumpPushed(
+        tester,
+        engine,
+        const TestRunPage(name: 'Arrive home', id: 'arrive_home'),
+      );
+      await tapKey(tester, 'run-now');
+      expect(engine.callsOf('automation.run').single.$2, {'id': 'arrive_home'});
+      expect(find.byType(RunPage), findsOneWidget);
+    });
+
+    testWidgets('a rule not saved yet says to save it to run it', (
+      tester,
+    ) async {
+      await pumpPushed(
+        tester,
+        engine,
+        TestRunPage(
+          name: 'New rule',
+          dryRun: RunRecord.fromJson(_run('dry', ok: true, dryRun: true)),
+        ),
+      );
+      expect(find.byKey(const ValueKey('save-to-run')), findsOneWidget);
+      expect(find.byKey(const ValueKey('run-now')), findsNothing);
     });
 
     testWidgets('an automation that never ran says so', (tester) async {

@@ -1,4 +1,6 @@
 import 'package:omniflow_engine/omniflow_engine.dart';
+import 'package:omniflow_engine/src/api/automation_view.dart'
+    show SentenceContext;
 import 'package:test/test.dart';
 
 /// The things a rule may name in these tests, by driver.
@@ -679,6 +681,185 @@ void main() {
     });
   });
 
+  group('try and otherwise', () {
+    final rule = normalizeRule({
+      'name': 'Open a film app',
+      'when': ['manual'],
+      'then': [
+        {
+          'try': ['lamp.power=true', 'notify:opened'],
+          'otherwise': ['notify:fallback'],
+        },
+        'notify:after',
+      ],
+    }, context: context);
+
+    Future<List<String>> ran({required bool fails}) async {
+      final effects = _NoEffects();
+      if (fails) {
+        effects.onInvoke = (_, _) => throw StateError('not installed');
+      }
+      final trace = await FlowRunner(
+        FlowSpec.parse(compileRule(rule).flow),
+        effects,
+        clock: InstantFlowClock(DateTime(2026)),
+      ).fire('when_0', {});
+      expect(trace.outcome, RunOutcome.completed);
+      return [for (final n in trace.nodes) '${n.nodeId}:${n.port}'];
+    }
+
+    test('a step that works skips otherwise', () async {
+      expect(await ran(fails: false), [
+        'when_0:out',
+        'then_0_try_0:out',
+        'then_0_try_1:out',
+        'then_1:out',
+      ]);
+    });
+
+    test('a step that fails runs otherwise instead of the rest', () async {
+      expect(await ran(fails: true), [
+        'when_0:out',
+        'then_0_try_0:error',
+        'then_0_otherwise_0:out',
+        'then_1:out',
+      ]);
+    });
+
+    test('reads in plain words and validates', () {
+      expect(issuesOf(rule), isEmpty);
+      expect(
+        const SentenceContext(names: {'lamp': 'Lamp'})
+            .step((rule['then'] as List).first as Map<String, Object?>),
+        'try Lamp power on then notify "opened", '
+        'if that fails notify "fallback"',
+      );
+    });
+  });
+
+  group('repeat', () {
+    Map<String, Object?> rule(Map<String, Object?> repeat) => normalizeRule({
+      'name': 'Keep trying',
+      'when': ['manual'],
+      'then': [
+        {'repeat': repeat},
+        'notify:done',
+      ],
+    }, context: context);
+
+    test('reads in plain words and compiles to a bounded repeat', () {
+      final r = rule({
+        'do': ['lamp.power=true'],
+        'times': 10,
+        'every': 3000,
+        'until': 'lamp.power == true',
+      });
+      final flow = compileRule(r).flow;
+      final node = nodeOf(flow, 'then_0');
+      expect(node['type'], 'repeat');
+      expect(node['config'], {
+        'maxIterations': 10,
+        'everyMs': 3000,
+        'until': {
+          'type': 'compare',
+          'left': {'state': 'lamp.power'},
+          'op': '==',
+          'right': {'literal': true},
+        },
+      });
+      expect(issuesOf(r), isEmpty);
+      expect(
+        const SentenceContext(names: {'lamp': 'Lamp'})
+            .step((r['then'] as List).first as Map<String, Object?>),
+        'repeat up to 10 times, every 3 s, until Lamp power is on: '
+        'Lamp power on',
+      );
+    });
+
+    test('stops once until holds, and goes on after', () async {
+      final effects = _NoEffects();
+      var sends = 0;
+      effects.onInvoke = (device, capability) {
+        if (++sends == 3) effects.deviceStates['lamp'] = {'power': true};
+      };
+      final trace = await FlowRunner(
+        FlowSpec.parse(
+          compileRule(
+            rule({
+              'do': ['lamp.power=true'],
+              'until': 'lamp.power == true',
+              'every': 1000,
+            }),
+          ).flow,
+        ),
+        effects,
+        clock: InstantFlowClock(DateTime(2026)),
+      ).fire('when_0', {});
+      expect(trace.outcome, RunOutcome.completed);
+      expect(sends, 3);
+      expect(trace.nodes.last.nodeId, 'then_1');
+    });
+
+    test('runs times passes when nothing stops it', () async {
+      final effects = _NoEffects();
+      var sends = 0;
+      effects.onInvoke = (_, _) => sends++;
+      await FlowRunner(
+        FlowSpec.parse(
+          compileRule(
+            rule({
+              'do': ['lamp.power=true'],
+              'times': 4,
+            }),
+          ).flow,
+        ),
+        effects,
+        clock: InstantFlowClock(DateTime(2026)),
+      ).fire('when_0', {});
+      expect(sends, 4);
+    });
+
+    test('a repeat with no end, or too many passes, is refused', () {
+      expect(
+        issuesOf({
+          'name': 'Forever',
+          'when': ['manual'],
+          'then': [
+            {
+              'repeat': {
+                'do': ['lamp.power=true'],
+              },
+            },
+          ],
+        }),
+        [
+          {
+            'path': 'then[0].repeat',
+            'message': 'needs times, until, or both, so it always ends',
+          },
+        ],
+      );
+      expect(
+        [
+          for (final i in issuesOf({
+            'name': 'Many',
+            'when': ['manual'],
+            'then': [
+              {
+                'repeat': {
+                  'do': ['lamp.power=true'],
+                  'times': 5000,
+                },
+              },
+            ],
+          }))
+            i['path'],
+        ],
+        ['then[0].repeat.times'],
+      );
+    });
+  });
+
   test('a dry run goes on past a waitFor', () async {
     final rule = normalizeRule({
       'name': 'Dry wait',
@@ -761,13 +942,18 @@ class _NoEffects implements FlowEffects {
   @override
   void announce(Map<String, Object?> payload) {}
 
+  void Function(String deviceId, String capabilityId)? onInvoke;
+
   @override
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,
     Map<String, Object?> params, {
     String? flowId,
-  }) async => null;
+  }) async {
+    onInvoke?.call(deviceId, capabilityId);
+    return null;
+  }
 
   @override
   Future<void> runFlow(String flowId, Map<String, Object?> msg) async {}

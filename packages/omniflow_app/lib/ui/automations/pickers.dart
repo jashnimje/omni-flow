@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart' show AutomationSummary, Json;
+import '../../api/tv_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../rules/things.dart';
+import '../../state/providers.dart';
 import '../design/design.dart';
 import 'form_parts.dart';
 import 'rule_words.dart';
@@ -950,6 +953,24 @@ Future<RuleStep?> pickStep(
               onTap: (c) async => Navigator.of(c).pop(IfStep()),
             ),
             _Choice(
+              key: 'pick-try',
+              title: 'Try, with a fallback',
+              subtitle:
+                  'if a step fails, like an app that is not installed, '
+                  'do something else',
+              icon: AutomationIcons.fallback,
+              onTap: (c) async => Navigator.of(c).pop(TryStep()),
+            ),
+            _Choice(
+              key: 'pick-repeat',
+              title: 'Repeat',
+              subtitle:
+                  'again and again until something holds, like until '
+                  'the TV is on',
+              icon: AutomationIcons.repeat,
+              onTap: (c) async => Navigator.of(c).pop(RepeatStep()),
+            ),
+            _Choice(
               key: 'pick-together',
               title: 'Do these together',
               subtitle: 'run two or more lists of steps at once',
@@ -1129,11 +1150,72 @@ Future<RuleStep?> actionForm(
             params: paramsOf(cap),
             values: values,
             onChanged: () => setState(() {}),
+            choices: {
+              if (thing.driver == TvCalls.driver)
+                'package': () => tvAppChoices(context, thing.id),
+            },
           ),
         ],
       ];
     },
   );
+}
+
+/// The apps a TV can open, by name, for a launch step's package.
+Future<List<ParamChoice>> tvAppChoices(BuildContext context, String tv) async {
+  final client = ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(engineClientProvider);
+  final result = await client.call(
+    TvCalls.apps,
+    TvCalls.appsArgs(tv, AppFilter.all),
+  );
+  if (result['ok'] != true) throw errorMessage(result);
+  final apps = [
+    for (final a in TvCalls.appsOf(result))
+      if (a.launchable && a.enabled)
+        (value: a.package, label: a.label ?? a.package),
+  ]..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+  return apps;
+}
+
+/// How many times [step] runs and the wait between passes. Returns
+/// whether anything changed.
+Future<bool> repeatForm(BuildContext context, RepeatStep step) async {
+  var times = step.times;
+  var every = step.everyMs;
+  final count = TextEditingController(text: times == null ? '' : '$times');
+  final done = await showFormSheet<bool>(
+    context,
+    title: 'How often',
+    subtitle:
+        'It stops at the first of these: the most passes, or what you put '
+        'under Stop when.',
+    result: () =>
+        (times == null || (times! >= 1 && times! <= 1000)) && every >= 0
+        ? true
+        : null,
+    build: (context, setState) => [
+      LabelledField(
+        key: const ValueKey('repeat-times'),
+        label: 'At most this many times (1 to 1000)',
+        controller: count,
+        number: true,
+        onChanged: (t) => setState(() => times = int.tryParse(t.trim()) ?? 0),
+      ),
+      DurationInput(
+        label: 'Wait between passes',
+        ms: every,
+        onChanged: (v) => setState(() => every = v),
+      ),
+    ],
+  );
+  if (done != true) return false;
+  step
+    ..times = times
+    ..everyMs = every;
+  return true;
 }
 
 Future<WaitStep?> waitForm(BuildContext context, [WaitStep? current]) {

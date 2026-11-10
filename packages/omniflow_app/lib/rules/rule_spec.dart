@@ -77,6 +77,11 @@ bool stepsComplete(List<RuleStep> steps) =>
               stepsComplete(s.then) &&
               (s.otherwise.isEmpty || stepsComplete(s.otherwise)),
         TogetherStep() => s.branches.every(stepsComplete),
+        TryStep() =>
+          stepsComplete(s.steps) &&
+              (s.otherwise.isEmpty || stepsComplete(s.otherwise)),
+        RepeatStep() =>
+          stepsComplete(s.steps) && (s.times != null || s.until.isNotEmpty),
         WaitForStep() => s.onTimeout.isEmpty || stepsComplete(s.onTimeout),
         KeepStep() => s.whileConditions.isNotEmpty,
         _ => true,
@@ -349,6 +354,22 @@ sealed class RuleStep {
     if (json['together'] case final List branches) {
       return TogetherStep([for (final b in branches) listFromJson(b)]);
     }
+    if (json['try'] case final List tried) {
+      return TryStep(
+        steps: listFromJson(tried),
+        otherwise: listFromJson(json['otherwise']),
+      );
+    }
+    if (json['repeat'] case final Map repeat) {
+      final r = Map<String, Object?>.from(repeat);
+      final until = r['until'] is Map ? [r['until']] : r['until'];
+      return RepeatStep(
+        steps: listFromJson(r['do']),
+        times: (r['times'] as num?)?.toInt(),
+        everyMs: (r['every'] as num?)?.toInt() ?? 0,
+        until: [for (final c in _maps(until)) RuleCondition.fromJson(c)],
+      );
+    }
     if (json['notify'] case final String title) return NotifyStep(title);
     if (json['notify'] case final Map n) {
       final payload = Map<String, Object?>.from(n);
@@ -470,6 +491,52 @@ class TogetherStep extends RuleStep {
     'together': [
       for (final b in branches) [for (final s in b) s.toJson()],
     ],
+  };
+}
+
+/// Runs [steps]. When a device step in them fails (an app that is not
+/// installed, a light that does not answer), [otherwise] runs instead of
+/// the rest of them.
+class TryStep extends RuleStep {
+  TryStep({List<RuleStep>? steps, List<RuleStep>? otherwise})
+    : steps = steps ?? [],
+      otherwise = otherwise ?? [];
+
+  final List<RuleStep> steps;
+  final List<RuleStep> otherwise;
+
+  @override
+  Json toJson() => {
+    'try': [for (final s in steps) s.toJson()],
+    if (otherwise.isNotEmpty)
+      'otherwise': [for (final s in otherwise) s.toJson()],
+  };
+}
+
+/// Runs [steps] again and again: at most [times] times, waiting [everyMs]
+/// between passes, and stopping before a pass once [until] all hold.
+class RepeatStep extends RuleStep {
+  RepeatStep({
+    List<RuleStep>? steps,
+    this.times = 10,
+    this.everyMs = 3000,
+    List<RuleCondition>? until,
+  }) : steps = steps ?? [],
+       until = until ?? [];
+
+  final List<RuleStep> steps;
+  int? times;
+  int everyMs;
+  final List<RuleCondition> until;
+
+  @override
+  Json toJson() => {
+    'repeat': {
+      'do': [for (final s in steps) s.toJson()],
+      'times': ?times,
+      if (everyMs > 0) 'every': everyMs,
+      if (until.isNotEmpty) 'until': [for (final c in until) c.toJson()],
+    },
   };
 }
 

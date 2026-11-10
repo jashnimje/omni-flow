@@ -68,6 +68,19 @@ void main() {
       expect(volumeShows('$level'), isTrue);
     });
 
+    testWidgets('the header opens the room, name and settings of the TV', (
+      tester,
+    ) async {
+      await pumpTv(tester, engine);
+      await tester.tap(find.byKey(const ValueKey('tv-header-device')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('device-details-$tvId')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('device-remove-$tvId')), findsOneWidget);
+    });
+
     testWidgets('an unreachable TV shows why, and retry reads it again', (
       tester,
     ) async {

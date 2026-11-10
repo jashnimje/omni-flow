@@ -18,6 +18,8 @@ abstract final class AutomationIcons {
   static const keep = Symbols.lock_clock_rounded;
   static const days = Symbols.calendar_month_rounded;
   static const waitUntil = Symbols.hourglass_bottom_rounded;
+  static const repeat = Symbols.repeat_rounded;
+  static const fallback = Symbols.alt_route_rounded;
   static const pass = Symbols.check_circle_rounded;
   static const fail = Symbols.cancel_rounded;
   static const send = Symbols.arrow_forward_rounded;
@@ -312,6 +314,11 @@ class RuleWords {
           : 'If ${_lower(condition(s.conditions.first))}'
                 '${s.conditions.length > 1 ? ' and ${s.conditions.length - 1} more' : ''}…',
     TogetherStep() => 'Do these together',
+    TryStep() =>
+      s.otherwise.isEmpty
+          ? 'Try these, and go on if one fails'
+          : 'Try these, with a fallback',
+    RepeatStep() => 'Repeat ${repeatHow(s)}',
     NotifyStep() => 'Notify: ${s.title}',
     SetStep() =>
       'Set ${s.name.replaceFirst(RegExp(r'^[$%]'), '')} to ${valueText(s.value)}',
@@ -367,6 +374,14 @@ class RuleWords {
     return spec is Map ? spec['unit'] as String? : null;
   }
 
+  /// How often a repeat runs: "up to 10 times, every 3 s, until TV is on".
+  String repeatHow(RepeatStep s) => [
+    if (s.times case final n?) s.until.isEmpty ? '$n times' : 'up to $n times',
+    if (s.everyMs > 0) 'every ${durationText(s.everyMs)}',
+    if (s.until.isNotEmpty)
+      'until ${[for (final c in s.until) _lower(condition(c))].join(' and ')}',
+  ].join(', ');
+
   IconData stepIcon(RuleStep s) => switch (s) {
     DoStep() => thing(s.thing)?.icon ?? OmniIcons.device,
     ToggleStep() => thing(s.thing)?.icon ?? OmniIcons.power,
@@ -374,6 +389,8 @@ class RuleWords {
     WaitForStep() => AutomationIcons.waitUntil,
     IfStep() => OmniIcons.branch,
     TogetherStep() => AutomationIcons.together,
+    TryStep() => AutomationIcons.fallback,
+    RepeatStep() => AutomationIcons.repeat,
     NotifyStep() => OmniIcons.notifications,
     SetStep() => AutomationIcons.variable,
     RunStep() => OmniIcons.automations,

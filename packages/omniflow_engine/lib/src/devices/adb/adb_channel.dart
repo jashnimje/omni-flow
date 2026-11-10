@@ -39,6 +39,8 @@ class AdbChannel implements DriverChannel {
     this._connectTimeout = const Duration(seconds: 3),
     this._pairingTimeout = const Duration(seconds: 60),
     this._wakeOnLan = broadcastWakeOnLan,
+    this._wakeWait = const Duration(seconds: 45),
+    this._wakeRetry = const Duration(seconds: 3),
     this._generateKey = AdbHostKey.generate,
     this._onPairingPrompt,
   }) : _keyName = keyName ?? 'omniflow@${_safeHostName()}';
@@ -49,6 +51,11 @@ class AdbChannel implements DriverChannel {
   final Duration _connectTimeout;
   final Duration _pairingTimeout;
   final WakeOnLanSender _wakeOnLan;
+
+  /// How long a TV woken by Wake-on-LAN gets to bring ADB back, and how
+  /// often it is tried in that time.
+  final Duration _wakeWait;
+  final Duration _wakeRetry;
   final Future<AdbHostKey> Function() _generateKey;
 
   /// Runs with the device id when its TV is showing "Allow USB debugging?".
@@ -95,9 +102,8 @@ class AdbChannel implements DriverChannel {
   @override
   Future<ChannelReply> send(ChannelRequest request) async {
     final device = request.device;
-    final action = AdbAction.parse(
-      _renderer.render(request.command, request.context),
-    );
+    final rendered = _renderer.render(request.command, request.context);
+    final action = AdbAction.parse(rendered);
     switch (action) {
       case AdbWakeOnLan():
         final mac = device.settings['mac'];
@@ -117,19 +123,53 @@ class AdbChannel implements DriverChannel {
         );
         final port =
             device.port ?? request.manifest.transport.port ?? adbDefaultPort;
-        final output = await _shell(
+        Future<String> run() => _shell(
           device,
           port,
           action.command,
           timeout,
           offerKey: request.allowPairing,
         );
+        final output = _isWake(rendered)
+            ? await _wake(device, run)
+            : await run();
         final failure = action.failureIn(output);
         if (failure != null) throw CommandFailedException(failure);
         return ChannelReply({
           'shell': action.command,
           'output': output,
         }, raw: output);
+    }
+  }
+
+  static bool _isWake(Object? rendered) =>
+      rendered is Map && rendered['op'] == 'key' && rendered['key'] == 'wakeup';
+
+  /// Runs the wake key. A TV in deep standby has its network off and does
+  /// not answer, so a TV with a `mac` setting gets a Wake-on-LAN packet and
+  /// then the key again until ADB is back or [_wakeWait] runs out.
+  Future<String> _wake(Device device, Future<String> Function() run) async {
+    try {
+      return await run();
+    } on TransportTimeoutException {
+      final mac = device.settings['mac'];
+      if (mac is! String || !macPattern.hasMatch(mac)) rethrow;
+      await _wakeOnLan(wakeOnLanPacketFor(mac));
+    }
+    final deadline = DateTime.now().add(_wakeWait);
+    while (true) {
+      await Future<void>.delayed(_wakeRetry);
+      try {
+        return await run();
+      } on TransportTimeoutException {
+        if (DateTime.now().isAfter(deadline)) {
+          throw TransportTimeoutException(
+            '${device.id} did not answer within ${_wakeWait.inSeconds} s of '
+            'Wake-on-LAN. Turn on network standby (wake on Wi-Fi) in the TV '
+            'power settings',
+          );
+        }
+      }
     }
   }
 

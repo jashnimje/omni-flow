@@ -1,3 +1,6 @@
+import '../manifest/capability.dart';
+import '../manifest/driver_manifest.dart';
+
 /// Starting points for a rule. Each spec is a rule with placeholders,
 /// `"<key>"`, that the app (or [fillTemplate]) replaces with the user's
 /// picks. A placeholder that is a whole string takes the value with its
@@ -187,11 +190,20 @@ class TemplateFillException implements Exception {
 
 final _placeholder = RegExp(r'<([a-z][a-z0-9_]*)>');
 
+/// The actions that turn a thing on and off when it has no on/off switch,
+/// such as a TV's wake and sleep.
+typedef PowerActions = ({String on, String off});
+
 /// [template]'s spec with [values] in place of its placeholders.
+///
+/// [powerActionsOf] names, for a `thing.action` picked as a switch, the
+/// actions that turn that thing on and off instead. A step that sets such a
+/// target to true or false becomes a plain step on its on or off action.
 Map<String, Object?> fillTemplate(
   RuleTemplate template,
-  Map<String, Object?> values,
-) {
+  Map<String, Object?> values, {
+  PowerActions? Function(String target)? powerActionsOf,
+}) {
   final filled = <String, Object?>{};
   for (final p in template.placeholders) {
     final value = values[p.key] ?? p.fallback;
@@ -221,8 +233,46 @@ Map<String, Object?> fillTemplate(
     _ => v,
   };
 
-  return Map<String, Object?>.from(fill(template.spec) as Map);
+  Object? power(Object? v) => switch (v) {
+    Map m
+        when m['do'] is String &&
+            m['params'] is Map &&
+            (m['params'] as Map)['value'] is bool =>
+      switch (powerActionsOf?.call(m['do'] as String)) {
+        final actions? => {
+          for (final e in m.entries)
+            if (e.key != 'params') '${e.key}': e.value,
+          'do': _onThing(
+            m['do'] as String,
+            (m['params'] as Map)['value'] == true ? actions.on : actions.off,
+          ),
+        },
+        null => {for (final e in m.entries) '${e.key}': power(e.value)},
+      },
+    Map m => {for (final e in m.entries) '${e.key}': power(e.value)},
+    List l => [for (final item in l) power(item)],
+    _ => v,
+  };
+
+  return Map<String, Object?>.from(power(fill(template.spec)) as Map);
 }
+
+/// The wake and sleep actions of [manifest], when its capability [id] is
+/// one of them or its `power` action: what turns a TV on and off.
+PowerActions? powerActionsOf(DriverManifest? manifest, String id) {
+  bool isAction(String name) =>
+      manifest?.capability(name)?.type == CapabilityType.action;
+  if (!const {'power', 'wake', 'sleep'}.contains(id) ||
+      !isAction(id) ||
+      !isAction('wake') ||
+      !isAction('sleep')) {
+    return null;
+  }
+  return (on: 'wake', off: 'sleep');
+}
+
+String _onThing(String target, String action) =>
+    '${target.substring(0, target.lastIndexOf('.'))}.$action';
 
 Object? _fillString(String s, Map<String, Object?> values) {
   final whole = _placeholder.matchAsPrefix(s);

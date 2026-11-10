@@ -287,6 +287,9 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
                 : t.name,
             icon: t.icon,
           ),
+      for (final t in things)
+        if (t.toggles.isEmpty && t.wakesAndSleeps)
+          (value: '${t.id}.power', title: t.name, icon: t.icon),
     ],
     _ => const [],
   };

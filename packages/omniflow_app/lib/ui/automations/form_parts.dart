@@ -279,11 +279,17 @@ class ParamControls extends StatefulWidget {
     required this.params,
     required this.values,
     required this.onChanged,
+    this.choices = const {},
   });
 
   final Map<String, Json> params;
   final Json values;
   final VoidCallback onChanged;
+
+  /// For a text param, what it can be, loaded when the user opens the
+  /// list: the apps on a TV for its `package`. The field stays for a value
+  /// the list does not have.
+  final Map<String, Future<List<ParamChoice>> Function()> choices;
 
   /// [values] when every required param is set and every number is in its
   /// range, else null.
@@ -423,7 +429,7 @@ class _ParamControlsState extends State<ParamControls> {
       );
     }
     final c = _field(key);
-    return LabelledField(
+    final field = LabelledField(
       key: ValueKey('param-$key'),
       label: label,
       controller: c,
@@ -432,5 +438,106 @@ class _ParamControlsState extends State<ParamControls> {
       onChanged: (t) =>
           set(spec['type'] == 'number' ? num.tryParse(t.trim()) : t.trim()),
     );
+    final load = widget.choices[key];
+    if (load == null) return field;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OmniListRow(
+          key: ValueKey('param-$key-pick'),
+          leading: const Icon(OmniIcons.search, color: OmniColors.accent),
+          title: 'Choose from the list',
+          subtitle: widget.values[key] == null
+              ? null
+              : _picked[key] ?? '${widget.values[key]}',
+          onTap: () async {
+            final choice = await showOmniSheet<ParamChoice>(
+              context,
+              builder: (_) => _ChoiceSheet(title: label, load: load),
+            );
+            if (choice == null || !mounted) return;
+            c.text = choice.value;
+            _picked[key] = choice.label;
+            set(choice.value);
+          },
+        ),
+        field,
+      ],
+    );
   }
+
+  final _picked = <String, String>{};
+}
+
+/// One value a param can take, with the words for it.
+typedef ParamChoice = ({String value, String label});
+
+class _ChoiceSheet extends StatefulWidget {
+  const _ChoiceSheet({required this.title, required this.load});
+
+  final String title;
+  final Future<List<ParamChoice>> Function() load;
+
+  @override
+  State<_ChoiceSheet> createState() => _ChoiceSheetState();
+}
+
+class _ChoiceSheetState extends State<_ChoiceSheet> {
+  late final _choices = widget.load();
+  var _query = '';
+
+  @override
+  Widget build(BuildContext context) => OmniSheet(
+    title: widget.title,
+    children: [
+      TextField(
+        key: const ValueKey('choice-search'),
+        decoration: const InputDecoration(
+          labelText: 'Search',
+          prefixIcon: Icon(OmniIcons.search),
+        ),
+        onChanged: (t) => setState(() => _query = t.trim().toLowerCase()),
+      ),
+      const SizedBox(height: OmniSpace.sm),
+      FutureBuilder<List<ParamChoice>>(
+        future: _choices,
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return OmniBanner.error('${snap.error}');
+          }
+          final all = snap.data;
+          if (all == null) {
+            return const Padding(
+              padding: EdgeInsets.all(OmniSpace.lg),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final shown = [
+            for (final c in all)
+              if (_query.isEmpty ||
+                  c.label.toLowerCase().contains(_query) ||
+                  c.value.toLowerCase().contains(_query))
+                c,
+          ];
+          if (shown.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.all(OmniSpace.md),
+              child: Text('Nothing matches', style: OmniText.caption),
+            );
+          }
+          return Column(
+            children: [
+              for (final c in shown)
+                OmniListRow(
+                  key: ValueKey('choice-${c.value}'),
+                  title: c.label,
+                  subtitle: c.label == c.value ? null : c.value,
+                  onTap: () => Navigator.of(context).pop(c),
+                ),
+            ],
+          );
+        },
+      ),
+    ],
+  );
 }

@@ -253,6 +253,19 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
     });
   }
 
+  var _running = false;
+
+  /// Runs it now, sending every step, then opens what that run did.
+  Future<void> _runNow() async {
+    setState(() => _running = true);
+    final started = await ref.read(engineApiProvider).runAutomation(widget.id!);
+    if (!mounted) return;
+    setState(() => _running = false);
+    await _load();
+    if (!mounted) return;
+    if (started.value?.firstOrNull case final run?) _openRun(run);
+  }
+
   void _openRun(RunRecord run) => Navigator.of(context).push<void>(
     MaterialPageRoute(
       builder: (_) => RunPage(
@@ -303,6 +316,19 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
               )
             else
               RunNodeRows(key: const ValueKey('dry-run'), run: dry),
+            const SizedBox(height: OmniSpace.md),
+            if (widget.id == null)
+              const Text(
+                'Save it to run it for real.',
+                key: ValueKey('save-to-run'),
+                style: OmniText.caption,
+              )
+            else
+              OmniButton(
+                key: const ValueKey('run-now'),
+                label: _running ? 'Running…' : 'Run it now for real',
+                onPressed: _running ? null : _runNow,
+              ),
           ],
           if (widget.id != null) ...[
             const OmniSectionHeader('Last runs'),

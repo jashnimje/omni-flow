@@ -196,7 +196,7 @@ void main() {
         ('when_0', 'run by hand'),
         ('only_if', 'only if lamp.power == false'),
         ('then_0', 'notify Hi'),
-        ('then_1', 'set lamp.power to true'),
+        ('then_1', 'Lamp on'),
       ],
     );
   });

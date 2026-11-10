@@ -345,6 +345,36 @@ void main() {
       expect(buttonEnabled(tester, 'template-continue'), isFalse);
     });
 
+    testWidgets('a TV counts as something a template can turn off', (
+      tester,
+    ) async {
+      engine.devices = [
+        {
+          'id': 'tv',
+          'name': 'TV',
+          'driver': 'android_tv_adb',
+          'host': '192.168.1.60',
+          'state': const <String, Object?>{},
+          'capabilities': [
+            for (final id in ['wake', 'sleep', 'power'])
+              {'id': id, 'type': 'action', 'label': id, 'params': {}},
+          ],
+        },
+      ];
+      await pumpPage(tester, engine, const _WithNew());
+      await tapKey(tester, 'new-rule');
+      await tapKey(tester, 'template-bedtime');
+      await tapKey(tester, 'tpl-things-tv.power');
+      await tapKey(tester, 'template-continue');
+      expect(engine.callsOf('automation.templates').last.$2, {
+        'id': 'bedtime',
+        'values': {
+          'time': '23:00',
+          'things': ['tv.power'],
+        },
+      });
+    });
+
     testWidgets('a quick link is made from the New sheet', (tester) async {
       engine.answerers['link.options'] = (args) => {
         'ok': true,

@@ -203,6 +203,32 @@ class SentenceContext {
           ].join(' then '),
       ].join(' and ');
     }
+    if (s['try'] is List) {
+      String list(Object? steps) => [
+        for (final inner in steps as List? ?? const [])
+          step(Map<String, Object?>.from(inner as Map)),
+      ].join(' then ');
+      final otherwise = s['otherwise'];
+      return otherwise is List && otherwise.isNotEmpty
+          ? 'try ${list(s['try'])}, if that fails ${list(otherwise)}'
+          : 'try ${list(s['try'])}, and go on if it fails';
+    }
+    if (s['repeat'] is Map) {
+      final r = Map<String, Object?>.from(s['repeat'] as Map);
+      final until = r['until'] as List?;
+      final how = [
+        if (r['times'] != null)
+          until == null ? '${r['times']} times' : 'up to ${r['times']} times',
+        if (r['every'] case final int ms when ms > 0) 'every ${duration(ms)}',
+        if (until != null)
+          'until ${[for (final c in until) condition(Map<String, Object?>.from(c as Map))].join(' and ')}',
+      ];
+      final body = [
+        for (final inner in r['do'] as List? ?? const [])
+          step(Map<String, Object?>.from(inner as Map)),
+      ].join(' then ');
+      return 'repeat ${how.join(', ')}: $body';
+    }
     if (s['notify'] is Map) return 'notify "${(s['notify'] as Map)['title']}"';
     if (s['set'] is Map) {
       final set = s['set'] as Map;

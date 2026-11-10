@@ -335,7 +335,7 @@ class StepBlock extends StatelessWidget {
     draft.changed();
     if (!context.mounted) return;
     final i = steps.indexOf(step);
-    if (step is IfStep || step is TogetherStep || step is WaitForStep) {
+    if (isGroupStep(step)) {
       await openGroupPage(context, draft, step, '$path[$i]');
     }
   }
@@ -344,7 +344,7 @@ class StepBlock extends StatelessWidget {
     final s = steps[i];
     final words = draft.words;
     final at = '$path[$i]';
-    final group = s is IfStep || s is TogetherStep || s is WaitForStep;
+    final group = isGroupStep(s);
     return OmniStepRow(
       key: ValueKey('row-$at'),
       reorderIndex: i,
@@ -358,13 +358,19 @@ class StepBlock extends StatelessWidget {
       },
       style: switch (s) {
         WaitStep() => StepRowStyle.wait,
-        IfStep() || TogetherStep() || WaitForStep() => StepRowStyle.flow,
+        IfStep() ||
+        TogetherStep() ||
+        WaitForStep() ||
+        TryStep() ||
+        RepeatStep() => StepRowStyle.flow,
         _ => StepRowStyle.normal,
       },
       trailingText: switch (s) {
         IfStep() => '${s.then.length + s.otherwise.length}',
         TogetherStep() => '${s.branches.fold(0, (n, b) => n + b.length)}',
         WaitForStep() => '${s.onTimeout.length}',
+        TryStep() => '${s.steps.length + s.otherwise.length}',
+        RepeatStep() => '${s.steps.length}',
         _ => null,
       },
       error: group || s is KeepStep
@@ -374,7 +380,9 @@ class StepBlock extends StatelessWidget {
         UnknownStep() => null,
         IfStep() ||
         TogetherStep() ||
-        WaitForStep() => () => openGroupPage(context, draft, s, at),
+        WaitForStep() ||
+        TryStep() ||
+        RepeatStep() => () => openGroupPage(context, draft, s, at),
         KeepStep() => () async {
           final kept = await openKeepPage(context, draft, s, at);
           if (kept == null) return;
@@ -400,6 +408,14 @@ class StepBlock extends StatelessWidget {
     );
   }
 }
+
+/// The steps that hold their own lists of steps, edited on a page.
+bool isGroupStep(RuleStep s) =>
+    s is IfStep ||
+    s is TogetherStep ||
+    s is WaitForStep ||
+    s is TryStep ||
+    s is RepeatStep;
 
 Future<void> openGroupPage(
   BuildContext context,
@@ -446,6 +462,8 @@ class GroupPage extends StatelessWidget {
       title: switch (step) {
         IfStep() => 'If… otherwise',
         TogetherStep() => 'Do these together',
+        TryStep() => 'Try, with a fallback',
+        RepeatStep() => 'Repeat',
         _ => 'Wait until',
       },
       body: ListView(
@@ -480,6 +498,49 @@ class GroupPage extends StatelessWidget {
         heading: 'Otherwise',
         caption: 'in order, or nothing',
         kind: SentenceKind.flow,
+      ),
+    ],
+    TryStep(:final steps, :final otherwise) => [
+      StepBlock(
+        draft: draft,
+        steps: steps,
+        path: '$path.try',
+        heading: 'Try',
+        caption: 'in order',
+      ),
+      StepBlock(
+        draft: draft,
+        steps: otherwise,
+        path: '$path.otherwise',
+        heading: 'If one fails',
+        caption: 'instead of the rest, or nothing to go on',
+        kind: SentenceKind.flow,
+      ),
+    ],
+    final RepeatStep repeat => [
+      OmniListRow(
+        key: const ValueKey('repeat-how'),
+        icon: AutomationIcons.repeat,
+        title: 'How often',
+        subtitle: draft.words.repeatHow(repeat),
+        chevron: true,
+        onTap: () async {
+          if (await repeatForm(context, repeat)) draft.changed();
+        },
+      ),
+      ConditionBlock(
+        draft: draft,
+        conditions: repeat.until,
+        path: '$path.repeat.until',
+        heading: 'Stop when',
+        caption: 'all of these hold, checked before each pass',
+      ),
+      StepBlock(
+        draft: draft,
+        steps: repeat.steps,
+        path: '$path.repeat.do',
+        heading: 'Each time',
+        caption: 'in order',
       ),
     ],
     TogetherStep(:final branches) => [

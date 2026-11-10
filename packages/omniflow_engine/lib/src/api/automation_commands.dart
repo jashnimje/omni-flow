@@ -94,6 +94,12 @@ class AutomationCommands {
     return id == null ? rule : {...rule, 'id': id};
   }
 
+  /// Node labels in the user's names: "I get home", "TV wake".
+  static RuleWords _wordsOf(SentenceContext words) => (
+    trigger: (t) => words.trigger(t).replaceFirst(RegExp('^When '), ''),
+    step: words.step,
+  );
+
   /// [json] checked and compiled, with where its flow issues sit in it.
   Future<(Map<String, Object?>, FlowSpec)> _compileRule(
     Map<String, Object?> json,
@@ -103,6 +109,7 @@ class AutomationCommands {
       rule,
       enabled: json['enabled'] != false,
       refs: await _stored.references(),
+      words: _wordsOf(await sentenceContext()),
     );
     final flow = await _flowCommands.checked(
       compiled.flow,
@@ -278,12 +285,20 @@ class AutomationCommands {
       };
     }
     if (id == null) throw ApiError('invalid', 'values needs a template id');
+    final drivers = (await sentenceContext()).drivers;
     try {
       return {
         'templates': [
           {
             ...chosen.single.toJson(),
-            'spec': fillTemplate(chosen.single, objectArg(args, 'values')),
+            'spec': fillTemplate(
+              chosen.single,
+              objectArg(args, 'values'),
+              powerActionsOf: (target) => powerActionsOf(
+                drivers[target.split('.').first],
+                target.split('.').skip(1).join('.'),
+              ),
+            ),
             'filled': true,
           },
         ],

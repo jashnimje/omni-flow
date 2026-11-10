@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/engine_calls.dart' show DeviceView;
 import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
 import '../add/pair_sheet.dart';
 import '../design/design.dart';
+import '../devices/device_sections.dart';
 import 'tv_apps.dart';
 import 'tv_console.dart';
 import 'tv_controller.dart';
@@ -100,6 +102,22 @@ class _TvPageState extends ConsumerState<TvPage> {
             color: on ? OmniColors.accent : OmniColors.muted,
             onPressed: () => tv.key(on ? Keycodes.sleep : Keycodes.wakeup),
           ),
+          if (_device case final device?)
+            OmniIconAction(
+              key: const ValueKey('tv-header-device'),
+              icon: OmniIcons.more,
+              label: 'Room, name and settings',
+              onPressed: () => showOmniSheet<void>(
+                context,
+                builder: (_) => OmniSheet(
+                  title: widget.name,
+                  children: [
+                    UsedInSection(device: DeviceView(device)),
+                    DeviceSection(device: DeviceView(device)),
+                  ],
+                ),
+              ),
+            ),
         ],
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
