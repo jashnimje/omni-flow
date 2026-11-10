@@ -46,7 +46,7 @@ typedef NfcScanMatch = ({
 /// The NFC tag things. A scan from any reader, the phone or a board's
 /// RC522 or PN532, finds the tag by the id OmniFlow wrote on it (the
 /// `omniflow://tag/<id>` link) and then by its UID, records `last_scanned`
-/// and raises `scanned` on it, then raises the reader's own event. A tag no
+/// and `last_source` (`phone` or the board's id) and raises `scanned` on it, then raises the reader's own event. A tag no
 /// thing knows is reported as `tag.unknown` with the `thing.add` candidate
 /// that names it.
 ///
@@ -111,7 +111,10 @@ class NfcTags {
         'add': add,
       });
     } else {
-      await _core.devices.mergeState(tag.id, {'last_scanned': when});
+      await _core.devices.mergeState(tag.id, {
+        'last_scanned': when,
+        'last_source': reader.source,
+      });
       _core.raiseEvent(tag.id, 'scanned', {
         'uid': uid,
         'ndefId': ?ndefId,
@@ -179,6 +182,7 @@ class TagCommands {
     'name': tag.name,
     'uid': ?normalizeUid(tag.settings['uid']),
     'lastScanned': ?tag.state['last_scanned'],
+    'lastSource': ?tag.state['last_source'],
   };
 
   Future<Device> _tag(String id) async {

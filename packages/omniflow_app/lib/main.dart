@@ -8,7 +8,7 @@ import 'service/phone_files.dart';
 import 'startup.dart';
 import 'state/providers.dart';
 
-export 'ui/home.dart' show OmniFlowApp;
+export 'ui/app.dart' show OmniFlowApp;
 
 /// The engine runs in a foreground service, so flows keep firing with the
 /// screen off and after the app is swiped away. The UI only connects to it.

@@ -1,3 +1,5 @@
+import '../../api/plain_error.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -5,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../../api/engine_client.dart';
 import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
+import 'tv_widgets.dart' show appNameOf;
 
 /// One open TV control centre: the TV's live state, its key catalog and
 /// the progress of whatever transfer runs, shared by the header and every
@@ -24,9 +27,18 @@ class TvController extends ChangeNotifier {
   List<TvKeyGroup> keyGroups = const [];
   TvProgress? progress;
 
+  /// The file the running transfer is on, for its progress card.
+  String? progressName;
+
   /// Labels by package, filled once the Apps tab has listed them, so the
   /// header can name the focused app.
   final appLabels = <String, String>{};
+
+  /// What the app in front is called, or null when none is.
+  String? get appName => switch (state.app) {
+    final String app => appNameOf(app, label: appLabels[app]),
+    null => null,
+  };
 
   Timer? _timer;
   StreamSubscription<Json>? _events;
@@ -50,6 +62,9 @@ class TvController extends ChangeNotifier {
   void _changed() {
     if (!_disposed) notifyListeners();
   }
+
+  /// The Apps tab learned labels, so the header can name the app in front.
+  void labelsChanged() => _changed();
 
   /// Reads the state without a snackbar, since it runs every few seconds.
   Future<void> refresh() async {
@@ -131,8 +146,14 @@ class TvController extends ChangeNotifier {
 
   /// Runs a transfer, clearing its progress when it ends. With [quiet] the
   /// caller handles the error, so it can ask about a conflict first.
-  Future<Json> transfer(String command, Json args, {bool quiet = false}) async {
+  Future<Json> transfer(
+    String command,
+    Json args, {
+    bool quiet = false,
+    String? name,
+  }) async {
     progress = (op: command, done: 0, total: null);
+    progressName = name;
     _changed();
     try {
       return quiet
@@ -140,6 +161,7 @@ class TvController extends ChangeNotifier {
           : await call(command, args);
     } finally {
       progress = null;
+      progressName = null;
       _changed();
     }
   }
@@ -168,7 +190,10 @@ class TvController extends ChangeNotifier {
         _changed();
       case 'device.offline' || 'device.pollFailed':
         if (event['device'] != id) return;
-        offline = '${event['error'] ?? 'not reachable'}';
+        offline = plainError(
+          '${event['errorType'] ?? 'timeout'}',
+          event['error'] as String?,
+        );
         _changed();
     }
   }

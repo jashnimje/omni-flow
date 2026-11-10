@@ -4,7 +4,9 @@ import 'api_error.dart';
 import 'board_runtime.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'device_history.dart';
 import 'hub_runtime.dart';
+import 'organize_commands.dart';
 import 'stored_flows.dart';
 import 'thing_setup.dart';
 import 'things_runtime.dart';
@@ -45,6 +47,7 @@ class DeviceCommands {
           'id': m.id,
           'name': m.name,
           'category': m.category,
+          'icon': ?m.icon,
           'transport': m.transport.type.wireName,
           'builtIn': _registry.isBuiltIn(m.id),
           'highRisk': m.isHighRisk,
@@ -107,7 +110,8 @@ class DeviceCommands {
     final manifest = _registry[driverId];
     if (manifest == null) throw ApiError('not_found', 'no driver $driverId');
     final replace = args['replace'] == true;
-    if (!replace && await DriftDeviceStore(_db).get(id) != null) {
+    final replaced = await DriftDeviceStore(_db).get(id);
+    if (!replace && replaced != null) {
       throw ApiError(
         'exists',
         'a device $id exists. Remove it first, or pass replace: true',
@@ -134,10 +138,15 @@ class DeviceCommands {
           ? optStringArg(args, 'host') ?? virtualHost
           : stringArg(args, 'host'),
       port: port as int?,
-      room: optStringArg(args, 'room'),
+      room: args.containsKey('room')
+          ? await resolveRoom(_core, optStringArg(args, 'room'))
+          : replaced?.room,
       stableId: stableId,
       settings: settingsWithStableId(manifest, settings, stableId),
       state: initialThingState(driverId),
+      // Adding a device again keeps where the user put it.
+      favourite: replaced?.favourite ?? false,
+      order: replaced?.order,
     );
     if (driverId == placeDriverId) zoneOfPlace(device);
     if (replace) {
@@ -345,10 +354,15 @@ class DeviceCommands {
     };
   }
 
+  /// Every device, or those in `room` (a room id or name).
   Future<Map<String, Object?>> list(Map<String, Object?> args) async => {
     'devices': [
       for (final d in await DriftDeviceStore(_db).all())
-        if (args['room'] == null || args['room'] == d.room)
+        if (args['room'] == null ||
+            args['room'] == d.room ||
+            (d.room != null &&
+                '${_core.roomNames[d.room]}'.toLowerCase() ==
+                    '${args['room']}'.toLowerCase()))
           {
             ..._core.deviceJson(d),
             if (args['withCapabilities'] == true)
@@ -374,6 +388,8 @@ class DeviceCommands {
     _pairedHere.remove(id);
     await _core.serial.release(id);
     final removed = await _devices.removeDevice(id);
+    _core.history.forget(id);
+    await DriftHistoryStore(_db).removeDevice(id);
     for (final s
         in _registry[device?.driverId ?? '']?.settings ??
             const <SettingSpec>[]) {
@@ -407,6 +423,7 @@ class DeviceCommands {
       stringArg(args, 'capability'),
       args['params'] == null ? const {} : objectArg(args, 'params'),
       allowPairing: args['allowPairing'] != false,
+      by: changedByUser,
     );
     return {
       'device': _core.deviceJson(result.device),

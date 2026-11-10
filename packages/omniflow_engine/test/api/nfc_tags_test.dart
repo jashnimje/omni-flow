@@ -269,6 +269,7 @@ void main() {
         });
         expect(await stateOf('front_door'), {
           'last_scanned': '2026-11-08T08:00:00.000Z',
+          'last_source': 'phone',
         });
         await until(() => thingEvents().length == 2);
         expect(thingEvents().map((e) => (e.$1, e.$2)), [
@@ -585,6 +586,7 @@ void main() {
       });
       expect(scan['tag'], 'desk');
       expect(scan['source'], 'desk_board');
+      expect(await stateOf('desk'), containsPair('last_source', 'desk_board'));
       await until(() => thingEvents().length == 2);
       expect(thingEvents()[0].$3, containsPair('source', 'desk_board'));
       expect(thingEvents().map((e) => (e.$1, e.$2)), [

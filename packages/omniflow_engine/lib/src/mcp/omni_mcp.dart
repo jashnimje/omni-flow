@@ -238,7 +238,12 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         '{waitFor: {on, event | change | crosses, timeoutMs, onTimeout?: [steps]}} (a timeout ends '
         'the rule after onTimeout), {if: [conditions], then: [steps], else?: [steps]}, '
         '{together: [[steps], [steps]]} (side by side, then on), {notify: {title}}, '
-        '{set: {var: "\$Name", value}} or {run: "automation_id"}. Shorthand strings work in any list: '
+        '{set: {var: "\$Name", value}}, {run: "automation_id"}, or last in then '
+        '{keep: {target: "thing.action", value, while: [conditions], release?}}, which holds the '
+        'value while the conditions hold and sends release (the opposite of a true or false value '
+        'when left out, nothing when null) once they stop; a rule of keep steps alone needs no '
+        'when. A failed step is logged and the rest still run unless the rule sets '
+        'stopOnError: true. Shorthand strings work in any list: '
         '"home:entered", "nfc:front_door", "time:18:00", "lamp.power=true", "wait:2s", '
         '"notify:Welcome home". Issues come back at rule paths like then[2].do. A rule whose id '
         '(from its name) another rule has is refused with exists: give it another name. Saved untrusted: '
@@ -397,6 +402,146 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'Lists flows with whether they are enabled, approved and running.',
     inputSchema: JsonSchema.object(),
     callback: (_, _) async => reply(await engine.handle('flow.list', {})),
+  );
+
+  server.registerTool(
+    'list_automations',
+    description:
+        'Lists every rule, link, scene and flow with its sentence in plain words, whether it is '
+        'on and approved, the things it reads or drives, and its last run. device or tag keeps '
+        'those that use that thing, needsYou those waiting for approval or failing, source one '
+        'form (rule, link, graph, scene).',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'device': JsonSchema.string(),
+        'tag': JsonSchema.string(),
+        'needsYou': JsonSchema.boolean(),
+        'source': JsonSchema.string(),
+      },
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('automation.list', {
+        for (final key in const ['device', 'tag', 'needsYou', 'source'])
+          if (args[key] != null) key: args[key],
+      }),
+    ),
+  );
+
+  server.registerTool(
+    'list_rule_templates',
+    description:
+        'Lists rule templates (arrive home, leave home all off, motion light, tag toggle, '
+        'bedtime) with their placeholders. With id and values, returns that template\'s rule '
+        'filled in, ready for create_rule.',
+    inputSchema: JsonSchema.object(
+      properties: {'id': JsonSchema.string(), 'values': freeObject},
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('automation.templates', {
+        if (args['id'] != null) 'id': args['id'],
+        if (args['values'] != null) 'values': args['values'],
+      }),
+    ),
+  );
+
+  server.registerTool(
+    'list_scenes',
+    description: 'Lists scenes: named sets of device actions run together.',
+    inputSchema: JsonSchema.object(),
+    callback: (_, _) async => reply(await engine.handle('scene.list', {})),
+  );
+
+  server.registerTool(
+    'save_scene',
+    description:
+        'Saves a scene: {name, icon?, actions: [{do: "thing.action", params?}] or shorthand '
+        'like "lamp.power=false", id?}. With no id it gets one from its name. Saved untrusted: '
+        'a scene that drives a high-risk device waits for the user to approve it, and one the '
+        'user saved goes back to waiting when you change it.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'id': JsonSchema.string(),
+        'name': JsonSchema.string(),
+        'icon': JsonSchema.string(),
+        'actions': JsonSchema.array(),
+      },
+      required: ['name', 'actions'],
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('scene.save', {
+        for (final key in const ['id', 'name', 'icon', 'actions'])
+          if (args[key] != null) key: args[key],
+        'trusted': false,
+      }),
+    ),
+  );
+
+  server.registerTool(
+    'run_scene',
+    description: 'Runs an approved scene now.',
+    inputSchema: JsonSchema.object(
+      properties: {'id': JsonSchema.string()},
+      required: ['id'],
+    ),
+    callback: (args, _) async =>
+        reply(await engine.handle('scene.run', {'id': args['id']})),
+  );
+
+  server.registerTool(
+    'list_rooms',
+    description:
+        'Lists the rooms in the user\'s order, with how many devices each has.',
+    inputSchema: JsonSchema.object(),
+    callback: (_, _) async => reply(await engine.handle('room.list', {})),
+  );
+
+  server.registerTool(
+    'organize_device',
+    description:
+        'Renames a device, moves it to a room (an id or name; a new name adds the room; "" '
+        'takes it out), stars it as a favourite, or sets its order in its room. Only the keys '
+        'given change.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'deviceId': JsonSchema.string(),
+        'name': JsonSchema.string(),
+        'room': JsonSchema.string(),
+        'favourite': JsonSchema.boolean(),
+        'order': JsonSchema.integer(),
+      },
+      required: ['deviceId'],
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('device.organize', {
+        'id': args['deviceId'],
+        for (final key in const ['name', 'room', 'favourite', 'order'])
+          if (args.containsKey(key)) key: args[key],
+      }),
+    ),
+  );
+
+  server.registerTool(
+    'device_history',
+    description:
+        'A device\'s recent state changes, newest first: when, which key, the value, and by '
+        'which automation or the user. key, limit (1 to 500, default 100) and since (ISO 8601) '
+        'narrow it.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'deviceId': JsonSchema.string(),
+        'key': JsonSchema.string(),
+        'limit': JsonSchema.integer(),
+        'since': JsonSchema.string(),
+      },
+      required: ['deviceId'],
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('device.history', {
+        'id': args['deviceId'],
+        for (final key in const ['key', 'limit', 'since'])
+          if (args[key] != null) key: args[key],
+      }),
+    ),
   );
 
   // Read only: naming, writing or scanning a tag stays with the user, so

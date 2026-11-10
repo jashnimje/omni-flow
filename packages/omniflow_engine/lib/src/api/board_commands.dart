@@ -35,7 +35,8 @@ class BoardCommands {
 
   /// What the board offers, for a GPIO picker: its profile, every pin with
   /// its caps, the pins set now, how many it can watch, and whether it has
-  /// IR and RF outputs. An offline board gives the last describe this
+  /// IR and RF outputs, and its boot strapping pins (`bootPins`), so a
+  /// picker can warn before a save. An offline board gives the last describe this
   /// engine saw, with `live: false` and when it was seen.
   Future<Map<String, Object?>> describe(Map<String, Object?> args) async {
     final id = stringArg(args, 'id');
@@ -61,6 +62,7 @@ class BoardCommands {
       'seenAt': ?seenAt?.toIso8601String(),
       'describe': describe,
       'warnings': strappingPinWarnings(boardPinsOf(device, manifest), describe),
+      'bootPins': bootPinsOf(describe),
     };
   }
 

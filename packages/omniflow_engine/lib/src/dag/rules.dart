@@ -18,6 +18,12 @@ export 'rule_shorthand.dart' show RuleContext;
 ///           {"notify": {"title": "Welcome home"}}]}
 /// ```
 ///
+/// A `keep` step holds a value while conditions hold: `{"keep": {"target":
+/// "fan.power", "value": true, "while": [{"state": "room.temp", "op": ">",
+/// "value": 28}], "release"?: false}}`. Keep steps come last in `then`, and
+/// a rule of keep steps alone needs no `when`. A failed step does not stop
+/// the rest of the rule unless it sets `stopOnError: true`.
+///
 /// Each list item may also be a shorthand string (`home:entered`,
 /// `lamp.power=true`, `wait:2s`), which [normalizeRule] expands, so the
 /// stored rule is always the object form.
@@ -31,6 +37,7 @@ abstract final class RuleKeys {
     'mode',
     'cooldownSeconds',
     'enabled',
+    'stopOnError',
   ];
   static const triggers = ['on', 'time', 'interval', 'manual'];
   static const onModes = ['event', 'change', 'crosses'];
@@ -54,7 +61,12 @@ abstract final class RuleKeys {
     'notify',
     'set',
     'run',
+    'keep',
   ];
+
+  /// The run modes a rule with a keep step may use: a hold must answer
+  /// every change, even while an earlier run is still going.
+  static const keepModes = ['parallel', 'queued'];
 }
 
 final _id = RegExp(r'^[a-z][a-z0-9_]*$');
@@ -120,11 +132,48 @@ Map<String, Object?> normalizeRule(
   }
   final out = <String, Object?>{'id': id, 'name': name};
   final norm = _Normalizer(issues, context);
-  out['when'] = norm.list(rule['when'], 'when', norm.trigger, required: true);
+  final rawThen = rule['then'];
+  final holds = rawThen is List && rawThen.any(_isKeep);
+  final onlyHolds =
+      rawThen is List && rawThen.isNotEmpty && rawThen.every(_isKeep);
+  final noWhen =
+      onlyHolds &&
+      (rule['when'] == null ||
+          (rule['when'] is List && (rule['when'] as List).isEmpty));
+  out['when'] = noWhen
+      ? const <Object?>[]
+      : norm.list(rule['when'], 'when', norm.trigger, required: true);
   if (rule['onlyIf'] != null) {
     out['onlyIf'] = norm.list(rule['onlyIf'], 'onlyIf', norm.condition);
+    if (noWhen && (out['onlyIf'] as List).isNotEmpty) {
+      issues.add('onlyIf', 'needs a when: a keep step has its own while');
+    }
   }
   out['then'] = norm.steps(rule['then'], 'then');
+  if (rawThen is List) {
+    final firstKeep = rawThen.indexWhere(_isKeep);
+    for (var i = firstKeep + 1; firstKeep >= 0 && i < rawThen.length; i++) {
+      if (!_isKeep(rawThen[i])) {
+        issues.add('then[$i]', 'comes after a keep step: keep steps go last');
+      }
+    }
+  }
+  if (holds &&
+      rule['mode'] != null &&
+      !RuleKeys.keepModes.contains(rule['mode'])) {
+    issues.add(
+      'mode',
+      'must be ${RuleKeys.keepModes.join(' or ')} for a rule with a keep '
+          'step, so the hold answers every change',
+    );
+  }
+  if (rule['stopOnError'] != null) {
+    if (rule['stopOnError'] is! bool) {
+      issues.add('stopOnError', 'must be true or false');
+    } else if (rule['stopOnError'] == true) {
+      out['stopOnError'] = true;
+    }
+  }
   if (rule['mode'] != null) {
     if (RunMode.fromWire(rule['mode']) == null) {
       issues.add(
@@ -148,6 +197,8 @@ Map<String, Object?> normalizeRule(
   }
   return out;
 }
+
+bool _isKeep(Object? step) => step is Map && step.containsKey('keep');
 
 /// IssueCollector helpers write `$.key`, and rule paths have no root.
 ValidationIssue _strip(ValidationIssue i) => i.path.startsWith(r'$.')
@@ -374,11 +425,19 @@ class _Normalizer {
     }
   }
 
+  static final _topLevelStep = RegExp(r'^then\[\d+\]$');
+
   Map<String, Object?>? step(Object? item, String path) {
     final map = _object(item, path, expandStep, RuleKeys.steps, 'step');
     if (map == null) return null;
     final kind = RuleKeys.steps.firstWhere(map.containsKey);
     switch (kind) {
+      case 'keep':
+        if (!_topLevelStep.hasMatch(path)) {
+          issues.add(path, 'a keep step goes at the end of the rule\'s then');
+          return null;
+        }
+        return keep(map, path);
       case 'do' || 'toggle':
         _only(map, path, {kind, if (kind == 'do') 'params'}, 'a $kind step');
         final ref = map[kind];
@@ -479,6 +538,41 @@ class _Normalizer {
     }
   }
 
+  Map<String, Object?>? keep(Map<String, Object?> map, String path) {
+    _only(map, path, {'keep'}, 'a keep step');
+    final keep = map['keep'];
+    final at = '$path.keep';
+    if (keep is! Map) {
+      issues.add(at, 'must be {target, value, while, release?}');
+      return null;
+    }
+    final k = Map<String, Object?>.from(keep);
+    _only(k, at, {'target', 'value', 'while', 'release'}, 'a keep');
+    final target = k['target'];
+    if (target is! String || !_action.hasMatch(target)) {
+      issues.add('$at.target', 'must be thing.action, like hall_bulb.power');
+    }
+    if (!k.containsKey('value')) issues.add('$at.value', 'is required');
+    final hold = list(k['while'], '$at.while', condition, required: true);
+    if (_readsMsg(hold)) {
+      issues.add('$at.while', 'cannot read the message: a hold has none');
+    }
+    return {
+      'keep': {
+        'target': target,
+        'value': k['value'],
+        'while': hold,
+        if (k.containsKey('release')) 'release': k['release'],
+      },
+    };
+  }
+
+  static bool _readsMsg(Object? value) => switch (value) {
+    Map m => m.containsKey('msg') || m.values.any(_readsMsg),
+    List l => l.any(_readsMsg),
+    _ => false,
+  };
+
   /// Checks one side of a compare: a `state`, `var` or `msg` reference. A
   /// `literal` is taken as it is.
   void _reference(String kind, Object? ref, String path) {
@@ -565,7 +659,7 @@ RuleCompilation compileRule(
   FlowReferences refs = const FlowReferences(),
 }) {
   final when = (rule['when'] as List).cast<Map<String, Object?>>();
-  final c = _Compiler(when.length, refs);
+  final c = _Compiler(when.length, refs, '${rule['id']}');
   var open = <(String, String)>[];
   for (var i = 0; i < when.length; i++) {
     open.add((c.trigger(when[i], 'when[$i]', row: i), 'out'));
@@ -583,23 +677,28 @@ RuleCompilation compileRule(
     c.connect(open, id);
     open = [(id, 'true')];
   }
-  c.steps((rule['then'] as List).cast(), 'then', open, col: 2, row: 0);
+  final then = (rule['then'] as List).cast<Map<String, Object?>>();
+  c.steps(then, 'then', open, col: 2, row: 0);
+  final holds = then.any((s) => s.containsKey('keep'));
   return RuleCompilation._({
     'schemaVersion': supportedFlowSchemaVersion,
     'id': rule['id'],
     'name': rule['name'],
     'enabled': enabled,
-    'mode': rule['mode'] ?? RunMode.single.name,
+    'mode':
+        rule['mode'] ?? (holds ? RunMode.parallel.name : RunMode.single.name),
     'cooldownSeconds': rule['cooldownSeconds'] ?? 0,
+    if (rule['stopOnError'] != true) 'onError': 'continue',
     'nodes': c.nodes,
     'edges': c.edges,
   }, c.origins);
 }
 
 class _Compiler {
-  _Compiler(this._rows, this._refs);
+  _Compiler(this._rows, this._refs, this._ruleId);
 
   final FlowReferences _refs;
+  final String _ruleId;
 
   final nodes = <Map<String, Object?>>[];
   final edges = <Map<String, Object?>>[];
@@ -988,6 +1087,10 @@ class _Compiler {
       }
       return [(id, 'done')];
     }
+    if (s.containsKey('keep')) {
+      keep(Map<String, Object?>.from(s['keep'] as Map), path, open, col: col);
+      return const [];
+    }
     if (s.containsKey('notify')) {
       final n = Map<String, Object?>.from(s['notify'] as Map);
       node('notify', 'notify ${n['title']}', n, {
@@ -1012,6 +1115,193 @@ class _Compiler {
       {'flowId': '$path.run'},
     );
     return [(id, 'out')];
+  }
+
+  /// A keep step: one check, entered from the rule's steps and from a
+  /// trigger on every state its while reads, each time bound its while names
+  /// and the target's own state. While the conditions hold it sets the
+  /// target to the value whenever the target differs, and remembers it is
+  /// holding in a global. When they stop holding it sends the release value
+  /// once, so a target the user changed while nothing was held stays as it is.
+  void keep(
+    Map<String, Object?> k,
+    String path,
+    List<(String, String)> open, {
+    required int col,
+  }) {
+    final id = idOf(path);
+    final at = '$path.keep';
+    final hold = (k['while'] as List).cast<Map<String, Object?>>();
+    final ref = k['target'] as String;
+    final dot = ref.indexOf('.');
+    final thing = ref.substring(0, dot);
+    final action = ref.substring(dot + 1);
+    final targetKey = stateKeyOf(
+      _refs.capabilityOf(thing, action)?.stateJsonPath,
+    );
+    final value = k['value'];
+    final release = k.containsKey('release')
+        ? k['release']
+        : value is bool
+        ? !value
+        : null;
+    final holdVar = '\$keep_${_ruleId}_$id';
+    var row = _rows;
+    _rows += 3;
+
+    final triggers = <String>[];
+    final seen = <String>{};
+    void onState(String stateRef, String origin) {
+      final (t, key) = thingKey(stateRef);
+      final resolved = stateKey(t, key);
+      if (!seen.add('$t.$resolved')) return;
+      triggers.add(
+        add(
+          '${id}_on_${triggers.length}',
+          'on',
+          '$t.$resolved changes',
+          {'thing': t, 'key': resolved, 'change': <String, Object?>{}},
+          {'': origin},
+          col: col,
+          row: row++,
+        ),
+      );
+    }
+
+    void onTime(String hhmm, String origin) {
+      if (!seen.add('time:$hhmm')) return;
+      triggers.add(
+        add(
+          '${id}_on_${triggers.length}',
+          'time_of_day',
+          'at $hhmm',
+          {'at': hhmm},
+          {'': origin},
+          col: col,
+          row: row++,
+        ),
+      );
+    }
+
+    void watch(Map<String, Object?> cond, String origin) {
+      if (cond['state'] case final String state) onState(state, origin);
+      final value = cond['value'];
+      if (value is Map && value['state'] is String) {
+        onState(value['state'] as String, origin);
+      }
+      if (cond['between'] case [final String start, final String end]) {
+        onTime(start, origin);
+        onTime(end, origin);
+      }
+      if (cond.containsKey('days')) onTime('00:00', origin);
+      if (cond['not'] case final Map<String, Object?> inner) {
+        watch(inner, origin);
+      }
+      for (final group in ['anyOf', 'allOf']) {
+        for (final inner in (cond[group] as List? ?? const [])) {
+          watch(Map<String, Object?>.from(inner as Map), origin);
+        }
+      }
+    }
+
+    for (var j = 0; j < hold.length; j++) {
+      watch(hold[j], '$at.while[$j]');
+    }
+    if (targetKey != null) onState('$thing.$targetKey', '$at.target');
+
+    final check = conditions(
+      hold,
+      '$at.while',
+      id,
+      label: 'while',
+      col: col + 1,
+      row: _rows,
+    );
+    connect([...open, for (final t in triggers) (t, 'out')], check);
+
+    String step(
+      String suffix,
+      String type,
+      String label,
+      Map<String, Object?> config,
+      List<(String, String)> from,
+    ) {
+      final node = add(
+        '${id}_$suffix',
+        type,
+        label,
+        config,
+        {'': at, 'deviceId': '$at.target', 'capabilityId': '$at.target'},
+        col: col + 2,
+        row: _rows,
+      );
+      connect(from, node);
+      return node;
+    }
+
+    Map<String, Object?> send(Object? v) => {
+      'deviceId': thing,
+      'capabilityId': action,
+      'params': {'value': v},
+    };
+
+    final holding = step(
+      'hold',
+      'set_variable',
+      'holding $ref at $value',
+      {'name': holdVar, 'value': true},
+      [(check, 'true')],
+    );
+    var apply = [(holding, 'out')];
+    if (targetKey != null) {
+      final differs = step(
+        'differs',
+        'compare',
+        'if $thing.$targetKey is not $value',
+        {
+          'left': {'state': '$thing.$targetKey'},
+          'op': '!=',
+          'right': {'literal': value},
+        },
+        apply,
+      );
+      apply = [(differs, 'true')];
+    }
+    step(
+      'apply',
+      'device_capability',
+      'keep $ref at $value',
+      send(value),
+      apply,
+    );
+    final held = step(
+      'held',
+      'compare',
+      'if $ref was held',
+      {
+        'left': {'var': holdVar},
+        'op': '==',
+        'right': {'literal': true},
+      },
+      [(check, 'false')],
+    );
+    final released = step(
+      'unhold',
+      'set_variable',
+      'stop holding $ref',
+      {'name': holdVar, 'value': false},
+      [(held, 'true')],
+    );
+    if (release != null) {
+      step(
+        'release',
+        'device_capability',
+        'release $ref to $release',
+        send(release),
+        [(released, 'out')],
+      );
+    }
+    _rows++;
   }
 
   static String _duration(int ms) => ms % 3600000 == 0 && ms > 0

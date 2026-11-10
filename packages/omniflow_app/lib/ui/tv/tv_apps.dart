@@ -5,10 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
-import '../device_sheets.dart' show confirm;
+import '../design/design.dart';
 import 'tv_controller.dart';
 import 'tv_widgets.dart';
 
+/// 4.2 Apps: search, Installed, System and All, Install APK, and one row per
+/// app with its colour badge, label, package and version.
 class TvAppsTab extends ConsumerStatefulWidget {
   const TvAppsTab({super.key, required this.tv});
 
@@ -18,8 +20,7 @@ class TvAppsTab extends ConsumerStatefulWidget {
   ConsumerState<TvAppsTab> createState() => _TvAppsTabState();
 }
 
-class _TvAppsTabState extends ConsumerState<TvAppsTab>
-    with AutomaticKeepAliveClientMixin {
+class _TvAppsTabState extends ConsumerState<TvAppsTab> {
   var _filter = AppFilter.user;
   List<TvApp>? _apps;
   String? _error;
@@ -27,9 +28,6 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab>
   var _installing = false;
 
   TvController get tv => widget.tv;
-
-  @override
-  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -52,9 +50,10 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab>
     if (!mounted) return;
     setState(() {
       if (result['ok'] == true) {
-        _apps = TvCalls.appsOf(
-          result,
-        )..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        _apps = TvCalls.appsOf(result)
+          ..sort(
+            (a, b) => _name(a).toLowerCase().compareTo(_name(b).toLowerCase()),
+          );
         for (final a in _apps!) {
           if (a.label != null) tv.appLabels[a.package] = a.label!;
         }
@@ -62,7 +61,10 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab>
         _error = errorMessage(result);
       }
     });
+    tv.labelsChanged();
   }
+
+  static String _name(TvApp a) => appNameOf(a.package, label: a.label);
 
   Future<void> _install() async {
     final files = ref.read(phoneFilesProvider);
@@ -74,6 +76,7 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab>
         final result = await tv.transfer(
           TvCalls.install,
           TvCalls.installArgs(tv.id, apk.path),
+          name: apk.name,
         );
         if (result['ok'] == true) showMessage('Installed ${apk.name}');
       }
@@ -84,116 +87,105 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab>
     await _load();
   }
 
+  void _setFilter(AppFilter f) {
+    if (f == _filter) return;
+    setState(() => _filter = f);
+    unawaited(_load());
+  }
+
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     final query = _search.text.trim().toLowerCase();
+    final all = _apps;
     final apps = [
-      for (final a in _apps ?? const <TvApp>[])
+      for (final a in all ?? const <TvApp>[])
         if (query.isEmpty ||
-            a.name.toLowerCase().contains(query) ||
+            _name(a).toLowerCase().contains(query) ||
             a.package.toLowerCase().contains(query))
           a,
     ];
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        key: const ValueKey('apps-list'),
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+        children: [
+          TextField(
+            key: const ValueKey('apps-search'),
+            controller: _search,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(OmniIcons.search),
+              hintText: all == null
+                  ? 'Search apps'
+                  : 'Search ${all.length} apps',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: OmniSpace.xs),
+          Wrap(
+            spacing: OmniSpace.xs,
             children: [
-              Expanded(
-                child: TextField(
-                  key: const ValueKey('apps-search'),
-                  controller: _search,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    hintText: 'Search apps',
-                    isDense: true,
-                  ),
-                  onChanged: (_) => setState(() {}),
+              for (final (f, label) in const [
+                (AppFilter.user, 'Installed'),
+                (AppFilter.system, 'System'),
+                (AppFilter.all, 'All'),
+              ])
+                OmniFilterChip(
+                  key: ValueKey('apps-filter-${f.name}'),
+                  label: label,
+                  selected: _filter == f,
+                  onTap: () => _setFilter(f),
                 ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.tonalIcon(
+              OmniFilterChip(
                 key: const ValueKey('apps-install'),
-                onPressed: _installing ? null : _install,
-                icon: const Icon(Icons.install_mobile),
-                label: const Text('Install APK'),
+                label: 'Install APK',
+                icon: OmniIcons.add,
+                onTap: _installing ? null : _install,
               ),
             ],
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-          child: SegmentedButton<AppFilter>(
-            key: const ValueKey('apps-filter'),
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: AppFilter.user, label: Text('Installed')),
-              ButtonSegment(value: AppFilter.system, label: Text('System')),
-              ButtonSegment(value: AppFilter.all, label: Text('All')),
-            ],
-            selected: {_filter},
-            onSelectionChanged: (s) {
-              setState(() => _filter = s.first);
-              unawaited(_load());
-            },
-          ),
-        ),
-        TransferProgress(tv: tv),
-        Expanded(
-          child: _error != null
-              ? TvEmpty(text: _error!, onRetry: _load)
-              : _apps == null
-              ? const Center(child: CircularProgressIndicator())
-              : apps.isEmpty
-              ? TvEmpty(text: query.isEmpty ? 'No apps here' : 'No app matches')
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.builder(
-                    key: const ValueKey('apps-list'),
-                    itemCount: apps.length,
-                    itemBuilder: (context, i) {
-                      final a = apps[i];
-                      return ListTile(
-                        key: ValueKey('app-${a.package}'),
-                        leading: CircleAvatar(
-                          child: Text(
-                            a.name.isEmpty ? '?' : a.name[0].toUpperCase(),
-                          ),
-                        ),
-                        title: Text(a.name),
-                        subtitle: Text(
-                          [
-                            if (a.label != null) a.package,
-                            if (a.versionName != null) a.versionName!,
-                            if (a.sizeBytes != null) formatBytes(a.sizeBytes),
-                          ].join('  '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: a.enabled
-                            ? (a.system
-                                  ? const Icon(Icons.shield_outlined, size: 18)
-                                  : null)
-                            : const Chip(
-                                label: Text('Disabled'),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                        onTap: () => _openApp(a),
-                      );
-                    },
-                  ),
-                ),
-        ),
-      ],
+          TransferProgress(tv: tv),
+          if (_error != null)
+            TvLoadError(what: 'The apps', reason: _error!, onRetry: _load)
+          else if (all == null)
+            const TvLoading(label: 'Reading the apps')
+          else if (apps.isEmpty)
+            OmniEmptyState(
+              icon: OmniIcons.search,
+              title: query.isEmpty ? 'No apps here' : 'No app matches',
+              message: query.isEmpty
+                  ? 'Try System or All.'
+                  : 'Search looks at names and packages.',
+            )
+          else
+            for (final a in apps) _row(a),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(TvApp a) {
+    final name = _name(a);
+    final running = tv.state.app == a.package;
+    return OmniListRow(
+      key: ValueKey('app-${a.package}'),
+      leading: AppBadge(package: a.package, name: name),
+      title: name,
+      subtitle: [a.package, ?a.versionName].join(' · '),
+      value: running
+          ? 'running'
+          : !a.enabled
+          ? 'disabled'
+          : null,
+      valueColor: running ? OmniColors.accent : OmniColors.muted,
+      chevron: true,
+      onTap: () => _openApp(a),
     );
   }
 
   Future<void> _openApp(TvApp app) async {
-    final changed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
+    final changed = await showOmniSheet<bool>(
+      context,
       builder: (_) => AppSheet(tv: tv, app: app),
     );
     if (changed == true) await _load();
@@ -201,7 +193,8 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab>
 }
 
 /// Everything that can be done to one app. Pops true when the app list
-/// needs reading again.
+/// needs reading again. Clear data, disable and uninstall ask first and say
+/// what is lost.
 class AppSheet extends StatefulWidget {
   const AppSheet({super.key, required this.tv, required this.app});
 
@@ -216,6 +209,7 @@ class _AppSheetState extends State<AppSheet> {
   var _busy = false;
 
   TvApp get app => widget.app;
+  String get _name => appNameOf(app.package, label: app.label);
 
   Future<void> _run(
     AppAction action, {
@@ -229,6 +223,7 @@ class _AppSheetState extends State<AppSheet> {
         context,
         title: ask,
         body: body ?? '',
+        destructive: true,
         action: switch (action) {
           AppAction.uninstall => 'Uninstall',
           AppAction.clearData => 'Clear data',
@@ -259,7 +254,7 @@ class _AppSheetState extends State<AppSheet> {
     builder: (context) {
       final info = TvCalls.appInfoOf(result);
       return AlertDialog(
-        title: Text(app.name),
+        title: Text(_name),
         content: SingleChildScrollView(
           child: SelectableText(
             [for (final e in info.entries) '${e.key}: ${e.value}'].join('\n'),
@@ -284,125 +279,119 @@ class _AppSheetState extends State<AppSheet> {
       String label,
       VoidCallback onTap, {
       bool danger = false,
-    }) {
-      final color = danger ? Theme.of(context).colorScheme.error : null;
-      return ListTile(
-        key: ValueKey('app-$key'),
-        enabled: !_busy,
-        leading: Icon(icon, color: color),
-        title: Text(label, style: TextStyle(color: color)),
-        onTap: onTap,
-      );
-    }
+    }) => TvKeyButton(
+      key: ValueKey('app-$key'),
+      label: label,
+      icon: icon,
+      foreground: danger ? OmniColors.bad : OmniColors.text,
+      onTap: _busy ? null : onTap,
+    );
 
-    return SafeArea(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return OmniSheet(
+      title: _name,
+      subtitle: [
+        app.package,
+        ?app.versionName,
+        if (app.sizeBytes != null) formatBytes(app.sizeBytes),
+        if (app.system) 'system app',
+        if (!app.enabled) 'disabled',
+      ].join(' · '),
+      children: [
+        if (_busy)
+          const Padding(
+            padding: EdgeInsets.only(bottom: OmniSpace.sm),
+            child: OmniProgressBar(height: 4, semanticLabel: 'Working'),
+          ),
+        const SizedBox(height: OmniSpace.xs),
+        TvKeyGrid(
+          columns: 3,
           children: [
-            ListTile(
-              title: Text(
-                app.name,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              subtitle: Text(
-                [
-                  app.package,
-                  if (app.versionName != null) 'Version ${app.versionName}',
-                  if (app.sizeBytes != null) formatBytes(app.sizeBytes),
-                  if (app.system) 'System app',
-                  if (!app.enabled) 'Disabled',
-                ].join('\n'),
-              ),
+            action(
+              'open',
+              TvIcons.open,
+              'Open',
+              () => _run(AppAction.open, done: 'Opened $_name'),
             ),
-            if (_busy) const LinearProgressIndicator(),
-            const Divider(height: 1),
-            if (app.launchable || app.enabled)
-              action(
-                'open',
-                Icons.open_in_new,
-                'Open on the TV',
-                () => _run(AppAction.open, done: 'Opened ${app.name}'),
-              ),
             action(
               'stop',
-              Icons.stop_circle_outlined,
-              'Force stop',
-              () => _run(AppAction.stop, done: 'Stopped ${app.name}'),
+              TvIcons.forceStop,
+              'Stop',
+              () => _run(AppAction.stop, done: 'Stopped $_name'),
             ),
             action(
               'clear-cache',
-              Icons.cleaning_services_outlined,
-              'Clear cache',
+              TvIcons.cache,
+              'Cache',
               () => _run(AppAction.clearCache, done: 'Cleared the cache'),
             ),
             action(
               'clear-data',
-              Icons.delete_sweep_outlined,
-              'Clear data',
+              TvIcons.data,
+              'Data',
               () => _run(
                 AppAction.clearData,
-                ask: 'Clear all data of ${app.name}?',
+                ask: 'Clear all data of $_name?',
                 body:
                     'Its accounts, sign-ins, downloads and settings on the TV '
                     'are deleted. This cannot be undone.',
-                done: 'Cleared the data of ${app.name}',
+                done: 'Cleared the data of $_name',
                 reload: true,
               ),
-              danger: true,
             ),
             if (app.enabled)
               action(
                 'disable',
-                Icons.block,
+                TvIcons.disable,
                 'Disable',
                 () => _run(
                   AppAction.disable,
-                  ask: 'Disable ${app.name}?',
+                  ask: 'Disable $_name?',
                   body: app.system
                       ? 'It is a system app. The TV can stop working properly '
                             'until it is enabled again.'
                       : 'It stops running and leaves the home screen until '
-                            'it is enabled again.',
-                  done: 'Disabled ${app.name}',
+                            'it is enabled again. Its data stays.',
+                  done: 'Disabled $_name',
                   reload: true,
                 ),
-                danger: true,
               )
             else
               action(
                 'enable',
-                Icons.check_circle_outline,
+                TvIcons.enable,
                 'Enable',
                 () => _run(
                   AppAction.enable,
-                  done: 'Enabled ${app.name}',
+                  done: 'Enabled $_name',
                   reload: true,
                 ),
               ),
             action(
               'uninstall',
-              Icons.delete_forever_outlined,
-              app.system ? 'Uninstall updates or remove' : 'Uninstall',
+              OmniIcons.delete,
+              app.system ? 'Remove' : 'Uninstall',
               () => _run(
                 AppAction.uninstall,
-                ask: 'Uninstall ${app.name}?',
-                body: 'The app and all its data leave the TV.',
-                done: 'Uninstalled ${app.name}',
+                ask: 'Uninstall $_name?',
+                body:
+                    'The app and all its data leave the TV: sign-ins, '
+                    'downloads and settings. Installing it again starts '
+                    'fresh.',
+                done: 'Uninstalled $_name',
                 reload: true,
               ),
               danger: true,
             ),
-            action(
-              'info',
-              Icons.info_outline,
-              'App info',
-              () => _run(AppAction.info),
-            ),
           ],
         ),
-      ),
+        const SizedBox(height: OmniSpace.sm),
+        OmniButton.ghost(
+          key: const ValueKey('app-info'),
+          label: 'App info',
+          icon: OmniIcons.info,
+          onPressed: _busy ? null : () => _run(AppAction.info),
+        ),
+      ],
     );
   }
 }

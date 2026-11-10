@@ -3,9 +3,20 @@ package com.jashnm.omniflow_app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import android.nfc.NfcAdapter
 import android.nfc.Tag
+import android.nfc.tech.IsoDep
+import android.nfc.tech.MifareClassic
+import android.nfc.tech.MifareUltralight
 import android.nfc.tech.Ndef
+import android.nfc.tech.NdefFormatable
+import android.nfc.tech.NfcA
+import android.nfc.tech.NfcB
+import android.nfc.tech.NfcF
+import android.nfc.tech.NfcV
+import android.nfc.tech.TagTechnology
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -15,17 +26,19 @@ import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
 
 /**
- * Hands the UI the NFC tag that opened the app (the omniflow://tag/ intent
- * filter), and later ones Android delivers while the app is not reading, on
- * omniflow/nfc_intent. Also asks for the location access Android requires
- * before it names the Wi-Fi network, on omniflow/permissions.
+ * Hands the UI the NFC tag that opened the app (an omniflow://tag/ link, or
+ * any other tag through the tech and tag filters), and later ones Android
+ * delivers while the app is not reading, on omniflow/nfc_intent. On omniflow/permissions it asks for the location
+ * access Android requires before it names the Wi-Fi network, and for the
+ * local network access Android 17 requires before an app reaches devices on
+ * the LAN, and reports both.
  */
 class MainActivity : FlutterActivity() {
     private var nfc: MethodChannel? = null
     private var pendingScan: Map<String, Any?>? = null
     private var launchReading = false
     private var takeWaiting: MethodChannel.Result? = null
-    private var permissionResult: MethodChannel.Result? = null
+    private val permissionResults = mutableMapOf<Int, MethodChannel.Result>()
     private val reader = Executors.newSingleThreadExecutor()
     private val mainThread = Handler(Looper.getMainLooper())
 
@@ -57,6 +70,21 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, PERMISSIONS_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "wifiName" -> askForLocation(result)
+                "localNetwork" -> askForLocalNetwork(result)
+                "status" -> result.success(
+                    mapOf(
+                        "location" to granted(Manifest.permission.ACCESS_FINE_LOCATION),
+                        "localNetwork" to (!localNetworkNeeded() || granted(LOCAL_NETWORK)),
+                        "localNetworkNeeded" to localNetworkNeeded(),
+                    ),
+                )
+                "appSettings" -> {
+                    startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -78,7 +106,7 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * The tag an NDEF intent names, once. Reopening the app from recents
+     * The tag an NFC intent names, once. Reopening the app from recents
      * replays the launching intent, so that one is skipped, and a taken intent
      * is replaced so a recreated activity does not send it again.
      *
@@ -87,7 +115,7 @@ class MainActivity : FlutterActivity() {
      * are never used: only a Tag, which [readLive] then has to read.
      */
     private fun takeTag(intent: Intent?): Tag? {
-        if (intent?.action != NfcAdapter.ACTION_NDEF_DISCOVERED) return null
+        if (intent == null || intent.action !in NFC_ACTIONS) return null
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return null
         setIntent(Intent(Intent.ACTION_MAIN))
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -104,23 +132,27 @@ class MainActivity : FlutterActivity() {
      * makes up carries no link to the NFC service, so its read fails and
      * nothing reaches the engine. Getting past this takes a Tag with a binder
      * that answers as the NFC service, far more than made-up extras. `live`
-     * tells the Dart side the records came from this read.
+     * tells the Dart side the records came from this read. A tag with no
+     * NDEF records, or none at all, is read by its UID alone, which is how
+     * the engine knows a tag OmniFlow never wrote.
      */
     private fun readLive(tag: Tag, done: (Map<String, Any?>?) -> Unit) {
         reader.execute {
             val scan = try {
-                Ndef.get(tag)?.use { ndef ->
-                    ndef.connect()
-                    ndef.ndefMessage?.let { message ->
-                        mapOf(
-                            "uid" to tag.id,
-                            "live" to true,
-                            "records" to message.records.map {
-                                mapOf("tnf" to it.tnf.toInt(), "type" to it.type, "payload" to it.payload)
-                            },
-                        )
+                val ndef = Ndef.get(tag)
+                val records = if (ndef != null) {
+                    ndef.use {
+                        it.connect()
+                        it.ndefMessage?.records?.map { r ->
+                            mapOf("tnf" to r.tnf.toInt(), "type" to r.type, "payload" to r.payload)
+                        } ?: emptyList()
                     }
+                } else if (connects(tag)) {
+                    emptyList()
+                } else {
+                    null
                 }
+                records?.let { mapOf("uid" to tag.id, "live" to true, "records" to it) }
             } catch (e: Exception) {
                 null
             }
@@ -128,31 +160,77 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** Whether [tag] answers through one of its technologies, which proves it is real. */
+    private fun connects(tag: Tag): Boolean {
+        val tech: TagTechnology = NfcA.get(tag) ?: NfcB.get(tag) ?: NfcF.get(tag)
+            ?: NfcV.get(tag) ?: IsoDep.get(tag) ?: MifareUltralight.get(tag)
+            ?: MifareClassic.get(tag) ?: NdefFormatable.get(tag) ?: return false
+        tech.use { it.connect() }
+        return true
+    }
+
+    private fun granted(permission: String) =
+        checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Whether this Android has the local network permission. It arrived with
+     * Android 17; on earlier versions the LAN needs no runtime grant.
+     */
+    private fun localNetworkNeeded(): Boolean = try {
+        packageManager.getPermissionInfo(LOCAL_NETWORK, 0)
+        true
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    }
+
     private fun askForLocation(result: MethodChannel.Result) {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+        if (granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
             result.success(true)
             return
         }
-        permissionResult?.success(false)
-        permissionResult = result
-        requestPermissions(
+        ask(
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
             LOCATION_REQUEST,
+            result,
         )
+    }
+
+    private fun askForLocalNetwork(result: MethodChannel.Result) {
+        if (!localNetworkNeeded() || granted(LOCAL_NETWORK)) {
+            result.success(true)
+            return
+        }
+        ask(arrayOf(LOCAL_NETWORK), LOCAL_NETWORK_REQUEST, result)
+    }
+
+    /** A second ask of the same kind answers the first one false. */
+    private fun ask(permissions: Array<String>, requestCode: Int, result: MethodChannel.Result) {
+        permissionResults.remove(requestCode)?.success(false)
+        permissionResults[requestCode] = result
+        requestPermissions(permissions, requestCode)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != LOCATION_REQUEST) return
-        permissionResult?.success(
-            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED,
+        val result = permissionResults.remove(requestCode) ?: return
+        result.success(
+            when (requestCode) {
+                LOCATION_REQUEST -> granted(Manifest.permission.ACCESS_FINE_LOCATION)
+                else -> granted(LOCAL_NETWORK)
+            },
         )
-        permissionResult = null
     }
 
     companion object {
         private const val NFC_CHANNEL = "omniflow/nfc_intent"
+        private val NFC_ACTIONS = setOf(
+            NfcAdapter.ACTION_NDEF_DISCOVERED,
+            NfcAdapter.ACTION_TECH_DISCOVERED,
+            NfcAdapter.ACTION_TAG_DISCOVERED,
+        )
         private const val PERMISSIONS_CHANNEL = "omniflow/permissions"
         private const val LOCATION_REQUEST = 7102
+        private const val LOCAL_NETWORK_REQUEST = 7103
+        private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 }

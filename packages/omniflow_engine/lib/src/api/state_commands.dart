@@ -79,6 +79,19 @@ class StateCommands {
     return {'zones': _things.zoneStates};
   }
 
+  /// `{home, person?}`: the user says whether they are home. The person
+  /// reports `homeSource: manual` until a reading decides again.
+  Future<Map<String, Object?>> presenceSet(Map<String, Object?> args) async {
+    final home = args['home'];
+    if (home is! bool) throw ApiError('invalid', 'home must be true or false');
+    return {
+      'state': await _things.setHome(
+        home,
+        personId: optStringArg(args, 'person'),
+      ),
+    };
+  }
+
   Future<Map<String, Object?>> phoneBattery(Map<String, Object?> args) async {
     final charging = args['charging'];
     if (charging != null && charging is! bool) {

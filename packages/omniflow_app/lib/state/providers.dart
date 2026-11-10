@@ -1,9 +1,11 @@
+import '../api/plain_error.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../api/engine_calls.dart' show Json;
+import '../api/engine_calls.dart' show EngineApi, Json;
 import '../api/engine_client.dart';
 import '../nfc/nfc.dart';
 import '../service/phone_files.dart';
@@ -80,7 +82,7 @@ Future<Json> callClient(
 String errorMessage(Json result) {
   final error = result['error'] as Map? ?? const {};
   return [
-    '${error['message'] ?? 'failed'}',
+    plainError('${error['type'] ?? 'failed'}', error['message'] as String?),
     for (final issue in (error['issues'] as List? ?? const []))
       switch (issue) {
         {'path': final path, 'message': final message} => '$path: $message',
@@ -119,12 +121,17 @@ class DevicesNotifier extends AsyncNotifier<List<Json>> {
       case 'device.offline' || 'board.offline' || 'device.pollFailed':
         final id = e['device'];
         if (id is! String) return;
-        _offline[id] = '${e['error'] ?? 'not reachable'}';
+        _offline[id] = plainError(
+          '${e['errorType'] ?? 'timeout'}',
+          e['error'] as String?,
+        );
         if (current == null) return;
         state = AsyncData([for (final d in current) _withStatus(d)]);
       case 'board.error':
         // A failing board repeats its error with every hello.
-        final text = 'Board error: ${e['error']}';
+        final text =
+            'A board had a problem: '
+            '${plainError('${e['errorType'] ?? 'device_error'}', e['error'] as String?)}';
         if (text == _lastBoardError) return;
         _lastBoardError = text;
         showMessage(text);
@@ -228,4 +235,18 @@ class PacketsNotifier extends Notifier<List<Json>> {
 
 final packetsProvider = NotifierProvider<PacketsNotifier, List<Json>>(
   PacketsNotifier.new,
+);
+
+/// The typed engine calls. A failure shows as a snackbar, as with
+/// [callEngine], and comes back in the reply for the screen to show inline.
+final engineApiProvider = Provider<EngineApi>(
+  (ref) => EngineApi(
+    ref.watch(engineClientProvider),
+    onFailure: (f) => showMessage(
+      [
+        f.message,
+        for (final i in f.issues) '${i.path}: ${i.message}',
+      ].join('\n'),
+    ),
+  ),
 );

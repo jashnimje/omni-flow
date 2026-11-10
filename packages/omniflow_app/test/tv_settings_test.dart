@@ -9,10 +9,16 @@ void main() {
 
   setUp(() => engine = tvEngine());
 
-  Future<void> expand(WidgetTester tester, String category) async {
-    await tester.tap(find.text(category));
-    await tester.pumpAndSettle();
-  }
+  bool sliderShows(String key, String value) => find
+      .descendant(
+        of: find.byKey(ValueKey('setting-slider-$key')),
+        matching: find.text(value),
+      )
+      .evaluate()
+      .isNotEmpty;
+
+  Finder stayAwake() =>
+      find.byKey(const ValueKey('setting-switch-stay_on_while_plugged_in'));
 
   group('curated settings', () {
     testWidgets('each category shows its settings with their descriptions', (
@@ -25,21 +31,59 @@ void main() {
       expect(find.text('Network'), findsOneWidget);
       expect(find.text('Developer'), findsOneWidget);
       expect(find.textContaining('Backlight level'), findsOneWidget);
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const ValueKey('setting-value-screen_brightness')),
-            )
-            .data,
-        '128',
+      expect(sliderShows('screen_brightness', '128'), isTrue);
+      expect(find.text('Search 4 settings'), findsOneWidget);
+      expect(find.text('system 2 · secure 1 · global 1'), findsOneWidget);
+    });
+
+    testWidgets('search finds curated settings and raw keys', (tester) async {
+      await pumpTv(tester, engine);
+      await openTvTab(tester, 'Settings');
+      await tester.enterText(
+        find.byKey(const ValueKey('settings-search')),
+        'stay',
       );
+      await tester.pump();
+      expect(find.text('Stay awake'), findsOneWidget);
+      expect(find.text('Display and sound'), findsNothing);
+      await tester.enterText(
+        find.byKey(const ValueKey('settings-search')),
+        'volume_music',
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('search-raw-system.volume_music')),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('settings-search')),
+        'nothing like this',
+      );
+      await tester.pump();
+      expect(find.text('No setting matches'), findsOneWidget);
+    });
+
+    testWidgets('a catalog the TV cannot give says why, with Try again', (
+      tester,
+    ) async {
+      engine.answers['tv.settings.catalog'] = {
+        'ok': false,
+        'error': {'type': 'timeout', 'message': 'the TV did not answer'},
+      };
+      await pumpTv(tester, engine);
+      await openTvTab(tester, 'Settings');
+      expect(find.textContaining('The TV did not answer'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
     });
 
     testWidgets('a slider writes the whole number it lands on', (tester) async {
       await pumpTv(tester, engine);
       await openTvTab(tester, 'Settings');
-      await tester.tap(
-        find.byKey(const ValueKey('setting-slider-screen_brightness')),
+      await tester.tapAt(
+        tester.getTopLeft(
+              find.byKey(const ValueKey('setting-slider-screen_brightness')),
+            ) +
+            const Offset(40, 24),
       );
       await tester.pumpAndSettle();
       final put = argsOf(engine, 'tv.settings.put').single;
@@ -63,25 +107,20 @@ void main() {
       };
       await pumpTv(tester, engine);
       await openTvTab(tester, 'Settings');
-      await tester.tap(
-        find.byKey(const ValueKey('setting-slider-screen_brightness')),
+      await tester.tapAt(
+        tester.getTopLeft(
+              find.byKey(const ValueKey('setting-slider-screen_brightness')),
+            ) +
+            const Offset(40, 24),
       );
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const ValueKey('setting-value-screen_brightness')),
-            )
-            .data,
-        '77',
-      );
+      expect(sliderShows('screen_brightness', '77'), isTrue);
     });
 
     testWidgets('a switch writes true or false', (tester) async {
       await pumpTv(tester, engine);
       await openTvTab(tester, 'Settings');
-      await expand(tester, 'Developer');
-      await tester.tap(find.text('Stay awake'));
+      await tester.tap(stayAwake());
       await tester.pumpAndSettle();
       expect(argsOf(engine, 'tv.settings.put').single, {
         'id': tvId,
@@ -89,10 +128,7 @@ void main() {
         'key': 'stay_on_while_plugged_in',
         'value': true,
       });
-      expect(
-        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-        isTrue,
-      );
+      expect(tester.widget<Switch>(stayAwake()).value, isTrue);
     });
 
     testWidgets('a refused write leaves the shown value as it was', (
@@ -104,14 +140,10 @@ void main() {
       };
       await pumpTv(tester, engine);
       await openTvTab(tester, 'Settings');
-      await expand(tester, 'Developer');
-      await tester.tap(find.text('Stay awake'));
+      await tester.tap(stayAwake());
       await tester.pumpAndSettle();
-      expect(find.text('value out of range'), findsOneWidget);
-      expect(
-        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-        isFalse,
-      );
+      expect(find.text('Value out of range.'), findsOneWidget);
+      expect(tester.widget<Switch>(stayAwake()).value, isFalse);
     });
 
     testWidgets('a Private DNS change asks first, and Cancel writes nothing', (
@@ -119,7 +151,6 @@ void main() {
     ) async {
       await pumpTv(tester, engine);
       await openTvTab(tester, 'Settings');
-      await expand(tester, 'Network');
       await tester.tap(
         find.byKey(const ValueKey('setting-enum-private_dns_mode')),
       );
@@ -173,7 +204,7 @@ void main() {
       );
       await tester.pump();
       expect(find.text('volume_music'), findsNothing);
-      await tester.tap(find.text('global'));
+      await tester.tap(find.text('Global'));
       await tester.pumpAndSettle();
       expect(argsOf(engine, 'tv.settings.list').last['namespace'], 'global');
     });

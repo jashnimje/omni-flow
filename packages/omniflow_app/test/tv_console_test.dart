@@ -19,6 +19,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('console-accept')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('console-command')), findsOneWidget);
+    expect(
+      find.text(
+        'Commands run directly on the TV. Only you can use this, never Claude.',
+      ),
+      findsOneWidget,
+    );
     expect(engine.callsOf('tv.shell'), isEmpty);
   });
 
@@ -113,6 +119,6 @@ void main() {
     await tester.enterText(find.byKey(const ValueKey('console-command')), 'id');
     await tester.tap(find.byKey(const ValueKey('console-run')));
     await tester.pumpAndSettle();
-    expect(find.text('the shell is user only'), findsOneWidget);
+    expect(find.text('The shell is user only.'), findsOneWidget);
   });
 }

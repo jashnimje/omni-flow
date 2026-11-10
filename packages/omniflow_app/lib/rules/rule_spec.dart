@@ -45,9 +45,18 @@ class RuleSpec {
 
   /// Whether every list the rule form needs filled has something in it: a
   /// trigger and a step, and in each If a condition and a THEN step, and a
-  /// step in each Do together branch. The builder marks the empty card
-  /// instead of leaving the engine to name a rule path.
-  bool get complete => when.isNotEmpty && stepsComplete(then);
+  /// step in each Do together branch. A rule of keep steps alone needs no
+  /// trigger, since each keep watches its own conditions.
+  bool get complete => (when.isNotEmpty || onlyKeeps) && stepsComplete(then);
+
+  /// Whether [then] is all keep steps.
+  bool get onlyKeeps => then.isNotEmpty && then.every((s) => s is KeepStep);
+
+  /// Whether the first failed step stops the rest. Without it every step
+  /// runs and failures go to the run log.
+  bool get stopOnError => extra['stopOnError'] == true;
+  set stopOnError(bool stop) =>
+      stop ? extra['stopOnError'] = true : extra.remove('stopOnError');
 
   Json toJson() => {
     ...extra,
@@ -69,6 +78,7 @@ bool stepsComplete(List<RuleStep> steps) =>
               (s.otherwise.isEmpty || stepsComplete(s.otherwise)),
         TogetherStep() => s.branches.every(stepsComplete),
         WaitForStep() => s.onTimeout.isEmpty || stepsComplete(s.onTimeout),
+        KeepStep() => s.whileConditions.isNotEmpty,
         _ => true,
       },
     );
@@ -350,6 +360,20 @@ sealed class RuleStep {
     }
     if (json['set'] case final Map s) return SetStep('${s['var']}', s['value']);
     if (json['run'] case final String id) return RunStep(id);
+    if (json['keep'] case final Map keep) {
+      final k = Map<String, Object?>.from(keep);
+      final (thing, capability) = splitRef('${k['target'] ?? ''}');
+      return KeepStep(
+        thing,
+        capability,
+        value: k['value'],
+        whileConditions: [
+          for (final c in _maps(k['while'])) RuleCondition.fromJson(c),
+        ],
+        release: k['release'],
+        hasRelease: k.containsKey('release'),
+      );
+    }
     return UnknownStep(json);
   }
 
@@ -483,6 +507,38 @@ class RunStep extends RuleStep {
 
   @override
   Json toJson() => {'run': automationId};
+}
+
+/// `{"keep": {"target": "thing.action", "value": v, "while": [Condition],
+/// "release"?: v}}`: holds the target at [value] while every condition
+/// holds, and sends [release] once they stop (the opposite of a boolean
+/// [value] when it is left out). Keep steps go last in a rule's then.
+class KeepStep extends RuleStep {
+  KeepStep(
+    this.thing,
+    this.capability, {
+    this.value = true,
+    List<RuleCondition>? whileConditions,
+    this.release,
+    this.hasRelease = false,
+  }) : whileConditions = whileConditions ?? [];
+
+  String thing;
+  String capability;
+  Object? value;
+  final List<RuleCondition> whileConditions;
+  Object? release;
+  bool hasRelease;
+
+  @override
+  Json toJson() => {
+    'keep': {
+      'target': '$thing.$capability',
+      'value': value,
+      'while': [for (final c in whileConditions) c.toJson()],
+      if (hasRelease) 'release': release,
+    },
+  };
 }
 
 /// A step a newer engine wrote that this app cannot edit. It is kept as it

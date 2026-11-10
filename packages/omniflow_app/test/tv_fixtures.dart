@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/state/providers.dart';
+import 'package:omniflow_app/ui/tv/tv_page.dart';
 
 import 'fake_engine.dart';
+import 'screen_harness.dart';
 
 const tvId = 'lounge_tv';
 
@@ -184,14 +186,26 @@ FakeEngine tvEngine() {
         },
       ],
     },
-    'tv.settings.list': {
-      'ok': true,
-      'settings': [
+  });
+  engine.answerers['tv.settings.list'] = (args) => {
+    'ok': true,
+    'settings': switch (args['namespace']) {
+      'system' => [
         {'namespace': 'system', 'key': 'screen_off_timeout', 'value': '600000'},
         {'namespace': 'system', 'key': 'volume_music', 'value': '30'},
       ],
+      'secure' => [
+        {'namespace': 'secure', 'key': 'adb_enabled', 'value': '1'},
+      ],
+      _ => [
+        {
+          'namespace': 'global',
+          'key': 'stay_on_while_plugged_in',
+          'value': '0',
+        },
+      ],
     },
-  });
+  };
   engine.answerers['tv.files.list'] = (args) => switch (args['path']) {
     '/sdcard' => {
       'ok': true,
@@ -220,19 +234,16 @@ FakeEngine tvEngine() {
   return engine;
 }
 
-/// Opens the TV control centre from the TV's card, on [tab].
+/// Shows [tab] of the open TV control centre.
 Future<void> openTvTab(WidgetTester tester, String tab) async {
-  await tester.tap(find.byKey(const ValueKey('tv-open-$tvId')));
+  if (tab == 'Remote') return;
+  await tester.tap(
+    find.descendant(
+      of: find.byKey(const ValueKey('tv-tabs')),
+      matching: find.text(tab),
+    ),
+  );
   await tester.pumpAndSettle();
-  if (tab != 'Remote') {
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(const ValueKey('tv-tabs')),
-        matching: find.text(tab),
-      ),
-    );
-    await tester.pumpAndSettle();
-  }
 }
 
 /// The args of every call of [command].
@@ -240,15 +251,17 @@ List<Map<String, Object?>> argsOf(FakeEngine engine, String command) => [
   for (final c in engine.callsOf(command)) c.$2,
 ];
 
+/// The TV control centre of [tvId] on its own, on the Remote tab.
 Future<FakePhoneFiles> pumpTv(
   WidgetTester tester,
   FakeEngine engine, {
   FakePhoneFiles? files,
 }) async {
   final phone = files ?? FakePhoneFiles();
-  await pumpApp(
+  await pumpScreen(
     tester,
     engine,
+    const TvPage(id: tvId, name: 'Lounge TV'),
     overrides: [
       phoneFilesProvider.overrideWithValue(phone),
       tvPollProvider.overrideWithValue(const Duration(hours: 1)),
@@ -256,3 +269,10 @@ Future<FakePhoneFiles> pumpTv(
   );
   return phone;
 }
+
+/// The whole app, for the TV card on the device list.
+Future<void> pumpTvApp(WidgetTester tester, FakeEngine engine) => pumpApp(
+  tester,
+  engine,
+  overrides: [tvPollProvider.overrideWithValue(const Duration(hours: 1))],
+);

@@ -97,7 +97,12 @@ void main() {
       'charging',
     });
     expect(ids('phone', CapabilityType.event), {'nfc_scanned'});
-    expect(ids('person', CapabilityType.sensor), {'home', 'place'});
+    expect(ids('person', CapabilityType.sensor), {
+      'home',
+      'place',
+      'home_source',
+      'home_since',
+    });
     expect(ids('place', CapabilityType.sensor), {'inside', 'people'});
     expect(ids('nfc_tag', CapabilityType.sensor), {'last_scanned'});
     expect(ids('nfc_tag', CapabilityType.event), {'scanned'});

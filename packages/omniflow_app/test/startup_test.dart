@@ -35,28 +35,29 @@ class _RestoredStorage extends Fake implements FlutterSecureStorage {
 }
 
 void main() {
-  testWidgets('a failed start shows the error and Retry starts again', (
-    tester,
-  ) async {
-    var attempts = 0;
-    final engine = FakeEngine();
-    await tester.pumpWidget(
-      Launcher(
-        start: () async {
-          attempts++;
-          if (attempts == 1) throw StateError('omniflow.sqlite is in use');
-          return (client: engine as EngineClient, hubError: null);
-        },
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('OmniFlow could not start'), findsOneWidget);
-    expect(find.textContaining('omniflow.sqlite is in use'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('start-retry')));
-    await tester.pumpAndSettle();
-    expect(attempts, 2);
-    expect(find.text('Desk lamp'), findsOneWidget);
-  });
+  testWidgets(
+    'a failed start says so in plain words and Try again starts again',
+    (tester) async {
+      var attempts = 0;
+      final engine = FakeEngine();
+      await tester.pumpWidget(
+        Launcher(
+          start: () async {
+            attempts++;
+            if (attempts == 1) throw StateError('omniflow.sqlite is in use');
+            return (client: engine as EngineClient, hubError: null);
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('OmniFlow could not start'), findsOneWidget);
+      expect(find.textContaining('omniflow.sqlite'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('start-retry')));
+      await tester.pumpAndSettle();
+      expect(attempts, 2);
+      expect(find.text('Desk lamp'), findsOneWidget);
+    },
+  );
 
   test('a secret the keystore cannot decrypt reads as missing', () async {
     final storage = _RestoredStorage();

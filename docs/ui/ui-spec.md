@@ -1,6 +1,6 @@
 # OmniFlow App Design
 
-> Status: active. Direction A ("Home and automations") approved 2026-11-08. The visual spec is `docs/ui/mockups.html`; this file is the written spec the rebuild is checked against.
+> Status: active. Direction A ("Home and automations") approved and built 2026-11-08. The visual spec is `docs/ui/mockups.html`; this file is the written spec the rebuild is checked against.
 
 ## Goals
 
@@ -152,13 +152,20 @@ A live header on every tab: the app in front with its playing state, a volume sl
 - **Empty home**: what discovery found, with Add buttons.
 - **Offline and errors**: a plain sentence on what happened and what to try (try again, find it on the network, see what was sent), and which automations are affected. No raw exception text anywhere in the UI.
 
-## Engine additions the design needs
+## Engine additions
 
-- **Scenes**: a scene is a named set of device actions run together. Store scenes as automations with form `scene` (or as rules with only a manual trigger and a together step) so they share validation, approval and the run log.
-- **Favourites and room order**: a small per-device setting (`favourite`, `order`) the app can set through the core API.
-- **State history**: a capped per-device log of state changes for device and sensor pages.
-- **Presence explanation**: the person thing reports which source last decided home or away.
-- **Rooms list**: rooms as their own list with order, not only a string on each device.
+Built on 2026-11-08, all through the core API with CLI verbs. DESIGN.md (UI, Engine additions for the redesign) has the full contract.
+
+- **Scenes**: `scene.save`, `scene.list`, `scene.run` and `scene.remove`, stored as automations with source `scene` (a manual trigger and a `together` step), so validation, approval, trust and the run log apply. `automation.save` and `automation.dry_run` take `form: scene`.
+- **Favourites and room order**: `device.organize {id, name?, room?, favourite?, order?}`. Device rows carry `favourite`, `order`, `roomId`, `room`, `category` and `icon`.
+- **State history**: `device.history {id, key?, limit?, since?}`, capped at 500 rows per device, each entry saying who changed it (`user` or the automation id).
+- **Presence explanation**: the person thing's `homeSource` (`wifi`, `ble` or `manual`) and `homeSince`, and `presence.set` for I am home or away.
+- **Rooms list**: `room.list`, `room.save`, `room.remove` and `room.order`, with a schema 5 migration from the old room names.
+- **Automations list**: `automation.list` returns sentence chips, the last run, needs you and the things each automation uses, filtered by `device`, `tag` or `needsYou`. `automation.templates` gives the five templates and fills them.
+- **Rules**: the keep step and `stopOnError`, with a failed step no longer stopping the rest of a rule.
+- **Boards and tags**: `board.describe` reports `bootPins`, and a tag scan writes `last_source`.
+
+Not built: the `hub` presence source, a stored wait before away for Wi-Fi, folder item counts in `tv.files.list`, and failed-run or approval notifications.
 
 ## Acceptance
 

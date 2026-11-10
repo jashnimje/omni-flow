@@ -9,7 +9,8 @@ import 'package:omniflow_engine/omniflow_engine.dart';
 import 'api/engine_client.dart';
 import 'service/service_engine_client.dart';
 import 'state/providers.dart';
-import 'ui/home.dart';
+import 'ui/app.dart';
+import 'ui/design/design.dart';
 import 'ui/theme.dart';
 
 /// The engine the app talks to, and why the hub did not start, if it did not.
@@ -74,7 +75,7 @@ class _LauncherState extends State<Launcher> {
       _stoppedSub = s.client.events
           .where((e) => e['event'] == serviceStoppedEvent)
           .listen((e) => setState(() => _stopped = '${e['reason']}'));
-    }, onError: (Object _) {});
+    }, onError: (Object e) => debugPrint('OmniFlow could not start: $e'));
   }
 
   @override
@@ -83,33 +84,28 @@ class _LauncherState extends State<Launcher> {
     super.dispose();
   }
 
+  // No navigator, so a route a notification launched the app with is left
+  // for the shell instead of failing to resolve here.
   Widget _screen(Widget child) => MaterialApp(
     title: 'OmniFlow',
     theme: omniTheme(),
-    home: Scaffold(body: Center(child: child)),
+    builder: (_, _) => Scaffold(body: Center(child: child)),
   );
 
   @override
   Widget build(BuildContext context) {
     if (_stopped case final reason?) {
       return _screen(
-        Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('OmniFlow is stopped'),
-              const SizedBox(height: 8),
-              Text(reason, key: const ValueKey('stopped-reason')),
-              const SizedBox(height: 4),
-              const Text('Flows do not run until it starts again.'),
-              const SizedBox(height: 16),
-              FilledButton(
-                key: const ValueKey('service-start'),
-                onPressed: () => setState(_run),
-                child: const Text('Start'),
-              ),
-            ],
+        OmniEmptyState(
+          key: const ValueKey('stopped-reason'),
+          icon: OmniIcons.power,
+          title: 'OmniFlow is stopped',
+          message: '$reason. Automations do not run until it starts again.',
+          action: OmniButton(
+            key: const ValueKey('service-start'),
+            label: 'Start',
+            expand: false,
+            onPressed: () => setState(_run),
           ),
         ),
       );
@@ -132,21 +128,18 @@ class _LauncherState extends State<Launcher> {
       }
       return _screen(
         snap.hasError
-            ? Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('OmniFlow could not start'),
-                    const SizedBox(height: 8),
-                    Text('${snap.error}', key: const ValueKey('start-error')),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      key: const ValueKey('start-retry'),
-                      onPressed: () => setState(_run),
-                      child: const Text('Retry'),
-                    ),
-                  ],
+            ? OmniEmptyState(
+                key: const ValueKey('start-error'),
+                icon: OmniIcons.error,
+                title: 'OmniFlow could not start',
+                message:
+                    'Its background service did not answer. Try again, and '
+                    'if it keeps happening, restart the phone.',
+                action: OmniButton(
+                  key: const ValueKey('start-retry'),
+                  label: 'Try again',
+                  expand: false,
+                  onPressed: () => setState(_run),
                 ),
               )
             : const CircularProgressIndicator(),

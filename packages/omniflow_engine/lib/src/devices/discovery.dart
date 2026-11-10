@@ -66,8 +66,10 @@ class DeviceDiscovery {
     MdnsDiscovery? mdns,
     this.tuyaMinimumWindow = const Duration(seconds: 6),
     this.tuyaLocateWindow = const Duration(seconds: 8),
+    Future<Set<String>> Function()? ownAddresses,
   }) : tuya = tuya ?? TuyaDiscovery(),
-       mdns = mdns ?? MdnsDiscovery();
+       mdns = mdns ?? MdnsDiscovery(),
+       ownAddresses = ownAddresses ?? localAddresses;
 
   final UdpDiscovery udp;
   final TuyaDiscovery tuya;
@@ -80,6 +82,11 @@ class DeviceDiscovery {
   /// How long healing listens for a moved Tuya device. It returns as soon
   /// as the device is heard.
   final Duration tuyaLocateWindow;
+
+  /// The addresses of the machine the engine runs on. An ADB find at one of
+  /// them is this phone's own wireless debugging, never a TV, and
+  /// connecting to it puts "Allow USB debugging?" on the phone itself.
+  final Future<Set<String>> Function() ownAddresses;
 
   /// [portOverride] applies to `udp_broadcast` only. A spec's `windowMs`
   /// lengthens [window] for that method.
@@ -215,8 +222,15 @@ class DeviceDiscovery {
     final found = <String, List<DiscoveredDevice>>{
       for (final d in drivers) d.id: [],
     };
-    for (final results in await Future.wait(runs)) {
+    final adb = {
+      for (final d in drivers)
+        if (d.transport.type == TransportType.adb) d.id,
+    };
+    final all = await Future.wait(runs);
+    final own = adb.isEmpty ? const <String>{} : await _own();
+    for (final results in all) {
       for (final (driverId, device) in results) {
+        if (adb.contains(driverId) && own.contains(device.host)) continue;
         found[driverId]!.add(device);
       }
     }
@@ -225,6 +239,14 @@ class DeviceDiscovery {
       failures,
       runs.length,
     );
+  }
+
+  Future<Set<String>> _own() async {
+    try {
+      return await ownAddresses();
+    } on SocketException {
+      return const {};
+    }
   }
 
   static DiscoverySpec? _spec(DriverManifest driver, String method) =>
@@ -380,6 +402,13 @@ class UdpDiscovery {
         ?.host;
   };
 }
+
+/// Every non-loopback address of this machine's interfaces.
+Future<Set<String>> localAddresses() async => {
+  for (final interface in await NetworkInterface.list())
+    for (final address in interface.addresses)
+      if (!address.isLoopback) address.address,
+};
 
 /// The limited broadcast address plus a /24 directed broadcast for every
 /// IPv4 interface. Dart does not expose interface netmasks, and home networks

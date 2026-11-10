@@ -108,6 +108,61 @@ void _tools({required bool viaHub}) {
     },
   );
 
+  test('an agent organizes devices and saves scenes, and a scene it saves '
+      'is untrusted', () async {
+    final moved = body(
+      await call('organize_device', {
+        'deviceId': 'desk_lamp',
+        'room': 'Office',
+        'favourite': true,
+      }),
+    );
+    expect(moved['ok'], isTrue, reason: '$moved');
+    expect((moved['device'] as Map)['roomId'], 'office');
+    final rooms = body(await call('list_rooms'));
+    expect(
+      [for (final r in (rooms['rooms'] as List).cast<Map>()) r['id']],
+      ['study', 'office'],
+    );
+
+    await engine.handle('scene.save', {
+      'id': 'focus',
+      'name': 'Focus',
+      'actions': ['desk_lamp.brightness=80'],
+      'trusted': true,
+    });
+    final replaced = body(
+      await call('save_scene', {
+        'id': 'focus',
+        'name': 'Focus',
+        'actions': ['desk_lamp.brightness=10'],
+      }),
+    );
+    expect(replaced['ok'], isTrue, reason: '$replaced');
+    expect(replaced['approved'], isFalse);
+    final risky = body(
+      await call('save_scene', {
+        'name': 'Loud',
+        'actions': ['mac_mini.volume=90'],
+      }),
+    );
+    expect((risky['highRisk'], risky['approved']), (true, false));
+    final run = body(await call('run_scene', {'id': 'loud'}));
+    expect(run['ok'], isFalse, reason: 'an unapproved scene does not run');
+
+    final waiting = body(await call('list_automations', {'needsYou': true}));
+    expect(
+      [for (final a in (waiting['automations'] as List).cast<Map>()) a['id']],
+      ['focus', 'loud'],
+    );
+    final history = body(
+      await call('device_history', {'deviceId': 'desk_lamp'}),
+    );
+    expect(history['entries'], isEmpty);
+    final templates = body(await call('list_rule_templates'));
+    expect(templates['templates'], hasLength(5));
+  });
+
   test('the packet sniffer sees the engine\'s packets', () async {
     final sniffing = call('sniff_live_packets', {'seconds': 1});
     await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -123,7 +178,7 @@ void _tools({required bool viaHub}) {
     expect((packets.single as Map)['text'], '{"method":"getPilot"}');
   });
 
-  test('lists the twenty-four tools', () async {
+  test('lists the thirty-two tools', () async {
     final tools = (await client.listTools()).tools.map((t) => t.name).toSet();
     expect(tools, {
       'discover_devices_and_capabilities',
@@ -131,6 +186,14 @@ void _tools({required bool viaHub}) {
       'register_custom_driver_manifest',
       'deploy_automation_flow_dag',
       'list_flows',
+      'list_automations',
+      'list_rule_templates',
+      'list_scenes',
+      'save_scene',
+      'run_scene',
+      'list_rooms',
+      'organize_device',
+      'device_history',
       'list_tags',
       'simulate_flow_dry_run',
       'sniff_live_packets',
@@ -561,7 +624,7 @@ void _stdio() {
             .firstWhere((l) => l.contains('"id":2'))
             .timeout(const Duration(seconds: 20)),
       ) as Map;
-      expect(((list['result'] as Map)['tools'] as List), hasLength(24));
+      expect(((list['result'] as Map)['tools'] as List), hasLength(32));
       await process.stdin.close();
       expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
     },

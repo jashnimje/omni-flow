@@ -10,12 +10,14 @@ abstract interface class FlowHost {
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,
-    Map<String, Object?> params,
-  );
+    Map<String, Object?> params, {
+    String? flowId,
+  });
   Future<Map<String, Object?>?> toggleDevice(
     String deviceId,
-    String capabilityId,
-  );
+    String capabilityId, {
+    String? flowId,
+  });
   Future<void> saveGlobal(String name, Object? value);
   Future<void> saveTrace(Map<String, Object?> trace);
   void emit(Map<String, Object?> event);
@@ -166,14 +168,16 @@ class FlowEngine implements FlowEffects {
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,
-    Map<String, Object?> params,
-  ) => _host.invokeDevice(deviceId, capabilityId, params);
+    Map<String, Object?> params, {
+    String? flowId,
+  }) => _host.invokeDevice(deviceId, capabilityId, params, flowId: flowId);
 
   @override
   Future<Map<String, Object?>?> toggleDevice(
     String deviceId,
-    String capabilityId,
-  ) => _host.toggleDevice(deviceId, capabilityId);
+    String capabilityId, {
+    String? flowId,
+  }) => _host.toggleDevice(deviceId, capabilityId, flowId: flowId);
 
   @override
   Future<void> runFlow(String flowId, Map<String, Object?> msg) async {

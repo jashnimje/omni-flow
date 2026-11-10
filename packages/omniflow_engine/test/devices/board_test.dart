@@ -406,6 +406,12 @@ void main() {
         w.split(':').first,
     ];
 
+    test('the boot pins of each board, for a picker to warn before a save', () {
+      expect(bootPinsOf({'board': 'esp32'}), [0, 2, 5, 12, 15]);
+      expect(bootPinsOf({'board': 'esp8266'}), [0, 2, 15]);
+      expect(bootPinsOf({'board': 'host'}), isEmpty);
+    });
+
     test('ESP32 warns on GPIO 0, 2, 5, 12 and 15', () {
       expect(warnedOn('esp32'), ['boot', 'led', 'cs', 'flash', 'tx']);
       expect(

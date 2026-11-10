@@ -23,6 +23,13 @@
          it from the phone's menu, never at launch. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Android 17 asks before an app reaches devices on the local network
+         (shown as nearby devices). Every light, plug, TV and board is there.
+         The app asks on first run and from Settings, Permissions. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- The Fix button of Settings, Running in the background: Android
+         stops apps it optimises for battery, which stops automations. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- No backup: secrets are keystore-bound, so a restored copy on another
          phone cannot be decrypted. -->
     <application
@@ -59,6 +66,21 @@
                 <action android:name="android.nfc.action.NDEF_DISCOVERED"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:scheme="omniflow" android:host="tag" android:pathPrefix="/"/>
+            </intent-filter>
+            <!-- Any other tag (a blank card, a transit card, a tag another
+                 app wrote) also reaches OmniFlow while it is closed, so a
+                 tag the engine knows by its UID works with no link on it.
+                 Android tries NDEF first, then these. -->
+            <intent-filter>
+                <action android:name="android.nfc.action.TECH_DISCOVERED"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.action.TECH_DISCOVERED"
+                android:resource="@xml/nfc_tech_filter" />
+            <intent-filter>
+                <action android:name="android.nfc.action.TAG_DISCOVERED"/>
+                <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
         </activity>
         <!-- flutter_foreground_task's service, which must keep this name. No

@@ -81,7 +81,11 @@ abstract class _RuleCommandBase extends Command<int> {
               'type': 'invalid',
               'message':
                   '${args['id']} is a $source, not a rule. Use '
-                  '${source == 'link' ? 'omni link' : 'omni flow'} for it',
+                  '${switch (source) {
+                    'link' => 'omni link',
+                    'scene' => 'omni scene',
+                    _ => 'omni flow',
+                  }} for it',
             },
           };
         } else if (apiCommand != 'automation.get') {

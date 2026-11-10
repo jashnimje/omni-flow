@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'api_error.dart';
+import 'error_of.dart';
+import 'device_history.dart';
 import '../dag/canonical.dart';
 import '../dag/flow_engine.dart';
 import '../devices/adb/adb_channel.dart';
@@ -91,7 +93,7 @@ class EngineCore {
   /// waits for it instead of closing the database under it.
   void track(Future<void> work) {
     final tracked = work.catchError((Object e) {
-      emit({'event': 'board.error', 'error': '$e'});
+      emit({'event': 'board.error', ...errorFields(e)});
     });
     _pending.add(tracked);
     tracked.whenComplete(() => _pending.remove(tracked));
@@ -144,6 +146,20 @@ class EngineCore {
         : null;
   }
 
+  /// Every device's state changes. The engine feeds it device events.
+  late final history = DeviceHistoryLog(this);
+
+  /// Each room's name by id, so device JSON names the room without a read.
+  final roomNames = <String, String>{};
+
+  Future<void> loadRooms() async {
+    roomNames
+      ..clear()
+      ..addEntries([
+        for (final r in await DriftRoomStore(db).all()) MapEntry(r.id, r.name),
+      ]);
+  }
+
   Map<String, Object?> deviceJson(Device d) {
     final manifest = registry[d.driverId];
     final window = _onlineWindow(manifest);
@@ -151,9 +167,16 @@ class EngineCore {
       'id': d.id,
       'name': d.name,
       'driver': d.driverId,
+      if (manifest != null) 'category': manifest.category,
+      'icon': ?manifest?.icon,
       'host': d.host,
       if (d.port != null) 'port': d.port,
-      if (d.room != null) 'room': d.room,
+      if (d.room != null) ...{
+        'roomId': d.room,
+        'room': roomNames[d.room] ?? d.room,
+      },
+      'favourite': d.favourite,
+      'order': ?d.order,
       if (d.stableId != null) 'stableId': d.stableId,
       'board': isBoardDriver(manifest),
       if (manifest?.pairingSpec case final pairing?)

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omniflow_app/ui/boards/board_page.dart';
 
 import 'fake_engine.dart';
 
@@ -18,151 +19,6 @@ void main() {
       expect(find.byKey(const ValueKey('add-device-empty')), findsOneWidget);
     });
 
-    testWidgets('a scanned device is added with its name and room', (
-      tester,
-    ) async {
-      engine.answers['driver.list'] = {
-        'ok': true,
-        'drivers': [
-          {'id': 'philips_wiz_udp', 'name': 'Philips WiZ'},
-          {'id': 'tuya_plug', 'name': 'Tuya plug'},
-        ],
-      };
-      engine.answers['device.discover'] = {
-        'ok': true,
-        'found': [
-          {
-            'host': '192.168.1.40',
-            'stableId': 'a8bb50000001',
-            'knownAs': 'desk_lamp',
-          },
-          {'host': '192.168.1.41', 'stableId': 'a8bb50aa'},
-        ],
-      };
-      await pumpApp(tester, engine);
-      await openDriverSheet(tester);
-      await tester.tap(find.byKey(const ValueKey('add-driver')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Philips WiZ').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('add-scan')));
-      await tester.pumpAndSettle();
-      expect(engine.callsOf('device.discover').single.$2, {
-        'driver': 'philips_wiz_udp',
-      });
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const ValueKey('found-known-192.168.1.40')),
-            )
-            .data,
-        'Already used by Desk lamp',
-      );
-      await tester.tap(find.byKey(const ValueKey('found-192.168.1.41')));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('add-name')),
-        'Hall lamp',
-      );
-      await tester.enterText(find.byKey(const ValueKey('add-room')), 'Hall');
-      await tester.pump();
-      expect(find.text('Id: hall_lamp'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('add-save')));
-      await tester.pumpAndSettle();
-      expect(engine.callsOf('device.add').single.$2, {
-        'id': 'hall_lamp',
-        'name': 'Hall lamp',
-        'driver': 'philips_wiz_udp',
-        'host': '192.168.1.41',
-        'room': 'Hall',
-        'stableId': 'a8bb50aa',
-      });
-      expect(find.text('Added Hall lamp'), findsOneWidget);
-    });
-
-    testWidgets('a bridge already used by one light is offered for the next', (
-      tester,
-    ) async {
-      engine.answers['driver.list'] = {
-        'ok': true,
-        'drivers': [
-          {
-            'id': 'philips_hue_light',
-            'name': 'Philips Hue light',
-            'pairing': 'hue_bridge',
-            'settings': [
-              {'key': 'lightId', 'label': 'Light number on the bridge'},
-            ],
-          },
-        ],
-      };
-      engine.answers['device.discover'] = {
-        'ok': true,
-        'found': [
-          {
-            'host': '192.168.1.20',
-            'stableId': 'ecb5fafffe000001',
-            'knownAs': 'desk_lamp',
-          },
-        ],
-      };
-      await pumpApp(tester, engine);
-      await openDriverSheet(tester);
-      await tester.tap(find.byKey(const ValueKey('add-driver')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Philips Hue light').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('add-scan')));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('Nothing'), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('found-192.168.1.20')));
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const ValueKey('add-name')))
-            .controller!
-            .text,
-        isEmpty,
-      );
-      await tester.enterText(find.byKey(const ValueKey('add-name')), 'Hall');
-      await tester.enterText(
-        find.byKey(const ValueKey('add-setting-lightId')),
-        '2',
-      );
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('add-save')));
-      await tester.pumpAndSettle();
-      expect(engine.callsOf('device.add').single.$2, {
-        'id': 'hall',
-        'name': 'Hall',
-        'driver': 'philips_hue_light',
-        'host': '192.168.1.20',
-        'stableId': 'ecb5fafffe000001',
-        'settings': {'lightId': '2'},
-      });
-    });
-
-    testWidgets('rename keeps the device and replaces its name and room', (
-      tester,
-    ) async {
-      await pumpApp(tester, engine);
-      await openDeviceMenu(tester, 'desk_lamp', 'Rename or move');
-      await tester.enterText(find.byKey(const ValueKey('edit-name')), 'Lamp');
-      await tester.enterText(find.byKey(const ValueKey('edit-room')), 'Bed');
-      await tester.tap(find.byKey(const ValueKey('edit-save')));
-      await tester.pumpAndSettle();
-      expect(engine.callsOf('device.add').single.$2, {
-        'id': 'desk_lamp',
-        'name': 'Lamp',
-        'driver': 'philips_wiz_udp',
-        'host': '192.168.1.40',
-        'room': 'Bed',
-        'settings': const <String, Object?>{},
-        'replace': true,
-        'provision': false,
-      });
-    });
-
     testWidgets('remove asks first, then removes and reloads', (tester) async {
       await pumpApp(tester, engine);
       final before = engine.callsOf('device.list').length;
@@ -174,7 +30,7 @@ void main() {
       expect(engine.callsOf('device.list').length, before + 1);
     });
 
-    testWidgets('Pins shows for a device the engine marks as a board', (
+    testWidgets('a device the engine marks as a board opens the board page', (
       tester,
     ) async {
       engine.devices = [
@@ -186,17 +42,17 @@ void main() {
         },
       ];
       await pumpApp(tester, engine);
-      await tester.tap(find.byKey(const ValueKey('device-menu-copied')));
-      await tester.pumpAndSettle();
-      expect(find.text('Pins'), findsOneWidget);
+      await openDevicePage(tester, 'copied');
+      expect(find.byType(BoardPage), findsOneWidget);
     });
   });
 
   group('reachability', () {
-    testWidgets('an offline event badges the card until the device is heard', (
+    testWidgets('an offline event shows the help until the device is heard', (
       tester,
     ) async {
       await pumpApp(tester, engine);
+      await openDevicePage(tester, 'desk_lamp');
       expect(find.byKey(const ValueKey('offline-desk_lamp')), findsNothing);
       engine.eventsOut.add({
         'event': 'device.pollFailed',
@@ -226,6 +82,8 @@ void main() {
         {...FakeEngine.lamp(), 'online': false},
       ];
       await pumpApp(tester, engine);
+      expect(find.text('Offline'), findsOneWidget);
+      await openDevicePage(tester, 'desk_lamp');
       expect(find.byKey(const ValueKey('offline-desk_lamp')), findsOneWidget);
     });
 
@@ -234,16 +92,18 @@ void main() {
     ) async {
       engine.devices = [FakeEngine.lamp(state: const {})];
       await pumpApp(tester, engine);
-      expect(find.byType(Switch), findsNothing);
+      await openDevicePage(tester, 'desk_lamp');
+      expect(find.text('Not read yet'), findsOneWidget);
+      expect(find.text('Off'), findsNothing);
       expect(
         tester
-            .widget<Text>(
-              find.byKey(const ValueKey('level-desk_lamp.brightness')),
+            .getSemantics(
+              find.byKey(const ValueKey('slider-desk_lamp.brightness')),
             )
-            .data,
+            .value,
         '-',
       );
-      await tester.tap(find.text('On'));
+      await tester.tap(find.byKey(const ValueKey('device-power-desk_lamp')));
       await tester.pump();
       expect(engine.callsOf('device.invoke').single.$2['params'], {
         'value': true,
@@ -270,21 +130,13 @@ void main() {
         ),
       ];
       await pumpApp(tester, engine);
-      await tester.tap(find.byKey(const ValueKey('color-Red')));
+      await openDevicePage(tester, 'desk_lamp');
+      await tester.tap(find.byKey(const ValueKey('swatch-Red')));
       await tester.pump();
-      expect(engine.callsOf('device.invoke').last.$2['params'], {
-        'r': 255,
-        'g': 0,
-        'b': 0,
-      });
-      await tester.enterText(find.byKey(const ValueKey('color-hex')), 'ff8800');
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('color-send')));
-      await tester.pump();
-      expect(engine.callsOf('device.invoke').last.$2['params'], {
-        'r': 255,
-        'g': 136,
-        'b': 0,
+      expect(engine.callsOf('device.invoke').last.$2, {
+        'id': 'desk_lamp',
+        'capability': 'rgb',
+        'params': {'r': 255, 'g': 107, 'b': 107},
       });
     });
 
@@ -307,6 +159,7 @@ void main() {
         ),
       ];
       await pumpApp(tester, engine);
+      await openDevicePage(tester, 'desk_lamp');
       final send = find.byKey(const ValueKey('params-run-IR'));
       expect(tester.widget<OutlinedButton>(send).onPressed, isNull);
       await tester.enterText(find.byKey(const ValueKey('param-address')), '4');
@@ -340,6 +193,7 @@ void main() {
         ),
       ];
       await pumpApp(tester, engine);
+      await openDevicePage(tester, 'desk_lamp');
       expect(find.text('Scenes'), findsOneWidget);
       expect(find.text('Not supported in the app yet'), findsOneWidget);
     });
@@ -366,10 +220,14 @@ void main() {
         },
       ];
       await pumpApp(tester, engine);
+      await openDevicePage(tester, 'mac');
       expect(find.byKey(const ValueKey('high-risk-mac')), findsOneWidget);
       await tester.tap(find.text('Sleep display'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('192.168.1.20'), findsOneWidget);
+      expect(
+        find.textContaining('This runs a command on 192.168.1.20'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(engine.callsOf('device.invoke'), isEmpty);
@@ -384,33 +242,41 @@ void main() {
     });
 
     testWidgets('the slider announces its value with the unit', (tester) async {
-      await pumpApp(tester, engine);
-      final slider = tester.widget<Slider>(find.byType(Slider));
-      expect(slider.semanticFormatterCallback!(30), '30%');
-    });
-
-    testWidgets('the dashboard meets the tap target and contrast guidelines', (
-      tester,
-    ) async {
       final semantics = tester.ensureSemantics();
-      engine.devices = [
-        FakeEngine.lamp(
-          extra: [
-            {
-              'id': 'say',
-              'type': 'text_command',
-              'label': 'Say',
-              'params': {
-                'value': {'type': 'string'},
-              },
-            },
-          ],
-        ),
-      ];
       await pumpApp(tester, engine);
-      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
-      await expectLater(tester, meetsGuideline(textContrastGuideline));
+      await openDevicePage(tester, 'desk_lamp');
+      final slider = tester.getSemantics(
+        find.byKey(const ValueKey('slider-desk_lamp.brightness')),
+      );
+      expect(slider.value, '30%');
+      expect(slider.label, 'Brightness');
       semantics.dispose();
     });
+
+    testWidgets(
+      'the device page meets the tap target and contrast guidelines',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        engine.devices = [
+          FakeEngine.lamp(
+            extra: [
+              {
+                'id': 'say',
+                'type': 'text_command',
+                'label': 'Say',
+                'params': {
+                  'value': {'type': 'string'},
+                },
+              },
+            ],
+          ),
+        ];
+        await pumpApp(tester, engine);
+        await openDevicePage(tester, 'desk_lamp');
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        semantics.dispose();
+      },
+    );
   });
 }

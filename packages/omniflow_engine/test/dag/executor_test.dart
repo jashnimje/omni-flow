@@ -58,8 +58,9 @@ class FakeEffects implements FlowEffects {
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,
-    Map<String, Object?> params,
-  ) async {
+    Map<String, Object?> params, {
+    String? flowId,
+  }) async {
     if (deviceId == failDevice) throw Exception('$deviceId timed out');
     invoked.add((deviceId, capabilityId, params));
     return {'ok': true};
@@ -68,8 +69,9 @@ class FakeEffects implements FlowEffects {
   @override
   Future<Map<String, Object?>?> toggleDevice(
     String deviceId,
-    String capabilityId,
-  ) async {
+    String capabilityId, {
+    String? flowId,
+  }) async {
     invoked.add((deviceId, capabilityId, const {'toggle': true}));
     return {'ok': true};
   }

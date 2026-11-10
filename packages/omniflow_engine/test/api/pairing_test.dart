@@ -428,6 +428,8 @@ void main() {
     expect(drivers['philips_hue_light']!['pairing'], 'hue_bridge');
     expect(drivers['home_assistant_sensor']!['pairing'], 'secret');
     expect(drivers['omniflow_board']!['board'], isTrue);
+    expect(drivers['place']!['icon'], 'place');
+    expect(drivers['place']!['category'], 'presence');
     expect(drivers['tuya_plug']!['settings'], [
       {'key': 'devId', 'label': 'Device id'},
       {'key': 'localKey', 'label': 'Local key', 'secret': true},

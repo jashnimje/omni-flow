@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
-import '../device_sheets.dart' show confirm;
+import '../design/design.dart';
 import 'tv_controller.dart';
 import 'tv_widgets.dart';
 
@@ -32,6 +32,9 @@ String? fileNameError(String name) {
 
 typedef _Clipboard = ({List<String> paths, bool cut});
 
+/// 4.4 Files: a breadcrumb, folders first, long press to select with the
+/// action bar at the bottom, paste in the folder moved to, and a plus for a
+/// new folder or an upload from the phone.
 class TvFilesTab extends ConsumerStatefulWidget {
   const TvFilesTab({super.key, required this.tv});
 
@@ -41,8 +44,7 @@ class TvFilesTab extends ConsumerStatefulWidget {
   ConsumerState<TvFilesTab> createState() => _TvFilesTabState();
 }
 
-class _TvFilesTabState extends ConsumerState<TvFilesTab>
-    with AutomaticKeepAliveClientMixin {
+class _TvFilesTabState extends ConsumerState<TvFilesTab> {
   var _path = filesRoot;
   List<TvFileEntry>? _entries;
   String? _error;
@@ -51,10 +53,11 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
   _Clipboard? _clipboard;
   var _busy = false;
 
-  TvController get tv => widget.tv;
+  /// Set by Stop after this file: a batch ends once the file in flight is
+  /// done. The engine has no way to stop a file half way.
+  var _stopBatch = false;
 
-  @override
-  bool get wantKeepAlive => true;
+  TvController get tv => widget.tv;
 
   @override
   void initState() {
@@ -104,7 +107,10 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
   ];
 
   Future<T> _working<T>(Future<T> Function() work) async {
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _stopBatch = false;
+    });
     try {
       return await work();
     } finally {
@@ -151,6 +157,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
     await _working(() async {
       var done = 0;
       for (final from in clip.paths) {
+        if (_stopBatch) break;
         if (clip.cut && parentOf(from) == _path) continue;
         if (_path == from || _path.startsWith('$from/')) {
           showMessage('Cannot put ${baseName(from)} inside itself');
@@ -165,6 +172,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
         final result = await tv.transfer(
           clip.cut ? TvCalls.filesMove : TvCalls.filesCopy,
           TvCalls.fromToArgs(tv.id, from, to),
+          name: baseName(from),
         );
         if (result['ok'] != true) break;
         done++;
@@ -190,6 +198,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
                 'undone.'
           : 'They are deleted from the TV. This cannot be undone.',
       action: 'Delete',
+      destructive: true,
     );
     if (!ok) return;
     final result = await _working(
@@ -224,7 +233,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
   Future<void> _newFolder() async {
     final name = await askText(
       context,
-      title: 'New folder in ${baseName(_path)}',
+      title: 'New folder in ${_crumbLabel(_path)}',
       label: 'Folder name',
       action: 'Create',
       validate: fileNameError,
@@ -244,7 +253,12 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
     Json Function({bool overwrite}) args,
     String target,
   ) async {
-    var result = await tv.transfer(command, args(), quiet: true);
+    var result = await tv.transfer(
+      command,
+      args(),
+      quiet: true,
+      name: baseName(target),
+    );
     if (TvCalls.isConflict(result) && mounted) {
       final replace = await confirm(
         context,
@@ -253,9 +267,15 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
             '${baseName(target)} already exists there. Replacing it '
             'cannot be undone.',
         action: 'Replace',
+        destructive: true,
       );
       if (!replace) return false;
-      result = await tv.transfer(command, args(overwrite: true), quiet: true);
+      result = await tv.transfer(
+        command,
+        args(overwrite: true),
+        quiet: true,
+        name: baseName(target),
+      );
     }
     if (result['ok'] != true) showMessage(errorMessage(result));
     return result['ok'] == true;
@@ -276,6 +296,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
     await _working(() async {
       var done = 0;
       for (final f in files) {
+        if (_stopBatch) break;
         final to = joinPath(dir, f.name);
         final ok = await _transferAsking(
           TvCalls.filesDownload,
@@ -299,7 +320,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
         );
       }
     });
-    setState(_selected.clear);
+    if (mounted) setState(_selected.clear);
   }
 
   Future<void> _upload() async {
@@ -310,6 +331,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
       var done = 0;
       try {
         for (final f in picked) {
+          if (_stopBatch) break;
           final to = joinPath(_path, f.name);
           final ok = await _transferAsking(
             TvCalls.filesUpload,
@@ -358,38 +380,29 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
   }
 
   Future<void> _fileSheet(TvFileEntry e) async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(e.name),
-              subtitle: Text(
-                [
-                  formatBytes(e.size),
-                  formatDate(e.modified),
-                ].where((s) => s.isNotEmpty).join('  '),
-              ),
+    final choice = await showOmniSheet<String>(
+      context,
+      builder: (context) => OmniSheet(
+        title: e.name,
+        subtitle: _subtitle(e),
+        children: [
+          for (final (value, icon, label) in [
+            if (!e.isDir)
+              ('download', TvIcons.download, 'Download to the phone'),
+            ('copy', TvIcons.copy, 'Copy'),
+            ('cut', TvIcons.cut, 'Cut'),
+            ('rename', TvIcons.rename, 'Rename'),
+            ('info', OmniIcons.info, 'Details'),
+            ('delete', OmniIcons.delete, 'Delete'),
+          ])
+            OmniListRow(
+              key: ValueKey('file-$value'),
+              icon: icon,
+              title: label,
+              iconForeground: value == 'delete' ? OmniColors.bad : null,
+              onTap: () => Navigator.of(context).pop(value),
             ),
-            const Divider(height: 1),
-            for (final (value, icon, label) in [
-              if (!e.isDir) ('download', Icons.download, 'Download to phone'),
-              ('copy', Icons.copy, 'Copy'),
-              ('cut', Icons.content_cut, 'Cut'),
-              ('rename', Icons.drive_file_rename_outline, 'Rename'),
-              ('info', Icons.info_outline, 'Details'),
-              ('delete', Icons.delete_outline, 'Delete'),
-            ])
-              ListTile(
-                key: ValueKey('file-$value'),
-                leading: Icon(icon),
-                title: Text(label),
-                onTap: () => Navigator.of(context).pop(value),
-              ),
-          ],
-        ),
+        ],
       ),
     );
     if (!mounted) return;
@@ -409,64 +422,183 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
     }
   }
 
+  Future<void> _addSheet() async {
+    final choice = await showOmniSheet<String>(
+      context,
+      builder: (context) => OmniSheet(
+        title: 'Add to ${_crumbLabel(_path)}',
+        children: [
+          OmniListRow(
+            key: const ValueKey('files-new-folder'),
+            icon: TvIcons.newFolder,
+            title: 'New folder',
+            onTap: () => Navigator.of(context).pop('folder'),
+          ),
+          OmniListRow(
+            key: const ValueKey('files-upload'),
+            icon: TvIcons.upload,
+            title: 'Upload from the phone',
+            subtitle: 'Pick files, they land in this folder',
+            onTap: () => Navigator.of(context).pop('upload'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case 'folder':
+        await _newFolder();
+      case 'upload':
+        await _upload();
+    }
+  }
+
   static String _count(int n) => n == 1 ? '1 item' : '$n items';
+
+  static String _subtitle(TvFileEntry e) => [
+    if (e.isDir) 'Folder' else formatBytes(e.size),
+    formatDate(e.modified),
+  ].where((s) => s.isNotEmpty).join(' · ');
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     final selecting = _selected.isNotEmpty;
     final entries = _entries;
-    return Column(
+    return Stack(
       children: [
-        _Breadcrumbs(path: _path, onOpen: _busy ? null : _open),
-        if (selecting) _selectionBar() else _toolbar(),
-        if (_loading || _busy) const LinearProgressIndicator(minHeight: 2),
-        TransferProgress(tv: tv),
-        Expanded(
-          child: _error != null
-              ? TvEmpty(text: _error!, onRetry: _reload)
-              : entries == null
-              ? const Center(child: CircularProgressIndicator())
-              : entries.isEmpty
-              ? const TvEmpty(text: 'This folder is empty')
-              : RefreshIndicator(
-                  onRefresh: _reload,
-                  child: ListView.builder(
-                    key: const ValueKey('files-list'),
-                    itemCount: entries.length,
-                    itemBuilder: (context, i) => _entryTile(entries[i]),
+        RefreshIndicator(
+          onRefresh: _reload,
+          child: ListView(
+            key: const ValueKey('files-list'),
+            padding: EdgeInsets.fromLTRB(14, 0, 14, selecting ? 96 : 24),
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _Breadcrumbs(
+                      path: _path,
+                      onOpen: _busy ? null : _open,
+                    ),
                   ),
+                  OmniIconAction(
+                    key: const ValueKey('files-add'),
+                    icon: OmniIcons.add,
+                    label: 'New folder or upload',
+                    onPressed: _busy ? null : _addSheet,
+                  ),
+                ],
+              ),
+              if (selecting) _selectionHeader(),
+              if (_clipboard case final clip?) _pasteCard(clip),
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: OmniSpace.xs),
+                  child: OmniProgressBar(height: 2, semanticLabel: 'Reading'),
                 ),
+              TransferProgress(
+                tv: tv,
+                onCancel: _busy && !_stopBatch
+                    ? () => setState(() => _stopBatch = true)
+                    : null,
+              ),
+              if (_error != null)
+                TvLoadError(
+                  what: 'This folder',
+                  reason: _error!,
+                  onRetry: _reload,
+                )
+              else if (entries == null)
+                const TvLoading(label: 'Reading the folder')
+              else if (entries.isEmpty)
+                const OmniEmptyState(
+                  icon: TvIcons.folder,
+                  title: 'This folder is empty',
+                  message: 'Use the plus to add a folder or upload a file.',
+                )
+              else
+                for (final e in entries) _entryRow(e),
+            ],
+          ),
         ),
+        if (selecting)
+          Positioned(left: 12, right: 12, bottom: 14, child: _actionBar()),
       ],
     );
   }
 
-  Widget _entryTile(TvFileEntry e) {
+  Widget _selectionHeader() => Row(
+    children: [
+      Expanded(
+        child: Text(
+          '${_selected.length} selected',
+          key: const ValueKey('select-count'),
+          style: OmniText.section,
+        ),
+      ),
+      TextButton(
+        key: const ValueKey('select-all'),
+        onPressed: () => setState(
+          () => _selected.addAll([for (final e in _entries!) e.name]),
+        ),
+        child: const Text('Select all'),
+      ),
+      TextButton(
+        key: const ValueKey('select-clear'),
+        onPressed: () => setState(_selected.clear),
+        child: const Text('Clear'),
+      ),
+    ],
+  );
+
+  Widget _pasteCard(_Clipboard clip) => OmniCard(
+    highlighted: true,
+    title: '${clip.cut ? 'Move' : 'Copy'} ${_count(clip.paths.length)} here',
+    trailing: TextButton(
+      key: const ValueKey('files-paste-cancel'),
+      onPressed: () => setState(() => _clipboard = null),
+      child: const Text('Cancel'),
+    ),
+    child: OmniButton(
+      key: const ValueKey('files-paste'),
+      label: 'Paste in ${_crumbLabel(_path)}',
+      icon: TvIcons.paste,
+      onPressed: _busy ? null : _paste,
+    ),
+  );
+
+  Widget _entryRow(TvFileEntry e) {
     final selected = _selected.contains(e.name);
     final opensAsFolder = e.isDir || e.type == 'link';
-    return ListTile(
+    final icon = switch (e.type) {
+      'dir' => TvIcons.folder,
+      'link' => TvIcons.link,
+      _ => _fileIcon(e.name),
+    };
+    return OmniListRow(
       key: ValueKey('entry-${e.name}'),
-      selected: selected,
-      leading: selected
-          ? const Icon(Icons.check_circle)
-          : Icon(switch (e.type) {
-              'dir' => Icons.folder,
-              'link' => Icons.link,
-              _ => _fileIcon(e.name),
-            }),
-      title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        [
-          if (!e.isDir) formatBytes(e.size),
-          formatDate(e.modified),
-        ].where((s) => s.isNotEmpty).join('  '),
-      ),
+      leading: _selected.isEmpty
+          ? null
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  selected ? TvIcons.checked : TvIcons.unchecked,
+                  color: selected ? OmniColors.accent : OmniColors.muted,
+                  fill: selected ? 1 : 0,
+                  semanticLabel: selected ? 'Selected' : 'Not selected',
+                ),
+                const SizedBox(width: OmniSpace.sm),
+                OmniIconBox(icon: icon),
+              ],
+            ),
+      icon: icon,
+      title: e.name,
+      subtitle: _subtitle(e),
       trailing: _selected.isEmpty
-          ? IconButton(
+          ? OmniIconAction(
               key: ValueKey('entry-menu-${e.name}'),
-              tooltip: 'More for ${e.name}',
-              icon: const Icon(Icons.more_vert),
+              icon: OmniIcons.more,
+              label: 'More for ${e.name}',
               onPressed: _busy ? null : () => _fileSheet(e),
             )
           : null,
@@ -490,117 +622,118 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab>
         ? name.substring(name.lastIndexOf('.') + 1).toLowerCase()
         : '';
     return switch (ext) {
-      'apk' => Icons.android,
-      'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' => Icons.image_outlined,
-      'mp4' || 'mkv' || 'avi' || 'mov' || 'webm' => Icons.movie_outlined,
-      'mp3' || 'aac' || 'flac' || 'wav' || 'ogg' => Icons.audiotrack_outlined,
-      'zip' || 'tar' || 'gz' || '7z' => Icons.archive_outlined,
-      'txt' || 'log' || 'json' || 'xml' => Icons.description_outlined,
-      _ => Icons.insert_drive_file_outlined,
+      'apk' => TvIcons.apk,
+      'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' => TvIcons.image,
+      'mp4' || 'mkv' || 'avi' || 'mov' || 'webm' => TvIcons.video,
+      'mp3' || 'aac' || 'flac' || 'wav' || 'ogg' => TvIcons.audio,
+      'zip' || 'tar' || 'gz' || '7z' => TvIcons.archive,
+      'txt' || 'log' || 'json' || 'xml' => TvIcons.text,
+      _ => TvIcons.file,
     };
   }
 
-  Widget _toolbar() => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 4),
-    child: Row(
-      children: [
-        IconButton(
-          key: const ValueKey('files-up'),
-          tooltip: 'Up one folder',
-          onPressed: _path == '/' || _busy
-              ? null
-              : () => _open(parentOf(_path)),
-          icon: const Icon(Icons.arrow_upward),
-        ),
-        IconButton(
-          key: const ValueKey('files-refresh'),
-          tooltip: 'Refresh',
-          onPressed: _busy ? null : _reload,
-          icon: const Icon(Icons.refresh),
-        ),
-        const Spacer(),
-        if (_clipboard case final clip?)
-          TextButton.icon(
-            key: const ValueKey('files-paste'),
-            onPressed: _busy ? null : _paste,
-            onLongPress: () => setState(() => _clipboard = null),
-            icon: const Icon(Icons.content_paste),
-            label: Text('Paste ${clip.paths.length}'),
-          ),
-        IconButton(
-          key: const ValueKey('files-new-folder'),
-          tooltip: 'New folder',
-          onPressed: _busy ? null : _newFolder,
-          icon: const Icon(Icons.create_new_folder_outlined),
-        ),
-        IconButton(
-          key: const ValueKey('files-upload'),
-          tooltip: 'Upload from the phone',
-          onPressed: _busy ? null : _upload,
-          icon: const Icon(Icons.upload),
-        ),
-      ],
-    ),
-  );
-
-  Widget _selectionBar() {
+  /// The bar of the mockup: copy, cut, download, rename and delete for what
+  /// is selected.
+  Widget _actionBar() {
     final chosen = _selectedEntries;
+    Widget action(
+      String key,
+      IconData icon,
+      String label,
+      VoidCallback? onTap, {
+      bool danger = false,
+    }) {
+      final color = onTap == null
+          ? OmniColors.muted
+          : danger
+          ? OmniColors.bad
+          : OmniColors.text;
+      return Expanded(
+        child: Semantics(
+          button: true,
+          enabled: onTap != null,
+          label: label,
+          excludeSemantics: true,
+          onTap: onTap,
+          child: InkWell(
+            key: ValueKey('select-$key'),
+            borderRadius: BorderRadius.circular(OmniRadii.button),
+            onTap: onTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: OmniSpace.target + 4,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 20, color: color),
+                  const SizedBox(height: 2),
+                  Text(label, style: TextStyle(fontSize: 11, color: color)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Material(
-      color: Theme.of(context).colorScheme.secondaryContainer,
-      child: Row(
-        children: [
-          IconButton(
-            key: const ValueKey('select-clear'),
-            tooltip: 'Clear the selection',
-            onPressed: () => setState(_selected.clear),
-            icon: const Icon(Icons.close),
-          ),
-          Text('${chosen.length}', key: const ValueKey('select-count')),
-          const Spacer(),
-          IconButton(
-            key: const ValueKey('select-all'),
-            tooltip: 'Select all',
-            onPressed: () => setState(
-              () => _selected.addAll([for (final e in _entries!) e.name]),
+      key: const ValueKey('select-bar'),
+      color: OmniColors.sheet,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: OmniColors.line),
+      ),
+      elevation: 6,
+      child: Padding(
+        padding: const EdgeInsets.all(OmniSpace.xs),
+        child: Row(
+          children: [
+            action(
+              'copy',
+              TvIcons.copy,
+              'Copy',
+              _busy ? null : () => _copy(chosen, cut: false),
             ),
-            icon: const Icon(Icons.select_all),
-          ),
-          IconButton(
-            key: const ValueKey('select-copy'),
-            tooltip: 'Copy',
-            onPressed: () => _copy(chosen, cut: false),
-            icon: const Icon(Icons.copy),
-          ),
-          IconButton(
-            key: const ValueKey('select-cut'),
-            tooltip: 'Cut',
-            onPressed: () => _copy(chosen, cut: true),
-            icon: const Icon(Icons.content_cut),
-          ),
-          IconButton(
-            key: const ValueKey('select-download'),
-            tooltip: 'Download to the phone',
-            onPressed: _busy ? null : () => _download(chosen),
-            icon: const Icon(Icons.download),
-          ),
-          if (chosen.length == 1)
-            IconButton(
-              key: const ValueKey('select-rename'),
-              tooltip: 'Rename',
-              onPressed: _busy ? null : () => _rename(chosen.single),
-              icon: const Icon(Icons.drive_file_rename_outline),
+            action(
+              'cut',
+              TvIcons.cut,
+              'Cut',
+              _busy ? null : () => _copy(chosen, cut: true),
             ),
-          IconButton(
-            key: const ValueKey('select-delete'),
-            tooltip: 'Delete',
-            onPressed: _busy ? null : () => _delete(chosen),
-            icon: const Icon(Icons.delete_outline),
-          ),
-        ],
+            action(
+              'download',
+              TvIcons.download,
+              'Download',
+              _busy ? null : () => _download(chosen),
+            ),
+            action(
+              'rename',
+              TvIcons.rename,
+              'Rename',
+              _busy || chosen.length != 1 ? null : () => _rename(chosen.single),
+            ),
+            action(
+              'delete',
+              OmniIcons.delete,
+              'Delete',
+              _busy ? null : () => _delete(chosen),
+              danger: true,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+
+/// What a folder is called in the breadcrumb: the shared storage reads
+/// "Storage", the TV's root "TV".
+String _crumbLabel(String path) => switch (path) {
+  '/' => 'TV',
+  filesRoot => 'Storage',
+  _ => baseName(path),
+};
 
 class _Breadcrumbs extends StatelessWidget {
   const _Breadcrumbs({required this.path, required this.onOpen});
@@ -610,40 +743,74 @@ class _Breadcrumbs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final parts = path.split('/').where((p) => p.isNotEmpty).toList();
-    final crumbs = <(String, String)>[('/', '/')];
-    for (var i = 0; i < parts.length; i++) {
-      crumbs.add((parts[i], '/${parts.sublist(0, i + 1).join('/')}'));
+    final crumbs = <String>['/'];
+    if (path == filesRoot || path.startsWith('$filesRoot/')) {
+      crumbs.add(filesRoot);
+      final rest = path.substring(filesRoot.length).split('/');
+      var at = filesRoot;
+      for (final p in rest.where((p) => p.isNotEmpty)) {
+        at = joinPath(at, p);
+        crumbs.add(at);
+      }
+    } else {
+      var at = '';
+      for (final p in path.split('/').where((p) => p.isNotEmpty)) {
+        at = '$at/$p';
+        crumbs.add(at);
+      }
     }
+    // Reversed so a deep path keeps its last folder in view, and shrink
+    // wrapped so a short one still starts at the left.
     return SizedBox(
-      height: 44,
-      child: ListView(
-        key: const ValueKey('breadcrumbs'),
-        scrollDirection: Axis.horizontal,
-        reverse: true,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        children: [
-          for (final (i, (label, target)) in crumbs.indexed.toList().reversed)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (i > 0) const Icon(Icons.chevron_right, size: 18),
-                TextButton(
-                  key: ValueKey('crumb-$target'),
-                  onPressed: onOpen == null || i == crumbs.length - 1
-                      ? null
-                      : () => onOpen!(target),
-                  child: i == 0
-                      ? const Icon(
-                          Icons.storage,
-                          size: 18,
-                          semanticLabel: 'Root',
-                        )
-                      : Text(label),
-                ),
-              ],
-            ),
-        ],
+      height: OmniSpace.target,
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: ListView(
+          key: const ValueKey('breadcrumbs'),
+          scrollDirection: Axis.horizontal,
+          reverse: true,
+          shrinkWrap: true,
+          children: [
+            for (final (i, target) in crumbs.indexed.toList().reversed)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (i > 0)
+                    const Icon(
+                      OmniIcons.chevron,
+                      size: 16,
+                      color: OmniColors.muted,
+                    ),
+                  TextButton(
+                    key: ValueKey('crumb-$target'),
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(
+                        OmniSpace.target,
+                        OmniSpace.target,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      foregroundColor: i == crumbs.length - 1
+                          ? OmniColors.text
+                          : OmniColors.muted,
+                      disabledForegroundColor: i == crumbs.length - 1
+                          ? OmniColors.text
+                          : OmniColors.muted,
+                      textStyle: TextStyle(
+                        fontSize: 12,
+                        fontWeight: i == crumbs.length - 1
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
+                    ),
+                    onPressed: onOpen == null || i == crumbs.length - 1
+                        ? null
+                        : () => onOpen!(target),
+                    child: Text(_crumbLabel(target)),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }

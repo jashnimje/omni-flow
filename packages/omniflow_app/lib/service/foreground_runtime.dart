@@ -129,6 +129,13 @@ class ForegroundServiceControl implements ServiceControl {
   }
 
   static void _check(ServiceRequestResult result) {
+    // The service from before a reinstall can come back between the
+    // running check and this start. It is the service wanted, so connect.
+    if (result case ServiceRequestFailure(
+      error: ServiceAlreadyStartedException(),
+    )) {
+      return;
+    }
     if (result case ServiceRequestFailure(:final error)) {
       throw StateError('The background service did not start: $error');
     }

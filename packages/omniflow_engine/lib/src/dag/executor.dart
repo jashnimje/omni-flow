@@ -3,6 +3,7 @@ import 'dart:async';
 import '../template/template_renderer.dart';
 import 'canonical.dart';
 import 'conditions.dart';
+import 'error_text.dart';
 import 'flow.dart';
 import 'flow_engine.dart' show payloadMatches, stateTriggerFires;
 import 'node_types.dart';
@@ -77,17 +78,20 @@ class CancelToken {
 
 /// What actions do outside the executor. The engine supplies the real ones.
 abstract interface class FlowEffects {
+  /// Runs a capability for the flow [flowId].
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,
-    Map<String, Object?> params,
-  );
+    Map<String, Object?> params, {
+    String? flowId,
+  });
 
   /// Sets a toggle capability to the opposite of the device's current state.
   Future<Map<String, Object?>?> toggleDevice(
     String deviceId,
-    String capabilityId,
-  );
+    String capabilityId, {
+    String? flowId,
+  });
   Future<void> runFlow(String flowId, Map<String, Object?> msg);
   void announce(Map<String, Object?> payload);
   Future<void> setGlobal(String name, Object? value);
@@ -344,6 +348,9 @@ class FlowRunner {
     run.trace.nodes.add(trace);
     final watch = Stopwatch()..start();
     String? port;
+    // A failed step of a flow that carries on after errors records the
+    // failure and goes on through `out`.
+    String? follow;
     var out = msg;
     try {
       switch (type.category) {
@@ -381,6 +388,7 @@ class FlowRunner {
             out = {...msg, 'error': _message(e)};
             if (flow.edgesFrom(node.id, 'error').isEmpty) {
               trace.error = _message(e);
+              if (flow.continueOnError) follow = 'out';
             }
           }
       }
@@ -395,7 +403,8 @@ class FlowRunner {
       trace.port = port;
       trace.output = port == null ? null : out;
     }
-    if (port != null) await _follow(run, node.id, port, out, clock);
+    final next = follow ?? port;
+    if (next != null) await _follow(run, node.id, next, out, clock);
   }
 
   Future<String?> _gate(_Run run, NodeSpec node, FlowClock clock) async {
@@ -593,6 +602,7 @@ class FlowRunner {
           c['deviceId'] as String,
           c['capabilityId'] as String,
           params,
+          flowId: flow.id,
         );
         return {...msg, 'result': reply};
       case 'device_toggle':
@@ -610,6 +620,7 @@ class FlowRunner {
         final toggled = await _effects.toggleDevice(
           c['deviceId'] as String,
           c['capabilityId'] as String,
+          flowId: flow.id,
         );
         return {...msg, 'result': toggled};
       case 'set_variable':
@@ -654,8 +665,6 @@ class FlowRunner {
         deviceStates: _effects.deviceStates,
       );
 
-  static String _message(Object e) {
-    final text = e.toString();
-    return text.startsWith('Exception: ') ? text.substring(11) : text;
-  }
+  static String _message(Object e) =>
+      withoutTypeName(e is ArgumentError ? '${e.message}' : '$e');
 }

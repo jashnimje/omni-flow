@@ -9,107 +9,63 @@ void main() {
 
   setUp(() => engine = tvEngine());
 
-  group('the TV card', () {
-    testWidgets('a TV gets the compact card, not one control per capability', (
-      tester,
-    ) async {
-      await pumpTv(tester, engine);
-      expect(find.byKey(const ValueKey('tv-open-$tvId')), findsOneWidget);
-      expect(find.byKey(const ValueKey('$tvId.remote')), findsNothing);
-      expect(find.byKey(const ValueKey('$tvId.wake')), findsNothing);
-      expect(
-        tester
-            .widget<Text>(find.byKey(const ValueKey('tv-card-now-$tvId')))
-            .data,
-        'com.netflix.ninja  Playing',
-      );
-      expect(find.byKey(const ValueKey('desk_lamp.power')), findsOneWidget);
-      expect(find.byKey(const ValueKey('device-menu-$tvId')), findsOneWidget);
-    });
+  Finder remoteScroll() => find
+      .descendant(
+        of: find.byKey(const ValueKey('tv-remote')),
+        matching: find.byType(Scrollable),
+      )
+      .first;
 
-    testWidgets('high-risk TV capabilities do not say they run host commands', (
-      tester,
-    ) async {
-      final tv = tvDevice();
-      tv['capabilities'] = [
-        ...(tv['capabilities'] as List),
-        {
-          'id': 'set_setting',
-          'type': 'action',
-          'label': 'Set a setting',
-          'highRisk': true,
-          'params': {},
-        },
-      ];
-      engine.devices = [tv, FakeEngine.lamp()];
-      await pumpTv(tester, engine);
-      expect(find.byKey(const ValueKey('tv-open-$tvId')), findsOneWidget);
-      expect(find.byKey(const ValueKey('high-risk-$tvId')), findsNothing);
-    });
-
-    testWidgets('power sleeps a TV that is on, and the slider sets volume', (
-      tester,
-    ) async {
-      await pumpTv(tester, engine);
-      await tester.tap(find.byKey(const ValueKey('tv-card-power-$tvId')));
-      await tester.pumpAndSettle();
-      expect(argsOf(engine, 'tv.key').single, {'id': tvId, 'keycode': 223});
-      await tester.tap(find.byKey(const ValueKey('tv-card-volume-$tvId')));
-      await tester.pumpAndSettle();
-      final level = argsOf(engine, 'tv.volume').single['level'] as int;
-      expect(level, inInclusiveRange(40, 60));
-    });
-
-    testWidgets('a sleeping TV offers wake', (tester) async {
-      engine.devices = [
-        tvDevice(state: const {'power': 'asleep'}),
-      ];
-      await pumpTv(tester, engine);
-      expect(find.text('Asleep'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('tv-card-power-$tvId')));
-      await tester.pumpAndSettle();
-      expect(argsOf(engine, 'tv.key').single, {'id': tvId, 'keycode': 224});
-    });
-  });
+  bool volumeShows(String value) => find
+      .descendant(
+        of: find.byKey(const ValueKey('tv-volume')),
+        matching: find.text(value),
+      )
+      .evaluate()
+      .isNotEmpty;
 
   group('the live header', () {
-    testWidgets('shows power, the app in front, playback and volume', (
+    testWidgets('names the app in front, its playback and the volume', (
       tester,
     ) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       expect(argsOf(engine, 'tv.state').first, {'id': tvId});
       expect(
-        tester.widget<Text>(find.byKey(const ValueKey('tv-power-state'))).data,
-        'On',
-      );
-      expect(
         tester.widget<Text>(find.byKey(const ValueKey('tv-app'))).data,
-        'com.netflix.ninja',
+        'Netflix',
       );
-      expect(find.text('Paused'), findsOneWidget);
       expect(
-        tester.widget<Text>(find.byKey(const ValueKey('tv-volume-value'))).data,
-        '30',
+        tester.widget<Text>(find.byKey(const ValueKey('tv-playing'))).data,
+        ' · paused',
       );
+      expect(volumeShows('30'), isTrue);
+      expect(find.byKey(const ValueKey('tv-power-state')), findsNothing);
+    });
+
+    testWidgets('a sleeping TV says so in place of the app', (tester) async {
+      engine.answers['tv.state'] = {'ok': true, 'power': 'asleep'};
+      await pumpTv(tester, engine);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('tv-power-state'))).data,
+        'Asleep',
+      );
+      await tester.tap(find.byKey(const ValueKey('tv-header-power')));
+      await tester.pumpAndSettle();
+      expect(argsOf(engine, 'tv.key').single, {'id': tvId, 'keycode': 224});
     });
 
     testWidgets('mute sends the catalog key and the slider the level', (
       tester,
     ) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       await tester.tap(find.byKey(const ValueKey('tv-mute')));
       await tester.pumpAndSettle();
       expect(argsOf(engine, 'tv.key').single, {'id': tvId, 'key': 'mute'});
       await tester.tap(find.byKey(const ValueKey('tv-volume')));
       await tester.pumpAndSettle();
-      final level = argsOf(engine, 'tv.volume').single['level'] as int;
+      final level = argsOf(engine, 'tv.volume').last['level'] as int;
       expect(level, inInclusiveRange(40, 60));
-      expect(
-        tester.widget<Text>(find.byKey(const ValueKey('tv-volume-value'))).data,
-        '$level',
-      );
+      expect(volumeShows('$level'), isTrue);
     });
 
     testWidgets('an unreachable TV shows why, and retry reads it again', (
@@ -123,10 +79,9 @@ void main() {
         },
       };
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       expect(find.byKey(const ValueKey('tv-offline')), findsOneWidget);
       expect(
-        find.textContaining('no answer from 192.168.1.60'),
+        find.textContaining('No answer from 192.168.1.60'),
         findsOneWidget,
       );
       final before = engine.callsOf('tv.state').length;
@@ -141,19 +96,17 @@ void main() {
       tester,
     ) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       engine.eventsOut.add({
         'event': 'device.pollFailed',
         'device': tvId,
         'error': 'connection refused',
       });
       await tester.pumpAndSettle();
-      expect(find.textContaining('connection refused'), findsWidgets);
+      expect(find.textContaining('onnection refused'), findsWidgets);
     });
 
     testWidgets('a stateChanged event updates the header', (tester) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       engine.eventsOut.add({
         'event': 'device.stateChanged',
         'device': {
@@ -164,12 +117,18 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.widget<Text>(find.byKey(const ValueKey('tv-app'))).data,
-        'com.sonyliv',
+        'Sonyliv',
       );
-      expect(
-        tester.widget<Text>(find.byKey(const ValueKey('tv-volume-value'))).data,
-        '12',
-      );
+      expect(volumeShows('12'), isTrue);
+    });
+
+    testWidgets('the header stays on every tab', (tester) async {
+      await pumpTv(tester, engine);
+      for (final tab in ['Apps', 'Settings', 'Files', 'Console']) {
+        await openTvTab(tester, tab);
+        expect(find.byKey(const ValueKey('tv-volume')), findsOneWidget);
+        expect(find.byKey(const ValueKey('tv-header-power')), findsOneWidget);
+      }
     });
   });
 
@@ -178,11 +137,17 @@ void main() {
       tester,
     ) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       await tester.tap(find.byKey(const ValueKey('key-23')));
-      await tester.tap(find.byKey(const ValueKey('key-244')));
-      await tester.tap(find.byKey(const ValueKey('key-245')));
       await tester.pumpAndSettle();
+      for (final code in [244, 245]) {
+        await tester.scrollUntilVisible(
+          find.byKey(ValueKey('key-$code')),
+          200,
+          scrollable: remoteScroll(),
+        );
+        await tester.tap(find.byKey(ValueKey('key-$code')));
+        await tester.pumpAndSettle();
+      }
       expect(argsOf(engine, 'tv.key'), [
         {'id': tvId, 'key': 'ok'},
         {'id': tvId, 'key': 'hdmi_2'},
@@ -190,87 +155,108 @@ void main() {
       ]);
     });
 
+    testWidgets('the top row, the D-pad, then back, menu, info, volume and '
+        'media come first', (tester) async {
+      await pumpTv(tester, engine);
+      double top(int code) =>
+          tester.getTopLeft(find.byKey(ValueKey('key-$code'))).dy;
+      double left(int code) =>
+          tester.getTopLeft(find.byKey(ValueKey('key-$code'))).dx;
+      final topRow = [26, 178, 3, 219];
+      for (final code in topRow.skip(1)) {
+        expect(top(code), top(26));
+      }
+      expect([
+        for (final c in topRow) left(c),
+      ], orderedEquals([for (final c in topRow) left(c)]..sort()));
+      expect(top(19), greaterThan(top(26)));
+      expect(top(23), greaterThan(top(19)));
+      expect(top(20), greaterThan(top(23)));
+      for (final (row, codes) in [
+        (0, [4, 82, 165]),
+        (1, [25, 164, 24]),
+        (2, [88, 85, 87]),
+      ]) {
+        for (final code in codes) {
+          expect(top(code), top(codes.first), reason: 'row $row');
+        }
+        expect(top(codes.first), greaterThan(top(20)));
+      }
+      expect(top(25), greaterThan(top(4)));
+      expect(top(88), greaterThan(top(25)));
+    });
+
     testWidgets('every part of the layout is there', (tester) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       for (final code in [
         26,
-        223,
-        224,
         178,
-        243,
-        246,
-        4,
         3,
-        82,
+        219,
         19,
         20,
         21,
         22,
         23,
-        176,
-        219,
-        24,
+        4,
+        82,
+        165,
         25,
         164,
+        24,
+        88,
+        85,
+        87,
+        8,
+        16,
+        7,
+        67,
+        66,
+        183,
+        184,
+        185,
+        186,
         166,
         167,
+        229,
+        243,
+        246,
         172,
-        165,
         175,
-        85,
+        176,
+        223,
+        224,
+        84,
+        187,
         89,
+        86,
         90,
-        7,
-        16,
-        183,
-        186,
       ]) {
         await tester.scrollUntilVisible(
           find.byKey(ValueKey('key-$code')),
           200,
-          scrollable: find
-              .descendant(
-                of: find.byKey(const ValueKey('tv-remote')),
-                matching: find.byType(Scrollable),
-              )
-              .first,
+          scrollable: remoteScroll(),
         );
         expect(find.byKey(ValueKey('key-$code')), findsOneWidget);
       }
     });
 
-    testWidgets('long press holds the key, and so does the Long press mode', (
-      tester,
-    ) async {
+    testWidgets('a long press on a key sends a long press', (tester) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       await tester.longPress(find.byKey(const ValueKey('key-3')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('long-press')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('key-19')));
       await tester.pumpAndSettle();
       expect(argsOf(engine, 'tv.key'), [
         {'id': tvId, 'key': 'home', 'longPress': true},
-        {'id': tvId, 'key': 'up', 'longPress': true},
+        {'id': tvId, 'key': 'up'},
       ]);
     });
 
     testWidgets('the text box types on the TV and clears', (tester) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       final box = find.byKey(const ValueKey('tv-text'));
-      await tester.scrollUntilVisible(
-        box,
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const ValueKey('tv-remote')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
+      await tester.scrollUntilVisible(box, 200, scrollable: remoteScroll());
       await tester.enterText(box, 'stranger things');
       await tester.tap(find.byKey(const ValueKey('tv-text-send')));
       await tester.pumpAndSettle();
@@ -285,18 +271,8 @@ void main() {
       tester,
     ) async {
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       final zoom = find.byKey(const ValueKey('catalog-zoom'));
-      await tester.scrollUntilVisible(
-        zoom,
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const ValueKey('tv-remote')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
+      await tester.scrollUntilVisible(zoom, 200, scrollable: remoteScroll());
       expect(find.text('More system keys'), findsOneWidget);
       expect(find.byKey(const ValueKey('catalog-ok')), findsNothing);
       await tester.tap(zoom);
@@ -310,10 +286,20 @@ void main() {
         'error': {'type': 'unavailable', 'message': 'the TV is off'},
       };
       await pumpTv(tester, engine);
-      await openTvTab(tester, 'Remote');
       await tester.tap(find.byKey(const ValueKey('key-23')));
       await tester.pumpAndSettle();
-      expect(find.text('the TV is off'), findsOneWidget);
+      expect(find.text('The TV is off.'), findsOneWidget);
+    });
+
+    testWidgets('meets the tap target, label and contrast guidelines', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpTv(tester, engine);
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+      handle.dispose();
     });
   });
 }

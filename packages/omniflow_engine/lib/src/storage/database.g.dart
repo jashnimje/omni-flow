@@ -379,6 +379,32 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _favouriteMeta = const VerificationMeta(
+    'favourite',
+  );
+  @override
+  late final GeneratedColumn<bool> favourite = GeneratedColumn<bool>(
+    'favourite',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("favourite" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -391,6 +417,8 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
     settingsJson,
     stateJson,
     lastSeen,
+    favourite,
+    position,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -472,6 +500,18 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
         lastSeen.isAcceptableOrUnknown(data['last_seen']!, _lastSeenMeta),
       );
     }
+    if (data.containsKey('favourite')) {
+      context.handle(
+        _favouriteMeta,
+        favourite.isAcceptableOrUnknown(data['favourite']!, _favouriteMeta),
+      );
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
+    }
     return context;
   }
 
@@ -521,6 +561,14 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}last_seen'],
       ),
+      favourite: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}favourite'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
+      ),
     );
   }
 
@@ -543,6 +591,10 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
   final String settingsJson;
   final String stateJson;
   final DateTime? lastSeen;
+  final bool favourite;
+
+  /// The device's place among its room's devices, lowest first.
+  final int? position;
   const DeviceRow({
     required this.id,
     required this.name,
@@ -554,6 +606,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     required this.settingsJson,
     required this.stateJson,
     this.lastSeen,
+    required this.favourite,
+    this.position,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -576,6 +630,10 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     if (!nullToAbsent || lastSeen != null) {
       map['last_seen'] = Variable<DateTime>(lastSeen);
     }
+    map['favourite'] = Variable<bool>(favourite);
+    if (!nullToAbsent || position != null) {
+      map['position'] = Variable<int>(position);
+    }
     return map;
   }
 
@@ -595,6 +653,10 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       lastSeen: lastSeen == null && nullToAbsent
           ? const Value.absent()
           : Value(lastSeen),
+      favourite: Value(favourite),
+      position: position == null && nullToAbsent
+          ? const Value.absent()
+          : Value(position),
     );
   }
 
@@ -614,6 +676,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       settingsJson: serializer.fromJson<String>(json['settingsJson']),
       stateJson: serializer.fromJson<String>(json['stateJson']),
       lastSeen: serializer.fromJson<DateTime?>(json['lastSeen']),
+      favourite: serializer.fromJson<bool>(json['favourite']),
+      position: serializer.fromJson<int?>(json['position']),
     );
   }
   @override
@@ -630,6 +694,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       'settingsJson': serializer.toJson<String>(settingsJson),
       'stateJson': serializer.toJson<String>(stateJson),
       'lastSeen': serializer.toJson<DateTime?>(lastSeen),
+      'favourite': serializer.toJson<bool>(favourite),
+      'position': serializer.toJson<int?>(position),
     };
   }
 
@@ -644,6 +710,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     String? settingsJson,
     String? stateJson,
     Value<DateTime?> lastSeen = const Value.absent(),
+    bool? favourite,
+    Value<int?> position = const Value.absent(),
   }) => DeviceRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -655,6 +723,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     settingsJson: settingsJson ?? this.settingsJson,
     stateJson: stateJson ?? this.stateJson,
     lastSeen: lastSeen.present ? lastSeen.value : this.lastSeen,
+    favourite: favourite ?? this.favourite,
+    position: position.present ? position.value : this.position,
   );
   DeviceRow copyWithCompanion(DevicesCompanion data) {
     return DeviceRow(
@@ -670,6 +740,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
           : this.settingsJson,
       stateJson: data.stateJson.present ? data.stateJson.value : this.stateJson,
       lastSeen: data.lastSeen.present ? data.lastSeen.value : this.lastSeen,
+      favourite: data.favourite.present ? data.favourite.value : this.favourite,
+      position: data.position.present ? data.position.value : this.position,
     );
   }
 
@@ -685,7 +757,9 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
           ..write('stableId: $stableId, ')
           ..write('settingsJson: $settingsJson, ')
           ..write('stateJson: $stateJson, ')
-          ..write('lastSeen: $lastSeen')
+          ..write('lastSeen: $lastSeen, ')
+          ..write('favourite: $favourite, ')
+          ..write('position: $position')
           ..write(')'))
         .toString();
   }
@@ -702,6 +776,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     settingsJson,
     stateJson,
     lastSeen,
+    favourite,
+    position,
   );
   @override
   bool operator ==(Object other) =>
@@ -716,7 +792,9 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
           other.stableId == this.stableId &&
           other.settingsJson == this.settingsJson &&
           other.stateJson == this.stateJson &&
-          other.lastSeen == this.lastSeen);
+          other.lastSeen == this.lastSeen &&
+          other.favourite == this.favourite &&
+          other.position == this.position);
 }
 
 class DevicesCompanion extends UpdateCompanion<DeviceRow> {
@@ -730,6 +808,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
   final Value<String> settingsJson;
   final Value<String> stateJson;
   final Value<DateTime?> lastSeen;
+  final Value<bool> favourite;
+  final Value<int?> position;
   final Value<int> rowid;
   const DevicesCompanion({
     this.id = const Value.absent(),
@@ -742,6 +822,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     this.settingsJson = const Value.absent(),
     this.stateJson = const Value.absent(),
     this.lastSeen = const Value.absent(),
+    this.favourite = const Value.absent(),
+    this.position = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DevicesCompanion.insert({
@@ -755,6 +837,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     this.settingsJson = const Value.absent(),
     this.stateJson = const Value.absent(),
     this.lastSeen = const Value.absent(),
+    this.favourite = const Value.absent(),
+    this.position = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -771,6 +855,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     Expression<String>? settingsJson,
     Expression<String>? stateJson,
     Expression<DateTime>? lastSeen,
+    Expression<bool>? favourite,
+    Expression<int>? position,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -784,6 +870,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
       if (settingsJson != null) 'settings_json': settingsJson,
       if (stateJson != null) 'state_json': stateJson,
       if (lastSeen != null) 'last_seen': lastSeen,
+      if (favourite != null) 'favourite': favourite,
+      if (position != null) 'position': position,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -799,6 +887,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     Value<String>? settingsJson,
     Value<String>? stateJson,
     Value<DateTime?>? lastSeen,
+    Value<bool>? favourite,
+    Value<int?>? position,
     Value<int>? rowid,
   }) {
     return DevicesCompanion(
@@ -812,6 +902,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
       settingsJson: settingsJson ?? this.settingsJson,
       stateJson: stateJson ?? this.stateJson,
       lastSeen: lastSeen ?? this.lastSeen,
+      favourite: favourite ?? this.favourite,
+      position: position ?? this.position,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -849,6 +941,12 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     if (lastSeen.present) {
       map['last_seen'] = Variable<DateTime>(lastSeen.value);
     }
+    if (favourite.present) {
+      map['favourite'] = Variable<bool>(favourite.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -868,6 +966,8 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
           ..write('settingsJson: $settingsJson, ')
           ..write('stateJson: $stateJson, ')
           ..write('lastSeen: $lastSeen, ')
+          ..write('favourite: $favourite, ')
+          ..write('position: $position, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1113,7 +1213,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
   /// later rise in its risk does not revoke the approval.
   final bool trusted;
 
-  /// The form the automation was written in: `link`, `rule` or `graph`,
+  /// The form the automation was written in: `link`, `rule`, `graph` or `scene`,
   /// so each surface reopens it as it was written.
   final String source;
 
@@ -2536,6 +2636,653 @@ class BoardDescribesCompanion extends UpdateCompanion<BoardDescribeRow> {
   }
 }
 
+class $RoomsTable extends Rooms with TableInfo<$RoomsTable, RoomRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $RoomsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, position];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'rooms';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<RoomRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  RoomRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return RoomRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
+      )!,
+    );
+  }
+
+  @override
+  $RoomsTable createAlias(String alias) {
+    return $RoomsTable(attachedDatabase, alias);
+  }
+}
+
+class RoomRow extends DataClass implements Insertable<RoomRow> {
+  final String id;
+  final String name;
+  final int position;
+  const RoomRow({required this.id, required this.name, required this.position});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['position'] = Variable<int>(position);
+    return map;
+  }
+
+  RoomsCompanion toCompanion(bool nullToAbsent) {
+    return RoomsCompanion(
+      id: Value(id),
+      name: Value(name),
+      position: Value(position),
+    );
+  }
+
+  factory RoomRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return RoomRow(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      position: serializer.fromJson<int>(json['position']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'position': serializer.toJson<int>(position),
+    };
+  }
+
+  RoomRow copyWith({String? id, String? name, int? position}) => RoomRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    position: position ?? this.position,
+  );
+  RoomRow copyWithCompanion(RoomsCompanion data) {
+    return RoomRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      position: data.position.present ? data.position.value : this.position,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RoomRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('position: $position')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, position);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RoomRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.position == this.position);
+}
+
+class RoomsCompanion extends UpdateCompanion<RoomRow> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<int> position;
+  final Value<int> rowid;
+  const RoomsCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.position = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  RoomsCompanion.insert({
+    required String id,
+    required String name,
+    this.position = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name);
+  static Insertable<RoomRow> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<int>? position,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (position != null) 'position': position,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  RoomsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<int>? position,
+    Value<int>? rowid,
+  }) {
+    return RoomsCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      position: position ?? this.position,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RoomsCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('position: $position, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $DeviceHistoryTable extends DeviceHistory
+    with TableInfo<$DeviceHistoryTable, HistoryRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DeviceHistoryTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _deviceIdMeta = const VerificationMeta(
+    'deviceId',
+  );
+  @override
+  late final GeneratedColumn<String> deviceId = GeneratedColumn<String>(
+    'device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _keyMeta = const VerificationMeta('key');
+  @override
+  late final GeneratedColumn<String> key = GeneratedColumn<String>(
+    'key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _valueJsonMeta = const VerificationMeta(
+    'valueJson',
+  );
+  @override
+  late final GeneratedColumn<String> valueJson = GeneratedColumn<String>(
+    'value_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _atMeta = const VerificationMeta('at');
+  @override
+  late final GeneratedColumn<DateTime> at = GeneratedColumn<DateTime>(
+    'at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _changedByMeta = const VerificationMeta(
+    'changedBy',
+  );
+  @override
+  late final GeneratedColumn<String> changedBy = GeneratedColumn<String>(
+    'changed_by',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    deviceId,
+    key,
+    valueJson,
+    at,
+    changedBy,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'device_history';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<HistoryRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('device_id')) {
+      context.handle(
+        _deviceIdMeta,
+        deviceId.isAcceptableOrUnknown(data['device_id']!, _deviceIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_deviceIdMeta);
+    }
+    if (data.containsKey('key')) {
+      context.handle(
+        _keyMeta,
+        key.isAcceptableOrUnknown(data['key']!, _keyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_keyMeta);
+    }
+    if (data.containsKey('value_json')) {
+      context.handle(
+        _valueJsonMeta,
+        valueJson.isAcceptableOrUnknown(data['value_json']!, _valueJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_valueJsonMeta);
+    }
+    if (data.containsKey('at')) {
+      context.handle(_atMeta, at.isAcceptableOrUnknown(data['at']!, _atMeta));
+    } else if (isInserting) {
+      context.missing(_atMeta);
+    }
+    if (data.containsKey('changed_by')) {
+      context.handle(
+        _changedByMeta,
+        changedBy.isAcceptableOrUnknown(data['changed_by']!, _changedByMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  HistoryRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return HistoryRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      deviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}device_id'],
+      )!,
+      key: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}key'],
+      )!,
+      valueJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}value_json'],
+      )!,
+      at: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}at'],
+      )!,
+      changedBy: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}changed_by'],
+      ),
+    );
+  }
+
+  @override
+  $DeviceHistoryTable createAlias(String alias) {
+    return $DeviceHistoryTable(attachedDatabase, alias);
+  }
+}
+
+class HistoryRow extends DataClass implements Insertable<HistoryRow> {
+  final int id;
+  final String deviceId;
+  final String key;
+  final String valueJson;
+  final DateTime at;
+
+  /// The automation that made the change, or `user`. Null when the device
+  /// reported it.
+  final String? changedBy;
+  const HistoryRow({
+    required this.id,
+    required this.deviceId,
+    required this.key,
+    required this.valueJson,
+    required this.at,
+    this.changedBy,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['device_id'] = Variable<String>(deviceId);
+    map['key'] = Variable<String>(key);
+    map['value_json'] = Variable<String>(valueJson);
+    map['at'] = Variable<DateTime>(at);
+    if (!nullToAbsent || changedBy != null) {
+      map['changed_by'] = Variable<String>(changedBy);
+    }
+    return map;
+  }
+
+  DeviceHistoryCompanion toCompanion(bool nullToAbsent) {
+    return DeviceHistoryCompanion(
+      id: Value(id),
+      deviceId: Value(deviceId),
+      key: Value(key),
+      valueJson: Value(valueJson),
+      at: Value(at),
+      changedBy: changedBy == null && nullToAbsent
+          ? const Value.absent()
+          : Value(changedBy),
+    );
+  }
+
+  factory HistoryRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return HistoryRow(
+      id: serializer.fromJson<int>(json['id']),
+      deviceId: serializer.fromJson<String>(json['deviceId']),
+      key: serializer.fromJson<String>(json['key']),
+      valueJson: serializer.fromJson<String>(json['valueJson']),
+      at: serializer.fromJson<DateTime>(json['at']),
+      changedBy: serializer.fromJson<String?>(json['changedBy']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'deviceId': serializer.toJson<String>(deviceId),
+      'key': serializer.toJson<String>(key),
+      'valueJson': serializer.toJson<String>(valueJson),
+      'at': serializer.toJson<DateTime>(at),
+      'changedBy': serializer.toJson<String?>(changedBy),
+    };
+  }
+
+  HistoryRow copyWith({
+    int? id,
+    String? deviceId,
+    String? key,
+    String? valueJson,
+    DateTime? at,
+    Value<String?> changedBy = const Value.absent(),
+  }) => HistoryRow(
+    id: id ?? this.id,
+    deviceId: deviceId ?? this.deviceId,
+    key: key ?? this.key,
+    valueJson: valueJson ?? this.valueJson,
+    at: at ?? this.at,
+    changedBy: changedBy.present ? changedBy.value : this.changedBy,
+  );
+  HistoryRow copyWithCompanion(DeviceHistoryCompanion data) {
+    return HistoryRow(
+      id: data.id.present ? data.id.value : this.id,
+      deviceId: data.deviceId.present ? data.deviceId.value : this.deviceId,
+      key: data.key.present ? data.key.value : this.key,
+      valueJson: data.valueJson.present ? data.valueJson.value : this.valueJson,
+      at: data.at.present ? data.at.value : this.at,
+      changedBy: data.changedBy.present ? data.changedBy.value : this.changedBy,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HistoryRow(')
+          ..write('id: $id, ')
+          ..write('deviceId: $deviceId, ')
+          ..write('key: $key, ')
+          ..write('valueJson: $valueJson, ')
+          ..write('at: $at, ')
+          ..write('changedBy: $changedBy')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, deviceId, key, valueJson, at, changedBy);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is HistoryRow &&
+          other.id == this.id &&
+          other.deviceId == this.deviceId &&
+          other.key == this.key &&
+          other.valueJson == this.valueJson &&
+          other.at == this.at &&
+          other.changedBy == this.changedBy);
+}
+
+class DeviceHistoryCompanion extends UpdateCompanion<HistoryRow> {
+  final Value<int> id;
+  final Value<String> deviceId;
+  final Value<String> key;
+  final Value<String> valueJson;
+  final Value<DateTime> at;
+  final Value<String?> changedBy;
+  const DeviceHistoryCompanion({
+    this.id = const Value.absent(),
+    this.deviceId = const Value.absent(),
+    this.key = const Value.absent(),
+    this.valueJson = const Value.absent(),
+    this.at = const Value.absent(),
+    this.changedBy = const Value.absent(),
+  });
+  DeviceHistoryCompanion.insert({
+    this.id = const Value.absent(),
+    required String deviceId,
+    required String key,
+    required String valueJson,
+    required DateTime at,
+    this.changedBy = const Value.absent(),
+  }) : deviceId = Value(deviceId),
+       key = Value(key),
+       valueJson = Value(valueJson),
+       at = Value(at);
+  static Insertable<HistoryRow> custom({
+    Expression<int>? id,
+    Expression<String>? deviceId,
+    Expression<String>? key,
+    Expression<String>? valueJson,
+    Expression<DateTime>? at,
+    Expression<String>? changedBy,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (deviceId != null) 'device_id': deviceId,
+      if (key != null) 'key': key,
+      if (valueJson != null) 'value_json': valueJson,
+      if (at != null) 'at': at,
+      if (changedBy != null) 'changed_by': changedBy,
+    });
+  }
+
+  DeviceHistoryCompanion copyWith({
+    Value<int>? id,
+    Value<String>? deviceId,
+    Value<String>? key,
+    Value<String>? valueJson,
+    Value<DateTime>? at,
+    Value<String?>? changedBy,
+  }) {
+    return DeviceHistoryCompanion(
+      id: id ?? this.id,
+      deviceId: deviceId ?? this.deviceId,
+      key: key ?? this.key,
+      valueJson: valueJson ?? this.valueJson,
+      at: at ?? this.at,
+      changedBy: changedBy ?? this.changedBy,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (deviceId.present) {
+      map['device_id'] = Variable<String>(deviceId.value);
+    }
+    if (key.present) {
+      map['key'] = Variable<String>(key.value);
+    }
+    if (valueJson.present) {
+      map['value_json'] = Variable<String>(valueJson.value);
+    }
+    if (at.present) {
+      map['at'] = Variable<DateTime>(at.value);
+    }
+    if (changedBy.present) {
+      map['changed_by'] = Variable<String>(changedBy.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DeviceHistoryCompanion(')
+          ..write('id: $id, ')
+          ..write('deviceId: $deviceId, ')
+          ..write('key: $key, ')
+          ..write('valueJson: $valueJson, ')
+          ..write('at: $at, ')
+          ..write('changedBy: $changedBy')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$OmniDatabase extends GeneratedDatabase {
   _$OmniDatabase(QueryExecutor e) : super(e);
   $OmniDatabaseManager get managers => $OmniDatabaseManager(this);
@@ -2550,6 +3297,12 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
   );
   late final $ExecutionLogTable executionLog = $ExecutionLogTable(this);
   late final $BoardDescribesTable boardDescribes = $BoardDescribesTable(this);
+  late final $RoomsTable rooms = $RoomsTable(this);
+  late final $DeviceHistoryTable deviceHistory = $DeviceHistoryTable(this);
+  late final Index deviceHistoryDevice = Index(
+    'device_history_device',
+    'CREATE INDEX device_history_device ON device_history (device_id, id)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2562,6 +3315,9 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
     globalVariables,
     executionLog,
     boardDescribes,
+    rooms,
+    deviceHistory,
+    deviceHistoryDevice,
   ];
 }
 
@@ -2751,6 +3507,8 @@ typedef $$DevicesTableCreateCompanionBuilder = DevicesCompanion Function({
   Value<String> settingsJson,
   Value<String> stateJson,
   Value<DateTime?> lastSeen,
+  Value<bool> favourite,
+  Value<int?> position,
   Value<int> rowid,
 });
 typedef $$DevicesTableUpdateCompanionBuilder = DevicesCompanion Function({
@@ -2764,6 +3522,8 @@ typedef $$DevicesTableUpdateCompanionBuilder = DevicesCompanion Function({
   Value<String> settingsJson,
   Value<String> stateJson,
   Value<DateTime?> lastSeen,
+  Value<bool> favourite,
+  Value<int?> position,
   Value<int> rowid,
 });
 
@@ -2823,6 +3583,16 @@ class $$DevicesTableFilterComposer
 
   ColumnFilters<DateTime> get lastSeen => $composableBuilder(
     column: $table.lastSeen,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get favourite => $composableBuilder(
+    column: $table.favourite,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2885,6 +3655,16 @@ class $$DevicesTableOrderingComposer
     column: $table.lastSeen,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get favourite => $composableBuilder(
+    column: $table.favourite,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$DevicesTableAnnotationComposer
@@ -2927,6 +3707,12 @@ class $$DevicesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastSeen =>
       $composableBuilder(column: $table.lastSeen, builder: (column) => column);
+
+  GeneratedColumn<bool> get favourite =>
+      $composableBuilder(column: $table.favourite, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
 }
 
 class $$DevicesTableTableManager
@@ -2967,6 +3753,8 @@ class $$DevicesTableTableManager
                 Value<String> settingsJson = const Value.absent(),
                 Value<String> stateJson = const Value.absent(),
                 Value<DateTime?> lastSeen = const Value.absent(),
+                Value<bool> favourite = const Value.absent(),
+                Value<int?> position = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DevicesCompanion(
                 id: id,
@@ -2979,6 +3767,8 @@ class $$DevicesTableTableManager
                 settingsJson: settingsJson,
                 stateJson: stateJson,
                 lastSeen: lastSeen,
+                favourite: favourite,
+                position: position,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2993,6 +3783,8 @@ class $$DevicesTableTableManager
                 Value<String> settingsJson = const Value.absent(),
                 Value<String> stateJson = const Value.absent(),
                 Value<DateTime?> lastSeen = const Value.absent(),
+                Value<bool> favourite = const Value.absent(),
+                Value<int?> position = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DevicesCompanion.insert(
                 id: id,
@@ -3005,6 +3797,8 @@ class $$DevicesTableTableManager
                 settingsJson: settingsJson,
                 stateJson: stateJson,
                 lastSeen: lastSeen,
+                favourite: favourite,
+                position: position,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -3996,6 +4790,390 @@ typedef $$BoardDescribesTableProcessedTableManager =
       BoardDescribeRow,
       PrefetchHooks Function()
     >;
+typedef $$RoomsTableCreateCompanionBuilder = RoomsCompanion Function({
+  required String id,
+  required String name,
+  Value<int> position,
+  Value<int> rowid,
+});
+typedef $$RoomsTableUpdateCompanionBuilder = RoomsCompanion Function({
+  Value<String> id,
+  Value<String> name,
+  Value<int> position,
+  Value<int> rowid,
+});
+
+class $$RoomsTableFilterComposer extends Composer<_$OmniDatabase, $RoomsTable> {
+  $$RoomsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$RoomsTableOrderingComposer
+    extends Composer<_$OmniDatabase, $RoomsTable> {
+  $$RoomsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$RoomsTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $RoomsTable> {
+  $$RoomsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+}
+
+class $$RoomsTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $RoomsTable,
+          RoomRow,
+          $$RoomsTableFilterComposer,
+          $$RoomsTableOrderingComposer,
+          $$RoomsTableAnnotationComposer,
+          $$RoomsTableCreateCompanionBuilder,
+          $$RoomsTableUpdateCompanionBuilder,
+          (RoomRow, BaseReferences<_$OmniDatabase, $RoomsTable, RoomRow>),
+          RoomRow,
+          PrefetchHooks Function()
+        > {
+  $$RoomsTableTableManager(_$OmniDatabase db, $RoomsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$RoomsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$RoomsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$RoomsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<int> position = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => RoomsCompanion(
+                id: id,
+                name: name,
+                position: position,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                Value<int> position = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => RoomsCompanion.insert(
+                id: id,
+                name: name,
+                position: position,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$RoomsTable, RoomRow>(table),
+                  BaseReferences<_$OmniDatabase, $RoomsTable, RoomRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$RoomsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $RoomsTable,
+      RoomRow,
+      $$RoomsTableFilterComposer,
+      $$RoomsTableOrderingComposer,
+      $$RoomsTableAnnotationComposer,
+      $$RoomsTableCreateCompanionBuilder,
+      $$RoomsTableUpdateCompanionBuilder,
+      (RoomRow, BaseReferences<_$OmniDatabase, $RoomsTable, RoomRow>),
+      RoomRow,
+      PrefetchHooks Function()
+    >;
+typedef $$DeviceHistoryTableCreateCompanionBuilder =
+    DeviceHistoryCompanion Function({
+      Value<int> id,
+      required String deviceId,
+      required String key,
+      required String valueJson,
+      required DateTime at,
+      Value<String?> changedBy,
+    });
+typedef $$DeviceHistoryTableUpdateCompanionBuilder =
+    DeviceHistoryCompanion Function({
+      Value<int> id,
+      Value<String> deviceId,
+      Value<String> key,
+      Value<String> valueJson,
+      Value<DateTime> at,
+      Value<String?> changedBy,
+    });
+
+class $$DeviceHistoryTableFilterComposer
+    extends Composer<_$OmniDatabase, $DeviceHistoryTable> {
+  $$DeviceHistoryTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get valueJson => $composableBuilder(
+    column: $table.valueJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get changedBy => $composableBuilder(
+    column: $table.changedBy,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DeviceHistoryTableOrderingComposer
+    extends Composer<_$OmniDatabase, $DeviceHistoryTable> {
+  $$DeviceHistoryTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get valueJson => $composableBuilder(
+    column: $table.valueJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get changedBy => $composableBuilder(
+    column: $table.changedBy,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DeviceHistoryTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $DeviceHistoryTable> {
+  $$DeviceHistoryTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get deviceId =>
+      $composableBuilder(column: $table.deviceId, builder: (column) => column);
+
+  GeneratedColumn<String> get key =>
+      $composableBuilder(column: $table.key, builder: (column) => column);
+
+  GeneratedColumn<String> get valueJson =>
+      $composableBuilder(column: $table.valueJson, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get at =>
+      $composableBuilder(column: $table.at, builder: (column) => column);
+
+  GeneratedColumn<String> get changedBy =>
+      $composableBuilder(column: $table.changedBy, builder: (column) => column);
+}
+
+class $$DeviceHistoryTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $DeviceHistoryTable,
+          HistoryRow,
+          $$DeviceHistoryTableFilterComposer,
+          $$DeviceHistoryTableOrderingComposer,
+          $$DeviceHistoryTableAnnotationComposer,
+          $$DeviceHistoryTableCreateCompanionBuilder,
+          $$DeviceHistoryTableUpdateCompanionBuilder,
+          (
+            HistoryRow,
+            BaseReferences<_$OmniDatabase, $DeviceHistoryTable, HistoryRow>,
+          ),
+          HistoryRow,
+          PrefetchHooks Function()
+        > {
+  $$DeviceHistoryTableTableManager(_$OmniDatabase db, $DeviceHistoryTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DeviceHistoryTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DeviceHistoryTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DeviceHistoryTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> deviceId = const Value.absent(),
+                Value<String> key = const Value.absent(),
+                Value<String> valueJson = const Value.absent(),
+                Value<DateTime> at = const Value.absent(),
+                Value<String?> changedBy = const Value.absent(),
+              }) => DeviceHistoryCompanion(
+                id: id,
+                deviceId: deviceId,
+                key: key,
+                valueJson: valueJson,
+                at: at,
+                changedBy: changedBy,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String deviceId,
+                required String key,
+                required String valueJson,
+                required DateTime at,
+                Value<String?> changedBy = const Value.absent(),
+              }) => DeviceHistoryCompanion.insert(
+                id: id,
+                deviceId: deviceId,
+                key: key,
+                valueJson: valueJson,
+                at: at,
+                changedBy: changedBy,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$DeviceHistoryTable, HistoryRow>(table),
+                  BaseReferences<
+                    _$OmniDatabase,
+                    $DeviceHistoryTable,
+                    HistoryRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DeviceHistoryTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $DeviceHistoryTable,
+      HistoryRow,
+      $$DeviceHistoryTableFilterComposer,
+      $$DeviceHistoryTableOrderingComposer,
+      $$DeviceHistoryTableAnnotationComposer,
+      $$DeviceHistoryTableCreateCompanionBuilder,
+      $$DeviceHistoryTableUpdateCompanionBuilder,
+      (
+        HistoryRow,
+        BaseReferences<_$OmniDatabase, $DeviceHistoryTable, HistoryRow>,
+      ),
+      HistoryRow,
+      PrefetchHooks Function()
+    >;
 
 class $OmniDatabaseManager {
   final _$OmniDatabase _db;
@@ -4014,4 +5192,8 @@ class $OmniDatabaseManager {
       $$ExecutionLogTableTableManager(_db, _db.executionLog);
   $$BoardDescribesTableTableManager get boardDescribes =>
       $$BoardDescribesTableTableManager(_db, _db.boardDescribes);
+  $$RoomsTableTableManager get rooms =>
+      $$RoomsTableTableManager(_db, _db.rooms);
+  $$DeviceHistoryTableTableManager get deviceHistory =>
+      $$DeviceHistoryTableTableManager(_db, _db.deviceHistory);
 }

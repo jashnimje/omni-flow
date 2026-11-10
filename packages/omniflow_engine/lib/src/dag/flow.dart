@@ -75,13 +75,21 @@ class FlowSpec {
     this.enabled = true,
     this.mode = RunMode.single,
     this.cooldownSeconds = 0,
+    this.continueOnError = false,
   });
+
+  /// The `onError` values: a failed action with no error edge ends its
+  /// branch (`stop`), or is recorded and the branch goes on (`continue`).
+  static const onErrorValues = ['stop', 'continue'];
 
   final String id;
   final String name;
   final bool enabled;
   final RunMode mode;
   final int cooldownSeconds;
+
+  /// Whether a failed action with no error edge goes on through `out`.
+  final bool continueOnError;
   final List<NodeSpec> nodes;
   final List<EdgeSpec> edges;
 
@@ -97,6 +105,9 @@ class FlowSpec {
     'enabled': enabled,
     'mode': mode.name,
     'cooldownSeconds': cooldownSeconds,
+    // Left out when it is the default, so a flow saved before it keeps its
+    // revision.
+    if (continueOnError) 'onError': 'continue',
     'nodes': nodes.map((n) => n.toJson()).toList(),
     'edges': edges.map((e) => e.toJson()).toList(),
   };
@@ -109,6 +120,7 @@ class FlowSpec {
     enabled: enabled ?? this.enabled,
     mode: mode,
     cooldownSeconds: cooldownSeconds,
+    continueOnError: continueOnError,
   );
 
   static FlowSpec parseJson(String source) {
@@ -159,6 +171,10 @@ class FlowSpec {
     }
     final cooldown =
         issues.optionalInt(map, 'cooldownSeconds', root, min: 0) ?? 0;
+    final onError = map['onError'] ?? 'stop';
+    if (!onErrorValues.contains(onError)) {
+      issues.add('$root.onError', 'must be one of ${onErrorValues.join(', ')}');
+    }
 
     final nodes = <NodeSpec>[];
     final rawNodes = issues.optionalList(map, 'nodes', root);
@@ -222,6 +238,7 @@ class FlowSpec {
       enabled: enabled,
       mode: mode,
       cooldownSeconds: cooldown,
+      continueOnError: onError == 'continue',
       nodes: List.unmodifiable(nodes),
       edges: List.unmodifiable(edges),
     );

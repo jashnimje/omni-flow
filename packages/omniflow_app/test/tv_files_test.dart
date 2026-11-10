@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omniflow_app/ui/design/design.dart';
 import 'package:omniflow_app/ui/tv/tv_files.dart';
 
 import 'fake_engine.dart';
@@ -16,14 +17,20 @@ void main() {
   }
 
   List<String> shownNames(WidgetTester tester) => [
-    for (final tile in tester.widgetList<ListTile>(
+    for (final row in tester.widgetList<OmniListRow>(
       find.descendant(
         of: find.byKey(const ValueKey('files-list')),
-        matching: find.byType(ListTile),
+        matching: find.byType(OmniListRow),
       ),
     ))
-      ((tile.title! as Text).data!),
+      row.title,
   ];
+
+  Future<void> addMenu(WidgetTester tester, String item) async {
+    await tester.tap(find.byKey(const ValueKey('files-add')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey(item)));
+  }
 
   test('paths join, split and refuse unusable names', () {
     expect(joinPath('/sdcard', 'a.txt'), '/sdcard/a.txt');
@@ -47,12 +54,11 @@ void main() {
     });
     expect(shownNames(tester), ['Download', 'Movies', 'notes.txt']);
     expect(find.textContaining('2.0 KB'), findsOneWidget);
-    expect(find.textContaining('2025-11-'), findsOneWidget);
+    expect(find.text('2.0 KB · 8 Nov 2025'), findsOneWidget);
+    expect(find.text('Storage'), findsOneWidget);
   });
 
-  testWidgets('a folder opens, and the breadcrumb and Up go back', (
-    tester,
-  ) async {
+  testWidgets('a folder opens, and the breadcrumb goes back', (tester) async {
     await openFiles(tester);
     await tester.tap(find.text('Download'));
     await tester.pumpAndSettle();
@@ -61,7 +67,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('crumb-/sdcard')));
     await tester.pumpAndSettle();
     expect(argsOf(engine, 'tv.files.list').last['path'], '/sdcard');
-    await tester.tap(find.byKey(const ValueKey('files-up')));
+    await tester.tap(find.byKey(const ValueKey('crumb-/')));
     await tester.pumpAndSettle();
     expect(argsOf(engine, 'tv.files.list').last['path'], '/');
   });
@@ -76,8 +82,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.widget<Text>(find.byKey(const ValueKey('select-count'))).data,
-      '2',
+      '2 selected',
     );
+    expect(find.byKey(const ValueKey('select-bar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('select-rename')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('select-copy')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Download'));
@@ -153,7 +161,7 @@ void main() {
 
   testWidgets('new folder makes it in the open folder', (tester) async {
     await openFiles(tester);
-    await tester.tap(find.byKey(const ValueKey('files-new-folder')));
+    await addMenu(tester, 'files-new-folder');
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('ask-text')), 'omni');
     await tester.pump();
@@ -281,7 +289,7 @@ void main() {
     await openFiles(tester, files: phone);
     await tester.tap(find.text('Download'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('files-upload')));
+    await addMenu(tester, 'files-upload');
     await tester.pump();
     await tester.pump();
     engine.eventsOut.add({
@@ -294,8 +302,10 @@ void main() {
     await tester.pump();
     expect(
       tester.widget<Text>(find.byKey(const ValueKey('tv-progress-text'))).data,
-      'Uploading  64 KB of 128 KB',
+      '64 KB of 128 KB',
     );
+    expect(find.text('Uploading a.jpg'), findsOneWidget);
+    expect(find.byKey(const ValueKey('tv-progress-cancel')), findsOneWidget);
     await tester.pumpAndSettle();
     expect(argsOf(engine, 'tv.files.upload'), [
       {
@@ -344,7 +354,7 @@ void main() {
     await openFiles(tester);
     await tester.tap(find.text('Android'));
     await tester.pumpAndSettle();
-    expect(find.text('Permission denied'), findsOneWidget);
+    expect(find.text('Permission denied.'), findsOneWidget);
     expect(shownNames(tester), ['Android']);
   });
 }

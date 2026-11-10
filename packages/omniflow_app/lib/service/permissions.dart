@@ -2,7 +2,8 @@ import 'package:flutter/services.dart';
 
 /// MainActivity's `omniflow/permissions` channel. Android hides the Wi-Fi
 /// network's name from an app without location access, so a Wi-Fi place
-/// cannot work until the user grants it.
+/// cannot work until the user grants it. Android 17 also asks before an app
+/// talks to devices on the local network (the nearby devices permission).
 class Permissions {
   const Permissions([this._channel = const MethodChannel(channelName)]);
 
@@ -10,14 +11,34 @@ class Permissions {
 
   final MethodChannel _channel;
 
-  /// Asks for location access, and is true when it is granted.
-  Future<bool> askForWifiName() async {
+  Future<T?> _invoke<T>(String method) async {
     try {
-      return await _channel.invokeMethod<bool>('wifiName') ?? false;
+      return await _channel.invokeMethod<T>(method);
     } on MissingPluginException {
-      return false;
+      return null;
     } on PlatformException {
-      return false;
+      return null;
     }
   }
+
+  /// Asks for location access, and is true when it is granted.
+  Future<bool> askForWifiName() async =>
+      await _invoke<bool>('wifiName') ?? false;
+
+  /// Asks for local network access where Android has it, and is true when
+  /// OmniFlow may reach the local network.
+  Future<bool> askForLocalNetwork() async =>
+      await _invoke<bool>('localNetwork') ?? false;
+
+  /// `{location, localNetwork, localNetworkNeeded}`, or null off Android.
+  Future<Map<String, Object?>?> status() async {
+    final map = await _invoke<Map<Object?, Object?>>('status');
+    return map == null
+        ? null
+        : {for (final e in map.entries) '${e.key}': e.value};
+  }
+
+  /// Opens OmniFlow's page in the system settings, for a permission the
+  /// user refused for good.
+  Future<void> openAppSettings() => _invoke<void>('appSettings');
 }

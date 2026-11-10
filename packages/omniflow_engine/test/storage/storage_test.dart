@@ -71,6 +71,19 @@ const v2Schema = [
   'CREATE TABLE "execution_log" ("id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "run_id" TEXT NOT NULL, "flow_id" TEXT NOT NULL, "outcome" TEXT NOT NULL, "started_at" INTEGER NOT NULL, "trace_json" TEXT NOT NULL)',
 ];
 
+/// The schema at version 4: version 3 with each flow's source and spec.
+List<String> get v4Schema => [
+  for (final statement in v3Schema)
+    statement.startsWith('CREATE TABLE "flows"')
+        ? 'CREATE TABLE "flows" ("id" TEXT NOT NULL, "flow_json" TEXT NOT NULL, '
+              '"enabled" INTEGER NOT NULL DEFAULT 1 CHECK ("enabled" IN (0, 1)), '
+              '"approved" INTEGER NOT NULL DEFAULT 1 CHECK ("approved" IN (0, 1)), '
+              '"trusted" INTEGER NOT NULL DEFAULT 0 CHECK ("trusted" IN (0, 1)), '
+              '"source" TEXT NOT NULL DEFAULT \'graph\', "spec_json" TEXT NULL, '
+              '"updated_at" INTEGER NOT NULL, PRIMARY KEY ("id"))'
+        : statement,
+];
+
 /// The schema at version 3: version 2, a trusted column and board describes.
 final v3Schema = [
   for (final statement in v2Schema)
@@ -111,19 +124,13 @@ void main() {
     () async {
       final dir = await Directory.systemTemp.createTemp('omni_migrate');
       addTearDown(() => dir.delete(recursive: true));
-      // The v1 tables, exactly as drift creates them (unchanged since).
-      final reference = OmniDatabase.memory();
-      await DriftDeviceStore(reference).all();
+      // The v1 tables, as drift created them: unchanged until version 5.
       final ddl = [
-        for (final row
-            in await reference
-                .customSelect(
-                  "SELECT sql FROM sqlite_master WHERE name IN ('devices', 'driver_manifests')",
-                )
-                .get())
-          row.read<String>('sql'),
+        for (final statement in v2Schema)
+          if (statement.contains('"devices"') ||
+              statement.contains('"driver_manifests"'))
+            statement,
       ];
-      await reference.close();
       expect(ddl, hasLength(2));
       final file = File('${dir.path}/omniflow.sqlite');
       final v1 = sqlite3.open(file.path);
@@ -154,7 +161,7 @@ void main() {
       ]);
       expect(await DriftGlobalStore(db).all(), {'HomeMode': 'home'});
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 4);
+      expect(version.read<int>('user_version'), 5);
     },
   );
 
@@ -204,7 +211,7 @@ void main() {
         'board': 'esp32',
       });
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 4);
+      expect(version.read<int>('user_version'), 5);
     },
   );
 
@@ -270,7 +277,110 @@ void main() {
       expect((r.enabled, r.approved, r.trusted), (true, false, true));
     }
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 4);
+    expect(version.read<int>('user_version'), 5);
+  });
+
+  test('a v4 database turns each room name into a room record the devices '
+      'keep by id, and adds favourites, order and history', () async {
+    final dir = await Directory.systemTemp.createTemp('omni_migrate_v4');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/omniflow.sqlite');
+    final v4 = sqlite3.open(file.path);
+    for (final statement in v4Schema) {
+      v4.execute(statement);
+    }
+    for (final (id, room) in [
+      ('lamp', 'Study'),
+      ('desk', 'Study'),
+      ('tv', 'Living room'),
+      ('plug', ''),
+      ('fan', null),
+      ('bulb', 'study'),
+    ]) {
+      v4.execute(
+        'INSERT INTO devices (id, name, driver_id, host, room) '
+        "VALUES (?, ?, 'philips_wiz_udp', '10.0.0.5', ?)",
+        [id, id, room],
+      );
+    }
+    v4.execute('PRAGMA user_version = 4');
+    v4.close();
+
+    final db = OmniDatabase.file(file);
+    addTearDown(db.close);
+    expect(
+      [for (final r in await DriftRoomStore(db).all()) (r.id, r.name, r.order)],
+      [
+        ('living_room', 'Living room', 0),
+        ('study', 'Study', 1),
+        ('study_2', 'study', 2),
+      ],
+    );
+    final devices = {for (final d in await DriftDeviceStore(db).all()) d.id: d};
+    expect(
+      {for (final d in devices.values) d.id: d.room},
+      {
+        'bulb': 'study_2',
+        'desk': 'study',
+        'fan': null,
+        'lamp': 'study',
+        'plug': null,
+        'tv': 'living_room',
+      },
+    );
+    expect(
+      devices.values.every((d) => !d.favourite && d.order == null),
+      isTrue,
+    );
+    await DriftDeviceStore(db).put(
+      devices['lamp']!
+          .copyWith(favourite: true)
+          .placed(room: 'study', order: 2),
+    );
+    final lamp = (await DriftDeviceStore(db).get('lamp'))!;
+    expect((lamp.favourite, lamp.order), (true, 2));
+
+    final history = DriftHistoryStore(db, cap: 3);
+    final at = DateTime.utc(2026, 11, 8);
+    for (var i = 0; i < 5; i++) {
+      await history.add('lamp', [
+        HistoryEntry(at.add(Duration(minutes: i)), 'dimming', i * 10),
+      ]);
+    }
+    await history.add('tv', [HistoryEntry(at, 'volume', 3, by: 'user')]);
+    expect(
+      [for (final e in await history.recent('lamp')) e.value],
+      [40, 30, 20],
+    );
+    expect(
+      [
+        for (final e in await history.recent(
+          'lamp',
+          since: at.add(const Duration(minutes: 3)),
+        ))
+          e.value,
+      ],
+      [40],
+    );
+    expect((await history.recent('tv')).single.toJson(), {
+      'at': '2026-11-08T00:00:00.000Z',
+      'key': 'volume',
+      'value': 3,
+      'by': 'user',
+    });
+    final version = await db.customSelect('PRAGMA user_version').getSingle();
+    expect(version.read<int>('user_version'), 5);
+  });
+
+  test('a room id comes from its name, unique, with a hash for letters the '
+      'slug drops', () {
+    expect(uniqueRoomId('Living room', {}), 'living_room');
+    expect(uniqueRoomId('Study', {'study'}), 'study_2');
+    expect(uniqueRoomId('Study', {'study', 'study_2'}), 'study_3');
+    expect(uniqueRoomId('2nd floor', {}), 'room_2nd_floor');
+    final hindi = uniqueRoomId('रसोई', {});
+    expect(hindi, matches(RegExp(r'^room_[a-z0-9]+$')));
+    expect(uniqueRoomId('बैठक', {}), isNot(hindi));
   });
 
   test('a flow keeps its source and spec unless put names a source', () async {

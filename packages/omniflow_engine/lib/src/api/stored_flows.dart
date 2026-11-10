@@ -133,6 +133,13 @@ class StoredFlows {
       } on FlowMigrationException catch (e) {
         _migrationErrors[id] = e.message;
       }
+      // A rule saved while a failed step still stopped the rest now carries
+      // on, as a rule saved today does unless it sets stopOnError.
+      if (r.source == FlowRecord.rule &&
+          r.spec?['stopOnError'] != true &&
+          migrated['onError'] == null) {
+        migrated = {...migrated, 'onError': 'continue'};
+      }
       // A link stored before specs were kept is read back from the flow it
       // compiled to, which only the migrated node types describe.
       final spec = r.source == FlowRecord.link && r.spec == null

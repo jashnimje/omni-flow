@@ -33,9 +33,40 @@ class Devices extends Table {
   TextColumn get settingsJson => text().withDefault(const Constant('{}'))();
   TextColumn get stateJson => text().withDefault(const Constant('{}'))();
   DateTimeColumn get lastSeen => dateTime().nullable()();
+  BoolColumn get favourite => boolean().withDefault(const Constant(false))();
+
+  /// The device's place among its room's devices, lowest first.
+  IntColumn get position => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
+}
+
+/// The rooms devices are in, in the order the user put them.
+@DataClassName('RoomRow')
+class Rooms extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  IntColumn get position => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Each device's state changes, newest last, capped per device by
+/// [DriftHistoryStore.cap].
+@DataClassName('HistoryRow')
+@TableIndex(name: 'device_history_device', columns: {#deviceId, #id})
+class DeviceHistory extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get deviceId => text()();
+  TextColumn get key => text()();
+  TextColumn get valueJson => text()();
+  DateTimeColumn get at => dateTime()();
+
+  /// The automation that made the change, or `user`. Null when the device
+  /// reported it.
+  TextColumn get changedBy => text().nullable()();
 }
 
 @DataClassName('FlowRow')
@@ -52,7 +83,7 @@ class Flows extends Table {
   /// later rise in its risk does not revoke the approval.
   BoolColumn get trusted => boolean().withDefault(const Constant(false))();
 
-  /// The form the automation was written in: `link`, `rule` or `graph`,
+  /// The form the automation was written in: `link`, `rule`, `graph` or `scene`,
   /// so each surface reopens it as it was written.
   TextColumn get source =>
       text().withDefault(const Constant(FlowRecord.graph))();
@@ -120,6 +151,8 @@ class ExecutionLog extends Table {
     GlobalVariables,
     ExecutionLog,
     BoardDescribes,
+    Rooms,
+    DeviceHistory,
   ],
 )
 class OmniDatabase extends _$OmniDatabase {
@@ -132,7 +165,7 @@ class OmniDatabase extends _$OmniDatabase {
   factory OmniDatabase.memory() => OmniDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   /// The key version 2 kept the trust mark under, inside the flow JSON.
   static const legacyTrustedKey = '_trusted';
@@ -160,8 +193,46 @@ class OmniDatabase extends _$OmniDatabase {
           "UPDATE flows SET source = 'link' WHERE id LIKE 'link\\_%' ESCAPE '\\'",
         );
       }
+      if (from < 5) {
+        await m.addColumn(devices, devices.favourite);
+        await m.addColumn(devices, devices.position);
+        await m.createTable(rooms);
+        await m.createTable(deviceHistory);
+        await m.createIndex(deviceHistoryDevice);
+        await _moveRoomNamesToRecords();
+      }
     },
   );
+
+  /// Before version 5 a device kept its room as a name. Each name becomes a
+  /// room record, in name order, and the device keeps the record's id.
+  Future<void> _moveRoomNamesToRecords() async {
+    await customStatement("UPDATE devices SET room = NULL WHERE room = ''");
+    final names = [
+      for (final row in await customSelect(
+        'SELECT DISTINCT room FROM devices WHERE room IS NOT NULL ORDER BY room',
+      ).get())
+        row.read<String>('room'),
+    ];
+    final ids = <String, String>{};
+    for (var i = 0; i < names.length; i++) {
+      final id = uniqueRoomId(names[i], ids.values.toSet());
+      ids[names[i]] = id;
+      await customStatement(
+        'INSERT INTO rooms (id, name, position) VALUES (?, ?, ?)',
+        [id, names[i].trim(), i],
+      );
+    }
+    // By device, since a new room id can equal another room's old name.
+    for (final row in await customSelect(
+      'SELECT id, room FROM devices WHERE room IS NOT NULL',
+    ).get()) {
+      await customStatement('UPDATE devices SET room = ? WHERE id = ?', [
+        ids[row.read<String>('room')],
+        row.read<String>('id'),
+      ]);
+    }
+  }
 
   Future<void> _moveTrustMarksToColumn() async {
     for (final row in await customSelect(
@@ -196,7 +267,8 @@ class FlowRecord {
   static const link = 'link';
   static const rule = 'rule';
   static const graph = 'graph';
-  static const sources = [link, rule, graph];
+  static const scene = 'scene';
+  static const sources = [link, rule, graph, scene];
 
   final Map<String, Object?> json;
   final bool enabled;
@@ -205,7 +277,7 @@ class FlowRecord {
   /// Whether the user saved or approved this version of the flow.
   final bool trusted;
 
-  /// How the automation was written: [link], [rule] or [graph].
+  /// How the automation was written: [link], [rule], [graph] or [scene].
   final String source;
 
   /// The link or rule [json] was compiled from, or null for a graph.
@@ -358,6 +430,20 @@ class ExecutionLogStore {
     );
   }
 
+  /// The newest run of each flow, by flow id.
+  Future<Map<String, Map<String, Object?>>> lastByFlow() async => {
+    for (final row
+        in await _db
+            .customSelect(
+              'SELECT flow_id, trace_json FROM execution_log WHERE id IN '
+              '(SELECT MAX(id) FROM execution_log GROUP BY flow_id)',
+            )
+            .get())
+      row.read<String>('flow_id'): Map<String, Object?>.from(
+        jsonDecode(row.read<String>('trace_json')) as Map,
+      ),
+  };
+
   Future<List<Map<String, Object?>>> recent({
     String? flowId,
     int limit = 20,
@@ -454,6 +540,8 @@ class DriftDeviceStore implements DeviceStore {
           settingsJson: Value(jsonEncode(device.settings)),
           stateJson: Value(jsonEncode(device.state)),
           lastSeen: Value(device.lastSeen),
+          favourite: Value(device.favourite),
+          position: Value(device.order),
         ),
       );
 
@@ -472,7 +560,161 @@ class DriftDeviceStore implements DeviceStore {
     settings: Map<String, Object?>.from(jsonDecode(row.settingsJson) as Map),
     state: Map<String, Object?>.from(jsonDecode(row.stateJson) as Map),
     lastSeen: row.lastSeen?.toUtc(),
+    favourite: row.favourite,
+    order: row.position,
   );
+}
+
+/// The id a room named [name] is saved under: lower snake case, with a
+/// short hash when the name has letters the slug drops, and `_2` and on
+/// when [taken] has it.
+String uniqueRoomId(String name, Set<String> taken) {
+  var slug = name
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'^_+|_+$'), '');
+  if (name.runes.any((r) => r > 0x7f)) {
+    var h = 0x811c9dc5;
+    for (final b in utf8.encode(name.trim())) {
+      h = ((h ^ b) * 0x01000193) & 0xffffffff;
+    }
+    final hash = h.toRadixString(36);
+    slug = slug.isEmpty ? hash : '${slug}_$hash';
+  }
+  if (!RegExp(r'^[a-z]').hasMatch(slug)) slug = 'room_$slug';
+  slug = slug.replaceAll(RegExp(r'_+$'), '');
+  var id = slug;
+  for (var n = 2; taken.contains(id); n++) {
+    id = '${slug}_$n';
+  }
+  return id;
+}
+
+class Room {
+  const Room({required this.id, required this.name, this.order = 0});
+
+  final String id;
+  final String name;
+  final int order;
+}
+
+class DriftRoomStore {
+  DriftRoomStore(this._db);
+
+  final OmniDatabase _db;
+
+  /// Every room, in the user's order, then by name.
+  Future<List<Room>> all() async => [
+    for (final r
+        in await (_db.select(_db.rooms)..orderBy([
+              (r) => OrderingTerm(expression: r.position),
+              (r) => OrderingTerm(expression: r.name),
+            ]))
+            .get())
+      Room(id: r.id, name: r.name, order: r.position),
+  ];
+
+  Future<Room?> get(String id) async {
+    final r = await (_db.select(
+      _db.rooms,
+    )..where((r) => r.id.equals(id))).getSingleOrNull();
+    return r == null ? null : Room(id: r.id, name: r.name, order: r.position);
+  }
+
+  Future<void> put(Room room) => _db
+      .into(_db.rooms)
+      .insertOnConflictUpdate(
+        RoomsCompanion.insert(
+          id: room.id,
+          name: room.name,
+          position: Value(room.order),
+        ),
+      );
+
+  Future<bool> remove(String id) async =>
+      await (_db.delete(_db.rooms)..where((r) => r.id.equals(id))).go() > 0;
+}
+
+class HistoryEntry {
+  const HistoryEntry(this.at, this.key, this.value, {this.by});
+
+  final DateTime at;
+  final String key;
+  final Object? value;
+
+  /// The automation that made the change, or `user`.
+  final String? by;
+
+  Map<String, Object?> toJson() => {
+    'at': at.toUtc().toIso8601String(),
+    'key': key,
+    'value': value,
+    'by': ?by,
+  };
+}
+
+/// Each device's state changes, keeping the newest [cap] per device.
+class DriftHistoryStore {
+  DriftHistoryStore(this._db, {this.cap = 500});
+
+  final OmniDatabase _db;
+  final int cap;
+
+  Future<void> add(String deviceId, List<HistoryEntry> entries) async {
+    if (entries.isEmpty) return;
+    await _db.batch((b) {
+      b.insertAll(_db.deviceHistory, [
+        for (final e in entries)
+          DeviceHistoryCompanion.insert(
+            deviceId: deviceId,
+            key: e.key,
+            valueJson: jsonEncode(e.value),
+            at: e.at,
+            changedBy: Value(e.by),
+          ),
+      ]);
+    });
+    await _db.customStatement(
+      'DELETE FROM device_history WHERE device_id = ? AND id NOT IN '
+      '(SELECT id FROM device_history WHERE device_id = ? ORDER BY id DESC LIMIT ?)',
+      [deviceId, deviceId, cap],
+    );
+  }
+
+  /// The newest changes of [deviceId] first, of [key] only when given, and
+  /// only those after [since].
+  Future<List<HistoryEntry>> recent(
+    String deviceId, {
+    String? key,
+    int limit = 100,
+    DateTime? since,
+  }) async {
+    final q = _db.select(_db.deviceHistory)
+      ..where((h) {
+        var where = h.deviceId.equals(deviceId);
+        if (key != null) where &= h.key.equals(key);
+        if (since != null) where &= h.at.isBiggerThanValue(since);
+        return where;
+      })
+      ..orderBy([
+        (h) => OrderingTerm(expression: h.id, mode: OrderingMode.desc),
+      ])
+      ..limit(limit);
+    return [
+      for (final r in await q.get())
+        HistoryEntry(
+          r.at.toUtc(),
+          r.key,
+          jsonDecode(r.valueJson),
+          by: r.changedBy,
+        ),
+    ];
+  }
+
+  Future<void> removeDevice(String deviceId) => (_db.delete(
+    _db.deviceHistory,
+  )..where((h) => h.deviceId.equals(deviceId))).go();
 }
 
 /// Persists user manifests so the registry can be rebuilt on start.

@@ -11,7 +11,6 @@ import 'package:omniflow_engine/omniflow_engine.dart'
     show omniflowApplicationId, tagRecords;
 
 import 'fake_engine.dart';
-import 'things_fixtures.dart';
 
 /// The phone's reader, driven by the test: [reader] is what the app
 /// listens with, and [write] completes the write it is waiting on.
@@ -206,55 +205,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('add-confirm')));
     await tester.pumpAndSettle();
     expect(engine.callsOf('thing.add').single.$2['candidate'], candidate);
-  });
-
-  group('writing a tag', () {
-    setUp(() {
-      engine.devices = [frontDoorTag];
-      engine.answers['tag.write_payload'] = {
-        'ok': true,
-        'id': 'front_door',
-        'uri': 'omniflow://tag/front_door',
-        'androidPackage': omniflowApplicationId,
-        'records': tagRecords('front_door'),
-      };
-    });
-
-    testWidgets('writes the link the engine gives onto the next tag', (
-      tester,
-    ) async {
-      await pump(tester);
-      await openDeviceMenu(tester, 'front_door', 'Write to a tag');
-
-      expect(engine.callsOf('tag.write_payload').single.$2, {
-        'id': 'front_door',
-      });
-      expect(nfc.writing?.uri, 'omniflow://tag/front_door');
-      expect(nfc.writing?.records, tagRecords('front_door'));
-      expect(find.text('Hold a tag to the back of the phone.'), findsOneWidget);
-
-      nfc.write!.complete(const NfcScan('04A22B1C', []));
-      await tester.pumpAndSettle();
-      expect(find.text('Wrote Front door tag on tag 04A22B1C'), findsOneWidget);
-    });
-
-    testWidgets('a tag that cannot take it says why, and Cancel gives up', (
-      tester,
-    ) async {
-      await pump(tester);
-      await openDeviceMenu(tester, 'front_door', 'Write to a tag');
-      nfc.write!.completeError(const NfcWriteError('This tag is locked'));
-      await tester.pumpAndSettle();
-      expect(find.text('This tag is locked'), findsOneWidget);
-
-      await tester.tap(find.byKey(const ValueKey('write-tag-retry')));
-      await tester.pumpAndSettle();
-      expect(find.text('Hold a tag to the back of the phone.'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('write-tag-cancel')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('write-tag-status')), findsNothing);
-      expect(nfc.write!.isCompleted, isTrue);
-    });
   });
 
   group('NDEF', () {

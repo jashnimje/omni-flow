@@ -34,6 +34,11 @@ ZoneSpec zoneOfPlace(Device place) => ZoneSpec.parse({
   'wifi': ?place.settings['wifi'],
 }, requireInput: false);
 
+/// What last decided whether the household person is home, as the person
+/// thing reports it in `homeSource`. `hub` is a hub that sees the phone,
+/// which no input reports yet.
+const presenceSources = ['wifi', 'ble', 'hub', 'manual'];
+
 /// The state a new virtual thing starts with, so its first real reading is
 /// a change and not the first time the key appears.
 Map<String, Object?> initialThingState(String driverId) => switch (driverId) {
@@ -167,6 +172,10 @@ class ThingsRuntime {
 
   ({String? ssid, String? bssid, DateTime at})? _lastWifi;
 
+  /// The input behind the readings being applied now, one of
+  /// [presenceSources].
+  String? _source;
+
   /// The person whose phone this engine reads: the one a phone names in
   /// its `person` setting, or the only person when there is one.
   Future<String?> householdPerson() async {
@@ -204,10 +213,43 @@ class ThingsRuntime {
     final homePlace = _places.values
         .where((p) => p.id == homeZone || zoneIdOf(p) == homeZone)
         .firstOrNull;
+    final isHome = homePlace != null && zones.isInside(homePlace.id);
     await _merge(person, {
-      'home': homePlace != null && zones.isInside(homePlace.id),
+      'home': isHome,
       'place': _entered.lastOrNull,
+      ..._presenceChange(device, isHome),
     }, quiet: quiet || quietPlaces.isNotEmpty);
+  }
+
+  /// `homeSource` and `homeSince` when [home] is a change for [person].
+  Map<String, Object?> _presenceChange(Device person, bool home) =>
+      valuesEqual(person.state['home'], home)
+      ? const {}
+      : {
+          'homeSince': DateTime.now().toUtc().toIso8601String(),
+          'homeSource': ?_source,
+        };
+
+  /// Sets whether [personId] (the household person when null) is home, as
+  /// the user says. The next reading that moves them in or out of their
+  /// home place decides again.
+  Future<Map<String, Object?>> setHome(bool home, {String? personId}) async {
+    final id =
+        personId ??
+        await householdPerson() ??
+        (throw ApiError('not_found', 'no household person: add one first'));
+    final person = await _store.get(id);
+    if (person == null || person.driverId != personDriverId) {
+      throw ApiError('not_found', 'no person $id');
+    }
+    final previous = _source;
+    _source = 'manual';
+    try {
+      await _merge(id, {'home': home, ..._presenceChange(person, home)});
+    } finally {
+      _source = previous;
+    }
+    return (await _store.get(id))!.state;
   }
 
   Future<void> _merge(
@@ -288,15 +330,22 @@ class ThingsRuntime {
     _core.emit({'event': 'wifi.changed', 'ssid': ssid, 'bssid': bssid});
     await _merge(device.id, {'wifi_ssid': ssid, 'wifi_bssid': bssid});
     _lastWifi = (ssid: ssid, bssid: bssid, at: at);
+    _source = 'wifi';
     await _apply(zones.wifi(ssid, bssid, at));
   }
 
   /// One BLE reading from the phone's scan.
-  Future<void> ble(String name, double rssi, DateTime at) =>
-      _apply(zones.bleReading(name, rssi, at));
+  Future<void> ble(String name, double rssi, DateTime at) {
+    _source = 'ble';
+    return _apply(zones.bleReading(name, rssi, at));
+  }
 
   /// About once a second, so a beacon that went quiet ends in an exit.
-  Future<void> tick(DateTime at) => _apply(zones.tick(at));
+  Future<void> tick(DateTime at) {
+    final changes = zones.tick(at);
+    if (changes.isNotEmpty) _source = 'ble';
+    return _apply(changes);
+  }
 
   /// The phone's battery level (0 to 100) and whether it is charging.
   Future<Map<String, Object?>> battery({
@@ -326,7 +375,12 @@ class ThingsRuntime {
       placeId = existing.id;
       await _core.devices.updateDevice(
         existing.id,
-        (d) => _place(d.id, zone, zoneId: zoneIdOf(d), state: d.state),
+        (d) => _place(
+          d.id,
+          zone,
+          zoneId: zoneIdOf(d),
+          state: d.state,
+        ).placed(room: d.room, order: d.order).copyWith(favourite: d.favourite),
       );
     } else {
       placeId = await _freePlaceId(zone.id);

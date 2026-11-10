@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
+import '../design/design.dart';
 import 'tv_controller.dart';
+import 'tv_widgets.dart';
 
 typedef _Run = ({
   String command,
@@ -13,8 +15,14 @@ typedef _Run = ({
   String? cwd,
 });
 
-/// A shell on the TV. It runs anything, so it stays behind a warning the
-/// user accepts once per session.
+/// The terminal well of the mockup: darker than a card, with the prompt in
+/// a light accent tint.
+const _well = Color(0xFF07090B);
+const _prompt = Color(0xFFB8F5EC);
+
+/// 4.5 Console: a shell on the TV. It runs anything, so it stays behind a
+/// warning the user accepts once per session, and the banner stays above
+/// the output after.
 class TvConsoleTab extends ConsumerStatefulWidget {
   const TvConsoleTab({super.key, required this.tv});
 
@@ -24,8 +32,7 @@ class TvConsoleTab extends ConsumerStatefulWidget {
   ConsumerState<TvConsoleTab> createState() => _TvConsoleTabState();
 }
 
-class _TvConsoleTabState extends ConsumerState<TvConsoleTab>
-    with AutomaticKeepAliveClientMixin {
+class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
   final _runs = <_Run>[];
   final _history = <String>[];
   final _command = TextEditingController();
@@ -34,9 +41,6 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab>
   String? _cwd;
 
   TvController get tv => widget.tv;
-
-  @override
-  bool get wantKeepAlive => true;
 
   @override
   void dispose() {
@@ -82,160 +86,154 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     if (!ref.watch(consoleAcceptedProvider)) return _warning(context);
-    const mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      children: [
-        Expanded(
-          child: _runs.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Commands run on the TV with ADB shell rights. Try '
-                      'getprop ro.build.version.release',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  key: const ValueKey('console-output'),
-                  controller: _scroll,
-                  padding: const EdgeInsets.all(12),
-                  itemCount: _runs.length,
-                  itemBuilder: (context, i) {
-                    final r = _runs[i];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${r.cwd == null ? '' : '${r.cwd} '}\$ ${r.command}',
-                            style: mono.copyWith(color: scheme.primary),
+    final mono = OmniText.mono.copyWith(color: _prompt);
+    final out = OmniText.mono.copyWith(color: OmniColors.muted);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const OmniBanner.warning(
+            'Commands run directly on the TV. Only you can use this, '
+            'never Claude.',
+          ),
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: _well,
+                borderRadius: BorderRadius.circular(OmniRadii.button),
+                border: Border.all(color: OmniColors.line),
+              ),
+              child: _runs.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(OmniSpace.md),
+                      child: Text(
+                        'Commands run with ADB shell rights. Try\n'
+                        'getprop ro.build.version.release',
+                        style: out,
+                      ),
+                    )
+                  : ListView.builder(
+                      key: const ValueKey('console-output'),
+                      controller: _scroll,
+                      padding: const EdgeInsets.all(OmniSpace.md),
+                      itemCount: _runs.length,
+                      itemBuilder: (context, i) {
+                        final r = _runs[i];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${r.cwd == null ? '' : '${r.cwd} '}\$ ${r.command}',
+                                style: mono,
+                              ),
+                              if (r.output.isNotEmpty)
+                                SelectableText(
+                                  r.output,
+                                  key: ValueKey('console-run-$i'),
+                                  style: r.failed
+                                      ? out.copyWith(color: OmniColors.bad)
+                                      : out,
+                                ),
+                              if (r.exitCode case final code?)
+                                Text(
+                                  'exit $code',
+                                  key: ValueKey('console-exit-$i'),
+                                  style: out.copyWith(
+                                    color: code == 0
+                                        ? OmniColors.muted
+                                        : OmniColors.bad,
+                                  ),
+                                ),
+                            ],
                           ),
-                          if (r.output.isNotEmpty)
-                            SelectableText(
-                              r.output,
-                              key: ValueKey('console-run-$i'),
-                              style: mono.copyWith(
-                                color: r.failed ? scheme.error : null,
-                              ),
-                            ),
-                          if (r.exitCode case final code?)
-                            Text(
-                              'exit $code',
-                              key: ValueKey('console-exit-$i'),
-                              style: mono.copyWith(
-                                color: code == 0
-                                    ? scheme.outline
-                                    : scheme.error,
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-        if (_running) const LinearProgressIndicator(minHeight: 2),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 4, 8),
-            child: Row(
-              children: [
-                PopupMenuButton<String>(
-                  key: const ValueKey('console-history'),
-                  tooltip: 'Earlier commands',
-                  enabled: _history.isNotEmpty,
-                  icon: const Icon(Icons.history),
-                  onSelected: (c) => setState(() {
-                    _command.text = c;
-                    _command.selection = TextSelection.collapsed(
-                      offset: c.length,
-                    );
-                  }),
-                  itemBuilder: (_) => [
-                    for (final c in _history.take(30))
-                      PopupMenuItem(
-                        value: c,
-                        child: Text(c, style: mono, maxLines: 2),
-                      ),
-                  ],
-                ),
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('console-command'),
-                    controller: _command,
-                    style: mono,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    textInputAction: TextInputAction.send,
-                    decoration: InputDecoration(
-                      hintText: 'Shell command',
-                      prefixText: '${_cwd == null ? '' : '$_cwd '}\$ ',
-                      isDense: true,
+                        );
+                      },
                     ),
-                    onSubmitted: (_) => _run(),
-                  ),
-                ),
-                IconButton(
-                  key: const ValueKey('console-run'),
-                  tooltip: 'Run',
-                  onPressed: _running ? null : _run,
-                  icon: const Icon(Icons.play_arrow),
-                ),
-                IconButton(
-                  key: const ValueKey('console-clear'),
-                  tooltip: 'Clear the output',
-                  onPressed: _runs.isEmpty ? null : () => setState(_runs.clear),
-                  icon: const Icon(Icons.clear_all),
-                ),
-              ],
             ),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _warning(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.warning_amber,
-            size: 48,
-            color: Theme.of(context).colorScheme.error,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'The console runs any command on the TV',
-            style: Theme.of(context).textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'OmniFlow does not check what you type. A command can delete '
-            'files, remove apps, change settings or make the TV unusable '
-            'until it is reset. Only run commands you understand.',
-            key: ValueKey('console-warning'),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            key: const ValueKey('console-accept'),
-            onPressed: () =>
-                ref.read(consoleAcceptedProvider.notifier).accept(),
-            child: const Text('I understand, open the console'),
+          if (_running)
+            const Padding(
+              padding: EdgeInsets.only(top: OmniSpace.xs),
+              child: OmniProgressBar(height: 2, semanticLabel: 'Running'),
+            ),
+          const SizedBox(height: OmniSpace.gap),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('console-command'),
+                  controller: _command,
+                  style: OmniText.mono.copyWith(fontSize: 14),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  textInputAction: TextInputAction.send,
+                  decoration: InputDecoration(
+                    labelText: 'Command',
+                    prefixText: '${_cwd == null ? '' : '$_cwd '}\$ ',
+                    suffixIcon: PopupMenuButton<String>(
+                      key: const ValueKey('console-history'),
+                      tooltip: 'Earlier commands',
+                      enabled: _history.isNotEmpty,
+                      icon: const Icon(TvIcons.history),
+                      onSelected: (c) => setState(() {
+                        _command.text = c;
+                        _command.selection = TextSelection.collapsed(
+                          offset: c.length,
+                        );
+                      }),
+                      itemBuilder: (_) => [
+                        for (final c in _history.take(30))
+                          PopupMenuItem(
+                            value: c,
+                            child: Text(c, style: OmniText.mono, maxLines: 2),
+                          ),
+                      ],
+                    ),
+                  ),
+                  onSubmitted: (_) => _run(),
+                ),
+              ),
+              OmniIconAction(
+                key: const ValueKey('console-run'),
+                icon: TvIcons.run,
+                label: 'Run',
+                color: OmniColors.accent,
+                onPressed: _running ? null : _run,
+              ),
+              OmniIconAction(
+                key: const ValueKey('console-clear'),
+                icon: TvIcons.clear,
+                label: 'Clear the output',
+                onPressed: _runs.isEmpty ? null : () => setState(_runs.clear),
+              ),
+            ],
           ),
         ],
       ),
-    ),
+    );
+  }
+
+  Widget _warning(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+    children: [
+      OmniEmptyState(
+        key: const ValueKey('console-warning'),
+        icon: OmniIcons.warning,
+        title: 'The console runs any command on the TV',
+        message:
+            'OmniFlow does not check what you type. A command can delete '
+            'files, remove apps, change settings or make the TV unusable '
+            'until it is reset. Only you can use it, never Claude.',
+        action: OmniButton(
+          key: const ValueKey('console-accept'),
+          label: 'I understand, open the console',
+          onPressed: () => ref.read(consoleAcceptedProvider.notifier).accept(),
+        ),
+      ),
+    ],
   );
 }

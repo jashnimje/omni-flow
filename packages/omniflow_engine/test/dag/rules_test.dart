@@ -765,8 +765,9 @@ class _NoEffects implements FlowEffects {
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,
-    Map<String, Object?> params,
-  ) async => null;
+    Map<String, Object?> params, {
+    String? flowId,
+  }) async => null;
 
   @override
   Future<void> runFlow(String flowId, Map<String, Object?> msg) async {}
@@ -777,6 +778,7 @@ class _NoEffects implements FlowEffects {
   @override
   Future<Map<String, Object?>?> toggleDevice(
     String deviceId,
-    String capabilityId,
-  ) async => null;
+    String capabilityId, {
+    String? flowId,
+  }) async => null;
 }

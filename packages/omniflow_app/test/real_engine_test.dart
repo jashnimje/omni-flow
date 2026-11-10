@@ -52,7 +52,7 @@ void main() {
 
     await pumpUntil(find.text('Desk lamp'));
     expect(find.text('Desk lamp'), findsOneWidget);
-    expect(find.byKey(const ValueKey('device-desk_lamp')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tile-desk_lamp')), findsOneWidget);
 
     await tester.runAsync(() async {
       final socket = await RawDatagramSocket.bind(

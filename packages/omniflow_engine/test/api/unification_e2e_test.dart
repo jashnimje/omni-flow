@@ -400,7 +400,12 @@ Future<void> main() async {
     await ok('phone.wifi', {'ssid': 'HomeNet', 'bssid': 'aa:bb'});
     await until(() => announced().contains('Welcome home'));
     expect((await stateOf('lamp'))['power'], isTrue);
-    expect(await stateOf('jade'), {'home': true, 'place': 'home'});
+    expect(await stateOf('jade'), {
+      'home': true,
+      'place': 'home',
+      'homeSource': 'wifi',
+      'homeSince': isA<String>(),
+    });
 
     final start = DateTime.utc(2026, 11, 7, 18);
     for (var s = 0; s <= 4; s++) {

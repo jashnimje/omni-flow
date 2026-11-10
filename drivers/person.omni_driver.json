@@ -8,6 +8,8 @@
   "settings": [{ "key": "homePlace", "label": "Place that counts as home (default home)" }],
   "capabilities": [
     { "id": "home", "type": "sensor", "label": "At home", "stateJsonPath": "$.home" },
-    { "id": "place", "type": "sensor", "label": "Place", "stateJsonPath": "$.place" }
+    { "id": "place", "type": "sensor", "label": "Place", "stateJsonPath": "$.place" },
+    { "id": "home_source", "type": "sensor", "label": "What decided home or away (wifi, ble, hub or manual)", "stateJsonPath": "$.homeSource" },
+    { "id": "home_since", "type": "sensor", "label": "Home or away since", "stateJsonPath": "$.homeSince" }
   ]
 }

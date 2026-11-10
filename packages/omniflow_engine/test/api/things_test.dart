@@ -129,7 +129,12 @@ void main() {
 
     await ok('phone.wifi', {'ssid': 'HomeNet', 'bssid': 'aa:bb'});
     await until(() => announced().contains('welcome'));
-    expect(await stateOf('jade'), {'home': true, 'place': 'home'});
+    expect(await stateOf('jade'), {
+      'home': true,
+      'place': 'home',
+      'homeSource': 'wifi',
+      'homeSince': isA<String>(),
+    });
     expect(await stateOf('home'), {
       'inside': true,
       'people': ['jade'],
@@ -141,7 +146,12 @@ void main() {
 
     await ok('phone.wifi', {'ssid': 'Cafe'});
     await until(() => announced().contains('bye'));
-    expect(await stateOf('jade'), {'home': false, 'place': null});
+    expect(await stateOf('jade'), {
+      'home': false,
+      'place': null,
+      'homeSource': 'wifi',
+      'homeSince': isA<String>(),
+    });
     expect(announced(), ['welcome', 'bye']);
   });
 
@@ -249,7 +259,12 @@ void main() {
       'settings': {'homePlace': 'flat'},
     });
     await ok('sensor.wifi', {'ssid': 'HomeNet'});
-    expect(await stateOf('jade'), {'home': true, 'place': 'flat'});
+    expect(await stateOf('jade'), {
+      'home': true,
+      'place': 'flat',
+      'homeSource': 'wifi',
+      'homeSince': isA<String>(),
+    });
     final start = DateTime(2026, 11, 7, 9);
     for (var i = 0; i < 4; i++) {
       await ok('sensor.ble', {
@@ -258,7 +273,12 @@ void main() {
         'at': start.add(Duration(milliseconds: 250 * i)).toIso8601String(),
       });
     }
-    expect(await stateOf('jade'), {'home': true, 'place': 'desk'});
+    expect(await stateOf('jade'), {
+      'home': true,
+      'place': 'desk',
+      'homeSource': 'wifi',
+      'homeSince': isA<String>(),
+    });
     final zones = (await ok('zone.list', {}))['zones'] as List;
     expect(
       {for (final z in zones.cast<Map>()) z['id']: z['inside']},
@@ -349,6 +369,7 @@ void main() {
       expect(scan['tag'], 'front_door');
       expect(await stateOf('front_door'), {
         'last_scanned': '2026-11-07T09:00:00.000Z',
+        'last_source': 'phone',
       });
       expect(
         (await ok('nfc.scanned', {

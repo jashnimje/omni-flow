@@ -378,6 +378,10 @@ const strappingPins = {
   'esp32': {0, 2, 5, 12, 15},
 };
 
+/// The boot strapping GPIOs of the board [describe] names, in order.
+List<int> bootPinsOf(Map<String, Object?> describe) =>
+    [...?strappingPins[describe['board']]]..sort();
+
 /// One warning per pin in [pins] that is a boot strapping pin on the board
 /// [describe] names. These pins still work, so nothing is refused.
 List<String> strappingPinWarnings(

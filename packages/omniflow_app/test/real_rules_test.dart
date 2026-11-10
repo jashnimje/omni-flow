@@ -43,7 +43,14 @@ void main() {
           [SetStep(r'$Away', false)],
           [RunStep('evening')],
         ]),
+        KeepStep(
+          'fan',
+          'power',
+          value: true,
+          whileConditions: [CompareCondition('state', 'room.temp', '>', 28)],
+        ),
       ],
+      extra: {'stopOnError': true},
     ).toJson();
 
     final stored = normalizeRule(spec);

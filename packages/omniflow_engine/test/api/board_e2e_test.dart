@@ -114,6 +114,7 @@ void describeTests() {
     expect(result['live'], isTrue);
     expect(result.containsKey('seenAt'), isFalse);
     expect(result['warnings'], isEmpty);
+    expect(result['bootPins'], isEmpty, reason: 'the host board has none');
     final describe = result['describe'] as Map<String, Object?>;
     expect(describe['board'], 'host');
     expect(describe['node'], 'desk_board');

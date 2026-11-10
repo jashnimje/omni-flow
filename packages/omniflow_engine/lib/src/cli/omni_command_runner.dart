@@ -17,6 +17,7 @@ import '../storage/keychain_secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../version.dart';
 import 'add_cli.dart';
+import 'organize_cli.dart';
 import 'rule_cli.dart';
 import 'tv_cli.dart';
 
@@ -135,6 +136,8 @@ class OmniCommandRunner extends CommandRunner<int> {
         _DevicePair(),
         _DeviceHostKey(),
         DeviceShellCommand(),
+        deviceOrganizeCommand(),
+        deviceHistoryCommand(),
       ]),
     );
     addCommand(
@@ -189,6 +192,10 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(RuleCommand());
     addCommand(AddCommand());
     addCommand(TvCommand());
+    addCommand(roomCommand());
+    addCommand(sceneCommand());
+    addCommand(automationCommand());
+    addCommand(presenceCommand());
     String id(List<String> rest) => _one(rest, 'ID');
     addCommand(
       _Group('flow', 'Validate, save, run and inspect flows.', [

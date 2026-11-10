@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'api_error.dart';
+import 'error_of.dart';
 import 'engine_core.dart';
 import 'nfc_tags.dart';
 import '../dag/conditions.dart' show valuesEqual;
@@ -267,6 +268,8 @@ class BoardRuntime {
             settings: old.settings,
             state: old.state,
             lastSeen: old.lastSeen,
+            favourite: old.favourite,
+            order: old.order,
           ),
         );
         _emit({
@@ -403,7 +406,7 @@ class BoardRuntime {
     try {
       await provisionBoard(id);
     } catch (e) {
-      _emit({'event': 'board.offline', 'device': id, 'error': '$e'});
+      _emit({'event': 'board.offline', 'device': id, ...errorFields(e)});
     }
   }
 }

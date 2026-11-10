@@ -1,0 +1,413 @@
+import '../dag/node_types.dart';
+import '../manifest/capability.dart';
+import '../manifest/driver_manifest.dart';
+import '../storage/database.dart';
+import '../devices/device_service.dart' show stateKeyOf;
+
+/// One piece of an automation's sentence: `when`, `if` and `then` are the
+/// coloured chips, `text` the words between them.
+Map<String, Object?> _chip(String kind, String text) => {
+  'kind': kind,
+  'text': text,
+};
+
+/// What an automation reads in plain words needs: each thing's name and
+/// driver, the household person (who reads as "I"), and the automation
+/// names a run step names.
+class SentenceContext {
+  const SentenceContext({
+    this.names = const {},
+    this.drivers = const {},
+    this.person,
+    this.automations = const {},
+  });
+
+  final Map<String, String> names;
+  final Map<String, DriverManifest> drivers;
+  final String? person;
+  final Map<String, String> automations;
+
+  String name(String thing) => names[thing] ?? thing.replaceAll('_', ' ');
+
+  CapabilitySpec? _capability(String thing, String key) {
+    final manifest = drivers[thing];
+    if (manifest == null) return null;
+    return manifest.capability(key) ??
+        manifest.capabilities
+            .where((c) => stateKeyOf(c.stateJsonPath) == key)
+            .firstOrNull;
+  }
+
+  /// The words for one key of a thing: its capability label, or the key.
+  String _key(String thing, String key) =>
+      (_capability(thing, key)?.label ?? key.replaceAll('_', ' '))
+          .toLowerCase();
+
+  String state(String ref) {
+    final (thing, key) = _split(ref);
+    return '${name(thing)} ${_key(thing, key)}';
+  }
+
+  static (String, String) _split(String ref) {
+    final dot = ref.indexOf('.');
+    return dot < 0
+        ? (ref, '')
+        : (ref.substring(0, dot), ref.substring(dot + 1));
+  }
+
+  static String value(Object? v) => switch (v) {
+    true => 'on',
+    false => 'off',
+    String s => s,
+    _ => '$v',
+  };
+
+  static String duration(Object? ms) {
+    if (ms is! int) return '$ms ms';
+    if (ms > 0 && ms % 3600000 == 0) return '${ms ~/ 3600000} h';
+    if (ms > 0 && ms % 60000 == 0) return '${ms ~/ 60000} min';
+    if (ms % 1000 == 0) return '${ms ~/ 1000} s';
+    return '$ms ms';
+  }
+
+  static String seconds(Object? s) => s is int ? duration(s * 1000) : '$s s';
+
+  bool _isMe(String thing) => thing == person;
+
+  String trigger(Map<String, Object?> t) {
+    if (t['on'] is String) return 'When ${_on(t)}';
+    if (t['time'] != null) {
+      final days = t['days'];
+      return 'At ${t['time']}${days is List ? ' on ${days.join(', ')}' : ''}';
+    }
+    if (t['interval'] != null) return 'Every ${seconds(t['interval'])}';
+    return 'When I run it';
+  }
+
+  /// What an `on` trigger or a waitFor waits for, after "when".
+  String _on(Map<String, Object?> t) {
+    final (thing, key) = _split(t['on'] as String);
+    if (t['event'] == true) {
+      if (key == 'scanned') return '${name(thing)} is scanned';
+      return '${name(thing)} ${_key(thing, key)}';
+    }
+    final change = t['change'];
+    final to = change is Map && change.containsKey('to') ? change['to'] : null;
+    if (key == 'home' && to is bool && drivers[thing]?.id == 'person') {
+      if (_isMe(thing)) return to ? 'I get home' : 'I leave';
+      return '${name(thing)} ${to ? 'gets home' : 'leaves'}';
+    }
+    final crosses = t['crosses'];
+    if (crosses is Map && crosses.isNotEmpty) {
+      return '${state(t['on'] as String)} goes ${crosses.keys.single} '
+          '${crosses.values.single}';
+    }
+    if (change is Map && change.containsKey('to')) {
+      return '${state(t['on'] as String)} turns ${value(to)}';
+    }
+    return '${state(t['on'] as String)} changes';
+  }
+
+  static const _opWords = {
+    '==': 'is',
+    '!=': 'is not',
+    '>': 'is above',
+    '<': 'is below',
+    '>=': 'is at least',
+    '<=': 'is at most',
+  };
+
+  String condition(Map<String, Object?> c) {
+    if (c['between'] case [final start, final end]) {
+      return 'between $start and $end';
+    }
+    if (c['days'] is List) return 'on ${(c['days'] as List).join(', ')}';
+    if (c['not'] is Map) {
+      return 'not ${condition(Map<String, Object?>.from(c['not'] as Map))}';
+    }
+    for (final (group, word) in [('anyOf', ' or '), ('allOf', ' and ')]) {
+      if (c[group] is List) {
+        return [
+          for (final inner in c[group] as List)
+            condition(Map<String, Object?>.from(inner as Map)),
+        ].join(word);
+      }
+    }
+    final op = _opWords[c['op']] ?? '${c['op']}';
+    final right = c['value'];
+    final rightText = right is Map && right.length == 1
+        ? (right.keys.single == 'state'
+              ? state('${right.values.single}')
+              : '${right.values.single}')
+        : value(right);
+    if (c['state'] case final String ref) {
+      final (thing, key) = _split(ref);
+      if (key == 'home' &&
+          right is bool &&
+          drivers[thing]?.id == 'person' &&
+          (c['op'] == '==' || c['op'] == '!=')) {
+        final home = (c['op'] == '==') == right;
+        if (_isMe(thing)) return home ? 'I am home' : 'I am away';
+        return '${name(thing)} is ${home ? 'home' : 'away'}';
+      }
+      return '${state(ref)} $op $rightText';
+    }
+    if (c['var'] != null) return '${c['var']} $op $rightText';
+    return 'the message ${c['msg']} $op $rightText';
+  }
+
+  /// The words for setting [ref] (`thing.action`) with [params].
+  String action(String ref, Map? params) {
+    final (thing, key) = _split(ref);
+    final capability = _capability(thing, key);
+    final who = name(thing);
+    if (params == null || params.isEmpty) return '$who ${_key(thing, key)}';
+    if (params.length == 1 && params.containsKey('value')) {
+      final v = params['value'];
+      if (capability?.type == CapabilityType.toggle && v is bool) {
+        return '$who ${value(v)}';
+      }
+      final unit = capability?.params['value']?.unit;
+      final suffix = unit == null ? '' : (unit == '%' ? '%' : ' $unit');
+      return '$who ${_key(thing, key)} ${value(v)}$suffix';
+    }
+    return '$who ${_key(thing, key)} '
+        '${params.entries.map((e) => '${e.key} ${value(e.value)}').join(', ')}';
+  }
+
+  String step(Map<String, Object?> s) {
+    if (s['do'] is String) {
+      return action(s['do'] as String, s['params'] as Map?);
+    }
+    if (s['toggle'] is String) {
+      final (thing, key) = _split(s['toggle'] as String);
+      final capability = _capability(thing, key);
+      return capability?.type == CapabilityType.toggle
+          ? 'toggle ${name(thing)}'
+          : 'toggle ${name(thing)} ${_key(thing, key)}';
+    }
+    if (s.containsKey('wait')) return 'wait ${duration(s['wait'])}';
+    if (s['waitFor'] is Map) {
+      final w = Map<String, Object?>.from(s['waitFor'] as Map);
+      return 'wait up to ${duration(w['timeoutMs'])} for ${_on(w)}';
+    }
+    if (s['if'] is List) {
+      return 'if ${[for (final c in s['if'] as List) condition(Map<String, Object?>.from(c as Map))].join(' and ')}…';
+    }
+    if (s['together'] is List) {
+      return [
+        for (final group in s['together'] as List)
+          [
+            for (final inner in group as List)
+              step(Map<String, Object?>.from(inner as Map)),
+          ].join(' then '),
+      ].join(' and ');
+    }
+    if (s['notify'] is Map) return 'notify "${(s['notify'] as Map)['title']}"';
+    if (s['set'] is Map) {
+      final set = s['set'] as Map;
+      return 'set ${set['var']} to ${value(set['value'])}';
+    }
+    if (s['run'] is String) {
+      return 'run ${automations[s['run']] ?? s['run']}';
+    }
+    return '$s';
+  }
+
+  /// A rule as chips: its triggers, then its conditions, an arrow, then
+  /// its steps. A keep step reads "Keep X on" with its while as a condition.
+  List<Map<String, Object?>> rule(Map<String, Object?> rule) {
+    final out = <Map<String, Object?>>[];
+    void joined(List<Map<String, Object?>> chips, String word) {
+      for (var i = 0; i < chips.length; i++) {
+        if (i > 0) out.add(_chip('text', word));
+        out.add(chips[i]);
+      }
+    }
+
+    final when = [
+      for (final t in (rule['when'] as List? ?? const []))
+        _chip('when', trigger(Map<String, Object?>.from(t as Map))),
+    ];
+    for (var i = 1; i < when.length; i++) {
+      when[i] = _chip('when', _lower(when[i]['text'] as String));
+    }
+    joined(when, 'or');
+    joined([
+      for (final c in (rule['onlyIf'] as List? ?? const []))
+        _chip('if', condition(Map<String, Object?>.from(c as Map))),
+    ], 'and');
+    final steps = [
+      for (final s in (rule['then'] as List? ?? const []))
+        Map<String, Object?>.from(s as Map),
+    ];
+    final plain = steps.where((s) => !s.containsKey('keep')).toList();
+    if (out.isNotEmpty && plain.isNotEmpty) out.add(_chip('text', '→'));
+    joined([for (final s in plain) _chip('then', step(s))], 'then');
+    for (final s in steps.where((s) => s.containsKey('keep'))) {
+      if (out.isNotEmpty) out.add(_chip('text', 'and'));
+      final k = Map<String, Object?>.from(s['keep'] as Map);
+      out.add(
+        _chip(
+          'then',
+          'Keep ${action('${k['target']}', {'value': k['value']})}',
+        ),
+      );
+      out.add(
+        _chip(
+          'if',
+          'while ${[for (final c in k['while'] as List) condition(Map<String, Object?>.from(c as Map))].join(' and ')}',
+        ),
+      );
+    }
+    return out;
+  }
+
+  List<Map<String, Object?>> scene(Map<String, Object?> scene) {
+    final out = <Map<String, Object?>>[];
+    final actions = scene['actions'] as List? ?? const [];
+    for (var i = 0; i < actions.length; i++) {
+      if (i > 0) out.add(_chip('text', 'and'));
+      final a = Map<String, Object?>.from(actions[i] as Map);
+      out.add(_chip('then', action('${a['do']}', a['params'] as Map?)));
+    }
+    return out;
+  }
+
+  List<Map<String, Object?>> link(Map<String, Object?> link) {
+    final from = '${link['from']}';
+    final to = '${link['to']}';
+    final (target, action) = _split(to);
+    switch (link['mode']) {
+      case 'follow':
+        return [
+          _chip('then', '${name(target)} ${_key(target, action)}'),
+          _chip('text', 'follows'),
+          _chip('when', state(from)),
+        ];
+      case 'threshold':
+        final above = link['above'];
+        return [
+          _chip(
+            'when',
+            'When ${state(from)} goes ${above != null ? 'above $above' : 'below ${link['below']}'}',
+          ),
+          _chip('text', '→'),
+          _chip('then', this.action(to, {'value': link['set']})),
+        ];
+      default:
+        final capability = _capability(target, action);
+        return [
+          _chip(
+            'when',
+            'When ${state(from)} turns ${value(link['onValue'] ?? true)}',
+          ),
+          _chip('text', '→'),
+          _chip(
+            'then',
+            capability?.type == CapabilityType.toggle
+                ? 'toggle ${name(target)}'
+                : 'toggle ${name(target)} ${_key(target, action)}',
+          ),
+        ];
+    }
+  }
+
+  /// A graph as its node labels: triggers, conditions, then actions.
+  List<Map<String, Object?>> graph(Map<String, Object?> flow) {
+    final nodes = [
+      for (final n in (flow['nodes'] as List? ?? const []))
+        Map<String, Object?>.from(n as Map),
+    ];
+    String label(Map<String, Object?> n) => '${n['label'] ?? n['id']}';
+    NodeCategory? category(Map<String, Object?> n) =>
+        builtInNodeTypes[n['type']]?.category;
+    final out = <Map<String, Object?>>[];
+    void add(String kind, Iterable<Map<String, Object?>> of, String word) {
+      var first = true;
+      for (final n in of) {
+        if (!first) out.add(_chip('text', word));
+        out.add(_chip(kind, label(n)));
+        first = false;
+      }
+    }
+
+    add('when', nodes.where((n) => category(n) == NodeCategory.trigger), 'or');
+    add('if', nodes.where((n) => category(n) == NodeCategory.condition), 'and');
+    final actions = nodes.where((n) => category(n) == NodeCategory.action);
+    if (out.isNotEmpty && actions.isNotEmpty) out.add(_chip('text', '→'));
+    add('then', actions, 'then');
+    return out;
+  }
+
+  List<Map<String, Object?>> sentence(FlowRecord r) {
+    final spec = r.spec;
+    try {
+      return switch (r.source) {
+        FlowRecord.rule when spec != null => rule(spec),
+        FlowRecord.scene when spec != null => scene(spec),
+        FlowRecord.link when spec != null => link(spec),
+        _ => graph(r.json),
+      };
+    } catch (_) {
+      // A spec stored by an older engine may not have today's shape.
+      return graph(r.json);
+    }
+  }
+
+  static String _lower(String text) =>
+      text.isEmpty ? text : text[0].toLowerCase() + text.substring(1);
+}
+
+/// The things a flow reads or drives: every device, trigger thing and
+/// state it compares.
+Set<String> thingsIn(Object? value) {
+  final out = <String>{};
+  void walk(Object? v) {
+    switch (v) {
+      case Map m:
+        if (m['deviceId'] case final String id) out.add(id);
+        if (m['thing'] case final String id) out.add(id);
+        if (m['state'] case final String ref when ref.contains('.')) {
+          out.add(ref.substring(0, ref.indexOf('.')));
+        }
+        m.values.forEach(walk);
+      case List l:
+        l.forEach(walk);
+    }
+  }
+
+  walk(value);
+  return out;
+}
+
+/// The things a flow's actions drive.
+Set<String> thingsDriven(Map<String, Object?> flow) => {
+  for (final n in (flow['nodes'] as List? ?? const []))
+    if (n is Map &&
+        builtInNodeTypes[n['type']]?.category == NodeCategory.action &&
+        n['config'] is Map &&
+        (n['config'] as Map)['deviceId'] is String)
+      (n['config'] as Map)['deviceId'] as String,
+};
+
+/// A run from the log as the automation list shows it: when, whether it
+/// went well, how many steps ran, and the failure.
+Map<String, Object?> lastRunOf(Map<String, Object?> trace) {
+  final nodes = (trace['nodes'] as List? ?? const []).whereType<Map>();
+  final steps = nodes.where((n) {
+    final category = builtInNodeTypes[n['type']]?.category;
+    return category != null &&
+        category != NodeCategory.trigger &&
+        category != NodeCategory.condition;
+  }).length;
+  final ok = trace['outcome'] == 'completed';
+  return {
+    'at': trace['startedAt'],
+    'ok': ok,
+    'steps': steps,
+    'run': trace['run'],
+    'outcome': trace['outcome'],
+    if (!ok && trace['reason'] != null) 'error': trace['reason'],
+  };
+}

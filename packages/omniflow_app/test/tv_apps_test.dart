@@ -16,15 +16,23 @@ void main() {
 
   Iterable<Map<String, Object?>> appCalls() => argsOf(engine, 'tv.app');
 
+  Finder inList(String text) => find.descendant(
+    of: find.byKey(const ValueKey('apps-list')),
+    matching: find.text(text),
+  );
+
   testWidgets('lists installed apps first, then by filter and search', (
     tester,
   ) async {
     await pumpTv(tester, engine);
     await openTvTab(tester, 'Apps');
     expect(argsOf(engine, 'tv.apps').single, {'id': tvId, 'filter': 'user'});
-    expect(find.text('Netflix'), findsOneWidget);
-    expect(find.text('SonyLIV'), findsOneWidget);
-    expect(find.text('Disabled'), findsOneWidget);
+    expect(inList('Netflix'), findsOneWidget);
+    expect(inList('SonyLIV'), findsOneWidget);
+    expect(inList('disabled'), findsOneWidget);
+    expect(inList('running'), findsOneWidget);
+    expect(inList('com.netflix.ninja · 9.1'), findsOneWidget);
+    expect(find.text('Search 2 apps'), findsOneWidget);
 
     await tester.tap(find.text('System'));
     await tester.pumpAndSettle();
@@ -35,11 +43,33 @@ void main() {
 
     await tester.enterText(find.byKey(const ValueKey('apps-search')), 'sony');
     await tester.pump();
-    expect(find.text('Netflix'), findsNothing);
-    expect(find.text('SonyLIV'), findsOneWidget);
+    expect(inList('Netflix'), findsNothing);
+    expect(inList('SonyLIV'), findsOneWidget);
     await tester.enterText(find.byKey(const ValueKey('apps-search')), 'ninja');
     await tester.pump();
-    expect(find.text('Netflix'), findsOneWidget);
+    expect(inList('Netflix'), findsOneWidget);
+  });
+
+  testWidgets('an app without a label is named from its package, with a '
+      'badge', (tester) async {
+    engine.answers['tv.apps'] = {
+      'ok': true,
+      'apps': [
+        {'package': 'com.example.player', 'versionName': '2.0'},
+      ],
+    };
+    await pumpTv(tester, engine);
+    await openTvTab(tester, 'Apps');
+    expect(inList('Example'), findsOneWidget);
+    expect(inList('E'), findsOneWidget);
+    expect(inList('com.example.player · 2.0'), findsOneWidget);
+  });
+
+  testWidgets('an empty filter says so', (tester) async {
+    engine.answers['tv.apps'] = {'ok': true, 'apps': const []};
+    await pumpTv(tester, engine);
+    await openTvTab(tester, 'Apps');
+    expect(find.text('No apps here'), findsOneWidget);
   });
 
   testWidgets('the header names the focused app once apps are listed', (
@@ -164,9 +194,10 @@ void main() {
     });
     await tester.pump();
     expect(find.byKey(const ValueKey('tv-progress')), findsOneWidget);
+    expect(find.text('Installing app.apk'), findsOneWidget);
     expect(
       tester.widget<Text>(find.byKey(const ValueKey('tv-progress-text'))).data,
-      'Installing  512 KB of 1.0 MB',
+      '512 KB of 1.0 MB',
     );
     await tester.pumpAndSettle();
     expect(phoneFiles.picks.single, ['apk']);
@@ -198,7 +229,7 @@ void main() {
     };
     await pumpTv(tester, engine);
     await openTvTab(tester, 'Apps');
-    expect(find.text('TV did not answer'), findsOneWidget);
+    expect(find.textContaining('TV did not answer'), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
   });
 }

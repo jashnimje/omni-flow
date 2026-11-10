@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'api_error.dart';
+import 'error_of.dart';
 import 'board_runtime.dart';
 import 'engine_core.dart';
 import 'things_runtime.dart';
@@ -125,7 +126,7 @@ class HubRuntime {
     if (manifest?.transport.type == TransportType.mqtt) {
       _track(
         _core.mqtt.watch(d, manifest!).catchError((Object e) {
-          _emit({'event': 'device.offline', 'device': d.id, 'error': '$e'});
+          _emit({'event': 'device.offline', 'device': d.id, ...errorFields(e)});
         }),
       );
     }
@@ -150,7 +151,11 @@ class HubRuntime {
             // A poll runs unattended, so it never puts a pairing prompt on a TV.
             await _core.devices.refreshState(id, allowPairing: false);
           } catch (e) {
-            _emit({'event': 'device.pollFailed', 'device': id, 'error': '$e'});
+            _emit({
+              'event': 'device.pollFailed',
+              'device': id,
+              ...errorFields(e),
+            });
           }
         }());
       });
@@ -181,7 +186,11 @@ class HubRuntime {
         try {
           await poll(id);
         } catch (e) {
-          _emit({'event': 'device.pollFailed', 'device': id, 'error': '$e'});
+          _emit({
+            'event': 'device.pollFailed',
+            'device': id,
+            ...errorFields(e),
+          });
         } finally {
           busy = false;
         }

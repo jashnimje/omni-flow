@@ -171,7 +171,7 @@ void main() {
 
   test('a save names its form, and its spec is an object', () async {
     final none = await fails('automation.save', {'spec': welcome}, 'invalid');
-    expect(none['message'], 'form must be one of link, rule, graph');
+    expect(none['message'], 'form must be one of link, rule, graph, scene');
     await fails('automation.save', {
       'form': 'script',
       'spec': welcome,

@@ -11,17 +11,18 @@ import 'command_args.dart';
 import 'device_commands.dart';
 import 'engine_core.dart';
 import 'engine_flow_host.dart';
+import 'error_of.dart';
 import 'flow_commands.dart';
 import 'host_key_commands.dart';
 import 'hub_runtime.dart';
 import 'link_commands.dart';
 import 'nfc_tags.dart';
+import 'organize_commands.dart';
 import 'pairing_commands.dart';
 import 'state_commands.dart';
 import 'stored_flows.dart';
 import 'things_runtime.dart';
 import 'tv_commands.dart';
-import '../dag/expression.dart';
 import '../dag/flow_engine.dart';
 import '../devices/adb/adb_channel.dart';
 import '../devices/board.dart';
@@ -34,18 +35,13 @@ import '../devices/http_channel.dart';
 import '../devices/mqtt_channel.dart';
 import '../devices/serial_channel.dart';
 import '../devices/tuya_channel.dart';
-import '../devices/tv/tv_socket.dart';
 import '../devices/tv/tv_channel.dart';
 import '../devices/virtual_channel.dart';
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
-import '../manifest/validation.dart';
 import '../storage/database.dart';
 import '../storage/secret_store.dart';
-import '../template/template_renderer.dart';
-import '../transports/host_exec.dart';
 import '../transports/packet_tap.dart';
-import '../transports/ssh_executor.dart';
 import '../transports/udp_transport.dart';
 
 export 'api_error.dart';
@@ -88,6 +84,7 @@ class OmniEngine {
       }),
       _core.events.listen(_addCommands.observe),
     ]);
+    devices.events.listen(_core.history.record);
     devices.events.listen(
       (e) => _core.emit({
         'event': 'device.stateChanged',
@@ -204,6 +201,8 @@ class OmniEngine {
         ],
       );
       engine._core.issues['driver'] = driverIssues;
+      await engine._core.loadRooms();
+      await engine._core.history.seed();
       await _backfillStableIds(engine._core);
       await engine._things.migrateZoneRows();
       await engine._things.reload(quiet: true);
@@ -292,6 +291,7 @@ class OmniEngine {
   late final _pairingCommands = PairingCommands(_core);
   late final _addCommands = AddCommands(_core, _deviceCommands);
   late final _tagCommands = TagCommands(_core, _things, _deviceCommands);
+  late final _organizeCommands = OrganizeCommands(_core);
 
   /// Stored records that could not be loaded, by kind (driver, zone, flow).
   /// They stay in the database and are reported, so one bad row never
@@ -400,6 +400,9 @@ class OmniEngine {
     'device.refresh': _deviceCommands.refresh,
     'device.pair': _pairingCommands.pair,
     'device.hostkey': _hostKeyCommands.hostKey,
+    'device.history': _core.history.history,
+    ..._organizeCommands.commands,
+    'presence.set': _stateCommands.presenceSet,
     'secret.set': _deviceCommands.secretSet,
     ..._tvCommands.commands,
   };
@@ -417,49 +420,8 @@ class OmniEngine {
     }
     try {
       return {'ok': true, ...await handler(args)};
-    } on ApiError catch (e) {
-      return _failure(e);
-    } on ValidationException catch (e) {
-      return _failure(ApiError('invalid', e.subject, issues: e.issues));
-    } on DeviceNotFoundException catch (e) {
-      return _failure(ApiError('not_found', e.message));
-    } on TransportTimeoutException catch (e) {
-      return _failure(ApiError('timeout', e.message));
-    } on PairingRequiredException catch (e) {
-      return _failure(ApiError('needs_user', e.message));
-    } on TvCertificateMismatchException catch (e) {
-      return _failure(ApiError('certificate_mismatch', e.message));
-    } on AdbPairingException catch (e) {
-      return _failure(ApiError('pairing_failed', e.message));
-    } on TvPairingException catch (e) {
-      return _failure(ApiError('pairing_failed', e.message));
-    } on LinkButtonNotPressedException catch (e) {
-      return _failure(ApiError('pairing_failed', e.message));
-    } on SecretRejectedException catch (e) {
-      return _failure(ApiError('secret_rejected', e.message));
-    } on HostKeyMismatchException catch (e) {
-      return _failure(hostKeyError(e));
-    } on CommandFailedException catch (e) {
-      return _failure(ApiError('device_error', e.message));
-    } on MissingSecretException catch (e) {
-      return _failure(
-        ApiError(
-          'missing_secret',
-          'no secret stored for ${e.key}. Set it with omni secret set',
-        ),
-      );
-    } on CommandTimeoutException catch (e) {
-      return _failure(ApiError('timeout', e.toString()));
-    } on TemplateException catch (e) {
-      return _failure(ApiError('template', e.message));
-    } on ArgumentError catch (e) {
-      return _failure(ApiError('invalid', '${e.message}'));
-    } on StateError catch (e) {
-      return _failure(ApiError('not_ready', e.message));
-    } on ExpressionException catch (e) {
-      return _failure(ApiError('invalid', e.message));
     } catch (e) {
-      return _failure(ApiError('internal', '$e'));
+      return _failure(apiErrorOf(e));
     }
   }
 

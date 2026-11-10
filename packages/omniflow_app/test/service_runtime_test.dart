@@ -449,7 +449,10 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.text('OmniFlow is stopped'), findsOneWidget);
-    expect(find.text('Stopped from the notification'), findsOneWidget);
+    expect(
+      find.textContaining('Stopped from the notification'),
+      findsOneWidget,
+    );
     expect(find.text('Desk lamp'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('service-start')));

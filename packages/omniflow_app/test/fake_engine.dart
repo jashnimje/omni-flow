@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/api/engine_client.dart';
 import 'package:omniflow_app/state/providers.dart';
-import 'package:omniflow_app/ui/home.dart';
+import 'package:omniflow_app/ui/app.dart';
 
 /// Answers core API commands from canned data and records every call.
 /// A command with no canned answer gets `{"ok": true}`.
@@ -153,9 +153,9 @@ Future<void> pumpApp(
   String? hubError,
   List<Override> overrides = const [],
 }) async {
-  // A phone-wide screen (412 dp), tall enough that the Add device button
-  // does not cover the controls under test.
-  tester.view.physicalSize = const Size(1236, 4800);
+  // A phone-wide screen (412 dp), tall enough that the Add button and the
+  // tab bar do not cover the controls under test.
+  tester.view.physicalSize = const Size(1236, 5400);
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     ProviderScope(
@@ -178,14 +178,49 @@ Future<void> openDriverSheet(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens a device's menu and picks [item].
+/// Opens a device's page from the Devices tab.
+Future<void> openDevicePage(WidgetTester tester, String deviceId) async {
+  await openTab(tester, 'Devices');
+  await tester.tap(find.byKey(ValueKey('device-row-$deviceId')));
+  await tester.pumpAndSettle();
+}
+
+/// Opens a device's menu and picks [item], opening its page first when it
+/// is not on screen.
 Future<void> openDeviceMenu(
   WidgetTester tester,
   String deviceId,
   String item,
 ) async {
+  if (find.byKey(ValueKey('device-menu-$deviceId')).evaluate().isEmpty) {
+    await openDevicePage(tester, deviceId);
+  }
   await tester.tap(find.byKey(ValueKey('device-menu-$deviceId')));
   await tester.pumpAndSettle();
   await tester.tap(find.text(item));
+  await tester.pumpAndSettle();
+}
+
+/// Taps [label] in the bottom tab bar.
+Future<void> openTab(WidgetTester tester, String label) async {
+  await tester.tap(
+    find.descendant(
+      of: find.byKey(const ValueKey('shell-tabs')),
+      matching: find.text(label),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// Opens search and commands from Home.
+Future<void> openSearch(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('open-search')));
+  await tester.pumpAndSettle();
+}
+
+/// Opens Settings, Developer.
+Future<void> openDeveloper(WidgetTester tester) async {
+  await openTab(tester, 'Settings');
+  await tester.tap(find.byKey(const ValueKey('settings-developer')));
   await tester.pumpAndSettle();
 }

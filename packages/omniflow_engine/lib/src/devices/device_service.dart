@@ -38,9 +38,13 @@ typedef DeviceLocator = Future<String?> Function(
 );
 
 class DeviceStateChanged {
-  const DeviceStateChanged(this.device);
+  const DeviceStateChanged(this.device, {this.by});
 
   final Device device;
+
+  /// Who sent the command that changed it: an automation id or `user`.
+  /// Null when the device reported the change itself.
+  final String? by;
 }
 
 class InvokeResult {
@@ -97,6 +101,7 @@ class DeviceService {
     String capabilityId,
     Map<String, Object?> params, {
     bool allowPairing = true,
+    String? by,
   }) => _serialised(deviceId, () async {
     final (device, manifest) = await _resolve(deviceId);
     return _invoke(
@@ -105,6 +110,7 @@ class DeviceService {
       _capability(manifest, capabilityId),
       params,
       allowPairing: allowPairing,
+      by: by,
     );
   });
 
@@ -115,6 +121,7 @@ class DeviceService {
     String deviceId,
     String capabilityId, {
     bool allowPairing = true,
+    String? by,
   }) => _serialised(deviceId, () async {
     final (device, manifest) = await _resolve(deviceId);
     final capability = _capability(manifest, capabilityId);
@@ -122,9 +129,14 @@ class DeviceService {
     if (key == null) {
       throw ArgumentError('$deviceId.$capabilityId cannot be toggled');
     }
-    return _invoke(device, manifest, capability, {
-      'value': device.state[key] != true,
-    }, allowPairing: allowPairing);
+    return _invoke(
+      device,
+      manifest,
+      capability,
+      {'value': device.state[key] != true},
+      allowPairing: allowPairing,
+      by: by,
+    );
   });
 
   CapabilitySpec _capability(DriverManifest manifest, String capabilityId) =>
@@ -139,6 +151,7 @@ class DeviceService {
     CapabilitySpec capability,
     Map<String, Object?> params, {
     bool allowPairing = true,
+    String? by,
   }) async {
     if (!capability.type.hasCommand) {
       throw ArgumentError(
@@ -155,7 +168,7 @@ class DeviceService {
     );
     final state = _optimisticState(current.state, capability, validated);
     final updated = current.copyWith(state: state, lastSeen: _clock());
-    await _save(updated);
+    await _save(updated, by: by);
     return InvokeResult(updated, reply);
   }
 
@@ -379,10 +392,10 @@ class DeviceService {
     return value is Map ? Map<String, Object?>.from(value) : null;
   }
 
-  Future<void> _save(Device device) async {
+  Future<void> _save(Device device, {String? by}) async {
     if (_removed.contains(device.id)) return;
     await _store.put(device);
-    if (!_events.isClosed) _events.add(DeviceStateChanged(device));
+    if (!_events.isClosed) _events.add(DeviceStateChanged(device, by: by));
   }
 
   Future<void> close() => _events.close();

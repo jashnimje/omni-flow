@@ -8,20 +8,27 @@ void main() {
 
   setUp(() => engine = FakeEngine());
 
-  testWidgets('the dashboard builds controls from capability types', (
+  testWidgets('the device page builds controls from capability types', (
     tester,
   ) async {
     await pumpApp(tester, engine);
     expect(find.text('Study'), findsOneWidget);
-    expect(find.text('Desk lamp'), findsOneWidget);
-    expect(find.byType(Switch), findsOneWidget);
-    expect(find.byType(Slider), findsOneWidget);
+    expect(find.byKey(const ValueKey('tile-desk_lamp')), findsOneWidget);
+    await openDevicePage(tester, 'desk_lamp');
+    expect(
+      find.byKey(const ValueKey('device-power-desk_lamp')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('slider-desk_lamp.brightness')),
+      findsOneWidget,
+    );
     expect(find.widgetWithText(OutlinedButton, 'Wake'), findsOneWidget);
   });
 
-  testWidgets('flipping the switch invokes the capability', (tester) async {
+  testWidgets('tapping a tile with power switches it', (tester) async {
     await pumpApp(tester, engine);
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byKey(const ValueKey('tile-desk_lamp')));
     await tester.pump();
     expect(engine.callsOf('device.invoke').single.$2, {
       'id': 'desk_lamp',
@@ -34,7 +41,11 @@ void main() {
     tester,
   ) async {
     await pumpApp(tester, engine);
-    await tester.drag(find.byType(Slider), const Offset(60, 0));
+    await openDevicePage(tester, 'desk_lamp');
+    await tester.drag(
+      find.byKey(const ValueKey('slider-desk_lamp.brightness')),
+      const Offset(120, 0),
+    );
     await tester.pumpAndSettle();
     final call = engine.callsOf('device.invoke').single.$2;
     expect(call['capability'], 'brightness');
@@ -43,11 +54,11 @@ void main() {
     expect(value as int, greaterThan(30));
   });
 
-  testWidgets('a state event moves the switch without a reload', (
+  testWidgets('a state event moves the tile and the page without a reload', (
     tester,
   ) async {
     await pumpApp(tester, engine);
-    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(find.text('Off'), findsOneWidget);
     engine.eventsOut.add({
       'event': 'device.stateChanged',
       'device': {
@@ -56,14 +67,16 @@ void main() {
       },
     });
     await tester.pumpAndSettle();
-    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
-    expect(tester.widget<Slider>(find.byType(Slider)).value, 70);
+    expect(find.text('70%'), findsOneWidget);
+    await openDevicePage(tester, 'desk_lamp');
+    expect(find.text('On · 70%'), findsOneWidget);
   });
 
   testWidgets(
     'the command bar asks the engine to interpret, then runs the call',
     (tester) async {
       await pumpApp(tester, engine);
+      await openSearch(tester);
       await tester.enterText(
         find.byKey(const ValueKey('command-bar')),
         'desk lamp 50%',
@@ -91,6 +104,7 @@ void main() {
       'summary': 'Desk lamp cannot sparkle. It can: power, brightness, wake',
     };
     await pumpApp(tester, engine);
+    await openSearch(tester);
     await tester.enterText(
       find.byKey(const ValueKey('command-bar')),
       'desk lamp sparkle',
@@ -114,6 +128,7 @@ void main() {
       'summary': 'Ask the architect',
     };
     await pumpApp(tester, engine);
+    await openSearch(tester);
     await tester.enterText(
       find.byKey(const ValueKey('command-bar')),
       'make it cosy',
@@ -138,7 +153,7 @@ void main() {
       'text': '{"method":"setPilot"}',
       'at': '2026-11-06T19:00:00Z',
     });
-    await tester.tap(find.text('Packets'));
+    await openDeveloper(tester);
     await tester.pumpAndSettle();
     expect(find.text('{"method":"setPilot"}'), findsOneWidget);
   });
@@ -149,9 +164,10 @@ void main() {
       'error': {'type': 'timeout', 'message': 'no reply from desk_lamp'},
     };
     await pumpApp(tester, engine);
+    await openDevicePage(tester, 'desk_lamp');
     await tester.tap(find.widgetWithText(OutlinedButton, 'Wake'));
     await tester.pumpAndSettle();
-    expect(find.text('no reply from desk_lamp'), findsOneWidget);
+    expect(find.text('No reply from desk_lamp.'), findsOneWidget);
   });
 
   testWidgets('a hub that did not start shows a banner', (tester) async {

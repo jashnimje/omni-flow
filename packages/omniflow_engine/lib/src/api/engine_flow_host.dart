@@ -17,23 +17,27 @@ class EngineFlowHost implements FlowHost {
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,
-    Map<String, Object?> params,
-  ) async => (await _core.devices.invoke(
+    Map<String, Object?> params, {
+    String? flowId,
+  }) async => (await _core.devices.invoke(
     deviceId,
     capabilityId,
     params,
     allowPairing: false,
+    by: flowId,
   )).reply.json;
 
   @override
   Future<Map<String, Object?>?> toggleDevice(
     String deviceId,
-    String capabilityId,
-  ) async => (await _core.devices.toggle(
+    String capabilityId, {
+    String? flowId,
+  }) async => (await _core.devices.toggle(
     deviceId,
     capabilityId,
     // A flow runs unattended, so it never puts a pairing prompt on a TV.
     allowPairing: false,
+    by: flowId,
   )).reply.json;
 
   @override
