@@ -98,6 +98,7 @@ class AutomationCommands {
   static RuleWords _wordsOf(SentenceContext words) => (
     trigger: (t) => words.trigger(t).replaceFirst(RegExp('^When '), ''),
     step: words.step,
+    condition: words.condition,
   );
 
   /// [json] checked and compiled, with where its flow issues sit in it.

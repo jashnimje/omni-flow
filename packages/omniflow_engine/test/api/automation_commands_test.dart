@@ -194,7 +194,7 @@ void main() {
       [for (final n in nodes) (n['node'], n['label'])],
       [
         ('when_0', 'run by hand'),
-        ('only_if', 'only if lamp.power == false'),
+        ('only_if', 'only if Lamp power is off'),
         ('then_0', 'notify Hi'),
         ('then_1', 'Lamp on'),
       ],

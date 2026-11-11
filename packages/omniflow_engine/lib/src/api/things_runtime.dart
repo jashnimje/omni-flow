@@ -134,7 +134,9 @@ class ThingsRuntime {
   /// did not move, so no exit or entry trigger may fire. [quiet] does the
   /// same for every state, for the engine opening, where places start
   /// outside and a remembered inside from before must not fire exit triggers.
-  Future<void> reload({bool quiet = false}) async {
+  /// [restore] is the reload when the engine opens: each place comes back
+  /// inside or not as it was stored, instead of starting outside.
+  Future<void> reload({bool quiet = false, bool restore = false}) async {
     final places = await _ofDriver(placeDriverId);
     final specs = <ZoneSpec>[];
     final issues = <Map<String, Object?>>[];
@@ -148,6 +150,11 @@ class ThingsRuntime {
     final before = {for (final id in _places.keys) id: zones.isInside(id)};
     _places = {for (final p in places) p.id: p};
     zones.update(specs);
+    if (restore) {
+      zones.restore({
+        for (final p in places) p.id: p.state['inside'] == true,
+      }, DateTime.now());
+    }
     if (_lastWifi case final w?) zones.wifi(w.ssid, w.bssid, w.at);
     _entered.removeWhere((id) => !zones.isInside(id));
     final edited = <String>{};

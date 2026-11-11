@@ -43,9 +43,18 @@ class SentenceContext {
       (_capability(thing, key)?.label ?? key.replaceAll('_', ' '))
           .toLowerCase();
 
+  /// The words for a state a thing reports: the label of the capability
+  /// that fills that key (a TV's power sensor, not its Power key), without
+  /// its parenthetical list of values.
   String state(String ref) {
     final (thing, key) = _split(ref);
-    return '${name(thing)} ${_key(thing, key)}';
+    final reported = drivers[thing]?.capabilities
+        .where((c) => stateKeyOf(c.stateJsonPath) == key)
+        .firstOrNull;
+    final words = reported == null
+        ? _key(thing, key)
+        : reported.label.replaceAll(RegExp(r'\s*\([^)]*\)'), '').toLowerCase();
+    return '${name(thing)} $words';
   }
 
   static (String, String) _split(String ref) {

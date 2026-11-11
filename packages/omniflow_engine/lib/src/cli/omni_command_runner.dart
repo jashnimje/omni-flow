@@ -6,6 +6,7 @@ import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:mcp_dart/mcp_dart.dart' show StdioServerTransport;
 
+import '../api/adb_phone_connection.dart';
 import '../api/local_client.dart';
 import '../api/local_server.dart';
 import '../api/omni_engine.dart';
@@ -62,7 +63,51 @@ class OmniCommandRunner extends CommandRunner<int> {
       ..addOption(
         'home',
         help: 'Data directory. Defaults to \$OMNIFLOW_HOME or ~/.omniflow.',
+      )
+      ..addOption(
+        'phone',
+        help:
+            'Use the engine of the OmniFlow app on a phone, through adb. '
+            'Takes the adb serial, or "usb" for the only phone attached.',
       );
+    addCommand(
+      _Group('agent', 'What AI agents may do through MCP.', [
+        _ApiCommand(
+          'access',
+          'Show what agents may do, and the commands each level opens.',
+          'agent.access',
+          (rest, _) async => const {},
+        ),
+        _ApiCommand(
+          'allow',
+          'Set what agents may do: read (the default) or setup.',
+          'agent.access.set',
+          (rest, _) async => {'access': _one(rest, 'read or setup')},
+          usage: 'read|setup',
+        ),
+        _ApiCommand(
+          'describe',
+          'Everything set up, as an agent sees it.',
+          'agent.describe',
+          (rest, _) async => const {},
+        ),
+        _ApiCommand(
+          'call',
+          'Send a command as an agent would, under the access level.',
+          'agent.call',
+          (rest, _) async {
+            if (rest.isEmpty || rest.length > 2) {
+              throw UsageException('needs COMMAND and optional JSON args', '');
+            }
+            return {
+              'command': rest.first,
+              if (rest.length == 2) 'args': await _jsonArg(rest[1]),
+            };
+          },
+          usage: 'COMMAND [JSON]',
+        ),
+      ]),
+    );
     addCommand(
       _Group('driver', 'List, validate and register driver manifests.', [
         _ApiCommand(
@@ -460,9 +505,13 @@ class OmniCommandRunner extends CommandRunner<int> {
 
   /// The running hub when one answers on [socketPath], else the engine
   /// opened here (with [tap], for commands that show packets).
-  Future<EngineConnection> connect({PacketTap? tap}) async =>
-      await LocalClient.connect(socketPath) ??
-      InProcessConnection(await engineFactory(home, tap: tap));
+  Future<EngineConnection> connect({PacketTap? tap}) async {
+    if (_globals?['phone'] case final String phone) {
+      return AdbPhoneConnection(serial: phone == 'usb' ? null : phone);
+    }
+    return await LocalClient.connect(socketPath) ??
+        InProcessConnection(await engineFactory(home, tap: tap));
+  }
 
   @override
   Future<int> run(Iterable<String> args) async {

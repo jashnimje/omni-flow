@@ -94,6 +94,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- adb only: AgentBridgeProvider refuses every caller but the
+             shell and root users. -->
+        <provider
+            android:name=".AgentBridgeProvider"
+            android:authorities="com.jashnm.omniflow_app.agent"
+            android:exported="true" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -713,6 +713,7 @@ class RuleCompilation {
 typedef RuleWords = ({
   String Function(Map<String, Object?> trigger) trigger,
   String Function(Map<String, Object?> step) step,
+  String Function(Map<String, Object?> condition) condition,
 });
 
 RuleCompilation compileRule(
@@ -944,7 +945,7 @@ class _Compiler {
     return add(
       id,
       type,
-      '$label ${conditions.map(describe).join(' and ')}',
+      '$label ${conditions.map(_words?.condition ?? describe).join(' and ')}',
       rule,
       origin,
       col: col,

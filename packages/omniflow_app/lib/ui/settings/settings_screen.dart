@@ -9,6 +9,7 @@ import '../devices/device_text.dart';
 import '../home/home_data.dart';
 import '../shell/shell.dart';
 import '../tags/tags_page.dart' show TagsPage;
+import 'agent_access.dart';
 import 'developer_page.dart';
 import 'hubs_page.dart';
 import 'phone_access.dart';
@@ -168,6 +169,7 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _push(context, const HubsPage()),
           ),
           const OmniSectionHeader('Claude and agents'),
+          const AgentAccessRow(),
           OmniListRow(
             key: const ValueKey('settings-waiting'),
             icon: OmniIcons.agent,

@@ -223,6 +223,48 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
   );
 
   server.registerTool(
+    'describe_omniflow',
+    description:
+        'Start here. Everything set up in OmniFlow in one reply: every thing (devices, the '
+        'phone, people, places, NFC tags) with its driver, room, state and the capabilities it '
+        'accepts with their params, the rooms, places, tags, scenes, variables, every automation '
+        'with its full spec, the rule templates, every driver with its settings and how it is '
+        'found and paired, and agentAccess: what you may change (read or setup), the commands '
+        'each level opens and the ones only the user may send. Plan from this, then make each '
+        'change with omniflow_call or the specific tools.',
+    inputSchema: JsonSchema.object(properties: {}),
+    callback: (_, _) async => reply(await engine.handle('agent.describe', {})),
+  );
+
+  server.registerTool(
+    'omniflow_call',
+    description:
+        'Sends one OmniFlow core API command, the same one the app and the omni CLI use, so '
+        'you can do anything the app does that your access allows, with no screen. '
+        'describe_omniflow lists the commands open at your access level (agentAccess.readCommands '
+        'and setupCommands). Common ones: thing.add {candidate | driver, host, name?, room?, '
+        'settings?} after device.discover, thing.configure {id, settings}, thing.next {id}, '
+        'device.organize {id, name?, room?, favourite?}, room.save {name}, zone.save (a place, '
+        'shaped as zone.list returns it), tag.save, scene.save {name, actions}, '
+        'automation.save {form: "rule", '
+        'spec, replace?} (the rule language is in create_rule), automation.dry_run {form, spec} or '
+        '{id}, automation.enable {id, enabled}, automation.run {id}, automation.remove {id}, '
+        'tv.apps {id}, tv.key {id, key}. Saves are untrusted, so a high-risk automation (TV '
+        'settings, app management, host commands) waits for the user to approve it. Commands '
+        'only the user may send come back as needs_user with the reason.',
+    inputSchema: JsonSchema.object(
+      properties: {'command': JsonSchema.string(), 'args': freeObject},
+      required: ['command'],
+    ),
+    callback: (args, _) async => reply(
+      await engine.handle('agent.call', {
+        'command': args['command'],
+        'args': args['args'] ?? const <String, Object?>{},
+      }),
+    ),
+  );
+
+  server.registerTool(
     'create_rule',
     description:
         'Saves a rule: when any trigger fires, only if every condition holds, run the steps in '

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'add_commands.dart';
+import 'agent_policy.dart';
 import 'api_error.dart';
 import 'automation_commands.dart';
 import 'board_commands.dart';
@@ -200,12 +201,13 @@ class OmniEngine {
           devices.close,
         ],
       );
+      engine._agentAccess = AgentAccessStore(home);
       engine._core.issues['driver'] = driverIssues;
       await engine._core.loadRooms();
       await engine._core.history.seed();
       await _backfillStableIds(engine._core);
       await engine._things.migrateZoneRows();
-      await engine._things.reload(quiet: true);
+      await engine._things.reload(quiet: true, restore: true);
       await engine._stored.migrateStored();
       await engine._stored.loadState();
       return engine;
@@ -327,7 +329,114 @@ class OmniEngine {
   Future<int> startWizPush({int listenPort = 38900}) =>
       _hub.startWizPush(listenPort: listenPort);
 
+  late final AgentAccessStore _agentAccess;
+
   late final Map<String, CommandHandler> _commands = {
+    // What an agent may do, and the commands each level opens. Setting it
+    // is the user's: MCP refuses agent.access.set.
+    'agent.access': (_) async => {
+      'access': (await _agentAccess.read()).name,
+      'levels': {
+        for (final a in AgentAccess.values)
+          a.name: a == AgentAccess.read
+              ? 'read everything, try rules out, save automations that wait '
+                    'for you where they are high risk'
+              : 'also find, add, configure and organize things, places, '
+                    'rooms, tags and scenes, and save, enable, run and remove '
+                    'automations',
+      },
+      'readCommands': agentReadCommands.toList()..sort(),
+      'setupCommands': agentSetupCommands.toList()..sort(),
+      'userOnly': agentUserOnly,
+    },
+    'agent.access.set': (args) async {
+      final access = AgentAccess.parse(args['access']);
+      if (access == null) {
+        throw ApiError(
+          'invalid',
+          'access must be ${AgentAccess.values.map((a) => a.name).join(' or ')}',
+        );
+      }
+      await _agentAccess.write(access);
+      _core.emit({'event': 'agent.accessChanged', 'access': access.name});
+      return {'access': access.name};
+    },
+    // One command an agent sends for any other, under its access level:
+    // refused with needs_user and the reason, or run with the arguments an
+    // agent never chooses (untrusted saves, no pairing prompts).
+    'agent.call': (args) async {
+      final command = stringArg(args, 'command');
+      final inner = args['args'] == null
+          ? const <String, Object?>{}
+          : objectArg(args, 'args');
+      if (command.startsWith('agent.') &&
+          command != 'agent.access' &&
+          command != 'agent.describe') {
+        throw ApiError(
+          'needs_user',
+          '$command cannot be called through agent.call',
+        );
+      }
+      final why = agentRefusal(command, inner, await _agentAccess.read());
+      if (why != null) throw ApiError('needs_user', why);
+      final result = await handle(command, agentArgs(command, inner));
+      if (result['ok'] != true) {
+        final error = result['error'] as Map;
+        throw ApiError('${error['type']}', '${error['message']}');
+      }
+      return {...result}..remove('ok');
+    },
+    // Everything an agent needs to plan a change, in one reply.
+    'agent.describe': (_) async {
+      Future<Object?> read(String command, [String? key]) async {
+        final r = await handle(command, const {});
+        if (r['ok'] != true) return {'error': r['error']};
+        return key == null ? ({...r}..remove('ok')) : r[key];
+      }
+
+      final automations = await handle('automation.list', const {});
+      return {
+        'engine': await read('engine.status'),
+        'agentAccess': await read('agent.access'),
+        'things': await read('device.list', 'devices'),
+        'rooms': await read('room.list', 'rooms'),
+        'places': await read('zone.list'),
+        'tags': await read('tag.list'),
+        'scenes': await read('scene.list'),
+        'variables': await read('var.list'),
+        'automations': [
+          for (final a in (automations['automations'] as List? ?? const []))
+            if (a is Map)
+              {
+                ...a,
+                'spec': (await handle('automation.get', {
+                  'id': a['id'],
+                }))['spec'],
+              },
+        ],
+        'templates': await read('automation.templates', 'templates'),
+        'drivers': [
+          for (final d
+              in (await handle('driver.list', const {}))['drivers'] as List? ??
+                  const [])
+            if (d is Map)
+              {
+                for (final k in [
+                  'id',
+                  'name',
+                  'category',
+                  'transport',
+                  'discovery',
+                  'pairing',
+                  'settings',
+                  'secrets',
+                  'capabilities',
+                ])
+                  if (d[k] != null) k: d[k],
+              },
+        ],
+      };
+    },
     'engine.status': (_) async => {
       'hubRunning': _hub.running,
       'flows': flows.loadedFlows.toList(),

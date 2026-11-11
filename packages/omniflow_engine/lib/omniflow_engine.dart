@@ -11,6 +11,8 @@ export 'src/api/local_client.dart'
         localSocketPath;
 export 'src/api/local_server.dart' show LocalServer, preparePrivateHome;
 export 'src/api/nfc_tags.dart' show normalizeUid, nfcTagDriverId;
+export 'src/api/adb_phone_connection.dart';
+export 'src/api/agent_policy.dart';
 export 'src/api/omni_engine.dart';
 export 'src/api/thing_setup.dart'
     show nextSetupStep, pairingProofSecret, settingPresent;

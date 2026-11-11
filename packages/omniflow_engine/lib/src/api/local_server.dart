@@ -28,7 +28,11 @@ Future<void> preparePrivateHome(Directory home) async {
 }
 
 Future<void> _chmod(String mode, String absolutePath) async {
-  final result = await Process.run('/bin/chmod', [mode, absolutePath]);
+  // Android keeps chmod in /system/bin.
+  final chmod = File('/bin/chmod').existsSync()
+      ? '/bin/chmod'
+      : '/system/bin/chmod';
+  final result = await Process.run(chmod, [mode, absolutePath]);
   if (result.exitCode != 0) {
     throw LocalSocketException(
       'cannot set mode $mode on $absolutePath: ${result.stderr}'.trim(),

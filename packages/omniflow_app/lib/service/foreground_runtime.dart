@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
@@ -179,14 +180,28 @@ void startOmniService() => FlutterForegroundTask.setTaskHandler(
   ),
 );
 
+/// The engine's control socket, which the app's agent bridge (adb only)
+/// hands commands to. Private to the app: a 0600 socket in its own files.
+LocalServer? _agentBridge;
+
 /// The engine the service owns: the only one that opens the database.
 Future<Started> openServiceEngine() async {
   final support = await getApplicationSupportDirectory();
-  return startEngine(
-    home: Directory('${support.path}/omniflow'),
+  final home = Directory('${support.path}/omniflow');
+  final started = await startEngine(
+    home: home,
     secrets: SecureStorageSecretStore(),
     tap: PacketTap(),
   );
+  if (started.client case final InProcessEngineClient client) {
+    try {
+      _agentBridge = await LocalServer.start(client.engine, home: home);
+    } on Object catch (e) {
+      // The app works without it; only agents over adb lose the engine.
+      debugPrint('OmniFlow agent bridge not started: $e');
+    }
+  }
+  return started;
 }
 
 /// Owns the engine for as long as the service runs: holds the multicast
@@ -247,6 +262,8 @@ class OmniTaskHandler extends TaskHandler {
           ? 'Android stopped the service at its time limit'
           : 'OmniFlow was stopped',
     );
+    await _agentBridge?.close();
+    _agentBridge = null;
     if (_engine case final InProcessEngineClient client) {
       await client.engine.close();
     }

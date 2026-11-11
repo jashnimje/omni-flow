@@ -61,6 +61,17 @@ class BleTracker {
   bool get isPresent => _present;
   double? get estimate => _estimate;
 
+  /// Starts present, as last known before a restart: heard at [at] at the
+  /// enter level, so the silence tick still exits if it stays quiet.
+  void assumePresent(DateTime at) {
+    _present = true;
+    _estimate = settings.enterDbm;
+    _p = 1;
+    _lastHeard = at;
+    _lastUpdate = at;
+    _candidateSince = null;
+  }
+
   /// A real reading from the beacon.
   ZoneTransition? reading(double rssi, DateTime at) {
     _lastHeard = at;
@@ -282,6 +293,17 @@ class ZoneTracker {
   String? _bssid;
 
   bool isInside(String zoneId) => _inside[zoneId] ?? false;
+
+  /// Puts back whether each tracked zone was [inside] before a restart, so
+  /// the first reading after it is not an arrival. A beacon zone counts as
+  /// heard now, and exits as usual if it stays quiet.
+  void restore(Map<String, bool> inside, DateTime at) {
+    for (final MapEntry(key: id, value: was) in inside.entries) {
+      if (!was || !_zones.containsKey(id)) continue;
+      _inside[id] = true;
+      _ble[id]?.assumePresent(at);
+    }
+  }
 
   Map<String, bool> get states => Map.unmodifiable(_inside);
 

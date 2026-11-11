@@ -681,6 +681,18 @@ void main() {
     });
   });
 
+  test('a TV power check reads as its sensor, not its Power key', () {
+    final words = SentenceContext(
+      names: const {'tv': 'TV'},
+      drivers: {'tv': DriverRegistry.withBuiltIns()['android_tv_adb']!},
+    );
+    expect(
+      words.condition({'state': 'tv.power', 'op': '==', 'value': 'on'}),
+      'TV power is on',
+    );
+    expect(words.action('tv.power', null), 'TV power key');
+  });
+
   group('try and otherwise', () {
     final rule = normalizeRule({
       'name': 'Open a film app',

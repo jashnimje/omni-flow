@@ -100,6 +100,48 @@ void main() {
       if (e['event'] == 'thing.event') (e['thing'], e['key']),
   ];
 
+  test(
+    'a restart while home is not an arrival, and leaving still is',
+    () async {
+      await ok('zone.save', {
+        'zone': {
+          'id': 'home',
+          'name': 'Home',
+          'wifi': {
+            'ssids': ['HomeNet'],
+          },
+        },
+      });
+      await ok('device.add', {'id': 'jade', 'driver': 'person'});
+      await ok('flow.save', {
+        'flow': announceOn('arrive', {
+          'thing': 'jade',
+          'key': 'home',
+          'change': {'to': true},
+        }, 'welcome'),
+      });
+      await ok('flow.save', {
+        'flow': announceOn('leave', {
+          'thing': 'jade',
+          'key': 'home',
+          'change': {'to': false},
+        }, 'bye'),
+      });
+      await ok('phone.wifi', {'ssid': 'HomeNet'});
+      await until(() => announced().contains('welcome'));
+
+      await close();
+      await open();
+      expect((await stateOf('jade'))['home'], isTrue);
+      await ok('phone.wifi', {'ssid': 'HomeNet'});
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(announced(), isEmpty, reason: 'the restart is not an arrival');
+
+      await ok('phone.wifi', {'ssid': 'Cafe'});
+      await until(() => announced().contains('bye'));
+    },
+  );
+
   test('jade.home turns true on arrival and false on leaving', () async {
     await ok('zone.save', {
       'zone': {
