@@ -7,6 +7,7 @@ import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../add/room_field.dart';
 import '../design/design.dart';
+import 'usb_board.dart';
 import 'add_pin_page.dart';
 import 'board_extras.dart';
 import 'board_pins.dart';
@@ -135,6 +136,13 @@ class _BoardPageState extends ConsumerState<BoardPage> {
             onTap: () => Navigator.of(context).pop('organize'),
           ),
           OmniListRow(
+            key: const ValueKey('board-usb'),
+            icon: OmniIcons.wifi,
+            title: 'Wi-Fi and name, over USB',
+            subtitle: 'Plug it into this phone',
+            onTap: () => Navigator.of(context).pop('usb'),
+          ),
+          OmniListRow(
             key: const ValueKey('board-remove'),
             icon: OmniIcons.delete,
             iconForeground: OmniColors.bad,
@@ -148,6 +156,8 @@ class _BoardPageState extends ConsumerState<BoardPage> {
     switch (choice) {
       case 'organize':
         await showOrganizeSheet(context, device);
+      case 'usb':
+        await showUsbBoardSheet(context, node: device['stableId'] as String?);
       case 'remove':
         await _remove(device);
     }

@@ -113,6 +113,7 @@ class OmniEngine {
     Future<List<InternetAddress>> Function()? discoveryTargets,
     MdnsDiscovery? mdns,
     TuyaDiscovery? tuyaDiscovery,
+    SerialLinks? serialLinks,
   }) async {
     await home.create(recursive: true);
     final file = File('${home.path}/omniflow.sqlite');
@@ -135,7 +136,7 @@ class OmniEngine {
       }
       udp = await UdpTransport.bind(tap: tap);
       final tuya = TuyaChannel(secrets, tap: tap);
-      final serial = SerialChannel(tap: tap);
+      final serial = SerialChannel(tap: tap, links: serialLinks);
       final discovery = DeviceDiscovery(
         udp: UdpDiscovery(udp, targets: discoveryTargets),
         tuya: tuyaDiscovery ?? TuyaDiscovery(tap: tap),
@@ -468,6 +469,8 @@ class OmniEngine {
     'board.describe': _boardCommands.describe,
     'board.pins': _boardCommands.pins,
     'board.setup': _boardCommands.setup,
+    'board.flash': _boardCommands.flash,
+    'board.ports': _boardCommands.ports,
     'board.periph': _boardCommands.periph,
     ..._automationCommands.commands,
     'thing.add': _addCommands.add,

@@ -15,6 +15,7 @@ Future<T?> showFormSheet<T>(
   build,
   required T? Function() result,
   String doneLabel = 'Done',
+  String? Function()? whyNot,
 }) => showOmniSheet<T>(
   context,
   builder: (context) => StatefulBuilder(
@@ -25,6 +26,14 @@ Future<T?> showFormSheet<T>(
         subtitle: subtitle,
         children: [
           ...build(context, setState),
+          if ((value == null ? whyNot?.call() : null) case final why?) ...[
+            const SizedBox(height: OmniSpace.sm),
+            Text(
+              why,
+              key: const ValueKey('form-why-not'),
+              style: OmniText.caption.copyWith(color: OmniColors.warn),
+            ),
+          ],
           const SizedBox(height: OmniSpace.md),
           OmniButton(
             key: const ValueKey('form-done'),
@@ -453,7 +462,7 @@ class _ParamControlsState extends State<ParamControls> {
           onTap: () async {
             final choice = await showOmniSheet<ParamChoice>(
               context,
-              builder: (_) => _ChoiceSheet(title: label, load: load),
+              builder: (_) => ChoiceSheet(title: label, load: load),
             );
             if (choice == null || !mounted) return;
             c.text = choice.value;
@@ -472,17 +481,19 @@ class _ParamControlsState extends State<ParamControls> {
 /// One value a param can take, with the words for it.
 typedef ParamChoice = ({String value, String label});
 
-class _ChoiceSheet extends StatefulWidget {
-  const _ChoiceSheet({required this.title, required this.load});
+/// A searchable list of choices, loaded when it opens, that pops the one
+/// picked.
+class ChoiceSheet extends StatefulWidget {
+  const ChoiceSheet({super.key, required this.title, required this.load});
 
   final String title;
   final Future<List<ParamChoice>> Function() load;
 
   @override
-  State<_ChoiceSheet> createState() => _ChoiceSheetState();
+  State<ChoiceSheet> createState() => _ChoiceSheetState();
 }
 
-class _ChoiceSheetState extends State<_ChoiceSheet> {
+class _ChoiceSheetState extends State<ChoiceSheet> {
   late final _choices = widget.load();
   var _query = '';
 

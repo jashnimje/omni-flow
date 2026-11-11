@@ -43,3 +43,6 @@ __pycache__/
 *.tmp
 *.bak
 
+# Board firmware the app flashes, built by packages/omniflow_app/tool/firmware_assets.dart
+packages/omniflow_app/assets/firmware/*
+!packages/omniflow_app/assets/firmware/README.md

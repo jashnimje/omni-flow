@@ -57,8 +57,18 @@ final consoleAcceptedProvider = NotifierProvider<ConsoleAccepted, bool>(
 /// Shows API errors without each screen handling them.
 final messengerKey = GlobalKey<ScaffoldMessengerState>();
 
-void showMessage(String text) =>
-    messengerKey.currentState?.showSnackBar(SnackBar(content: Text(text)));
+void showMessage(String text, {String? action, VoidCallback? onAction}) =>
+    messengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(text),
+        // With an action Flutter keeps it up until tapped, over the Save
+        // button. It goes after the usual few seconds instead.
+        persist: false,
+        action: action == null || onAction == null
+            ? null
+            : SnackBarAction(label: action, onPressed: onAction),
+      ),
+    );
 
 /// Calls the engine and shows the error message when the call fails.
 Future<Json> callEngine(

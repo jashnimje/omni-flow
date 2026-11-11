@@ -32,6 +32,28 @@ abstract interface class SerialSink {
 /// Opens the [SerialSink] for a port path.
 typedef SerialSinkOpener = Future<SerialSink> Function(String path);
 
+/// One open serial port the platform provides: bytes in and out, the
+/// modem lines and the speed. The phone's USB host ports are these.
+abstract interface class SerialLink implements SerialSink {
+  Stream<List<int>> get input;
+
+  /// Sets DTR and RTS, which reset a board or put it in its bootloader.
+  Future<void> setLines({bool? dtr, bool? rts});
+
+  Future<void> setBaud(int baud);
+}
+
+/// Serial ports a platform opens itself, such as USB on a phone, where
+/// there is no tty to run stty on. Their paths start with `usb:`.
+abstract interface class SerialLinks {
+  Future<List<String>> ports();
+
+  Future<SerialLink> open(String path, int baud);
+}
+
+/// Whether [path] names a port [SerialLinks] opens.
+bool isLinkPort(String path) => path.startsWith('usb:');
+
 /// The OmniFlow MCU protocol over a serial port, for a board on USB.
 ///
 /// The device's host is the port path (`/dev/cu.usbmodem1101`). The port is
@@ -44,7 +66,11 @@ class SerialChannel implements DriverChannel {
     this._tap,
     this._executor = const LocalExecutor(),
     this._openSink = _FileSink.open,
+    this.links,
   });
+
+  /// The platform's own ports (USB on a phone), when it has any.
+  final SerialLinks? links;
 
   final TemplateRenderer _renderer;
   final PacketTap? _tap;
@@ -101,7 +127,10 @@ class SerialChannel implements DriverChannel {
     Future<List<String>> Function()? ports,
   }) async {
     final found = <Map<String, Object?>>[];
-    for (final path in await (ports ?? usbSerialPorts)()) {
+    final paths = ports == null
+        ? [...await usbSerialPorts(), ...?await links?.ports()]
+        : await ports();
+    for (final path in paths) {
       final probe = Device(
         id: '_probe_${path.hashCode}',
         name: path,
@@ -137,6 +166,13 @@ class SerialChannel implements DriverChannel {
   Future<void> release(String deviceId) async =>
       _ports.remove(deviceId)?.close();
 
+  /// Closes every port held on [path], so a flasher can have it alone.
+  Future<void> releasePath(String path) async {
+    for (final id in _ports.keys.toList()) {
+      if (_ports[id]!.path == path) await _ports.remove(id)!.close();
+    }
+  }
+
   /// Two readers on one tty split its bytes between them, so a port that is
   /// already open is shared rather than opened again: by discovery, or by a
   /// second device with the same path.
@@ -151,6 +187,22 @@ class SerialChannel implements DriverChannel {
         .where((p) => p.path == device.host && !p.closed)
         .firstOrNull;
     if (held != null) return held;
+    final linked = links;
+    if (isLinkPort(device.host)) {
+      if (linked == null) {
+        throw TransportTimeoutException(
+          '${device.host} is a USB port of another device',
+        );
+      }
+      final link = await linked.open(device.host, baud).timeout(_openTimeout);
+      final port = _SerialPort.fromStream(device.host, link, link.input, _tap, (
+        json,
+      ) {
+        if (!_events.isClosed) _events.add(SerialEvent(device.id, json));
+      });
+      _ports[device.id] = port;
+      return port;
+    }
     if (!await File(device.host).exists()) {
       throw TransportTimeoutException(
         'serial port ${device.host} is not present',
@@ -223,6 +275,21 @@ class _SerialPort {
     this._tap,
   );
 
+  /// A port whose bytes come from a platform stream, not a cat process.
+  static _SerialPort fromStream(
+    String path,
+    SerialSink writer,
+    Stream<List<int>> input,
+    PacketTap? tap,
+    void Function(Map<String, Object?>) onEvent,
+  ) {
+    final port = _SerialPort._(path, writer, null, onEvent, tap);
+    port._subscription = input
+        .transform(const NdjsonDecoder())
+        .listen(port._onLine, onError: (_) => port.close(), onDone: port.close);
+    return port;
+  }
+
   static Future<_SerialPort> open(
     Device device,
     SerialSink writer,
@@ -247,7 +314,7 @@ class _SerialPort {
 
   final String path;
   final SerialSink _writer;
-  final Process _reader;
+  final Process? _reader;
   final void Function(Map<String, Object?>) _onEvent;
   final PacketTap? _tap;
   StreamSubscription<NdjsonLine>? _subscription;
@@ -318,9 +385,17 @@ class _SerialPort {
   Future<void> close() async {
     if (closed) return;
     closed = true;
-    _reader.kill();
-    await _subscription?.cancel();
-    await _writer.close();
+    // The line decoder ends only when its input does: the cat process is
+    // killed, or a platform link is closed first, which ends its stream.
+    final reader = _reader;
+    if (reader != null) {
+      reader.kill();
+      await _subscription?.cancel();
+      await _writer.close();
+    } else {
+      await _writer.close();
+      _subscription?.cancel().ignore();
+    }
     for (final w in _waiting.values) {
       if (!w.isCompleted) {
         w.completeError(const FileSystemException('serial port closed'));

@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'api_error.dart';
 import 'board_runtime.dart';
 import 'command_args.dart';
@@ -6,6 +9,9 @@ import '../devices/board.dart';
 import '../devices/channels.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
+import '../devices/flash/esp_rom.dart';
+import '../devices/flash/stk500.dart';
+import '../devices/serial_channel.dart';
 import '../storage/database.dart';
 import '../template/template_renderer.dart';
 import '../transports/udp_transport.dart';
@@ -19,6 +25,99 @@ class BoardCommands {
   final BoardRuntime _boards;
 
   DeviceService get _devices => _core.devices;
+
+  /// The chips `board.flash` writes, and the file each takes.
+  static const flashChips = {
+    'esp32':
+        'a .bin made for address 0 (arduino-cli --export-binaries '
+        'gives the merged one)',
+    'esp8266': 'a .bin',
+    'uno': 'an Intel .hex',
+  };
+
+  /// The serial ports a board can be flashed or set up on: the phone's USB
+  /// ports, and a computer's USB serial ports.
+  Future<Map<String, Object?>> ports(Map<String, Object?> args) async => {
+    'ports': [...await usbSerialPorts(), ...?await _core.serial.links?.ports()],
+    'canFlash': _core.serial.links != null,
+  };
+
+  /// `{port, chip, file, offset?}`: writes firmware from [file] to the board
+  /// on the USB [port], then starts it. Progress goes out as
+  /// `board.flashProgress` events. Only ports the platform opens itself
+  /// (the phone's USB) can be flashed, since a flash needs DTR and RTS.
+  Future<Map<String, Object?>> flash(Map<String, Object?> args) async {
+    final port = stringArg(args, 'port');
+    final chip = stringArg(args, 'chip');
+    if (!flashChips.containsKey(chip)) {
+      throw ApiError(
+        'invalid',
+        'chip must be ${flashChips.keys.join(', ')}. A Pico W is flashed '
+            'with its BOOTSEL drive for now',
+      );
+    }
+    final links = _core.serial.links;
+    if (links == null || !isLinkPort(port)) {
+      throw ApiError(
+        'invalid',
+        'only a board on this phone\'s USB can be flashed here. On a '
+            'computer use arduino-cli',
+      );
+    }
+    final file = File(stringArg(args, 'file'));
+    if (!await file.exists()) {
+      throw ApiError('not_found', 'no firmware file ${file.path}');
+    }
+    final Uint8List image;
+    try {
+      image = chip == 'uno'
+          ? parseIntelHex(await file.readAsString())
+          : await file.readAsBytes();
+    } on FlashException catch (e) {
+      throw ApiError('invalid', e.message);
+    }
+    if (image.isEmpty) throw ApiError('invalid', 'the firmware file is empty');
+    await _core.serial.releasePath(port);
+    final watch = Stopwatch()..start();
+    var last = -1;
+    void progress(String stage, double done) {
+      final percent = (done * 100).floor();
+      if (percent == last && stage == 'Writing') return;
+      last = percent;
+      _core.emit({
+        'event': 'board.flashProgress',
+        'port': port,
+        'stage': stage,
+        'done': done,
+      });
+    }
+
+    final link = await links.open(port, 115200);
+    try {
+      String found;
+      if (chip == 'uno') {
+        await Stk500Flasher(link).flash(image, progress: progress);
+        found = 'uno';
+      } else {
+        found = (await EspRomFlasher(link).flash(
+          image,
+          offset: optIntArg(args, 'offset') ?? 0,
+          progress: progress,
+          expect: EspChip.values.byName(chip),
+        )).name;
+      }
+      return {
+        'port': port,
+        'chip': found,
+        'bytes': image.length,
+        'ms': watch.elapsedMilliseconds,
+      };
+    } on FlashException catch (e) {
+      throw ApiError('device_error', e.message);
+    } finally {
+      await link.close();
+    }
+  }
 
   Future<Map<String, Object?>> provision(Map<String, Object?> args) async {
     final board = await _boards.provisionBoard(stringArg(args, 'id'));

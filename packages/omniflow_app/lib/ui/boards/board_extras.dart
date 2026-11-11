@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import 'usb_board.dart';
 import 'board_pins.dart';
 
 /// The setup of one extra on a board (an IR LED, an RF transmitter, an NFC
@@ -79,13 +80,29 @@ class _ExtraSheetState extends ConsumerState<ExtraSheet> {
       _busy = true;
       _failure = null;
     });
-    final reply = await EngineApi(ref.read(engineClientProvider))
-        .setBoardPeriph(
-          widget.boardId,
-          _type,
-          pins: _pins ?? const {},
-          clear: clear,
-        );
+    final engine = ref.read(engineClientProvider);
+    final device = ref
+        .read(devicesProvider)
+        .value
+        ?.where((d) => d['id'] == widget.boardId)
+        .firstOrNull;
+    // A board on Wi-Fi takes extras only on USB: the same board plugged into
+    // this phone gets them through its port.
+    String? port;
+    if (device != null && !'${device['host']}'.startsWith('usb:')) {
+      final node = device['stableId'];
+      port = (await findUsbBoards(engine))
+          .where((b) => b.node != null && b.node == node)
+          .firstOrNull
+          ?.port;
+    }
+    final reply = await EngineApi(engine).setBoardPeriph(
+      widget.boardId,
+      _type,
+      pins: _pins ?? const {},
+      clear: clear,
+      port: port,
+    );
     if (!mounted) return;
     setState(() {
       _busy = false;
@@ -109,8 +126,9 @@ class _ExtraSheetState extends ConsumerState<ExtraSheet> {
           : 'Set · ${BoardExtras.job(_type)}',
       children: [
         const OmniBanner.info(
-          'The board takes extras over USB only. If saving says so, plug it '
-          'into the computer running omni and run omni board periph there.',
+          'A board takes extras over USB only, so it cannot be changed from '
+          'across the room. Plug it into this phone with a USB cable, then '
+          'save.',
         ),
         if (_nfc && knownNfc.length > 1 && _set == null)
           OmniSegmented<String>(

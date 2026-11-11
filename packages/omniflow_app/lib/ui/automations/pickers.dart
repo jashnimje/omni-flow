@@ -312,12 +312,25 @@ enum _Input { none, number, text }
 /// One thing a form can pick: its words, the field it needs, and what it
 /// builds from the field's value.
 class _Option<T> {
-  const _Option(this.id, this.title, this.make, {this.input = _Input.none});
+  const _Option(
+    this.id,
+    this.title,
+    this.make, {
+    this.input = _Input.none,
+    this.choices = const [],
+    this.load,
+  });
 
   final String id;
   final String title;
   final _Input input;
   final T Function(Object? input) make;
+
+  /// The values a text input can take, shown as chips instead of a field.
+  final List<Object> choices;
+
+  /// A longer list, such as a TV's apps, opened from a row above the field.
+  final Future<List<ParamChoice>> Function()? load;
 }
 
 /// The options of a thing, the one picked and the field under it.
@@ -350,6 +363,16 @@ Future<T?> _optionsForm<T>(
     title: title,
     subtitle: subtitle,
     doneLabel: doneLabel,
+    whyNot: () {
+      final option = options.where((o) => o.id == picked).firstOrNull;
+      if (option == null) return options.isEmpty ? null : 'Pick one above';
+      return switch (option.input) {
+        _Input.number => 'Enter a number',
+        _Input.text when option.choices.isNotEmpty => 'Choose a value',
+        _Input.text => 'Enter a value',
+        _ => null,
+      };
+    },
     result: () {
       final option = options.where((o) => o.id == picked).firstOrNull;
       final value = input();
@@ -374,7 +397,40 @@ Future<T?> _optionsForm<T>(
             selected: o.id == picked,
             onTap: () => setState(() => picked = o.id),
           ),
-        if (option != null && option.input != _Input.none) ...[
+        if (option != null && option.choices.isNotEmpty) ...[
+          const SizedBox(height: OmniSpace.md),
+          Wrap(
+            key: const ValueKey('opt-choices'),
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final v in option.choices)
+                OmniFilterChip(
+                  key: ValueKey('opt-choice-$v'),
+                  label: valueText(v),
+                  selected: field.text == valueText(v),
+                  onTap: () => setState(() => field.text = valueText(v)),
+                ),
+            ],
+          ),
+        ] else if (option != null && option.input != _Input.none) ...[
+          if (option.load case final load?) ...[
+            const SizedBox(height: OmniSpace.md),
+            OmniListRow(
+              key: const ValueKey('opt-pick'),
+              icon: OmniIcons.search,
+              title: 'Choose from the list',
+              subtitle: field.text.isEmpty ? null : field.text,
+              chevron: true,
+              onTap: () async {
+                final choice = await showOmniSheet<ParamChoice>(
+                  context,
+                  builder: (_) => ChoiceSheet(title: option.title, load: load),
+                );
+                if (choice != null) setState(() => field.text = choice.value);
+              },
+            ),
+          ],
           const SizedBox(height: OmniSpace.md),
           LabelledField(
             key: const ValueKey('opt-input'),
@@ -476,6 +532,8 @@ Future<OnTrigger?> thingTriggerForm(
         named(k.label, 'changes to'),
         (v) => OnTrigger(thing: thing.id, key: k.key, to: v, hasTo: true),
         input: _Input.text,
+        choices: thing.valuesOf(k.key),
+        load: _appsOf(context, thing, k.key),
       ),
     ],
   ];
@@ -796,13 +854,24 @@ Future<CompareCondition?> thingConditionForm(
           (v) => CompareCondition('state', '${thing.id}.${k.key}', '<', v),
           input: _Input.number,
         ),
-      ] else
+      ] else ...[
         _Option(
           'is-${k.key}',
           '${cap(k.label)} is',
           (v) => CompareCondition('state', '${thing.id}.${k.key}', '==', v),
           input: _Input.text,
+          choices: thing.valuesOf(k.key),
+          load: _appsOf(context, thing, k.key),
         ),
+        _Option(
+          'isnot-${k.key}',
+          '${cap(k.label)} is not',
+          (v) => CompareCondition('state', '${thing.id}.${k.key}', '!=', v),
+          input: _Input.text,
+          choices: thing.valuesOf(k.key),
+          load: _appsOf(context, thing, k.key),
+        ),
+      ],
   ];
   String? selected;
   Object? input;
@@ -815,6 +884,8 @@ Future<CompareCondition?> thingConditionForm(
       (selected, input) = ('above-$key', current.value);
     } else if (current.op == '<' || current.op == '<=') {
       (selected, input) = ('below-$key', current.value);
+    } else if (current.op == '!=') {
+      (selected, input) = ('isnot-$key', current.value);
     } else {
       (selected, input) = ('is-$key', current.value);
     }
@@ -1161,6 +1232,15 @@ Future<RuleStep?> actionForm(
   );
 }
 
+/// The TV's apps for its "app on screen" state, so it is picked by name.
+Future<List<ParamChoice>> Function()? _appsOf(
+  BuildContext context,
+  Thing thing,
+  String key,
+) => thing.driver == TvCalls.driver && key == 'app'
+    ? () => tvAppChoices(context, thing.id)
+    : null;
+
 /// The apps a TV can open, by name, for a launch step's package.
 Future<List<ParamChoice>> tvAppChoices(BuildContext context, String tv) async {
   final client = ProviderScope.containerOf(
@@ -1196,13 +1276,18 @@ Future<bool> repeatForm(BuildContext context, RepeatStep step) async {
         (times == null || (times! >= 1 && times! <= 1000)) && every >= 0
         ? true
         : null,
+    whyNot: () => every < 0
+        ? 'Wait a whole number of seconds, minutes or hours'
+        : 'Use a number from 1 to 1000, or leave it empty',
     build: (context, setState) => [
       LabelledField(
         key: const ValueKey('repeat-times'),
-        label: 'At most this many times (1 to 1000)',
+        label: 'At most this many times (empty for no limit)',
         controller: count,
         number: true,
-        onChanged: (t) => setState(() => times = int.tryParse(t.trim()) ?? 0),
+        onChanged: (t) => setState(
+          () => times = t.trim().isEmpty ? null : int.tryParse(t.trim()) ?? 0,
+        ),
       ),
       DurationInput(
         label: 'Wait between passes',
@@ -1278,7 +1363,8 @@ Future<NotifyStep?> notifyForm(BuildContext context, [NotifyStep? current]) {
   return showFormSheet(
     context,
     title: 'Notify me',
-    subtitle: 'Shows on this phone while OmniFlow is open.',
+    subtitle:
+        'Shows as a notification on this phone, even with the screen off.',
     result: () => title.text.trim().isEmpty
         ? null
         : NotifyStep(

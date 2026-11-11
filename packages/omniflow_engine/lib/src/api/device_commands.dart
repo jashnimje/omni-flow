@@ -479,6 +479,7 @@ class DeviceCommands {
               _stored.capabilityIsHighRisk(manifest, c),
           if (stateKeyOf(c.stateJsonPath) != null)
             'stateKey': stateKeyOf(c.stateJsonPath),
+          if (c.values.isNotEmpty) 'values': c.values,
           'params': {
             for (final p in c.params.entries)
               p.key: {

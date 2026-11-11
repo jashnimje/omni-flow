@@ -66,6 +66,7 @@ class CapabilitySpec {
     required this.command,
     this.stateJsonPath,
     this.onOff,
+    this.values = const [],
   });
 
   final String id;
@@ -80,6 +81,10 @@ class CapabilitySpec {
   /// For a toggle whose device has its own words for on and off (`"ON"`,
   /// `"OFF"`): what `true` and `false` are sent as, and read back from.
   final (Object, Object)? onOff;
+
+  /// The values a sensor reports, when it has a fixed set (a TV's power is
+  /// on, asleep or off), so a check or trigger on it is a choice, not text.
+  final List<Object> values;
 
   /// [value] as the device says it, for a toggle with [onOff].
   Object? toDevice(Object? value) =>
@@ -170,6 +175,19 @@ class CapabilitySpec {
         onOff = (rawOnOff[0] as Object, rawOnOff[1] as Object);
       }
     }
+    final rawValues = map['values'];
+    var values = const <Object>[];
+    if (rawValues != null) {
+      if (type != CapabilityType.sensor) {
+        issues.add('$path.values', 'is only for a sensor');
+      } else if (rawValues is! List ||
+          rawValues.isEmpty ||
+          rawValues.any((v) => v == null || v is Map || v is List)) {
+        issues.add('$path.values', 'must be a list of plain values');
+      } else {
+        values = List<Object>.unmodifiable(rawValues.cast<Object>());
+      }
+    }
     if (issues.issues.length > before || id == null || type == null) {
       return null;
     }
@@ -181,6 +199,7 @@ class CapabilitySpec {
       command: command,
       stateJsonPath: stateJsonPath,
       onOff: onOff,
+      values: values,
     );
   }
 

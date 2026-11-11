@@ -491,7 +491,9 @@ List<Map<String, Object?>> pinSetupCommands(
 
 /// True when [host] names a serial port rather than a network address.
 bool isSerialHost(String host) =>
-    host.startsWith('/dev/') || RegExp(r'^COM\d+$').hasMatch(host);
+    host.startsWith('/dev/') ||
+    host.startsWith('usb:') ||
+    RegExp(r'^COM\d+$').hasMatch(host);
 
 /// The OmniFlow board protocol over whichever link the device has: its
 /// serial port when the host is a port path, Wi-Fi UDP otherwise.

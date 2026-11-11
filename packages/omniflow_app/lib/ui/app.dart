@@ -130,6 +130,7 @@ class _HomeState extends ConsumerState<Home> {
     messengerKey.currentState?.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 20),
+        persist: false,
         content: Text('New board found: $node (${e['board']}) at ${e['host']}'),
         action: SnackBarAction(
           label: 'Add',

@@ -12,8 +12,10 @@ import '../startup.dart';
 import 'engine_host.dart';
 import 'engine_link.dart';
 import 'multicast_lock.dart';
+import 'notifier.dart';
 import 'phone_inputs.dart';
 import 'service_engine_client.dart';
+import 'usb_links.dart';
 
 /// The id of the notification's Stop button.
 const stopButtonId = 'stop';
@@ -192,6 +194,7 @@ Future<Started> openServiceEngine() async {
     home: home,
     secrets: SecureStorageSecretStore(),
     tap: PacketTap(),
+    serialLinks: UsbLinks(),
   );
   if (started.client case final InProcessEngineClient client) {
     try {
@@ -221,6 +224,7 @@ class OmniTaskHandler extends TaskHandler {
   /// open. Null leaves the phone thing to the CLI.
   final PhoneInputs Function(EngineClient engine)? inputs;
   PhoneInputs? _inputs;
+  AutomationNotifier? _notifier;
 
   final Future<Started> Function() open;
   final Future<Object?> Function() stopService;
@@ -236,6 +240,7 @@ class OmniTaskHandler extends TaskHandler {
       _engine = started.client;
       _host.attach(started.client, hubError: started.hubError);
       _inputs = inputs?.call(started.client)?..start();
+      _notifier = AutomationNotifier(started.client)..start();
     } on Object catch (e) {
       _host.fail('$e');
     }
@@ -257,6 +262,7 @@ class OmniTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     await _inputs?.stop();
+    await _notifier?.stop();
     await _host.stop(
       isTimeout
           ? 'Android stopped the service at its time limit'

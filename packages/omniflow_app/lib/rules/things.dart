@@ -37,7 +37,14 @@ class Thing {
     for (final c in capabilities) {
       final key = c['stateKey'];
       if (key is String && seen.add(key)) {
-        out.add((key: key, label: '${c['label'] ?? key}'));
+        final label = '${c['label'] ?? key}';
+        // "Power (on, asleep or off)": the values show as choices instead.
+        out.add((
+          key: key,
+          label: c['values'] is List
+              ? label.replaceAll(RegExp(r'\s*\([^)]*\)'), '')
+              : label,
+        ));
       }
     }
     for (final key in state.keys) {
@@ -45,6 +52,13 @@ class Thing {
     }
     return out;
   }
+
+  /// The values state [key] can take, when its capability lists them.
+  List<Object> valuesOf(String key) => [
+    for (final c in capabilities)
+      if (c['stateKey'] == key && c['values'] is List)
+        ...(c['values'] as List).whereType<Object>(),
+  ];
 
   /// The events the thing's driver declares. A board raises events its
   /// firmware names, so it also takes a typed event.

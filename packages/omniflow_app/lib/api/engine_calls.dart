@@ -1134,8 +1134,9 @@ class EngineApi {
     String type, {
     Map<String, int> pins = const {},
     bool clear = false,
+    String? port,
   }) => _call('board.periph', {
-    'id': id,
+    if (port != null) 'port': port else 'id': id,
     'type': type,
     if (clear) 'clear': true else 'pins': pins,
   }, (r) => r);

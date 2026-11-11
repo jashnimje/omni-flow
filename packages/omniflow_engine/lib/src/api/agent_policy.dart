@@ -28,6 +28,7 @@ const agentReadCommands = {
   'automation.log',
   'automation.templates',
   'board.describe',
+  'board.ports',
   'device.discover',
   'device.get',
   'device.history',
@@ -109,6 +110,7 @@ const agentUserOnly = {
   'tv.settings.delete': 'raw TV setting writes are the user\'s',
   'tv.files.delete': 'deleting files is the user\'s',
   'presence.set': 'saying where the user is would fire automations falsely',
+  'board.flash': 'writing firmware replaces what a board runs',
 };
 
 /// Variables the engine keeps for itself, which no agent may set.

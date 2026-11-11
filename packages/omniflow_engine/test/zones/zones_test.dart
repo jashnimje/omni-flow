@@ -112,6 +112,7 @@ void main() {
       'ble': {'matchName': 'OMNI_PICO_DESK'},
       'wifi': {
         'ssids': ['HomeNet'],
+        'awayAfterMs': 0,
         'required': true,
       },
     });
@@ -119,8 +120,55 @@ void main() {
       'id': 'home',
       'wifi': {
         'ssids': ['HomeNet'],
+        'awayAfterMs': 0,
         'bssids': ['AA:BB:CC:00:11:22'],
       },
+    });
+
+    test('a short Wi-Fi drop is not leaving, a long one is', () {
+      final z = ZoneTracker([
+        ZoneSpec.parse({
+          'id': 'home',
+          'wifi': {
+            'ssids': ['HomeNet'],
+          },
+        }),
+      ]);
+      expect(
+        z.wifi('HomeNet', null, s(0)).single.transition,
+        ZoneTransition.entered,
+      );
+      expect(z.wifi(null, null, s(10)), isEmpty, reason: 'the router restarts');
+      expect(z.tick(s(100)), isEmpty);
+      expect(z.wifi('HomeNet', null, s(110)), isEmpty, reason: 'back in time');
+      expect(z.tick(s(300)), isEmpty);
+      expect(z.wifi('Cafe', null, s(400)), isEmpty);
+      expect(z.tick(s(519)), isEmpty);
+      expect(z.tick(s(521)).single.transition, ZoneTransition.exited);
+      expect(z.isInside('home'), isFalse);
+    });
+
+    test('the away wait is a place setting, and 0 leaves at once', () {
+      expect(
+        ZoneSpec.parse({
+          'id': 'home',
+          'wifi': {
+            'ssids': ['HomeNet'],
+            'awayAfterMs': 30000,
+          },
+        }).wifi!.awayAfter,
+        const Duration(seconds: 30),
+      );
+      expect(
+        () => ZoneSpec.parse({
+          'id': 'home',
+          'wifi': {
+            'ssids': ['HomeNet'],
+            'awayAfterMs': -1,
+          },
+        }),
+        throwsA(isA<ValidationException>()),
+      );
     });
 
     test('a Wi-Fi zone follows the network', () {

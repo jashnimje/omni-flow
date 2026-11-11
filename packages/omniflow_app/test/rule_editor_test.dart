@@ -115,6 +115,84 @@ void main() {
     expect(find.text('Saved Evening lights'), findsOneWidget);
   });
 
+  testWidgets('a TV state is checked by choosing its value, not typing it', (
+    tester,
+  ) async {
+    engine.devices = [
+      {
+        'id': 'tv',
+        'name': 'TV',
+        'driver': 'android_tv_adb',
+        'host': '192.168.1.60',
+        'state': const {'power': 'on', 'app': 'com.netflix.ninja'},
+        'capabilities': [
+          {
+            'id': 'power_state',
+            'type': 'sensor',
+            'label': 'Power (on, asleep or off)',
+            'stateKey': 'power',
+            'values': ['on', 'asleep', 'off'],
+            'params': {},
+          },
+          {
+            'id': 'current_app',
+            'type': 'sensor',
+            'label': 'App on screen',
+            'stateKey': 'app',
+            'params': {},
+          },
+        ],
+      },
+    ];
+    engine.answers['tv.apps'] = {
+      'ok': true,
+      'apps': [
+        {
+          'package': 'com.netflix.ninja',
+          'label': 'Netflix',
+          'launchable': true,
+        },
+      ],
+    };
+    await pumpPushed(
+      tester,
+      engine,
+      const RuleEditorPage(
+        initial: {
+          'name': 'TV check',
+          'when': [
+            {'manual': true},
+          ],
+          'then': [
+            {
+              'notify': {'title': 'Hi'},
+            },
+          ],
+        },
+      ),
+    );
+    await tapText(tester, 'Add condition');
+    await tapKey(tester, 'pick-thing-tv');
+    expect(find.text('Power is…'), findsOneWidget);
+    await tapKey(tester, 'opt-isnot-power');
+    expect(find.byKey(const ValueKey('opt-input')), findsNothing);
+    await tapKey(tester, 'opt-choice-asleep');
+    await tapKey(tester, 'form-done');
+
+    await tapText(tester, 'Add condition');
+    await tapKey(tester, 'pick-thing-tv');
+    await tapKey(tester, 'opt-is-app');
+    await tapKey(tester, 'opt-pick');
+    await tapKey(tester, 'choice-com.netflix.ninja');
+    await tapKey(tester, 'form-done');
+
+    await tapKey(tester, 'rule-save');
+    expect(savedSpec(engine)['onlyIf'], [
+      {'state': 'tv.power', 'op': '!=', 'value': 'asleep'},
+      {'state': 'tv.app', 'op': '==', 'value': 'com.netflix.ninja'},
+    ]);
+  });
+
   testWidgets('a TV launch step picks the app from the TV app list', (
     tester,
   ) async {
@@ -374,8 +452,25 @@ void main() {
     await pumpPushed(tester, engine, const RuleEditorPage(id: 'arrive_home'));
     await tester.tap(find.byTooltip('Remove Wait 3 s'));
     await tester.pumpAndSettle();
+    expect(find.text('Step removed'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
     await tapKey(tester, 'rule-save');
     expect((savedSpec(engine)['then'] as List).length, 2);
+  });
+
+  testWidgets('Undo puts a removed step back where it was', (tester) async {
+    engine.answers['automation.get'] = _stored(_arrive);
+    await pumpPushed(tester, engine, const RuleEditorPage(id: 'arrive_home'));
+    await tester.tap(find.byTooltip('Remove Wait 3 s'));
+    await tester.pumpAndSettle();
+    expect(find.text('Wait 3 s'), findsNothing);
+    await tester.tap(find.text('Undo'));
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('Wait 3 s'), findsOneWidget);
+    await tapKey(tester, 'rule-save');
+    expect((savedSpec(engine)['then'] as List)[1], {'wait': 3000});
   });
 
   testWidgets('an If opens its own page with its check, then and otherwise', (

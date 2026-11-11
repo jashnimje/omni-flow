@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
+import '../boards/firmware_sheet.dart';
+import '../boards/usb_board.dart';
 import '../design/design.dart';
 import '../tags/tags_page.dart' show showAddTagSheet;
 import 'add_by_hand_page.dart';
@@ -210,6 +212,23 @@ class _AddPageState extends ConsumerState<AddPage> {
               title: 'A place (home, office)',
               chevron: true,
               onTap: () => _byHand(driver: '${place?['driver'] ?? 'place'}'),
+            ),
+            OmniListRow(
+              key: const ValueKey('manual-usb-board'),
+              icon: OmniIcons.board,
+              title: 'A board on USB',
+              subtitle:
+                  'ESP32, ESP8266, Pico W or Uno, plugged into this phone',
+              chevron: true,
+              onTap: () => showUsbBoardSheet(context),
+            ),
+            OmniListRow(
+              key: const ValueKey('manual-firmware'),
+              icon: OmniIcons.developer,
+              title: 'Install firmware on a board',
+              subtitle: 'OmniFlow, or your own .bin or .hex, over USB',
+              chevron: true,
+              onTap: () => showFirmwareSheet(context),
             ),
             OmniListRow(
               key: const ValueKey('add-by-driver'),

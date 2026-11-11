@@ -72,6 +72,7 @@ void offerToNameTag(
   messengerKey.currentState?.showSnackBar(
     SnackBar(
       duration: const Duration(seconds: 20),
+      persist: false,
       content: const Text('New NFC tag. Name it to use it in rules.'),
       action: SnackBarAction(
         label: 'Name it',

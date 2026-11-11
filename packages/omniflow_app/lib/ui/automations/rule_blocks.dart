@@ -3,6 +3,7 @@ import 'package:flutter/semantics.dart';
 
 import '../../api/engine_calls.dart' show ApiFailure, AutomationSummary;
 import '../../rules/rule_spec.dart';
+import '../../state/providers.dart' show showMessage;
 import '../design/design.dart';
 import 'pickers.dart';
 import 'rule_words.dart';
@@ -165,10 +166,7 @@ class TriggerBlock extends StatelessWidget {
                       when[i] = edited;
                       draft.changed();
                     },
-              onRemove: () {
-                when.removeAt(i);
-                draft.changed();
-              },
+              onRemove: () => _removeWithUndo(draft, when, i, 'Trigger'),
             );
           },
         ),
@@ -233,10 +231,7 @@ class ConditionBlock extends StatelessWidget {
                     conditions[i] = edited;
                     draft.changed();
                   },
-            onRemove: () {
-              conditions.removeAt(i);
-              draft.changed();
-            },
+            onRemove: () => _removeWithUndo(draft, conditions, i, 'Condition'),
           );
         },
       ),
@@ -401,12 +396,23 @@ class StepBlock extends StatelessWidget {
           draft.changed();
         },
       },
-      onRemove: () {
-        steps.removeAt(i);
-        draft.changed();
-      },
+      onRemove: () => _removeWithUndo(draft, steps, i, 'Step'),
     );
   }
+}
+
+/// Removes item [i] of [list] and offers to put it back.
+void _removeWithUndo<T>(RuleDraft draft, List<T> list, int i, String what) {
+  final removed = list.removeAt(i);
+  draft.changed();
+  showMessage(
+    '$what removed',
+    action: 'Undo',
+    onAction: () {
+      list.insert(i.clamp(0, list.length), removed);
+      draft.changed();
+    },
+  );
 }
 
 /// The steps that hold their own lists of steps, edited on a page.

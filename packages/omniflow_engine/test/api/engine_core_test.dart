@@ -504,6 +504,7 @@ void main() {
           'id': 'home',
           'wifi': {
             'ssids': ['HomeNet'],
+            'awayAfterMs': 0,
           },
         },
       });

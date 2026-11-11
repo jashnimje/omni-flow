@@ -25,8 +25,14 @@ Future<Started> startEngine({
   PacketTap? tap,
   int wizListenPort = 38900,
   int boardHelloPort = 38951,
+  SerialLinks? serialLinks,
 }) async {
-  final engine = await OmniEngine.open(home: home, secrets: secrets, tap: tap);
+  final engine = await OmniEngine.open(
+    home: home,
+    secrets: secrets,
+    tap: tap,
+    serialLinks: serialLinks,
+  );
   final client = InProcessEngineClient(engine);
   final result = await client.call('hub.start', {
     'wizPort': wizListenPort,

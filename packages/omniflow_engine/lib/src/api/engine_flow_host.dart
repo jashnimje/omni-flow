@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'engine_core.dart';
 import '../dag/flow_engine.dart';
 import '../storage/database.dart';
@@ -47,6 +49,13 @@ class EngineFlowHost implements FlowHost {
   @override
   Future<void> saveTrace(Map<String, Object?> trace) =>
       ExecutionLogStore(_core.db).add(trace);
+
+  @override
+  Future<bool> ranAt(String flowId, String scheduled) async =>
+      (await ExecutionLogStore(_core.db).recent(
+        flowId: flowId,
+        limit: 50,
+      )).any((trace) => jsonEncode(trace).contains('"scheduled":"$scheduled"'));
 
   @override
   void emit(Map<String, Object?> event) => _core.emit(event);

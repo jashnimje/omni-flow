@@ -109,6 +109,7 @@ void main() {
           'name': 'Home',
           'wifi': {
             'ssids': ['HomeNet'],
+            'awayAfterMs': 0,
           },
         },
       });
@@ -149,6 +150,7 @@ void main() {
         'name': 'Home',
         'wifi': {
           'ssids': ['HomeNet'],
+          'awayAfterMs': 0,
         },
       },
     });
@@ -286,6 +288,7 @@ void main() {
         'id': 'flat',
         'wifi': {
           'ssids': ['HomeNet'],
+          'awayAfterMs': 0,
         },
       },
     });

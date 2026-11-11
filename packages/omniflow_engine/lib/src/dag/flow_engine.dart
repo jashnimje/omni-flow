@@ -20,6 +20,10 @@ abstract interface class FlowHost {
   });
   Future<void> saveGlobal(String name, Object? value);
   Future<void> saveTrace(Map<String, Object?> trace);
+
+  /// Whether [flowId] has a run in the log for the daily time [scheduled]
+  /// (its `scheduled` timestamp), so a restart does not run it twice.
+  Future<bool> ranAt(String flowId, String scheduled);
   void emit(Map<String, Object?> event);
   Stream<Map<String, Object?>> get events;
 }
@@ -32,6 +36,7 @@ class FlowEngine implements FlowEffects {
     this._clock = const SystemFlowClock(),
     Map<String, Object?> globals = const {},
   }) {
+    _openedAt = _clock.now();
     this.globals.addAll(globals);
     _subscription = _host.events.listen(_onEvent);
   }
@@ -40,6 +45,12 @@ class FlowEngine implements FlowEffects {
   final FlowClock _clock;
   final _runners = <String, FlowRunner>{};
   final _timers = <String, List<Timer>>{};
+
+  /// Daily triggers missed while the engine was down are caught up only when
+  /// it has just opened, and only this long after their time.
+  static const catchUpWindow = Duration(minutes: 15);
+  late final DateTime _openedAt;
+  final _caughtUp = <String>{};
   late final StreamSubscription<Map<String, Object?>> _subscription;
   bool _timersOn = false;
   final _pending = <Future<void>>{};
@@ -301,6 +312,7 @@ class FlowEngine implements FlowEffects {
   }
 
   void _scheduleDaily(FlowRunner r, NodeSpec n) {
+    _catchUp(r, n);
     final next = nextTimeOfDay(
       _clock.now(),
       n.config['at'] as String,
@@ -311,6 +323,25 @@ class FlowEngine implements FlowEffects {
       _scheduleDaily(r, n);
     });
     _timers.putIfAbsent(r.flow.id, () => []).add(timer);
+  }
+
+  /// Runs a daily trigger once whose time passed within [catchUpWindow]
+  /// before the engine opened (a reboot, Android restarting the service)
+  /// and that has no run for it yet.
+  void _catchUp(FlowRunner r, NodeSpec n) {
+    final key = '${r.flow.id}/${n.id}';
+    if (!_caughtUp.add(key)) return;
+    final now = _clock.now();
+    if (now.difference(_openedAt) > const Duration(minutes: 1)) return;
+    final at = n.config['at'] as String;
+    final days = (n.config['days'] as List?)?.cast<String>();
+    final last = previousTimeOfDay(now, at, days: days);
+    if (last == null || now.difference(last) > catchUpWindow) return;
+    final scheduled = last.toIso8601String();
+    _track(() async {
+      if (await _host.ranAt(r.flow.id, scheduled)) return;
+      _fire(r, n, {'scheduled': scheduled, 'caughtUp': true});
+    }());
   }
 
   /// Cancels the timers of [flowId], or of every flow.
@@ -372,6 +403,21 @@ bool payloadMatches(Object? match, Map<String, Object?> payload) =>
 /// The next local time at `HH:MM` after [now], on one of [days] when given.
 /// Built from local calendar fields, so a DST change moves it with the wall
 /// clock: 07:00 stays 07:00, and it fires once.
+/// The last time of day [hhmm] on [days] at or before [now], within a week.
+DateTime? previousTimeOfDay(DateTime now, String hhmm, {List<String>? days}) {
+  DateTime? last;
+  var t = nextTimeOfDay(
+    now.subtract(const Duration(days: 8)),
+    hhmm,
+    days: days,
+  );
+  while (!t.isAfter(now)) {
+    last = t;
+    t = nextTimeOfDay(t, hhmm, days: days);
+  }
+  return last;
+}
+
 DateTime nextTimeOfDay(DateTime now, String hhmm, {List<String>? days}) {
   final parts = hhmm.split(':');
   final hour = int.parse(parts[0]);

@@ -13,9 +13,9 @@
   "setup": ["pair", "configure:mac?"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },
   "capabilities": [
-    { "id": "power_state", "type": "sensor", "label": "Power (on, asleep or off)", "stateJsonPath": "$.power" },
+    { "id": "power_state", "type": "sensor", "label": "Power (on, asleep or off)", "stateJsonPath": "$.power", "values": ["on", "asleep", "off"] },
     { "id": "current_app", "type": "sensor", "label": "App on screen", "stateJsonPath": "$.app" },
-    { "id": "playback", "type": "sensor", "label": "Playback (playing, paused or stopped)", "stateJsonPath": "$.playing" },
+    { "id": "playback", "type": "sensor", "label": "Playback (playing, paused or stopped)", "stateJsonPath": "$.playing", "values": ["playing", "paused", "stopped"] },
     { "id": "wake", "type": "action", "label": "Wake", "command": { "op": "key", "key": "wakeup" } },
     { "id": "sleep", "type": "action", "label": "Sleep", "command": { "op": "key", "key": "sleep" } },
     { "id": "power", "type": "action", "label": "Power key", "command": { "op": "key", "key": "power" } },

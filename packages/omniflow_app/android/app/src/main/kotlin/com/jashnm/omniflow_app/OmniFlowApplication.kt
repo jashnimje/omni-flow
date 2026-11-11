@@ -14,5 +14,7 @@ class OmniFlowApplication : Application() {
         super.onCreate()
         FlutterForegroundTaskPlugin.addTaskLifecycleListener(MulticastLockBridge(this))
         FlutterForegroundTaskPlugin.addTaskLifecycleListener(PhoneSensorsBridge(this))
+        FlutterForegroundTaskPlugin.addTaskLifecycleListener(NotifyBridge(this))
+        FlutterForegroundTaskPlugin.addTaskLifecycleListener(UsbSerialBridge(this))
     }
 }

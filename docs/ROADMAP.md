@@ -150,6 +150,33 @@ Approved 2026-11-08. Spec: `docs/ui/mockups.html` and `docs/ui/ui-spec.md`. Desi
 - [ ] A side by side check of every screen on the phone with real data, and the new-user review by a fresh agent.
 - [ ] Failed-run and approval notifications, the `hub` presence source, a stored wait before away, and folder item counts in Files.
 
+## One stop shop - from the 2026-11-09 audit
+
+Four audits on 2026-11-09 checked devices, automations and presence, ease of use, and flashing against the code. In build order:
+
+1. Robustness
+   - [x] Wi-Fi away delay, so a short drop or Doze is not leaving (2 minutes, `awayAfterMs` per place)
+   - [x] Missed time triggers caught up after a restart (within 15 minutes, once)
+   - [x] A notification when a run fails, and notify steps as real notifications
+   - [ ] Run errors in plain words with step names
+2. Building automations without typing
+   - [x] State keys declare their values (TV power, playback) and show as chips, and the app on screen is picked from the TV's list
+   - [x] A greyed out Done says why
+   - [ ] Variables picked from the ones automations use
+   - [x] An empty repeat count means no limit
+   - [x] Undo after removing a trigger, condition or step
+   - [ ] A quick link's value is a switch or slider
+   - [ ] Typed setup fields (number, switch, choice) with help text
+3. Boards from the phone, no computer
+   - [x] USB serial on the phone (Kotlin USB host bridge, CDC, CP210x, CH34x, FTDI), so board setup, pins and extras run from the app
+   - [x] Flash the OmniFlow firmware, or your own .bin or .hex, to ESP32, ESP8266 and Uno over USB (ESP ROM protocol, STK500). Pico W (PICOBOOT) is next
+   - [ ] Over-the-air updates for ESP32 and Pico W, with a key set over USB (needs a security design first)
+   - [ ] Custom sketches compiled on a Mac or Pi with arduino-cli and flashed from the phone. Compiling C++ on the phone is not possible: no toolchain runs on Android
+4. More devices
+   - [ ] Tuya 3.4 and 3.5 control, Shelly Gen1, Hue colour, groups and scenes, more Home Assistant domains with push, SSDP and Wake-on-LAN for LG and Samsung, IR learn and raw send, ESPHome native API, Cast speakers, Android 11+ wireless debugging
+5. Hubs
+   - [ ] The CLI and hub on Linux (Raspberry Pi) with a secret store and a systemd unit, then presence from a hub (the phone on the LAN, computer idle or locked)
+
 ## Checks
 
 ### Before M1: hardware, network and accounts (manual)
@@ -255,3 +282,5 @@ What the code and design assume, checked on 2026-11-06 against primary sources. 
 - 2026-11-09: Arrive-home test on the phone and TV, and richer rules. On the Nothing A059, Places and people made the home place from the current Wi-Fi (HomeWiFi) and a person Jade, then showed "You are home, seen by Wi-Fi". The Arrive home rule (I get home, then TV wake, wait 5 s, open TV Settings) was built in the rule editor, its test run listed all three steps, and it ran for real (the run log shows 3 steps at 11:50). Built from that walk: templates offer a TV as something to turn on or off (`tv.power` becomes `wake` or `sleep`), rule nodes are labelled with thing names, a launch step picks the app from the TV's app list, the test page has Run it now, the TV page reaches its room, name and settings, a setup page for an existing thing says Set up. New rule steps: `repeat {do, times?, until?, every?}` (bounded to 1000 passes, `until` checked before each pass) and `try {steps, otherwise?}` (a device step that fails runs `otherwise` instead of the rest), in the engine, CLI and MCP docs and the app editor. The TV wake now falls back to Wake-on-LAN when the TV does not answer and has a `mac` setting, then retries ADB for 45 s. The TV's MAC is set on the phone. Not proven: a wake from deep standby on the real TV (`tcl_sys_network_standby_enabled` is 0, so the TV may drop Wi-Fi in standby until network standby is turned on in its power settings), and a real Wi-Fi leave and rejoin while the phone is in a pocket. Results: 872 engine tests (3 live skipped) and 357 app tests, analyze and format clean.
 - 2026-11-09: Agents set OmniFlow up end to end. `describe_omniflow` and `omniflow_call` give an MCP agent the whole setup in one reply and any core command its access level opens (`read` by default, `setup` once the user allows it). The user-only list holds at every level. `omni --phone <serial>` and `omni --phone <serial> mcp` reach the phone's engine through adb and the app's `AgentBridgeProvider`, with no network listener. Proven on the Nothing A059 through the MCP over stdio: describe returned the TV, place, person, phone and the rule. The agent made a Living room, put the TV in it as a favourite, and saved four rules and a scene, all approved because low risk: Home, film time (if the TV is on, Netflix; otherwise wake it until it is on, then Prime Video, falling back to YouTube), Leave home, TV off (after 2 minutes away), TV left on at night (01:00, not playing) and Phone battery low, plus a Movie night scene. It turned off the Arrive home test rule. `tv.shell`, `device.remove` and `agent.access.set` came back `needs_user`. Lights and the Mac mini were not added: no WiZ or Tuya device answered discovery, and a Mac needs SSH keys, which are the user's. Results: 884 engine tests (3 live skipped) and 357 app tests, analyze and format clean. Not proven: the provider refusing another app's call (checked in code, not run), and the new rules firing for real.
 - 2026-11-09: Fixed a restart being taken for an arrival. Places started outside whenever the engine opened, so after a reinstall, an Android restart of the service or a reboot, the first Wi-Fi reading counted as getting home and Home, film time opened Netflix (runs at 12:15 and 12:19, both reinstalls). Places now come back inside as stored, and a beacon place counts as just heard, so it still exits if it stays quiet. A test reopens the engine at home, sends the same Wi-Fi, expects no arrival and then a real leave. It fails with the fix reverted. On the phone, the 12:34 reinstall left the run log unchanged and Jade home.
+- 2026-11-09: Robustness and boards from the phone. A place waits 2 minutes off its Wi-Fi before counting as away, a daily time missed during a restart runs once within 15 minutes, and notify steps and failed runs are real notifications from the service (a test rule's notification showed on the Nothing A059). TV power and playback are chips, the app on screen is picked from the TV's list, a disabled Done says why, removing a row offers Undo, and action snackbars time out (Flutter now keeps an action snackbar until tapped, which covered Save). The phone opens USB serial boards itself: usb-serial-for-android 3.8.1 is vendored (MIT, its JitPack artifact is out of reach and the `usb_serial` plugin no longer builds), a service bridge lists, permits, opens, writes and sets DTR, RTS and speed, and the engine's `SerialLinks` routes `usb:` ports through it. On the phone `device.discover` and `board.ports` answer with nothing plugged in. R8 had stripped the drivers' reflective `getSupportedDevices`, now kept. A board is set up (name and Wi-Fi) and its extras changed over the phone's USB, and `board.flash` writes ESP32 and ESP8266 images through the ROM bootloader and Uno images through Optiboot, with progress events, the chip checked before anything is erased, and user-only for agents. The app carries the four images built by `tool/firmware_assets.dart` (git ignores them) and writes OmniFlow or a picked .bin or .hex. Results: engine 900+ tests, app 365, analyze and format clean. Not proven: any of the USB paths with a real board on the phone, since none was plugged in. Proven against simulated ESP32 and ESP8266 ROMs and Optiboot.
+

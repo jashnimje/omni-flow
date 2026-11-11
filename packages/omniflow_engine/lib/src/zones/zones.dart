@@ -133,10 +133,17 @@ class WifiSettings {
     this.ssids = const {},
     this.bssids = const {},
     this.required = false,
+    this.awayAfter = defaultAwayAfter,
   });
+
+  /// How long the phone may be off the network before it counts as gone:
+  /// a router restart, a weak spot in the house or Android dozing the radio
+  /// is not leaving.
+  static const defaultAwayAfter = Duration(minutes: 2);
 
   final Set<String> ssids;
   final Set<String> bssids;
+  final Duration awayAfter;
 
   /// A required Wi-Fi input must hold for the zone to count as entered.
   final bool required;
@@ -171,6 +178,8 @@ class ZoneSpec {
         'ssids': wifi!.ssids.toList(),
         'bssids': wifi!.bssids.toList(),
         'required': wifi!.required,
+        if (wifi!.awayAfter != WifiSettings.defaultAwayAfter)
+          'awayAfterMs': wifi!.awayAfter.inMilliseconds,
       },
   };
 
@@ -232,10 +241,17 @@ class ZoneSpec {
         return v.cast<String>().toSet();
       }
 
+      final away = rawWifi['awayAfterMs'];
+      if (away != null && (away is! int || away < 0 || away > 3600000)) {
+        issues.add(r'$.wifi.awayAfterMs', 'must be 0 to 3600000');
+      }
       wifi = WifiSettings(
         ssids: strings('ssids'),
         bssids: strings('bssids').map((b) => b.toLowerCase()).toSet(),
         required: rawWifi['required'] == true,
+        awayAfter: away is int && away >= 0 && away <= 3600000
+            ? Duration(milliseconds: away)
+            : WifiSettings.defaultAwayAfter,
       );
       if (wifi.ssids.isEmpty && wifi.bssids.isEmpty) {
         issues.add(r'$.wifi', 'needs ssids or bssids');
@@ -322,9 +338,33 @@ class ZoneTracker {
         ...?_apply(e.key, e.value.reading(rssi, at), at),
   ];
 
+  /// Call about once a second: beacons that went quiet, and Wi-Fi places
+  /// whose away wait has run out.
   List<ZoneChange> tick(DateTime at) => [
     for (final e in _ble.entries) ...?_apply(e.key, e.value.tick(at), at),
+    for (final id in _wifiLostAt.keys.toList())
+      if (!_ble.containsKey(id)) ...?_apply(id, null, at),
   ];
+
+  /// When each place's Wi-Fi stopped matching, while it still counts as
+  /// inside.
+  final _wifiLostAt = <String, DateTime>{};
+
+  bool _wifiHolds(ZoneSpec zone, DateTime at) {
+    final wifi = zone.wifi!;
+    if (_wifiKnown && wifi.matches(_ssid, _bssid)) {
+      _wifiLostAt.remove(zone.id);
+      return true;
+    }
+    if (_inside[zone.id] != true || wifi.awayAfter == Duration.zero) {
+      _wifiLostAt.remove(zone.id);
+      return false;
+    }
+    final lost = _wifiLostAt.putIfAbsent(zone.id, () => at);
+    if (at.difference(lost) < wifi.awayAfter) return true;
+    _wifiLostAt.remove(zone.id);
+    return false;
+  }
 
   List<ZoneChange> wifi(String? ssid, String? bssid, DateTime at) {
     _ssid = ssid;
@@ -339,8 +379,7 @@ class ZoneTracker {
     DateTime at,
   ) {
     final zone = _zones[zoneId]!;
-    final wifiOk =
-        zone.wifi == null || (_wifiKnown && zone.wifi!.matches(_ssid, _bssid));
+    final wifiOk = zone.wifi == null || _wifiHolds(zone, at);
     final bool nowInside;
     if (zone.ble == null && zone.wifi == null) {
       nowInside = false;
