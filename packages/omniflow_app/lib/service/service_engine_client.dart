@@ -9,6 +9,10 @@ import 'engine_link.dart';
 /// never one the engine sends.
 const serviceStoppedEvent = 'service.stopped';
 
+/// Why the service stopped when the user pressed Stop on its notification.
+/// Any other stop can be Android's, and the service may come back.
+const stoppedFromNotification = 'Stopped from the notification';
+
 /// Talks to the engine in the foreground service over an [EngineLink]. Like
 /// the engine, [call] never throws: a call the service cannot answer comes
 /// back as an `unavailable` error.

@@ -232,7 +232,7 @@ void main() {
       });
       expect(find.text('Last runs'), findsOneWidget);
       expect(find.textContaining('2 steps · 1.4 s'), findsOneWidget);
-      expect(find.text('Hall bulb timed out'), findsOneWidget);
+      expect(find.text('Hall bulb timed out.'), findsOneWidget);
       expect(find.textContaining('Yesterday'), findsOneWidget);
       await tapKey(tester, 'run-1');
       expect(find.byType(RunPage), findsOneWidget);
@@ -319,7 +319,7 @@ void main() {
         const RunPage(automationId: 'arrive_home', runId: 'r1'),
       );
       expect(find.textContaining('This run failed'), findsOneWidget);
-      expect(find.text('Hall bulb timed out'), findsOneWidget);
+      expect(find.text('Hall bulb timed out.'), findsOneWidget);
     });
 
     testWidgets('a run gone from the log says so', (tester) async {

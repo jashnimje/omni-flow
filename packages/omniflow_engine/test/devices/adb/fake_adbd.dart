@@ -363,7 +363,11 @@ class FakeSyncSession {
     _adbd.syncRequests.add('$id $arg');
     switch (id) {
       case 'STAT':
-        final node = _fs.nodes[arg];
+        // lstat, as adbd does: a link is not followed, except that a
+        // trailing slash resolves it, as the kernel does.
+        final node = arg.length > 1 && arg.endsWith('/')
+            ? _fs.nodes[_fs.resolve(arg.substring(0, arg.length - 1))]
+            : _fs.nodes[arg];
         _reply([
           ...ascii.encode('STAT'),
           ...le32(node?.mode ?? 0),

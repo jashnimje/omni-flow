@@ -380,6 +380,40 @@ class OmniEngine {
       }
       final why = agentRefusal(command, inner, await _agentAccess.read());
       if (why != null) throw ApiError('needs_user', why);
+      // The engine's state decides these: a high-risk automation runs only
+      // when the user starts it, and the globals it reads are not an agent's
+      // to set.
+      if (command == 'automation.run' ||
+          command == 'scene.run' ||
+          command == 'var.set' ||
+          command == 'var.remove' ||
+          command == 'device.discover') {
+        final risk = await _stored.riskSummary();
+        if ((command == 'automation.run' || command == 'scene.run') &&
+            risk.flows.contains(inner['id'])) {
+          throw ApiError(
+            'needs_user',
+            '${inner['id']} is high risk (it runs commands on a device), so '
+                'only you can run it',
+          );
+        }
+        if (command.startsWith('var.') &&
+            risk.globals.contains(inner['name'])) {
+          throw ApiError(
+            'needs_user',
+            '${inner['name']} is read by a high-risk automation, so only you '
+                'can change it',
+          );
+        }
+        final driver = _core.registry['${inner['driver']}'];
+        if (command == 'device.discover' &&
+            driver?.transport.type == TransportType.serial) {
+          throw ApiError(
+            'needs_user',
+            'finding a USB device opens its port, which resets the board',
+          );
+        }
+      }
       final result = await handle(command, agentArgs(command, inner));
       if (result['ok'] != true) {
         final error = result['error'] as Map;

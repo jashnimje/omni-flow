@@ -47,6 +47,19 @@ void main() {
   testWidgets('each tab root has its own button, and Settings none', (
     tester,
   ) async {
+    engine.answers['automation.list'] = {
+      'ok': true,
+      'automations': [
+        {
+          'id': 'evening',
+          'name': 'Evening',
+          'source': 'rule',
+          'enabled': true,
+          'approved': true,
+          'sentence': const <Object?>[],
+        },
+      ],
+    };
     await pumpApp(tester, engine);
     await openTab(tester, 'Automations');
     expect(fabWith('new-rule'), findsOneWidget);
@@ -55,6 +68,16 @@ void main() {
     expect(fabWith('add-device'), findsOneWidget);
     await openTab(tester, 'Settings');
     expect(find.byType(FloatingActionButton), findsNothing);
+  });
+
+  testWidgets('with no automations only the empty state offers New', (
+    tester,
+  ) async {
+    engine.answers['automation.list'] = {'ok': true, 'automations': []};
+    await pumpApp(tester, engine);
+    await openTab(tester, 'Automations');
+    expect(fabWith('new-rule'), findsNothing);
+    expect(find.byKey(const ValueKey('automations-empty')), findsOneWidget);
   });
 
   testWidgets('a page opened in a tab keeps the tab bar and hides the button', (

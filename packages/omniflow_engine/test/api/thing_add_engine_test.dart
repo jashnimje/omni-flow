@@ -75,7 +75,7 @@ void main() {
             as Map<String, Object?>;
     expect(shelly['driver'], 'shelly_plus_switch');
     final added = await ok('thing.add', {'candidate': shelly});
-    expect(added['id'], 'shellyplus1_a8032ab10001');
+    expect(added['id'], 'plug_0001');
     expect(added['next'], containsPair('step', 'done'));
     final next = await ok('thing.next', {'id': added['id']});
     expect(next['next'], containsPair('step', 'done'));
@@ -113,7 +113,7 @@ void main() {
       '1',
     ]);
     expect(code, 0, reason: '$out');
-    expect('$out', contains('Done. shellyplus1-a8032ab10001 is ready'));
+    expect('$out', contains('Done. Plug 0001 is ready'));
     engine = await OmniEngine.open(home: home, secrets: InMemorySecretStore());
   });
 

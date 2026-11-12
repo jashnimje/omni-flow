@@ -1,21 +1,27 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/service/notifier.dart';
+import 'package:omniflow_app/ui/shell/links.dart';
 
 import 'fake_engine.dart';
 
 void main() {
   late FakeEngine engine;
   late List<(String, String, String?)> posted;
+  late List<String?> links;
   late AutomationNotifier notifier;
 
   setUp(() {
     engine = FakeEngine();
     engine.answers['automation.get'] = {'ok': true, 'name': 'Home, film time'};
     posted = [];
+    links = [];
     notifier = AutomationNotifier(
       engine,
-      post: ({required channel, required id, required title, body}) async =>
-          posted.add((channel, title, body)),
+      post:
+          ({required channel, required id, required title, body, link}) async {
+            posted.add((channel, title, body));
+            links.add(link);
+          },
     )..start();
   });
 
@@ -59,5 +65,21 @@ void main() {
     });
     await send(failed);
     expect(posted, hasLength(2));
+  });
+
+  test('a tap opens the automation, or the run that failed', () async {
+    await send({
+      'event': 'flow.announce',
+      'flow': 'home film',
+      'title': 'Welcome home',
+    });
+    await send({
+      'event': 'run.finished',
+      'flow': 'home film',
+      'run': 'r 7',
+      'outcome': 'failed',
+    });
+    expect(ShellLink.parse(links[0]), const AutomationLink('home film'));
+    expect(ShellLink.parse(links[1]), const RunLink('home film', 'r 7'));
   });
 }

@@ -643,9 +643,15 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
               Text(
                 _tv
                     ? 'Check the TV is on, awake and on the same Wi-Fi as this '
-                          'phone. Some TVs show the prompt only after debugging '
-                          'is turned on in their developer options. Then try '
-                          'again.'
+                          'phone. The TV asks only once debugging is on:\n'
+                          '1. On the TV open Settings, then System (or Device '
+                          'preferences), then About.\n'
+                          '2. Select Build (Android TV OS build) 7 times, until '
+                          'it says you are a developer.\n'
+                          '3. Go back, open Developer options, and turn on USB '
+                          'debugging and Network debugging (on some TVs, ADB '
+                          'debugging).\n'
+                          '4. Try again here, and choose Allow on the TV.'
                     : 'Check $waitingFor is switched on and on the same Wi-Fi '
                           'as this phone, then try again.',
                 style: OmniText.body,

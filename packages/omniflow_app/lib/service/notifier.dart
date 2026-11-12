@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../api/engine_client.dart';
 import '../api/plain_error.dart';
+import '../ui/shell/links.dart';
 
 /// Posts a notification through the service's omniflow/notify channel.
 typedef PostNotification = Future<void> Function({
@@ -11,7 +12,16 @@ typedef PostNotification = Future<void> Function({
   required int id,
   required String title,
   String? body,
+  String? link,
 });
+
+/// The app link a notification opens: the automation, or one of its runs.
+String automationLink(String flow, {String? run}) {
+  final ShellLink link = run == null
+      ? AutomationLink(flow)
+      : RunLink(flow, run);
+  return 'omniflow://open${link.location}';
+}
 
 /// Turns engine events into phone notifications from the service, so they
 /// show with the screen off: a rule's notify step, and an automation run
@@ -36,6 +46,7 @@ class AutomationNotifier {
     required int id,
     required String title,
     String? body,
+    String? link,
   }) async {
     try {
       await _channel.invokeMethod<void>('post', {
@@ -43,6 +54,7 @@ class AutomationNotifier {
         'id': id,
         'title': title,
         'body': ?body,
+        'link': ?link,
       });
     } on MissingPluginException {
       // Not on the phone (tests, the desktop): nothing to show.
@@ -61,11 +73,15 @@ class AutomationNotifier {
       case 'flow.announce':
         final title = '${e['title'] ?? ''}'.trim();
         if (title.isEmpty) return;
+        // One notification per automation and title, updated in place, so
+        // a rule that fires often does not stack up to Android's limit.
+        final flow = e['flow'];
         await _post(
           channel: 'automations',
-          id: _nextId++,
+          id: flow == null ? _nextId++ : '$flow/$title'.hashCode & 0x7fffffff,
           title: title,
           body: e['body'] as String?,
+          link: flow == null ? null : automationLink('$flow'),
         );
       case 'run.finished':
         final flow = '${e['flow']}';
@@ -81,6 +97,7 @@ class AutomationNotifier {
           id: flow.hashCode & 0x7fffffff,
           title: '$name did not finish',
           body: plainError('device_error', e['reason'] as String?),
+          link: automationLink(flow, run: e['run'] as String?),
         );
     }
   }

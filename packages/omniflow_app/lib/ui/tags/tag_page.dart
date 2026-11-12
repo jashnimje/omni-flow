@@ -58,7 +58,7 @@ String whenText(DateTime t, {DateTime? now}) {
   final midnight = DateTime(today.year, today.month, today.day);
   final day = !at.isBefore(midnight)
       ? 'Today'
-      : !at.isBefore(midnight.subtract(const Duration(days: 1)))
+      : !at.isBefore(DateTime(today.year, today.month, today.day - 1))
       ? 'Yesterday'
       : _day(at);
   return '$day ${_clock(at)}';

@@ -3,13 +3,12 @@ import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
 
+import '../api/agent_policy.dart';
 import '../api/local_client.dart';
 import '../api/omni_engine.dart';
 import '../version.dart';
 
 typedef _Board = ({String fqbn, bool wifi, String pins});
-
-const _agentFindMethods = ['udp_broadcast', 'mdns', 'tuya_broadcast', 'hello'];
 
 /// The boards firmware/omniflow_node builds for, and the pins each offers
 /// (the board profiles in omni_core.cpp).
@@ -72,6 +71,12 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
   });
 
   final freeObject = JsonSchema.object(additionalProperties: true);
+
+  /// A command under the agent's access level, as omniflow_call sends it.
+  Future<Map<String, Object?>> asAgent(
+    String command,
+    Map<String, Object?> args,
+  ) => engine.handle('agent.call', {'command': command, 'args': args});
 
   server.registerTool(
     'discover_devices_and_capabilities',
@@ -327,7 +332,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         if (args['drivers'] != null) 'drivers': args['drivers'],
         // Opening a USB port resets an ESP32 or an Uno, which an agent
         // must not do to a board that is running.
-        'methods': _agentFindMethods,
+        'methods': agentFindMethods,
       }),
     ),
   );
@@ -361,7 +366,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['deviceId', 'pins'],
     ),
     callback: (args, _) async => reply(
-      await engine.handle('board.pins', {
+      await asAgent('board.pins', {
         'id': args['deviceId'],
         'pins': args['pins'],
       }),
@@ -514,10 +519,9 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['name', 'actions'],
     ),
     callback: (args, _) async => reply(
-      await engine.handle('scene.save', {
+      await asAgent('scene.save', {
         for (final key in const ['id', 'name', 'icon', 'actions'])
           if (args[key] != null) key: args[key],
-        'trusted': false,
       }),
     ),
   );
@@ -530,7 +534,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['id'],
     ),
     callback: (args, _) async =>
-        reply(await engine.handle('scene.run', {'id': args['id']})),
+        reply(await asAgent('scene.run', {'id': args['id']})),
   );
 
   server.registerTool(
@@ -558,7 +562,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['deviceId'],
     ),
     callback: (args, _) async => reply(
-      await engine.handle('device.organize', {
+      await asAgent('device.organize', {
         'id': args['deviceId'],
         for (final key in const ['name', 'room', 'favourite', 'order'])
           if (args.containsKey(key)) key: args[key],

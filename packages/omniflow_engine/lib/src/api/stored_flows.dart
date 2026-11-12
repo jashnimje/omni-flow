@@ -380,4 +380,21 @@ class StoredFlows {
     }
     return risky;
   }
+
+  /// The stored high-risk flows, and the globals they read, which an agent
+  /// may neither run nor set.
+  Future<({Set<String> flows, Set<String> globals})> riskSummary() async {
+    final (_, specs, _) = await stored();
+    final risky = await highRiskFlows(specs.values);
+    return (
+      flows: risky,
+      globals: {
+        for (final id in risky)
+          if (specs[id] case final f?)
+            for (final n in f.nodes)
+              for (final m in _globalRef.allMatches(jsonEncode(n.config)))
+                m.group(1)!,
+      },
+    );
+  }
 }

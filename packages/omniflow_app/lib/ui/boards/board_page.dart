@@ -251,10 +251,11 @@ class _BoardPageState extends ConsumerState<BoardPage> {
             ),
             for (final w in _warnings)
               OmniBanner.warning(w, key: ValueKey('pin-warning-$w')),
+            // With no pins the empty state carries the one Add button.
             OmniSectionHeader(
               'Pins',
-              actionLabel: 'Add pin',
-              onAction: _addPin,
+              actionLabel: pins.isEmpty ? null : 'Add pin',
+              onAction: pins.isEmpty ? null : _addPin,
             ),
             if (pins.isEmpty)
               OmniEmptyState(

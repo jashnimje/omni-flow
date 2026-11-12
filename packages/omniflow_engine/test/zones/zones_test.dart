@@ -148,6 +148,20 @@ void main() {
       expect(z.isInside('home'), isFalse);
     });
 
+    test('a place removed during its away wait is forgotten', () {
+      final home = ZoneSpec.parse({
+        'id': 'home',
+        'wifi': {
+          'ssids': ['HomeNet'],
+        },
+      });
+      final z = ZoneTracker([home]);
+      z.wifi('HomeNet', null, s(0));
+      z.wifi('Cafe', null, s(10));
+      z.update(const []);
+      expect(z.tick(s(500)), isEmpty);
+    });
+
     test('the away wait is a place setting, and 0 leaves at once', () {
       expect(
         ZoneSpec.parse({

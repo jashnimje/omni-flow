@@ -57,6 +57,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
       _history
         ..remove(command)
         ..insert(0, command);
+      if (_history.length > 100) _history.removeLast();
     });
     final result = await tv.client.call(
       TvCalls.shell,
@@ -75,7 +76,8 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
         cwd: _cwd,
       ));
       if (ok && shell.cwd != null) _cwd = shell.cwd;
-      _command.clear();
+      // Clear only what was run: the next command may be typed meanwhile.
+      if (_command.text.trim() == command) _command.clear();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {

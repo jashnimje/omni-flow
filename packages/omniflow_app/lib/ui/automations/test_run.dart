@@ -4,6 +4,7 @@ import 'package:omniflow_engine/omniflow_engine.dart'
     show NodeCategory, builtInNodeTypes;
 
 import '../../api/engine_calls.dart';
+import '../../api/plain_error.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import 'dialogs.dart';
@@ -37,7 +38,10 @@ int stepsOf(RunRecord run) => run.steps.where((n) {
 
 /// What a node did, or in a dry run would do, in plain words.
 String? _detail(RunNode n, {required bool dry}) {
-  if (n.error != null) return dry ? 'would fail: ${n.error}' : n.error;
+  if (n.error case final e?) {
+    final plain = plainError('device_error', e);
+    return dry ? 'would fail: $plain' : plain;
+  }
   final c = _category(n.type);
   final result = n.output?['result'];
   switch (c) {
@@ -83,7 +87,7 @@ class RunNodeRows extends StatelessWidget {
           OmniListRow(
             key: ValueKey('node-$i'),
             leading: _Dot(_color(_category(n.type))),
-            title: labels[n.node] ?? n.label ?? n.type.replaceAll('_', ' '),
+            title: n.label ?? labels[n.node] ?? n.type.replaceAll('_', ' '),
             subtitle: _detail(n, dry: dry),
             subtitleLines: 3,
             trailing: _verdict(n, dry: dry),
@@ -164,9 +168,10 @@ class RunRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final failed =
+    final raw =
         run.steps.where((n) => n.error != null).firstOrNull?.error ??
         run.reason;
+    final failed = raw == null ? null : plainError('device_error', raw);
     final steps = stepsOf(run);
     return OmniListRow(
       title: whenText(run.startedAt),
@@ -196,7 +201,12 @@ class TestRunPage extends ConsumerStatefulWidget {
     this.id,
     this.dryRun,
     this.actions = const [],
+    this.unsaved = false,
   });
+
+  /// The dry run is of edits not saved yet, so a real run would run the
+  /// saved version instead: it asks to save first.
+  final bool unsaved;
 
   final String name;
 
@@ -317,9 +327,11 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
             else
               RunNodeRows(key: const ValueKey('dry-run'), run: dry),
             const SizedBox(height: OmniSpace.md),
-            if (widget.id == null)
-              const Text(
-                'Save it to run it for real.',
+            if (widget.id == null || widget.unsaved)
+              Text(
+                widget.id == null
+                    ? 'Save it to run it for real.'
+                    : 'Save your changes to run this version for real.',
                 key: ValueKey('save-to-run'),
                 style: OmniText.caption,
               )
@@ -434,9 +446,10 @@ class _RunPageState extends ConsumerState<RunPage> {
   @override
   Widget build(BuildContext context) {
     final run = _run;
-    final failed =
+    final raw =
         run?.steps.where((n) => n.error != null).firstOrNull?.error ??
         run?.reason;
+    final failed = raw == null ? null : plainError('device_error', raw);
     return OmniPage(
       title: '${_name ?? widget.automationId} · run',
       body: ListView(
@@ -493,10 +506,13 @@ String runSummary(Object? name, Json result) {
             .cast<Map>()
             .where((n) => n['error'] != null)
             .firstOrNull;
+        if (r['outcome'] == 'completed') return '$name ran';
+        final why = failed?['error'] ?? r['reason'];
+        final step = failed?['label'];
         return [
-          '$name: ${r['outcome']}',
-          if (r['reason'] != null) '(${r['reason']})',
-          if (failed != null) 'at ${failed['node']}: ${failed['error']}',
+          '$name did not finish',
+          if (step != null) 'at $step',
+          if (why != null) '- ${plainError('device_error', '$why')}',
         ].join(' ');
       }(),
   ].join('\n');

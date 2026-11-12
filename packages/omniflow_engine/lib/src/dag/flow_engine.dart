@@ -24,6 +24,10 @@ abstract interface class FlowHost {
   /// Whether [flowId] has a run in the log for the daily time [scheduled]
   /// (its `scheduled` timestamp), so a restart does not run it twice.
   Future<bool> ranAt(String flowId, String scheduled);
+
+  /// Notes that [flowId] starts its daily time [scheduled], before it runs,
+  /// so a run cut off by a restart is not caught up again.
+  Future<void> markScheduled(String flowId, String scheduled);
   void emit(Map<String, Object?> event);
   Stream<Map<String, Object?>> get events;
 }
@@ -319,7 +323,11 @@ class FlowEngine implements FlowEffects {
       days: (n.config['days'] as List?)?.cast<String>(),
     );
     final timer = Timer(next.difference(_clock.now()), () {
-      _fire(r, n, {'scheduled': next.toIso8601String()});
+      final scheduled = next.toIso8601String();
+      _track(() async {
+        await _host.markScheduled(r.flow.id, scheduled);
+        _fire(r, n, {'scheduled': scheduled});
+      }());
       _scheduleDaily(r, n);
     });
     _timers.putIfAbsent(r.flow.id, () => []).add(timer);
@@ -340,6 +348,7 @@ class FlowEngine implements FlowEffects {
     final scheduled = last.toIso8601String();
     _track(() async {
       if (await _host.ranAt(r.flow.id, scheduled)) return;
+      await _host.markScheduled(r.flow.id, scheduled);
       _fire(r, n, {'scheduled': scheduled, 'caughtUp': true});
     }());
   }

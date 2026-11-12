@@ -144,7 +144,12 @@ class TvCommands {
     );
   }
 
-  Future<String> _run(_Tv tv, String command, {Duration? timeout}) => _healing(
+  Future<String> _run(
+    _Tv tv,
+    String command, {
+    Duration? timeout,
+    bool wake = false,
+  }) => _healing(
     tv,
     () => _core.adb.run(
       tv.device,
@@ -152,6 +157,7 @@ class TvCommands {
       command,
       timeout: timeout,
       offerKey: tv.offerKey,
+      wake: wake,
     ),
   );
 
@@ -264,7 +270,13 @@ class TvCommands {
     };
     final longPress = AdbAction.flagOf(args['longPress'], r'$.longPress');
     final repeat = AdbAction.repeatOf(args['repeat']);
-    await _run(tv, TvShell.key(keycode, longPress: longPress, repeat: repeat));
+    // Wake up, and the power key, are how the app turns a TV on: a TV in
+    // deep standby gets Wake-on-LAN first.
+    await _run(
+      tv,
+      TvShell.key(keycode, longPress: longPress, repeat: repeat),
+      wake: keycode == 224 || keycode == 26,
+    );
     return {
       'id': tv.device.id,
       'keycode': keycode,
@@ -319,9 +331,13 @@ class TvCommands {
       'volume': now?.$1 ?? level,
       'volumeMax': now?.$2 ?? max,
       'method': method,
+      // The TV did not say its volume, so the level is what was asked for.
+      if (now == null) 'unverified': true,
     };
     final device = await _core.devices.device(tv.device.id);
-    if (device != null && device.state['volume'] != result['volume']) {
+    if (now != null &&
+        device != null &&
+        device.state['volume'] != result['volume']) {
       await _core.devices.mergeState(tv.device.id, {
         'volume': result['volume'],
       });
@@ -725,6 +741,17 @@ class TvCommands {
     };
   }
 
+  /// Whether [path] is a folder, following a link to one: `/sdcard` is a
+  /// link to the storage folder, and STAT does not follow links.
+  static Future<bool> _isFolder(AdbSync s, String path) async {
+    final entry = await s.stat(path);
+    if (entry == null) return false;
+    if (entry.isDirectory) return true;
+    if (entry.type != 'link') return false;
+    return (await s.stat(path.endsWith('/') ? path : '$path/'))?.isDirectory ??
+        false;
+  }
+
   Future<AdbSyncEntry> _statOrMissing(AdbSync s, String path, String id) async {
     final entry = await s.stat(path);
     if (entry == null) throw ApiError('not_found', 'no $path on $id');
@@ -790,7 +817,10 @@ class TvCommands {
     File local,
     void Function(int) progressBy,
   ) async {
-    final raf = await local.open(mode: FileMode.write);
+    // Into a .part file, renamed over the target only once it is whole, so
+    // a failed download never costs the copy the user already had.
+    final part = File('${local.path}.part');
+    final raf = await part.open(mode: FileMode.write);
     var ok = false;
     try {
       await s.pull(remote, (Uint8List chunk) async {
@@ -800,7 +830,11 @@ class TvCommands {
       ok = true;
     } finally {
       await raf.close();
-      if (!ok && await local.exists()) await local.delete();
+      if (ok) {
+        await part.rename(local.path);
+      } else if (await part.exists()) {
+        await part.delete();
+      }
     }
   }
 
@@ -820,7 +854,7 @@ class TvCommands {
               FileSystemEntityType.notFound) {
         throw ApiError(
           'conflict',
-          '$target exists. Pass overwrite to replace it',
+          '${_baseName(target)} is already there: replace it, or pick another name',
         );
       }
       final isDir =
@@ -882,14 +916,12 @@ class TvCommands {
         .lastWhere((p) => p.isNotEmpty);
     final target = await _sync(tv, (s) async {
       final there = await s.stat(path);
-      final target = there != null && there.isDirectory
-          ? _join(path, name)
-          : path;
+      final target = await _isFolder(s, path) ? _join(path, name) : path;
       if (!overwrite && target != path && await s.stat(target) != null ||
           !overwrite && target == path && there != null) {
         throw ApiError(
           'conflict',
-          '$target exists. Pass overwrite to replace it',
+          '${_baseName(target)} is already there: replace it, or pick another name',
         );
       }
       return target;
@@ -987,14 +1019,11 @@ class TvCommands {
     }
     final target = await _sync(tv, (s) async {
       await _statOrMissing(s, from, tv.device.id);
-      final there = await s.stat(to);
-      final target = there != null && there.isDirectory
-          ? _join(to, _baseName(from))
-          : to;
+      final target = await _isFolder(s, to) ? _join(to, _baseName(from)) : to;
       if (!overwrite && await s.stat(target) != null) {
         throw ApiError(
           'conflict',
-          '$target exists. Pass overwrite to replace it',
+          '${_baseName(target)} is already there: replace it, or pick another name',
         );
       }
       return target;
@@ -1086,7 +1115,8 @@ class TvCommands {
     }
     final marker = _marker();
     final script = [
-      if (cwd != null) 'cd ${shellQuote(cwd)} || exit 1',
+      // A folder deleted since falls back to /, so the console never sticks.
+      if (cwd != null) 'cd ${shellQuote(cwd)} 2>/dev/null || cd /',
       command,
       'echo "$marker\$?:\$PWD"',
     ].join('\n');

@@ -2,7 +2,7 @@ import '../../api/plain_error.dart';
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../../api/engine_client.dart';
 import '../../api/tv_calls.dart';
@@ -47,15 +47,43 @@ class TvController extends ChangeNotifier {
   void start() {
     unawaited(refresh());
     unawaited(_loadKeys());
-    _timer = Timer.periodic(poll, (_) => unawaited(refresh()));
+    _resume();
     _events = client.events.listen(_onEvent);
+    // No reads while the app is in the background: the hub keeps its own
+    // poll, and this one only feeds the screen.
+    _lifecycle = AppLifecycleListener(
+      onHide: () {
+        _timer?.cancel();
+        _timer = null;
+      },
+      onShow: () {
+        if (_disposed || _timer != null) return;
+        unawaited(refresh());
+        _resume();
+      },
+    );
   }
+
+  void _resume() => _timer = Timer.periodic(poll, (_) => unawaited(refresh()));
+
+  AppLifecycleListener? _lifecycle;
+
+  /// A read in flight, so a slow TV never gets several at once.
+  var _reading = false;
+
+  /// Bumped by each change the user makes, so a read that started before it
+  /// cannot put the old value back.
+  var _generation = 0;
+
+  /// The TV is reachable but has not allowed this phone's key.
+  var needsPairing = false;
 
   @override
   void dispose() {
     _disposed = true;
     _timer?.cancel();
     _events?.cancel();
+    _lifecycle?.dispose();
     super.dispose();
   }
 
@@ -67,13 +95,34 @@ class TvController extends ChangeNotifier {
   void labelsChanged() => _changed();
 
   /// Reads the state without a snackbar, since it runs every few seconds.
+  ///
+  /// It never starts pairing: a read every few seconds would put "Allow USB
+  /// debugging?" on the TV again each time it is dismissed. Pairing is the
+  /// page's Pair button.
   Future<void> refresh() async {
-    final result = await client.call(TvCalls.state, TvCalls.idArgs(id));
-    if (_disposed) return;
+    if (_reading) return;
+    _reading = true;
+    final generation = _generation;
+    final Json result;
+    try {
+      result = await client.call(TvCalls.state, {
+        ...TvCalls.idArgs(id),
+        'allowPairing': false,
+      });
+    } finally {
+      _reading = false;
+    }
+    if (_disposed || generation != _generation) return;
     loaded = true;
+    needsPairing = false;
     if (result['ok'] == true) {
       state = TvCalls.stateOf(result);
       offline = null;
+    } else if ((result['error'] as Map?)?['type'] == 'needs_user') {
+      needsPairing = true;
+      offline =
+          'The TV has not let OmniFlow in yet. Tap Pair again, then choose '
+          'Allow on the TV.';
     } else {
       offline = errorMessage(result);
     }
@@ -128,8 +177,11 @@ class TvController extends ChangeNotifier {
   }
 
   Future<bool> setVolume(int level) async {
+    _generation++;
     final result = await call(TvCalls.volume, TvCalls.volumeArgs(id, level));
     if (result['ok'] == true) {
+      // What the TV says it is now, when it says.
+      if (result['volume'] case final int reported) level = reported;
       state = TvState(
         power: state.power,
         app: state.app,

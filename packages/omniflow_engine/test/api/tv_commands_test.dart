@@ -850,6 +850,13 @@ void main() {
         }))['type'],
         'conflict',
       );
+      // A move onto a link to a folder (like /sdcard) goes into the folder.
+      adbd.fs.link('/sdcard/Shortcut', '/sdcard/Download/Album');
+      final linked = await ok('tv.files.copy', {
+        'from': '/sdcard/Download/b.txt',
+        'to': '/sdcard/Shortcut',
+      });
+      expect(linked['to'], '/sdcard/Shortcut/b.txt');
       await ok('tv.files.move', {
         'from': '/sdcard/Download/b.txt',
         'to': '/sdcard/Download/c.txt',

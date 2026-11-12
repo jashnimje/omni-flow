@@ -107,7 +107,8 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
       _result = null;
       _progress = (stage: 'Starting', done: 0);
     });
-    _events ??= engine.events
+    await _events?.cancel();
+    _events = engine.events
         .where((e) => e['event'] == 'board.flashProgress' && e['port'] == port)
         .listen((e) {
           if (!mounted) return;
@@ -122,6 +123,7 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
     try {
       file = await _imagePath();
     } on Object {
+      if (!mounted) return;
       setState(() {
         _progress = null;
         _error = 'This copy of the app has no firmware for that board.';

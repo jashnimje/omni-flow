@@ -1,9 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
 import '../../api/engine_calls.dart' show ApiFailure, AutomationSummary;
 import '../../rules/rule_spec.dart';
-import '../../state/providers.dart' show showMessage;
+import '../../state/providers.dart' show messengerKey, showMessage;
 import '../design/design.dart';
 import 'pickers.dart';
 import 'rule_words.dart';
@@ -12,7 +14,8 @@ import 'rule_words.dart';
 /// open, so an edit anywhere rebuilds every page and clears the errors the
 /// last save or test run named (their rule paths no longer line up).
 class RuleDraft extends ChangeNotifier {
-  RuleDraft(this.spec, {required this.words, this.automations = const []});
+  RuleDraft(this.spec, {required this.words, this.automations = const []})
+    : _saved = jsonEncode(spec.toJson());
 
   final RuleSpec spec;
   RuleWords words;
@@ -20,11 +23,23 @@ class RuleDraft extends ChangeNotifier {
   /// What a run step can start: every other automation.
   List<AutomationSummary> automations;
   ApiFailure? failure;
-  var dirty = false;
+
+  /// The rule as last saved, so an edit undone by hand (or a picker left
+  /// on the same choice) does not count as unsaved work.
+  String _saved;
+  var _forced = false;
+
+  bool get dirty => _forced || jsonEncode(spec.toJson()) != _saved;
+
+  /// True marks the draft unsaved whatever it holds (a template not kept
+  /// yet). False takes what it holds now as saved.
+  set dirty(bool value) {
+    _forced = value;
+    if (!value) _saved = jsonEncode(spec.toJson());
+  }
 
   void changed() {
     failure = null;
-    dirty = true;
     notifyListeners();
   }
 
@@ -303,14 +318,7 @@ class StepBlock extends StatelessWidget {
     ],
   );
 
-  /// Keep steps go last in a rule's THEN, so a move or an add never puts a
-  /// plain step after one.
-  void _keepsLast() {
-    final keeps = steps.whereType<KeepStep>().toList();
-    steps
-      ..removeWhere((s) => s is KeepStep)
-      ..addAll(keeps);
-  }
+  void _keepsLast() => keepsLast(steps);
 
   Future<void> _add(BuildContext context) async {
     var step = await pickStep(
@@ -401,18 +409,41 @@ class StepBlock extends StatelessWidget {
   }
 }
 
+/// Keep steps go last in a rule's THEN, so a move, an add or an undo never
+/// puts a plain step after one.
+void keepsLast(List<RuleStep> steps) {
+  final keeps = steps.whereType<KeepStep>().toList();
+  steps
+    ..removeWhere((s) => s is KeepStep)
+    ..addAll(keeps);
+}
+
+/// The draft an Undo offered now would change, while its editor is open.
+RuleDraft? _undoDraft;
+
 /// Removes item [i] of [list] and offers to put it back.
 void _removeWithUndo<T>(RuleDraft draft, List<T> list, int i, String what) {
   final removed = list.removeAt(i);
   draft.changed();
+  _undoDraft = draft;
   showMessage(
     '$what removed',
     action: 'Undo',
     onAction: () {
+      if (!identical(_undoDraft, draft)) return;
       list.insert(i.clamp(0, list.length), removed);
+      if (list case final List<RuleStep> steps) keepsLast(steps);
       draft.changed();
     },
   );
+}
+
+/// Called when [draft]'s editor closes: an Undo still showing for it is
+/// taken away, since the draft it would change is gone.
+void dropUndoFor(RuleDraft draft) {
+  if (!identical(_undoDraft, draft)) return;
+  _undoDraft = null;
+  messengerKey.currentState?.hideCurrentSnackBar();
 }
 
 /// The steps that hold their own lists of steps, edited on a page.
@@ -634,7 +665,19 @@ class KeepPage extends StatefulWidget {
 }
 
 class _KeepPageState extends State<KeepPage> {
-  late var _keep = widget.step;
+  /// A copy, so leaving with Back keeps the rule as it was. Done hands it
+  /// back to replace the step.
+  late var _keep = KeepStep(
+    widget.step.thing,
+    widget.step.capability,
+    value: widget.step.value,
+    whileConditions: [
+      for (final c in widget.step.whileConditions)
+        RuleCondition.fromJson(c.toJson()),
+    ],
+    release: widget.step.release,
+    hasRelease: widget.step.hasRelease,
+  );
 
   RuleDraft get _draft => widget.draft;
 

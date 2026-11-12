@@ -69,16 +69,18 @@ class AgentAccessRow extends ConsumerWidget {
             ),
           const SizedBox(height: OmniSpace.sm),
           const Text(
-            'Always yours alone: keys and passwords, pairing, removing '
-            'things, approving high-risk automations, and the TV shell, '
-            'installs, raw settings and file deletes.',
+            'Never open to an agent: keys and passwords, pairing, removing '
+            'things or places, approving or running high-risk automations, '
+            'writing firmware, and the TV shell, installs, raw settings and '
+            'file deletes. A computer you allowed for USB debugging can still '
+            'do anything you can, so allow only your own.',
             key: ValueKey('agent-access-user-only'),
             style: OmniText.caption,
           ),
         ],
       ),
     );
-    if (picked == null || picked == current) return;
+    if (picked == null || picked == current || !context.mounted) return;
     final reply = await ref.read(engineClientProvider).call(
       'agent.access.set',
       {'access': picked},

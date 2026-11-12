@@ -116,6 +116,9 @@ class AdbConnection {
   final _inbox = ListQueue<AdbMessage>();
   Completer<void>? _arrived;
   final _streams = <int, _Stream>{};
+
+  /// Whether another stream (a file transfer, a long command) is open.
+  bool get busy => _streams.isNotEmpty;
   var _nextLocalId = 1;
   var _ready = false;
   var _closed = false;

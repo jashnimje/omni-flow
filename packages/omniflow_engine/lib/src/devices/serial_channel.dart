@@ -166,10 +166,22 @@ class SerialChannel implements DriverChannel {
   Future<void> release(String deviceId) async =>
       _ports.remove(deviceId)?.close();
 
-  /// Closes every port held on [path], so a flasher can have it alone.
-  Future<void> releasePath(String path) async {
-    for (final id in _ports.keys.toList()) {
-      if (_ports[id]!.path == path) await _ports.remove(id)!.close();
+  /// Ports a flasher has: nothing else opens them until it is done.
+  final _flashing = <String>{};
+
+  /// Closes every port held on [path] and keeps it for [work] alone, so no
+  /// poll or command reopens it in the middle of a flash.
+  Future<T> exclusive<T>(String path, Future<T> Function() work) async {
+    if (!_flashing.add(path)) {
+      throw TransportTimeoutException('$path is being flashed already');
+    }
+    try {
+      for (final id in _ports.keys.toList()) {
+        if (_ports[id]!.path == path) await _ports.remove(id)!.close();
+      }
+      return await work();
+    } finally {
+      _flashing.remove(path);
     }
   }
 
@@ -187,6 +199,11 @@ class SerialChannel implements DriverChannel {
         .where((p) => p.path == device.host && !p.closed)
         .firstOrNull;
     if (held != null) return held;
+    if (_flashing.contains(device.host)) {
+      throw TransportTimeoutException(
+        '${device.host} is being flashed: try again when it is done',
+      );
+    }
     final linked = links;
     if (isLinkPort(device.host)) {
       if (linked == null) {
@@ -194,7 +211,15 @@ class SerialChannel implements DriverChannel {
           '${device.host} is a USB port of another device',
         );
       }
-      final link = await linked.open(device.host, baud).timeout(_openTimeout);
+      final opening = linked.open(device.host, baud);
+      final SerialLink link;
+      try {
+        link = await opening.timeout(_openTimeout);
+      } on TimeoutException {
+        // A link that opens after all would hold the port forever.
+        unawaited(opening.then((late) => late.close(), onError: (_) {}));
+        throw TransportTimeoutException('${device.host} did not open');
+      }
       final port = _SerialPort.fromStream(device.host, link, link.input, _tap, (
         json,
       ) {

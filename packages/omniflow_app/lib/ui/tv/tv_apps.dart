@@ -41,13 +41,18 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
     super.dispose();
   }
 
+  /// The newest list asked for: an older reply that lands later is dropped.
+  var _request = 0;
+
   Future<void> _load() async {
+    if (!mounted) return;
+    final request = ++_request;
     setState(() => _error = null);
     final result = await tv.client.call(
       TvCalls.apps,
       TvCalls.appsArgs(tv.id, _filter),
     );
-    if (!mounted) return;
+    if (!mounted || request != _request) return;
     setState(() {
       if (result['ok'] == true) {
         _apps = TvCalls.appsOf(result)

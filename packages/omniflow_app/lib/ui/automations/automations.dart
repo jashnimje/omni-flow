@@ -3,7 +3,8 @@
 library;
 
 export 'automation_page.dart' show AutomationPage;
-export 'automations_screen.dart' show AutomationsScreen, AutomationCard;
+export 'automations_screen.dart'
+    show AutomationsScreen, AutomationCard, automationsAreEmpty;
 export 'automations_state.dart' show automationsProvider, AutomationsNotifier;
 export 'link_sheet.dart' show LinkSheet;
 export 'new_automation.dart' show openNewAutomation, TemplatePage;

@@ -77,7 +77,6 @@ class BoardCommands {
       throw ApiError('invalid', e.message);
     }
     if (image.isEmpty) throw ApiError('invalid', 'the firmware file is empty');
-    await _core.serial.releasePath(port);
     final watch = Stopwatch()..start();
     var last = -1;
     void progress(String stage, double done) {
@@ -92,31 +91,33 @@ class BoardCommands {
       });
     }
 
-    final link = await links.open(port, 115200);
-    try {
-      String found;
-      if (chip == 'uno') {
-        await Stk500Flasher(link).flash(image, progress: progress);
-        found = 'uno';
-      } else {
-        found = (await EspRomFlasher(link).flash(
-          image,
-          offset: optIntArg(args, 'offset') ?? 0,
-          progress: progress,
-          expect: EspChip.values.byName(chip),
-        )).name;
+    return _core.serial.exclusive(port, () async {
+      final link = await links.open(port, 115200);
+      try {
+        String found;
+        if (chip == 'uno') {
+          await Stk500Flasher(link).flash(image, progress: progress);
+          found = 'uno';
+        } else {
+          found = (await EspRomFlasher(link).flash(
+            image,
+            offset: optIntArg(args, 'offset') ?? 0,
+            progress: progress,
+            expect: EspChip.values.byName(chip),
+          )).name;
+        }
+        return {
+          'port': port,
+          'chip': found,
+          'bytes': image.length,
+          'ms': watch.elapsedMilliseconds,
+        };
+      } on FlashException catch (e) {
+        throw ApiError('device_error', e.message);
+      } finally {
+        await link.close();
       }
-      return {
-        'port': port,
-        'chip': found,
-        'bytes': image.length,
-        'ms': watch.elapsedMilliseconds,
-      };
-    } on FlashException catch (e) {
-      throw ApiError('device_error', e.message);
-    } finally {
-      await link.close();
-    }
+    });
   }
 
   Future<Map<String, Object?>> provision(Map<String, Object?> args) async {
@@ -219,12 +220,10 @@ class BoardCommands {
   /// and returns its address. The password goes to the board only.
   Future<Map<String, Object?>> setup(Map<String, Object?> args) async {
     final port = stringArg(args, 'port');
-    final name = optStringArg(args, 'name');
-    if (name != null && !_boardName.hasMatch(name)) {
-      throw ApiError(
-        'invalid',
-        'name is lower snake case, at most 23 characters, like desk_board',
-      );
+    final given = optStringArg(args, 'name');
+    final name = given == null ? null : boardNodeName(given);
+    if (given != null && (name == null || !_boardName.hasMatch(name))) {
+      throw ApiError('invalid', 'a board name needs a letter, like desk_board');
     }
     return _onPort(port, (send, describe) async {
       if (name != null) {
@@ -404,4 +403,17 @@ class BoardCommands {
       }
     }
   }
+}
+
+/// The name a board keeps in its flash for [text]: lower case, words joined
+/// by `_`, starting with a letter, at most 23 characters. Null when [text]
+/// has no letter to start with.
+String? boardNodeName(String text) {
+  final words = text
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9_-]+'), '_')
+      .replaceAll(RegExp(r'^[^a-z]+'), '')
+      .replaceAll(RegExp(r'_+$'), '');
+  if (words.isEmpty) return null;
+  return words.length > 23 ? words.substring(0, 23) : words;
 }

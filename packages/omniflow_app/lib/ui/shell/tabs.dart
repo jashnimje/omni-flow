@@ -85,6 +85,7 @@ final Map<ShellTab, ShellTabSpec> shellTabs = {
       key: ValueKey('new-rule'),
       label: 'New',
       onPressed: openNewAutomation,
+      hiddenWhen: automationsAreEmpty,
     ),
   ),
   ShellTab.devices: ShellTabSpec(

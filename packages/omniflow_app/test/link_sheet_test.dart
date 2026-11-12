@@ -156,6 +156,21 @@ void main() {
     });
   });
 
+  testWidgets('a threshold turns its target off, or sets a number', (
+    tester,
+  ) async {
+    await _open(tester, engine);
+    await tapKey(tester, 'link-from');
+    await tapText(tester, 'Desk board - light');
+    await tapKey(tester, 'link-to');
+    await tapText(tester, 'Desk lamp - Power');
+    await tester.enterText(find.byKey(const ValueKey('link-limit')), '30');
+    await tester.tap(find.text('Turn it off'));
+    await tester.pump();
+    await tapKey(tester, 'link-create');
+    expect(engine.callsOf('link.create').single.$2['set'], false);
+  });
+
   testWidgets('a follow offers only the targets the engine allows for it', (
     tester,
   ) async {

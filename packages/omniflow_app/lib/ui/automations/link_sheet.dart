@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -34,7 +32,10 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
   var _busy = false;
   final _options = <String, Reply<Json>>{};
   final _limit = TextEditingController();
-  final _set = TextEditingController(text: 'true');
+  final _set = TextEditingController();
+
+  /// What the threshold sets its target to: on, off, or the number typed.
+  var _setTo = 'on';
 
   static const modeLabels = {
     'toggle': 'Toggle',
@@ -125,12 +126,11 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
   }
 
   Future<void> _create() async {
-    Object? set;
-    try {
-      set = jsonDecode(_set.text);
-    } on FormatException {
-      set = _set.text;
-    }
+    final Object? set = switch (_setTo) {
+      'on' => true,
+      'off' => false,
+      _ => num.tryParse(_set.text.trim()),
+    };
     setState(() => _busy = true);
     final reply = await ref.read(engineApiProvider).createLink({
       'from': _from,
@@ -180,7 +180,10 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
         _from != null &&
         _to != null &&
         modes.contains(_mode) &&
-        (_mode != 'threshold' || num.tryParse(_limit.text) != null);
+        (_mode != 'threshold' ||
+            (num.tryParse(_limit.text) != null &&
+                (_setTo != 'number' ||
+                    num.tryParse(_set.text.trim()) != null)));
     return OmniSheet(
       title: 'Quick link',
       subtitle: 'When this changes, drive that.',
@@ -268,14 +271,28 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: OmniSpace.sm),
-          TextField(
-            key: const ValueKey('link-set'),
-            controller: _set,
-            decoration: const InputDecoration(
-              labelText: 'Then set it to',
-              hintText: 'true, false or a number',
-            ),
+          Text('Then', style: OmniText.caption),
+          OmniSegmented<String>(
+            key: const ValueKey('link-set-to'),
+            segments: const [
+              OmniSegment('on', 'Turn it on'),
+              OmniSegment('off', 'Turn it off'),
+              OmniSegment('number', 'Set a number'),
+            ],
+            selected: _setTo,
+            onChanged: (v) => setState(() => _setTo = v),
           ),
+          if (_setTo == 'number')
+            TextField(
+              key: const ValueKey('link-set'),
+              controller: _set,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+                signed: true,
+              ),
+              decoration: const InputDecoration(labelText: 'Set it to'),
+              onChanged: (_) => setState(() {}),
+            ),
         ],
         const SizedBox(height: OmniSpace.md),
         OmniButton(

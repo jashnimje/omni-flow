@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
-import '../add/add_page.dart';
 import '../add/guided_steps_page.dart';
 import '../add/pair_sheet.dart';
 import '../automations/automations.dart';
@@ -189,7 +188,10 @@ class OfflineHelp extends ConsumerWidget {
           title: 'Find it on the network',
           subtitle: 'if its address changed',
           chevron: true,
-          onTap: () => openAddThing(context),
+          onTap: () => showOmniSheet<void>(
+            context,
+            builder: (_) => _FindAgainSheet(device: d),
+          ),
         ),
         OmniListRow(
           key: const ValueKey('device-packets'),
@@ -493,4 +495,123 @@ Future<String?> askRoomName(BuildContext context, {String initial = ''}) {
       ],
     ),
   );
+}
+
+/// Looks for [device]'s driver on the network and points [device] at the
+/// find the user picks: same id, name, room and settings, so automations
+/// that use it keep working and nothing is added twice.
+class _FindAgainSheet extends ConsumerStatefulWidget {
+  const _FindAgainSheet({required this.device});
+
+  final DeviceView device;
+
+  @override
+  ConsumerState<_FindAgainSheet> createState() => _FindAgainSheetState();
+}
+
+class _FindAgainSheetState extends ConsumerState<_FindAgainSheet> {
+  List<Json>? _found;
+  String? _error;
+  var _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _look();
+  }
+
+  Future<void> _look() async {
+    setState(() {
+      _found = null;
+      _error = null;
+    });
+    final d = widget.device;
+    final r = await ref.read(engineClientProvider).call('device.discover', {
+      'driver': d.json['driver'],
+      'windowMs': 3000,
+      'serial': false,
+    });
+    if (!mounted) return;
+    setState(() {
+      if (r['ok'] != true) {
+        _error = errorMessage(r);
+        _found = const [];
+        return;
+      }
+      _found = [
+        for (final f in (r['found'] as List? ?? const []))
+          if (f is Map) Map<String, Object?>.from(f),
+      ];
+    });
+  }
+
+  Future<void> _use(Json find) async {
+    final d = widget.device;
+    setState(() => _busy = true);
+    final r = await ref.read(engineClientProvider).call('thing.add', {
+      'driver': d.json['driver'],
+      'host': find['host'],
+      'port': ?find['port'],
+      'stableId': ?find['stableId'] ?? d.json['stableId'],
+      'id': d.id,
+      'name': d.name,
+      'room': ?d.roomId,
+      'settings': d.json['settings'] ?? const <String, Object?>{},
+      'replace': true,
+    });
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (r['ok'] != true) {
+      setState(() => _error = errorMessage(r));
+      return;
+    }
+    await ref.read(devicesProvider.notifier).refresh();
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    showMessage('${d.name} is at ${find['host']} now');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final found = _found;
+    return OmniSheet(
+      title: 'Find ${widget.device.name}',
+      subtitle: 'Pick it, and it keeps its name, room and automations.',
+      children: [
+        if (found == null)
+          const Padding(
+            padding: EdgeInsets.all(OmniSpace.lg),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (found.isEmpty)
+          OmniBanner.info(
+            _error ??
+                'Nothing like it answered. Check it has power and is on this '
+                    'Wi-Fi, then look again.',
+            key: const ValueKey('find-again-none'),
+          )
+        else
+          for (final f in found)
+            OmniListRow(
+              key: ValueKey('find-again-${f['host']}'),
+              icon: OmniIcons.device,
+              title: '${f['name'] ?? f['host']}',
+              subtitle: f['host'] == widget.device.host
+                  ? '${f['host']} · where it was'
+                  : '${f['host']}',
+              chevron: true,
+              onTap: _busy ? null : () => _use(f),
+            ),
+        if (_error != null && found != null && found.isNotEmpty)
+          OmniBanner.error(_error!),
+        const SizedBox(height: OmniSpace.sm),
+        OmniButton.ghost(
+          key: const ValueKey('find-again-look'),
+          label: 'Look again',
+          icon: OmniIcons.retry,
+          onPressed: found == null ? null : _look,
+        ),
+      ],
+    );
+  }
 }

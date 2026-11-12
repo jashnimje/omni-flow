@@ -344,8 +344,8 @@ class _ParamsFormState extends State<ParamsForm> {
                   : TextInputType.text,
               decoration: InputDecoration(
                 labelText: e.value['optional'] == true
-                    ? '${e.key} (optional)'
-                    : e.key,
+                    ? '${_words(e.key)} (optional)'
+                    : _words(e.key),
                 helperText: _rangeHelp(e.value),
                 errorText: switch (num.tryParse(c.text.trim())) {
                   final n? when _outOfRange(e.value, n) =>
@@ -363,10 +363,13 @@ class _ParamsFormState extends State<ParamsForm> {
             DropdownButtonFormField<Object>(
               key: ValueKey('param-${e.key}'),
               initialValue: _choice[e.key],
-              decoration: InputDecoration(labelText: e.key),
+              decoration: InputDecoration(labelText: _words(e.key)),
               items: [
                 for (final o in options)
-                  DropdownMenuItem(value: o as Object, child: Text('$o')),
+                  DropdownMenuItem(
+                    value: o as Object,
+                    child: Text(o is String ? _words(o) : '$o'),
+                  ),
               ],
               onChanged: (v) => setState(() => _choice[e.key] = v),
             )
@@ -375,7 +378,7 @@ class _ParamsFormState extends State<ParamsForm> {
               key: ValueKey('param-${e.key}'),
               dense: true,
               contentPadding: EdgeInsets.zero,
-              title: Text(e.key),
+              title: Text(_words(e.key)),
               value: _choice[e.key] == true,
               onChanged: (v) => setState(() => _choice[e.key] = v),
             ),
@@ -388,4 +391,15 @@ class _ParamsFormState extends State<ParamsForm> {
       ],
     );
   }
+}
+
+/// A param or value as words: `long_press` reads "Long press".
+String _words(String key) {
+  final spaced = key
+      .replaceAll('_', ' ')
+      .replaceAllMapped(RegExp('([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+      .toLowerCase();
+  return spaced.isEmpty
+      ? key
+      : '${spaced[0].toUpperCase()}${spaced.substring(1)}';
 }

@@ -49,7 +49,7 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
     setState(() => _busy = true);
     final access = ref.read(phoneAccessProvider);
     if (_find) await access.askLocalNetwork();
-    if (_home) await access.askLocation();
+    if (_home && await access.askLocation()) await access.askLocationAlways();
     if (_background) {
       await access.askNotifications();
       await _backInFront();

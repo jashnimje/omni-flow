@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:ui' show IsolateNameServer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,8 +10,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/api/engine_client.dart';
 import 'package:omniflow_app/service/engine_host.dart';
 import 'package:omniflow_app/service/engine_link.dart';
+import 'package:omniflow_app/service/engine_owner.dart';
 import 'package:omniflow_app/service/foreground_runtime.dart';
 import 'package:omniflow_app/service/multicast_lock.dart';
+import 'package:omniflow_app/service/phone_inputs.dart';
 import 'package:omniflow_app/service/service_engine_client.dart';
 import 'package:omniflow_app/startup.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
@@ -414,6 +418,63 @@ void main() {
       expect(lockCalls, ['acquire', 'release']);
     });
 
+    test('a restarted task opens only once the old engine is closed', () async {
+      final order = <String>[];
+      final closing = Completer<void>();
+      final old = OmniTaskHandler(
+        open: () async =>
+            (client: FakeEngine() as EngineClient, hubError: null),
+        send: (_) {},
+        stopService: () async => null,
+        owner: EngineOwner(name: 'test.restart'),
+        inputs: (_) => _SlowStopInputs(closing.future, order),
+      );
+      await old.onStart(DateTime.now(), TaskStarter.developer);
+      final replacement = OmniTaskHandler(
+        open: () async {
+          order.add('new open');
+          return (client: FakeEngine() as EngineClient, hubError: null);
+        },
+        send: (_) {},
+        stopService: () async => null,
+        owner: EngineOwner(name: 'test.restart'),
+      );
+      // The plugin does not wait for onDestroy before the new onStart.
+      final destroyed = old.onDestroy(DateTime.now(), false);
+      final started = replacement.onStart(DateTime.now(), TaskStarter.system);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(order, isEmpty);
+      closing.complete();
+      await destroyed;
+      await started;
+      expect(order, ['old closed', 'new open']);
+      await replacement.onDestroy(DateTime.now(), false);
+    });
+
+    test('an old task that never answers holds off the new one only for '
+        'a while', () async {
+      // A port with no owner left behind, as a killed isolate leaves it.
+      final dead = ReceivePort();
+      IsolateNameServer.registerPortWithName(dead.sendPort, 'test.dead');
+      addTearDown(dead.close);
+      final opened = Completer<void>();
+      final h = OmniTaskHandler(
+        open: () async {
+          opened.complete();
+          return (client: FakeEngine() as EngineClient, hubError: null);
+        },
+        send: (_) {},
+        stopService: () async => null,
+        owner: EngineOwner(
+          name: 'test.dead',
+          wait: const Duration(milliseconds: 50),
+        ),
+      );
+      await h.onStart(DateTime.now(), TaskStarter.system);
+      expect(opened.isCompleted, isTrue);
+      await h.onDestroy(DateTime.now(), false);
+    });
+
     test('an engine that fails to open is reported to the UI', () async {
       final w = wire(() async => throw StateError('disk full'));
       await w.handler.onStart(DateTime.now(), TaskStarter.system);
@@ -460,6 +521,44 @@ void main() {
     expect(attempts, 2);
     expect(find.text('Desk lamp'), findsOneWidget);
   });
+
+  for (final byUser in [false, true]) {
+    testWidgets(
+      byUser
+          ? 'after the user stops it, the app waits for Start'
+          : 'a service Android stopped and started again is reconnected',
+      (tester) async {
+        var attempts = 0;
+        var running = false;
+        final engine = FakeEngine();
+        await tester.pumpWidget(
+          Launcher(
+            start: () async {
+              attempts++;
+              return (client: engine as EngineClient, hubError: null);
+            },
+            serviceRunning: () async => running,
+          ),
+        );
+        await tester.pumpAndSettle();
+        engine.eventsOut.add({
+          'event': serviceStoppedEvent,
+          'reason': byUser
+              ? stoppedFromNotification
+              : 'Android stopped the service',
+        });
+        await tester.pumpAndSettle();
+        expect(find.text('OmniFlow is stopped'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 2));
+        expect(attempts, 1, reason: 'not back yet');
+        running = true;
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pumpAndSettle();
+        expect(attempts, byUser ? 1 : 2);
+        expect(find.text('Desk lamp'), byUser ? findsNothing : findsOneWidget);
+      },
+    );
+  }
 }
 
 class _CallbackLink implements EngineLink {
@@ -475,4 +574,25 @@ class _CallbackLink implements EngineLink {
 
   @override
   Future<void> close() async {}
+}
+
+/// Phone inputs whose stop waits for [until], standing in for an engine
+/// that takes a while to close.
+class _SlowStopInputs implements PhoneInputs {
+  _SlowStopInputs(this.until, this.order);
+
+  final Future<void> until;
+  final List<String> order;
+
+  @override
+  void start() {}
+
+  @override
+  Future<void> stop() async {
+    await until;
+    order.add('old closed');
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

@@ -115,6 +115,43 @@ void main() {
     expect(find.text('Saved Evening lights'), findsOneWidget);
   });
 
+  testWidgets('a variable is picked from the ones automations set', (
+    tester,
+  ) async {
+    engine.answers['var.list'] = {
+      'ok': true,
+      'variables': {'Away': true, '_scheduled_x': 'internal', 'Mood': 'calm'},
+    };
+    await pumpPushed(
+      tester,
+      engine,
+      const RuleEditorPage(
+        initial: {
+          'name': 'Mood check',
+          'when': [
+            {'manual': true},
+          ],
+          'then': [
+            {
+              'notify': {'title': 'Hi'},
+            },
+          ],
+        },
+      ),
+    );
+    await tapText(tester, 'Add condition');
+    await tapKey(tester, 'pick-variable');
+    expect(find.byKey(const ValueKey('known-var-_scheduled_x')), findsNothing);
+    await tapKey(tester, 'known-var-Mood');
+    await tester.enterText(find.byKey(const ValueKey('var-value')), 'calm');
+    await tester.pump();
+    await tapKey(tester, 'form-done');
+    await tapKey(tester, 'rule-save');
+    expect(savedSpec(engine)['onlyIf'], [
+      {'var': r'$Mood', 'op': '==', 'value': 'calm'},
+    ]);
+  });
+
   testWidgets('a TV state is checked by choosing its value, not typing it', (
     tester,
   ) async {

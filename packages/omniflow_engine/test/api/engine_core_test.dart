@@ -864,14 +864,14 @@ void main() {
     });
 
     test(
-      'a board name that is not snake case is refused before the port opens',
+      'a board name with no letter is refused before the port opens',
       () async {
         final error = await err('board.setup', {
           'port': '/dev/omni-does-not-exist',
-          'name': 'Desk Board!',
+          'name': '123 !',
         });
         expect(error['type'], 'invalid');
-        expect(error['message'], contains('lower snake case'));
+        expect(error['message'], contains('needs a letter'));
       },
     );
   });

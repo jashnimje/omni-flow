@@ -130,8 +130,10 @@ class _TvPageState extends ConsumerState<TvPage> {
                   if (tv.offline case final reason?)
                     OmniBanner.error(
                       key: const ValueKey('tv-offline'),
-                      'Not answering: $reason. It may be asleep, switched '
-                      'off at the wall, or on another Wi-Fi.',
+                      tv.needsPairing
+                          ? reason
+                          : '$reason It may be asleep, switched off at the '
+                                'wall, or on another Wi-Fi.',
                       actionLabel: 'Retry',
                       onAction: tv.refresh,
                     ),

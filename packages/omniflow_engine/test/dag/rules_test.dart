@@ -738,6 +738,44 @@ void main() {
       ]);
     });
 
+    test(
+      'a nested try catches its own failure, and the outer goes on',
+      () async {
+        final nested = normalizeRule({
+          'name': 'Nested',
+          'when': ['manual'],
+          'then': [
+            {
+              'try': [
+                {
+                  'try': ['lamp.power=true'],
+                  'otherwise': ['notify:inner'],
+                },
+                'notify:outer rest',
+              ],
+              'otherwise': ['notify:outer fallback'],
+            },
+          ],
+        }, context: context);
+        final effects = _NoEffects()
+          ..onInvoke = (_, _) => throw StateError('no answer');
+        final trace = await FlowRunner(
+          FlowSpec.parse(compileRule(nested).flow),
+          effects,
+          clock: InstantFlowClock(DateTime(2026)),
+        ).fire('when_0', {});
+        expect(
+          [for (final n in trace.nodes) n.nodeId],
+          [
+            'when_0',
+            'then_0_try_0_try_0',
+            'then_0_try_0_otherwise_0',
+            'then_0_try_1',
+          ],
+        );
+      },
+    );
+
     test('reads in plain words and validates', () {
       expect(issuesOf(rule), isEmpty);
       expect(

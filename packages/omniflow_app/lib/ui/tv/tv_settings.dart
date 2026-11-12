@@ -48,6 +48,7 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() => _error = null);
     final result = await tv.client.call(
       TvCalls.settingsCatalog,
@@ -503,6 +504,7 @@ class _NamespaceListState extends State<_NamespaceList> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() => _error = null);
     final result = await tv.client.call(
       TvCalls.settingsList,
@@ -530,18 +532,20 @@ class _NamespaceListState extends State<_NamespaceList> {
           validate: _keyError,
         );
     if (newKey == null || !mounted) return;
+    final settingKey = newKey.trim();
     final newValue = await askText(
       context,
-      title: newKey,
+      title: settingKey,
       label: 'Value',
       initial: value ?? '',
       action: 'Save',
-      multiline: true,
+      // The engine takes one line: a setting value has no line breaks.
+      validate: (v) => v.contains('\n') ? 'One line only' : null,
     );
     if (newValue == null || newValue == value || !mounted) return;
     final ok = await confirm(
       context,
-      title: 'Write $ns/$newKey?',
+      title: 'Write $ns/$settingKey?',
       body:
           'This writes "$newValue" straight to the TV with no checks. A wrong '
           'value can change how the TV behaves until it is set back.',
@@ -551,10 +555,10 @@ class _NamespaceListState extends State<_NamespaceList> {
     if (!ok) return;
     final result = await tv.call(
       TvCalls.settingsPut,
-      TvCalls.settingPutArgs(tv.id, ns, newKey, newValue),
+      TvCalls.settingPutArgs(tv.id, ns, settingKey, newValue),
     );
     if (result['ok'] == true) {
-      showMessage('Saved $newKey');
+      showMessage('Saved $settingKey');
       await _load();
     }
   }

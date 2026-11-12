@@ -771,6 +771,17 @@ class AutomationTemplate {
   final String description;
   final List<TemplatePlaceholder> placeholders;
   final Json spec;
+
+  /// Whether a toggle step flips placeholder [key]. A TV turns on and off
+  /// with wake and sleep but cannot be flipped, so it is not offered there.
+  bool toggles(String key) {
+    bool walk(Object? v) => switch (v) {
+      Map m => m['toggle'] == '<$key>' || m.values.any(walk),
+      List l => l.any(walk),
+      _ => false,
+    };
+    return walk(spec);
+  }
 }
 
 /// The rule builders the contract adds: the keep step and stop on error.

@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../api/engine_client.dart';
 import '../startup.dart';
 import 'engine_host.dart';
+import 'engine_owner.dart';
 import 'engine_link.dart';
 import 'multicast_lock.dart';
 import 'notifier.dart';
@@ -179,6 +180,7 @@ void startOmniService() => FlutterForegroundTask.setTaskHandler(
     send: FlutterForegroundTask.sendDataToMain,
     stopService: FlutterForegroundTask.stopService,
     inputs: PhoneInputs.new,
+    owner: EngineOwner(),
   ),
 );
 
@@ -217,6 +219,7 @@ class OmniTaskHandler extends TaskHandler {
     required this.stopService,
     MulticastLock? lock,
     this.inputs,
+    this.owner,
   }) : _host = EngineHost(send: send),
        _lock = lock ?? MulticastLock();
 
@@ -226,6 +229,10 @@ class OmniTaskHandler extends TaskHandler {
   PhoneInputs? _inputs;
   AutomationNotifier? _notifier;
 
+  /// Holds off opening while a task this one replaced still has the
+  /// engine. Null for a lone handler (tests).
+  final EngineOwner? owner;
+
   final Future<Started> Function() open;
   final Future<Object?> Function() stopService;
   final EngineHost _host;
@@ -234,6 +241,7 @@ class OmniTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    await owner?.claim();
     await _lock.acquire();
     try {
       final started = await open();
@@ -255,24 +263,28 @@ class OmniTaskHandler extends TaskHandler {
   @override
   void onNotificationButtonPressed(String id) {
     if (id != stopButtonId) return;
-    unawaited(_host.stop('Stopped from the notification'));
+    unawaited(_host.stop(stoppedFromNotification));
     unawaited(stopService());
   }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
-    await _inputs?.stop();
-    await _notifier?.stop();
-    await _host.stop(
-      isTimeout
-          ? 'Android stopped the service at its time limit'
-          : 'OmniFlow was stopped',
-    );
-    await _agentBridge?.close();
-    _agentBridge = null;
-    if (_engine case final InProcessEngineClient client) {
-      await client.engine.close();
+    try {
+      await _inputs?.stop();
+      await _notifier?.stop();
+      await _host.stop(
+        isTimeout
+            ? 'Android stopped the service at its time limit'
+            : 'OmniFlow was stopped',
+      );
+      await _agentBridge?.close();
+      _agentBridge = null;
+      if (_engine case final InProcessEngineClient client) {
+        await client.engine.close();
+      }
+      await _lock.release();
+    } finally {
+      owner?.release();
     }
-    await _lock.release();
   }
 }

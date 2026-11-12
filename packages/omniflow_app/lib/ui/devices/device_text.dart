@@ -311,9 +311,10 @@ double? tileLevel(DeviceView d) {
 DeviceView? personOf(Iterable<DeviceView> devices) =>
     devices.where((d) => d.driver == 'person').firstOrNull;
 
-/// "Good morning", "Good afternoon" or "Good evening".
-String greeting(DateTime now) => now.hour < 12
-    ? 'Good morning'
-    : now.hour < 18
-    ? 'Good afternoon'
-    : 'Good evening';
+/// "Good morning" (5 to 12), "Good afternoon" (to 18), otherwise "Good
+/// evening": 1 am is not morning.
+String greeting(DateTime now) => switch (now.hour) {
+  >= 5 && < 12 => 'Good morning',
+  >= 12 && < 18 => 'Good afternoon',
+  _ => 'Good evening',
+};

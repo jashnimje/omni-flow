@@ -22,6 +22,7 @@ void main() {
         control: const ForegroundServiceControl(),
         link: ForegroundTaskLink.new,
       ),
+      serviceRunning: () => const ForegroundServiceControl().isRunning,
       platform: [
         nfcAdapterProvider.overrideWithValue(PluginNfcAdapter()),
         nfcIntentsProvider.overrideWithValue(intents),

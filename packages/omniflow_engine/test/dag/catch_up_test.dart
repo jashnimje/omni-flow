@@ -11,7 +11,14 @@ class _Host implements FlowHost {
   final _events = StreamController<Map<String, Object?>>.broadcast();
 
   @override
-  Future<bool> ranAt(String flowId, String scheduled) async => ran;
+  Future<bool> ranAt(String flowId, String scheduled) async =>
+      ran || marked.contains('$flowId@$scheduled');
+
+  final marked = <String>{};
+
+  @override
+  Future<void> markScheduled(String flowId, String scheduled) async =>
+      marked.add('$flowId@$scheduled');
 
   @override
   Future<void> saveTrace(Map<String, Object?> trace) async => traces.add(trace);
@@ -69,8 +76,9 @@ FlowSpec _daily(String at) => FlowSpec.parse({
 Future<List<Map<String, Object?>>> _startAt(
   DateTime now, {
   bool ran = false,
+  Set<String> marked = const {},
 }) async {
-  final host = _Host(ran: ran);
+  final host = _Host(ran: ran)..marked.addAll(marked);
   final engine = FlowEngine(host, clock: InstantFlowClock(now))
     ..load([_daily('01:00')])
     ..startTimers();
@@ -93,6 +101,14 @@ void main() {
     expect(await _startAt(DateTime(2026, 11, 10, 1, 5), ran: true), isEmpty);
     expect(await _startAt(DateTime(2026, 11, 10, 1, 30)), isEmpty);
     expect(await _startAt(DateTime(2026, 11, 10, 0, 59)), isEmpty);
+  });
+
+  test('a run cut off by the restart is not started again', () async {
+    final at = DateTime(2026, 11, 10, 1).toIso8601String();
+    expect(
+      await _startAt(DateTime(2026, 11, 10, 1, 5), marked: {'night@$at'}),
+      isEmpty,
+    );
   });
 
   test('the previous time of day respects the days', () {

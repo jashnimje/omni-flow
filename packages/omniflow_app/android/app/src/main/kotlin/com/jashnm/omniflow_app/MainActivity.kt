@@ -70,10 +70,12 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, PERMISSIONS_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "wifiName" -> askForLocation(result)
+                "wifiNameAlways" -> askForLocationAlways(result)
                 "localNetwork" -> askForLocalNetwork(result)
                 "status" -> result.success(
                     mapOf(
                         "location" to granted(Manifest.permission.ACCESS_FINE_LOCATION),
+                        "locationAlways" to locationAlways(),
                         "localNetwork" to (!localNetworkNeeded() || granted(LOCAL_NETWORK)),
                         "localNetworkNeeded" to localNetworkNeeded(),
                     ),
@@ -195,6 +197,19 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    /** Android 10 and later name the Wi-Fi to a background service only
+     * with location "all the time". */
+    private fun locationAlways() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+        granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+
+    /** Android 11 and later open the app's location page for this, where
+     * the user picks "Allow all the time". It needs location first. */
+    private fun askForLocationAlways(result: MethodChannel.Result) {
+        if (locationAlways()) return result.success(true)
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) return result.success(false)
+        ask(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), LOCATION_ALWAYS_REQUEST, result)
+    }
+
     private fun askForLocalNetwork(result: MethodChannel.Result) {
         if (!localNetworkNeeded() || granted(LOCAL_NETWORK)) {
             result.success(true)
@@ -216,6 +231,7 @@ class MainActivity : FlutterActivity() {
         result.success(
             when (requestCode) {
                 LOCATION_REQUEST -> granted(Manifest.permission.ACCESS_FINE_LOCATION)
+                LOCATION_ALWAYS_REQUEST -> locationAlways()
                 else -> granted(LOCAL_NETWORK)
             },
         )
@@ -231,6 +247,7 @@ class MainActivity : FlutterActivity() {
         private const val PERMISSIONS_CHANNEL = "omniflow/permissions"
         private const val LOCATION_REQUEST = 7102
         private const val LOCAL_NETWORK_REQUEST = 7103
+        private const val LOCATION_ALWAYS_REQUEST = 7104
         private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 }

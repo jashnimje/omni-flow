@@ -15,7 +15,7 @@ The engine (`packages/omniflow_engine/`) owns all logic and has no Flutter depen
 - Nothing is hardcoded to one household's devices. Device ids, addresses and keys come from the user's data, and tests use fixtures.
 - Never put secrets (Tuya local keys, SSH or ADB keys, TV pairing keys, Hue usernames, Home Assistant tokens) in manifests, flows, tests, logs or commits. They go through `SecretStore`.
 - Commands to a device shell (ADB) are built only from validated params, never from free text. Pairing and SSH host keys are the user's steps: MCP refuses them with `needs_user`.
-- Agent-written content is untrusted. Rules and flows from MCP are saved untrusted, and no MCP tool adds a find, stores a secret, names or writes an NFC tag, reports a scan or sets a board peripheral.
+- Agent-written content is untrusted. Rules and flows from MCP are saved untrusted. What else an agent may do is the user's access level (`agent_policy.dart`): `read` by default, `setup` once the user allows it, and the user-only list at every level. No MCP tool stores a secret, pairs, removes a thing, writes an NFC tag, reports a scan, sets a board peripheral or flashes a board.
 - A new command goes in the command table in `omni_engine.dart`, with its CLI verb in `lib/src/cli/omni_command_runner.dart`. After a schema change in `lib/src/storage/`, run `dart run build_runner build --delete-conflicting-outputs`.
 - Tests stay on loopback: fake TVs, a fake adbd, a fake mDNS client, `InMemorySecretStore`. Pass `mdns:` to `OmniEngine.open` in a test that discovers or heals.
 - Live tests (`dart test --tags live`) drive real devices on the LAN. Run them only when asked.

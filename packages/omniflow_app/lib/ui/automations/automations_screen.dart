@@ -33,7 +33,7 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
       AutomationFilter.all => true,
       AutomationFilter.rules => a.source == 'rule' || a.source == 'graph',
       AutomationFilter.links => a.isLink,
-      AutomationFilter.off => !a.enabled,
+      AutomationFilter.off => !a.enabled || a.needsApproval,
       AutomationFilter.needsYou => a.needsYou,
     };
     final q = _query.trim().toLowerCase();
@@ -372,3 +372,11 @@ class _Skeleton extends StatelessWidget {
     ),
   );
 }
+
+/// Whether the list has no automations yet, when its own empty state
+/// carries the New button, so the floating one would be a second.
+bool automationsAreEmpty(WidgetRef ref) =>
+    switch (ref.watch(automationsProvider)) {
+      AsyncData(:final value) => !value.any((a) => !a.isScene),
+      _ => false,
+    };

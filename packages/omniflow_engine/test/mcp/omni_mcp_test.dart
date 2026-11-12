@@ -110,6 +110,14 @@ void _tools({required bool viaHub}) {
 
   test('an agent organizes devices and saves scenes, and a scene it saves '
       'is untrusted', () async {
+    final refused = body(
+      await call('organize_device', {
+        'deviceId': 'desk_lamp',
+        'room': 'Office',
+      }),
+    );
+    expect((refused['error'] as Map)['type'], 'needs_user');
+    await engine.handle('agent.access.set', {'access': 'setup'});
     final moved = body(
       await call('organize_device', {
         'deviceId': 'desk_lamp',

@@ -292,6 +292,7 @@ class ZoneTracker {
       _zones.remove(id);
       _ble.remove(id);
       _inside.remove(id);
+      _wifiLostAt.remove(id);
     }
     for (final z in next.values) {
       if (_zones.containsKey(z.id)) continue;
@@ -343,7 +344,8 @@ class ZoneTracker {
   List<ZoneChange> tick(DateTime at) => [
     for (final e in _ble.entries) ...?_apply(e.key, e.value.tick(at), at),
     for (final id in _wifiLostAt.keys.toList())
-      if (!_ble.containsKey(id)) ...?_apply(id, null, at),
+      if (_zones.containsKey(id) && !_ble.containsKey(id))
+        ...?_apply(id, null, at),
   ];
 
   /// When each place's Wi-Fi stopped matching, while it still counts as

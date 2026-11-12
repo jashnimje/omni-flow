@@ -95,7 +95,9 @@ String errorMessage(Json result) {
     plainError('${error['type'] ?? 'failed'}', error['message'] as String?),
     for (final issue in (error['issues'] as List? ?? const []))
       switch (issue) {
-        {'path': final path, 'message': final message} => '$path: $message',
+        // The rule path (then[2].do) means nothing to a person: the editor
+        // shows each issue on its row instead.
+        {'message': final message} => plainError('invalid', '$message'),
         _ => '$issue',
       },
   ].join('\n');
@@ -108,12 +110,28 @@ class DevicesNotifier extends AsyncNotifier<List<Json>> {
   final _offline = <String, String>{};
   String? _lastBoardError;
 
+  /// State changes heard while the first list loads, put on top of it once
+  /// it lands so none is lost.
+  List<Json>? _early;
+
   @override
   Future<List<Json>> build() async {
     final client = ref.watch(engineClientProvider);
+    _early = [];
     final sub = client.events.listen(_onEvent);
     ref.onDispose(sub.cancel);
-    return _load(client);
+    var list = await _load(client);
+    final early = _early ?? const <Json>[];
+    _early = null;
+    for (final changed in early) {
+      list = [
+        for (final d in list)
+          d['id'] == changed['id']
+              ? _merge(d, changed, changed['online'] != false)
+              : d,
+      ];
+    }
+    return list;
   }
 
   void _onEvent(Json e) {
@@ -123,6 +141,10 @@ class DevicesNotifier extends AsyncNotifier<List<Json>> {
         final changed = Map<String, Object?>.from(e['device'] as Map);
         final heard = changed['online'] != false;
         if (heard) _offline.remove(changed['id']);
+        if (_early case final early?) {
+          early.add(changed);
+          return;
+        }
         if (current == null) return;
         state = AsyncData([
           for (final d in current)

@@ -25,6 +25,11 @@ class Permissions {
   Future<bool> askForWifiName() async =>
       await _invoke<bool>('wifiName') ?? false;
 
+  /// Asks for location all the time, which a Wi-Fi place needs to work with
+  /// the screen off. Android opens its settings page for it.
+  Future<bool> askForWifiNameAlways() async =>
+      await _invoke<bool>('wifiNameAlways') ?? false;
+
   /// Asks for local network access where Android has it, and is true when
   /// OmniFlow may reach the local network.
   Future<bool> askForLocalNetwork() async =>

@@ -179,6 +179,20 @@ void main() {
       expect(trace.nodes[1].port, 'true');
     });
 
+    test('a run keeps the words each step had when it ran', () async {
+      final f = flow(
+        [
+          {...node('trig', 'manual'), 'label': 'By hand'},
+          action('lamp', 'desk_lamp', {'value': true}),
+        ],
+        [edge('trig', 'out', 'lamp')],
+      );
+      final trace = await runner(f).fire('trig', {});
+      final nodes = [for (final n in trace.toJson()['nodes'] as List) n as Map];
+      expect(nodes.first['label'], 'By hand');
+      expect(nodes.last.containsKey('label'), isFalse, reason: 'no label set');
+    });
+
     test('at noon nothing runs, and the cooldown is not armed', () async {
       clock = FakeClock(DateTime(2026, 11, 6, 12, 0));
       final r = runner(evening());

@@ -126,26 +126,29 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
         ? 'Saved on the board.'
         : 'Saved, but it has not joined ${_ssid.text.trim()} yet. Check the '
               'password, and that it is a 2.4 GHz network.';
-    final known = await engine.call('device.list');
-    final exists = (known['devices'] as List? ?? const []).any(
-      (d) => d is Map && d['stableId'] == (reply['node'] ?? board.node),
-    );
-    if (!exists) {
-      final name = _name.text.trim().isEmpty
-          ? (board.node ?? 'board')
-          : _name.text.trim();
-      final added = await engine.call('device.add', {
-        'id': name.toLowerCase().replaceAll(RegExp('[^a-z0-9_]+'), '_'),
-        'name': name,
-        'driver': 'omniflow_board',
-        // On Wi-Fi it works unplugged; otherwise it stays a USB board.
-        'host': wifi['ip'] as String? ?? board.port,
-      });
-      text += added['ok'] == true
-          ? ' Added to your devices.'
-          : ' ${plainError('${(added['error'] as Map?)?['type']}', (added['error'] as Map?)?['message'] as String?)}';
-      await ref.read(devicesProvider.notifier).refresh();
+    // thing.add knows the board by its stable id (the name in its flash):
+    // set up again, it is found, not added twice. It makes a valid id from
+    // whatever the name is.
+    final node = reply['node'] as String? ?? board.node;
+    final display = _name.text.trim().isEmpty
+        ? (node ?? 'Board')
+        : _name.text.trim();
+    final added = await engine.call('thing.add', {
+      'driver': 'omniflow_board',
+      // On Wi-Fi it works unplugged; otherwise it stays a USB board.
+      'host': wifi['ip'] as String? ?? board.port,
+      'stableId': ?node,
+      'name': display,
+    });
+    final error = added['error'] as Map?;
+    if (added['ok'] == true) {
+      text += ' Added to your devices.';
+    } else if (error?['type'] != 'exists') {
+      text +=
+          ' ${plainError('${error?['type']}', error?['message'] as String?)}';
     }
+    if (!mounted) return;
+    await ref.read(devicesProvider.notifier).refresh();
     if (!mounted) return;
     setState(() {
       _busy = false;

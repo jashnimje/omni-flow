@@ -32,11 +32,14 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
     private val app = context.applicationContext
     private val usb = app.getSystemService(Context.USB_SERVICE) as UsbManager
     private val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newCachedThreadPool()
+    // One thread: writes, line changes, opens and closes happen in order,
+    // and the ports map is only touched here.
+    private val io = Executors.newSingleThreadExecutor()
     private var sink: EventChannel.EventSink? = null
     private val ports = mutableMapOf<String, Open>()
     private var plugReceiver: BroadcastReceiver? = null
     private val waitingPermission = mutableMapOf<String, MutableList<MethodChannel.Result>>()
+    private var permissionReceiver: BroadcastReceiver? = null
 
     private class Open(val port: UsbSerialPort, val reader: SerialInputOutputManager)
 
@@ -107,23 +110,41 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
         if (usb.hasPermission(device)) return result.success(true)
         waitingPermission.getOrPut(path) { mutableListOf() }.add(result)
         if (waitingPermission[path]!!.size > 1) return
-        val receiver = object : BroadcastReceiver() {
+        listenForPermissions()
+        val intent = Intent(ACTION_PERMISSION).setPackage(app.packageName)
+        val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+        usb.requestPermission(device, PendingIntent.getBroadcast(app, 0, intent, flags))
+    }
+
+    /** One receiver for every answer, settled by the device it names. */
+    private fun listenForPermissions() {
+        if (permissionReceiver != null) return
+        permissionReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                app.unregisterReceiver(this)
+                val device = deviceIn(intent) ?: return
                 val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                waitingPermission.remove(path)?.forEach { it.success(granted) }
+                waitingPermission.remove("usb:${device.deviceName}")?.forEach { it.success(granted) }
             }
         }
-        val filter = IntentFilter(ACTION_PERMISSION)
+        register(permissionReceiver!!, IntentFilter(ACTION_PERMISSION))
+    }
+
+    private fun deviceIn(intent: Intent): UsbDevice? = if (Build.VERSION.SDK_INT >= 33) {
+        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+    } else {
+        @Suppress("DEPRECATION")
+        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+    }
+
+    /** Not exported: Android still delivers its own USB broadcasts, and no
+     * other app can send a fake unplug. */
+    private fun register(receiver: BroadcastReceiver, filter: IntentFilter) {
         if (Build.VERSION.SDK_INT >= 33) {
             app.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             app.registerReceiver(receiver, filter)
         }
-        val intent = Intent(ACTION_PERMISSION).setPackage(app.packageName)
-        val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
-        usb.requestPermission(device, PendingIntent.getBroadcast(app, 0, intent, flags))
     }
 
     private fun open(path: String, baud: Int) {
@@ -135,18 +156,33 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
         val connection = usb.openDevice(device) ?: throw IllegalStateException("$path did not open")
         val port = driver.ports.first()
         port.open(connection)
-        port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        try {
+            port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        } catch (e: Exception) {
+            try {
+                port.close()
+            } catch (_: Exception) {
+            }
+            throw e
+        }
+        lateinit var open: Open
         val reader = SerialInputOutputManager(port, object : SerialInputOutputManager.Listener {
             override fun onNewData(data: ByteArray) {
                 emit(mapOf("event" to "data", "path" to path, "bytes" to data))
             }
 
+            // A reader stopped by close() also ends in an error: only the
+            // port still open on this path is closed and reported.
             override fun onRunError(e: Exception) {
-                emit(mapOf("event" to "closed", "path" to path, "error" to e.message))
-                io.execute { close(path) }
+                io.execute {
+                    if (ports[path] !== open) return@execute
+                    close(path)
+                    emit(mapOf("event" to "closed", "path" to path, "error" to e.message))
+                }
             }
         })
-        ports[path] = Open(port, reader)
+        open = Open(port, reader)
+        ports[path] = open
         reader.start()
     }
 
@@ -155,6 +191,7 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
 
     private fun close(path: String) {
         val open = ports.remove(path) ?: return
+        open.reader.listener = null
         open.reader.stop()
         try {
             open.port.close()
@@ -166,13 +203,7 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
         if (plugReceiver != null) return
         plugReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                val device: UsbDevice? = if (Build.VERSION.SDK_INT >= 33) {
-                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-                }
-                val path = "usb:${device?.deviceName ?: return}"
+                val path = "usb:${deviceIn(intent)?.deviceName ?: return}"
                 val plugged = intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED
                 if (!plugged) io.execute { close(path) }
                 emit(mapOf("event" to if (plugged) "attached" else "detached", "path" to path))
@@ -182,12 +213,7 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
-        if (Build.VERSION.SDK_INT >= 33) {
-            app.registerReceiver(plugReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            app.registerReceiver(plugReceiver, filter)
-        }
+        register(plugReceiver!!, filter)
     }
 
     private fun emit(event: Map<String, Any?>) {
@@ -208,14 +234,15 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
     override fun onTaskRepeatEvent() {}
 
     override fun onTaskDestroy() {
-        for (path in ports.keys.toList()) close(path)
-        plugReceiver?.let {
+        io.execute { for (path in ports.keys.toList()) close(path) }
+        for (receiver in listOfNotNull(plugReceiver, permissionReceiver)) {
             try {
-                app.unregisterReceiver(it)
+                app.unregisterReceiver(receiver)
             } catch (_: Exception) {
             }
         }
         plugReceiver = null
+        permissionReceiver = null
     }
 
     override fun onEngineWillDestroy() {}

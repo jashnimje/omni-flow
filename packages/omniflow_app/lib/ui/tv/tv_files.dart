@@ -65,7 +65,13 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
     unawaited(_open(filesRoot));
   }
 
+  /// The newest folder asked for: an older listing that lands later is
+  /// dropped.
+  var _request = 0;
+
   Future<void> _open(String path) async {
+    if (!mounted) return;
+    final request = ++_request;
     setState(() {
       _loading = true;
       _error = null;
@@ -74,7 +80,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
       TvCalls.filesList,
       TvCalls.pathArgs(tv.id, path),
     );
-    if (!mounted) return;
+    if (!mounted || request != _request) return;
     setState(() {
       _loading = false;
       if (result['ok'] == true) {
@@ -177,7 +183,10 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
         if (result['ok'] != true) break;
         done++;
       }
-      if (clip.cut) setState(() => _clipboard = null);
+      // A cut that did not finish stays on the clipboard, to paste again.
+      if (clip.cut && done == clip.paths.length && mounted) {
+        setState(() => _clipboard = null);
+      }
       if (done > 0) {
         showMessage('${clip.cut ? 'Moved' : 'Copied'} ${_count(done)}');
       }

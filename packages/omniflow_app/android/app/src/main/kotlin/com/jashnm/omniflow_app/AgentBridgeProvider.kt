@@ -9,7 +9,10 @@ import android.net.Uri
 import android.os.Binder
 import android.os.Bundle
 import android.util.Base64
+import org.json.JSONException
 import org.json.JSONObject
+import java.io.IOException
+import java.net.SocketTimeoutException
 import java.io.File
 
 /**
@@ -34,7 +37,13 @@ class AgentBridgeProvider : ContentProvider() {
         require(method == "handle" && arg != null) { "call handle with a base64 request" }
         val reply = try {
             forward(String(Base64.decode(arg, Base64.DEFAULT), Charsets.UTF_8))
-        } catch (e: Exception) {
+        } catch (e: JSONException) {
+            failure("invalid", "the request is not {command, args} JSON: ${e.message}")
+        } catch (e: IllegalArgumentException) {
+            failure("invalid", "the request is not base64")
+        } catch (e: SocketTimeoutException) {
+            failure("timeout", "the engine did not answer within ${TIMEOUT_MS / 1000} s")
+        } catch (e: IOException) {
             failure(
                 "unreachable",
                 "OmniFlow is not running on the phone. Open the app once, then try again",

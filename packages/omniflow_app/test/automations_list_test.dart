@@ -70,7 +70,8 @@ void main() {
     await tapKey(tester, 'filter-links');
     expect(shown(), {'desk_button'});
     await tapKey(tester, 'filter-off');
-    expect(shown(), {'door_mute'});
+    // One waiting for approval does not run yet, so it is off too.
+    expect(shown(), {'door_mute', 'movie_night'});
     await tapKey(tester, 'filter-needsYou');
     expect(shown(), {'movie_night'});
     await tapKey(tester, 'filter-rules');

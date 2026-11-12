@@ -15,6 +15,7 @@ class PhoneAccessState {
     this.localNetwork,
     this.localNetworkNeeded = false,
     this.location,
+    this.locationAlways,
     this.notifications,
     this.nfc,
     this.batteryUnrestricted,
@@ -26,6 +27,11 @@ class PhoneAccessState {
   /// Whether this Android asks for local network access at all (17 on).
   final bool localNetworkNeeded;
   final bool? location;
+
+  /// Location all the time: without it Android hides the Wi-Fi name from
+  /// the background service, so a Wi-Fi place works only while OmniFlow is
+  /// open.
+  final bool? locationAlways;
   final bool? notifications;
   final bool? nfc;
 
@@ -44,6 +50,7 @@ abstract interface class PhoneAccess {
   Future<PhoneAccessState> read();
   Future<bool> askLocalNetwork();
   Future<bool> askLocation();
+  Future<bool> askLocationAlways();
   Future<bool> askNotifications();
 
   /// Asks Android to stop optimising OmniFlow for battery, or opens the
@@ -79,6 +86,7 @@ class AndroidPhoneAccess implements PhoneAccess {
       localNetwork: status?['localNetwork'] as bool?,
       localNetworkNeeded: status?['localNetworkNeeded'] == true,
       location: status?['location'] as bool?,
+      locationAlways: status?['locationAlways'] as bool?,
       notifications: notify == null
           ? null
           : notify == NotificationPermission.granted,
@@ -95,6 +103,9 @@ class AndroidPhoneAccess implements PhoneAccess {
 
   @override
   Future<bool> askLocation() => permissions.askForWifiName();
+
+  @override
+  Future<bool> askLocationAlways() => permissions.askForWifiNameAlways();
 
   @override
   Future<bool> askNotifications() async =>
@@ -310,6 +321,24 @@ class _PhoneAccessPageState extends ConsumerState<PhoneAccessPage> {
               'are.',
             ),
           ),
+          if (state.location == true)
+            PermissionRow(
+              key: const ValueKey('permission-location-always'),
+              id: 'location-always',
+              icon: AreaIcons.location,
+              title: 'Location all the time',
+              why:
+                  'With the screen off Android hides the Wi-Fi name unless '
+                  'location is allowed all the time, so arriving home would '
+                  'go unnoticed. Choose "Allow all the time" on the page '
+                  'that opens.',
+              granted: state.locationAlways,
+              onGrant: () => _ask(
+                (a) => a.askLocationAlways(),
+                'Arriving home works only while OmniFlow is open until '
+                'location is allowed all the time.',
+              ),
+            ),
           PermissionRow(
             key: const ValueKey('permission-nfc'),
             id: 'nfc',

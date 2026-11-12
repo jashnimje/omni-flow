@@ -75,6 +75,42 @@ void main() {
       );
     });
 
+    test('presence and Wi-Fi globals are the engine\'s, set or removed', () {
+      for (final name in ['Zone_home', 'WifiSsid', 'HomeWifiConnected', '_x']) {
+        for (final command in ['var.set', 'var.remove']) {
+          expect(
+            agentRefusal(command, {'name': name}, AgentAccess.setup),
+            isNotNull,
+            reason: '$command $name',
+          );
+        }
+      }
+      expect(
+        agentRefusal('var.set', const {'name': 'Mood'}, AgentAccess.setup),
+        isNull,
+      );
+    });
+
+    test('an agent looks on the network only, and runs with no inputs', () {
+      expect(
+        agentArgs('device.discover', const {'driver': 'x'})['serial'],
+        false,
+      );
+      expect(agentArgs('thing.add', const {})['methods'], agentFindMethods);
+      expect(
+        agentArgs('automation.run', const {
+          'id': 'a',
+          'msg': {'x': 1},
+          'trigger': 't',
+        }),
+        {'id': 'a'},
+      );
+      expect(
+        agentRefusal('zone.remove', const {}, AgentAccess.setup),
+        contains('for the user only'),
+      );
+    });
+
     test('saves are untrusted and TV calls never pair', () {
       expect(
         agentArgs('automation.save', const {'trusted': true})['trusted'],
@@ -177,6 +213,51 @@ void main() {
       final lamp = await engine.handle('device.get', {'id': 'lamp'});
       expect(((lamp['device'] as Map)['state'] as Map)['power'], isTrue);
     });
+
+    test(
+      'a high-risk automation the user approved is not an agent\'s to run',
+      () async {
+        await engine.handle('driver.register', {
+          'manifest': {
+            'schemaVersion': 1,
+            'id': 'test_host',
+            'name': 'Host',
+            'category': 'computer',
+            'transport': {'type': 'exec', 'host': 'local'},
+            'capabilities': [
+              {
+                'id': 'say',
+                'type': 'action',
+                'label': 'Say',
+                'command': {
+                  'argv': ['/usr/bin/true'],
+                },
+              },
+            ],
+          },
+        });
+        await engine.handle('device.add', {
+          'id': 'mac',
+          'name': 'Mac',
+          'driver': 'test_host',
+          'host': 'local',
+        });
+        final saved = await engine.handle('automation.save', {
+          'form': 'rule',
+          'trusted': true,
+          'spec': {
+            'name': 'Host step',
+            'when': ['manual'],
+            'then': ['mac.say'],
+          },
+        });
+        expect(saved['highRisk'], isTrue, reason: '$saved');
+        await engine.handle('agent.access.set', {'access': 'setup'});
+        final r = await call('automation.run', {'id': saved['id']});
+        expect((r['error'] as Map)['type'], 'needs_user', reason: '$r');
+        expect('${(r['error'] as Map)['message']}', contains('only you'));
+      },
+    );
 
     test('describe gives the whole setup in one reply', () async {
       final d = await engine.handle('agent.describe', {});

@@ -27,6 +27,7 @@ const agentReadCommands = {
   'automation.list',
   'automation.log',
   'automation.templates',
+  'scene.run',
   'board.describe',
   'board.ports',
   'device.discover',
@@ -77,7 +78,6 @@ const agentSetupCommands = {
   'room.remove',
   'room.save',
   'scene.remove',
-  'scene.run',
   'scene.save',
   'tag.remove',
   'tag.save',
@@ -88,7 +88,6 @@ const agentSetupCommands = {
   'tv.volume',
   'var.remove',
   'var.set',
-  'zone.remove',
   'zone.save',
 };
 
@@ -110,12 +109,20 @@ const agentUserOnly = {
   'tv.settings.delete': 'raw TV setting writes are the user\'s',
   'tv.files.delete': 'deleting files is the user\'s',
   'presence.set': 'saying where the user is would fire automations falsely',
+  'zone.remove': 'removing a place deletes it with its history',
   'board.flash': 'writing firmware replaces what a board runs',
 };
 
-/// Variables the engine keeps for itself, which no agent may set.
-bool _reservedVariable(Object? name) =>
-    name is String && name.length > 1 && name.substring(1).startsWith('_');
+/// Globals the engine keeps for itself (presence and Wi-Fi, which rules
+/// trigger on), which no agent may set or remove. Names come without `$`.
+bool reservedVariable(Object? name) {
+  if (name is! String) return false;
+  final bare = name.startsWith(r'$') ? name.substring(1) : name;
+  return bare.startsWith('_') ||
+      bare.startsWith('Zone_') ||
+      bare == 'WifiSsid' ||
+      bare == 'HomeWifiConnected';
+}
 
 /// TV app actions an agent may take: the rest change or remove the app.
 const _agentTvAppActions = {'open', 'stop', 'info'};
@@ -137,8 +144,10 @@ String? agentRefusal(
         : 'tv.app ${args['action']} is for the user only: it changes or '
               'removes the app';
   }
-  if (command == 'var.set' && _reservedVariable(args['var'] ?? args['name'])) {
-    return 'variables that start with an underscore are the engine\'s';
+  if ((command == 'var.set' || command == 'var.remove') &&
+      reservedVariable(args['name'] ?? args['var'])) {
+    return '${args['name'] ?? args['var']} is the engine\'s own: it says '
+        'where you are, and only your phone sets it';
   }
   if (agentReadCommands.contains(command)) return null;
   if (agentSetupCommands.contains(command)) {
@@ -152,6 +161,9 @@ String _needsSetup(String command) =>
     'Settings, Claude and agents, What agents can do, choose Set up '
     'everything (or run omni agent access setup)';
 
+/// The discovery methods an agent may use: none opens a USB port.
+const agentFindMethods = ['udp_broadcast', 'mdns', 'tuya_broadcast', 'hello'];
+
 /// Arguments an agent never chooses: its saves are untrusted, so a
 /// high-risk automation waits for the user, and nothing it runs may start a
 /// pairing prompt.
@@ -163,6 +175,19 @@ Map<String, Object?> agentArgs(String command, Map<String, Object?> args) =>
       _ when command.startsWith('tv.') || command == 'device.refresh' => {
         ...args,
         'allowPairing': false,
+      },
+      // Opening a USB port resets an ESP32 or an Uno, so an agent looks on
+      // the network only.
+      'device.discover' => {...args, 'serial': false},
+      'thing.add' when args['candidate'] == null && args['driver'] == null => {
+        ...args,
+        'methods': agentFindMethods,
+      },
+      // An agent runs an automation as it is: the inputs a trigger gives
+      // are not its to choose.
+      'automation.run' || 'scene.run' => {
+        for (final e in args.entries)
+          if (e.key != 'msg' && e.key != 'trigger') e.key: e.value,
       },
       _ => args,
     };

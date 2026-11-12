@@ -173,8 +173,8 @@ Map<String, Object?> _candidate(
 }) {
   final knownAs = knownDeviceFor(driver, d.stableId, d.host, devices);
   final port = usePort && d.port != driver.transport.port ? d.port : null;
-  final name = d.name ?? '${driver.name} ${_tail(d)}';
-  final id = suggestThingId(d.name ?? '${driver.id}_${_tail(d)}', taken);
+  final name = suggestThingName(driver, d);
+  final id = suggestThingId(name, taken);
   taken.add(id);
   return {
     'driver': driver.id,
@@ -255,6 +255,39 @@ Map<String, String> _identity(
 };
 
 /// The last part of a find's stable id or address, to tell finds apart.
+/// What a person would call a find before naming it: the name the device
+/// announced when it reads like one ("Living Room TV"), otherwise what it is
+/// and the end of its id ("Light 0001"). A driver's full name ("Philips WiZ
+/// Light (local UDP)") or an announced id (`adb-4C04...`) is not a name.
+String suggestThingName(DriverManifest driver, DiscoveredDevice d) {
+  final announced = d.name?.trim();
+  if (announced != null && announced.isNotEmpty) {
+    if (!RegExp(r'^[A-Za-z0-9_.-]+$').hasMatch(announced)) return announced;
+    // A word someone chose (a board's node name, desk_board) reads as words;
+    // a serial number or an adb instance does not.
+    final serial =
+        announced.toLowerCase().startsWith('adb-') ||
+        RegExp(r'(?=[0-9a-fA-F]*[0-9])[0-9a-fA-F]{6,}').hasMatch(announced);
+    if (!serial) {
+      final words = announced.replaceAll(RegExp(r'[_.-]+'), ' ').trim();
+      return '${words[0].toUpperCase()}${words.substring(1)}';
+    }
+  }
+  final kind = switch (driver.category) {
+    'lighting' => 'Light',
+    'power' => 'Plug',
+    'media' => driver.id.contains('tv') ? 'TV' : 'Speaker',
+    'microcontroller' => 'Board',
+    'sensor' => 'Sensor',
+    'computer' => 'Computer',
+    'zigbee' => 'Zigbee device',
+    _ => driver.name.replaceAll(RegExp(r'\s*\(.*\)'), '').trim(),
+  };
+  final tail = _tail(d);
+  final short = tail.length > 4 ? tail.substring(tail.length - 4) : tail;
+  return '$kind ${short.toUpperCase()}';
+}
+
 String _tail(DiscoveredDevice d) {
   final id = d.stableId;
   if (id != null && id.isNotEmpty) {

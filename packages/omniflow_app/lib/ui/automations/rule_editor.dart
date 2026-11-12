@@ -68,6 +68,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
 
   @override
   void dispose() {
+    if (_draft case final draft?) dropUndoFor(draft);
     _draft?.dispose();
     super.dispose();
   }
@@ -143,6 +144,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
           name: _name.isEmpty ? 'New rule' : _name,
           id: widget.id,
           dryRun: reply.value!.firstOrNull,
+          unsaved: _draft?.dirty ?? false,
         ),
       ),
     );

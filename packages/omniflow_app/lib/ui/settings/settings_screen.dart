@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../automations/scenes.dart' show ScenesPage;
+import '../boards/usb_board.dart' show showUsbBoardSheet;
 import '../design/design.dart';
 import '../devices/device_text.dart';
 import '../home/home_data.dart';
@@ -167,6 +168,14 @@ class SettingsScreen extends ConsumerWidget {
                 : null,
             chevron: true,
             onTap: () => _push(context, const HubsPage()),
+          ),
+          OmniListRow(
+            key: const ValueKey('settings-usb'),
+            icon: OmniIcons.board,
+            title: 'Boards on USB',
+            subtitle: 'set up a board, or install firmware on it',
+            chevron: true,
+            onTap: () => showUsbBoardSheet(context),
           ),
           const OmniSectionHeader('Claude and agents'),
           const AgentAccessRow(),

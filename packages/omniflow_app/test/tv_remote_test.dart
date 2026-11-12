@@ -29,7 +29,10 @@ void main() {
       tester,
     ) async {
       await pumpTv(tester, engine);
-      expect(argsOf(engine, 'tv.state').first, {'id': tvId});
+      expect(argsOf(engine, 'tv.state').first, {
+        'id': tvId,
+        'allowPairing': false,
+      });
       expect(
         tester.widget<Text>(find.byKey(const ValueKey('tv-app'))).data,
         'Netflix',
@@ -79,6 +82,20 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('device-remove-$tvId')), findsOneWidget);
+    });
+
+    testWidgets('a TV that has not let OmniFlow in says to pair, and the '
+        'reads never prompt it', (tester) async {
+      engine.answers['tv.state'] = {
+        'ok': false,
+        'error': {'type': 'needs_user', 'message': 'lounge_tv is not paired'},
+      };
+      await pumpTv(tester, engine);
+      expect(find.textContaining('has not let OmniFlow in'), findsOneWidget);
+      expect(
+        argsOf(engine, 'tv.state').every((a) => a['allowPairing'] == false),
+        isTrue,
+      );
     });
 
     testWidgets('an unreachable TV shows why, and retry reads it again', (

@@ -195,7 +195,11 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
   List<Widget> _field(TemplatePlaceholder p, RuleWords words) {
     void set(Object? v) => setState(() => _values[p.key] = v);
     final value = _values[p.key];
-    final choices = _choicesFor(p.kind, words.things);
+    final choices = _choicesFor(
+      p.kind,
+      words.things,
+      wakeAndSleep: !widget.template.toggles(p.key),
+    );
     final header = OmniSectionHeader(p.label);
     switch (p.kind) {
       case 'time':
@@ -256,8 +260,9 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
   /// (`thing.key`) or switches (`thing.action`).
   static List<({String value, String title, IconData icon})> _choicesFor(
     String kind,
-    List<Thing> things,
-  ) => switch (kind) {
+    List<Thing> things, {
+    bool wakeAndSleep = true,
+  }) => switch (kind) {
     'person' => [
       for (final t in things)
         if (t.isPerson) (value: t.id, title: t.name, icon: OmniIcons.person),
@@ -288,7 +293,7 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
             icon: t.icon,
           ),
       for (final t in things)
-        if (t.toggles.isEmpty && t.wakesAndSleeps)
+        if (wakeAndSleep && t.toggles.isEmpty && t.wakesAndSleeps)
           (value: '${t.id}.power', title: t.name, icon: t.icon),
     ],
     _ => const [],

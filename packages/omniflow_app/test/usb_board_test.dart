@@ -49,7 +49,7 @@ void main() {
       'board': 'esp32',
       'wifi': {'configured': true, 'connected': true, 'ip': '192.168.1.40'},
     };
-    engine.answers['device.add'] = {'ok': true, 'id': 'desk_board'};
+    engine.answers['thing.add'] = {'ok': true, 'id': 'desk_board'};
   });
 
   Future<void> open(WidgetTester tester) async {
@@ -86,11 +86,11 @@ void main() {
         'ssid': 'HomeWiFi',
         'password': 'hunter22',
       });
-      expect(engine.callsOf('device.add').single.$2, {
-        'id': 'desk_board',
-        'name': 'desk_board',
+      expect(engine.callsOf('thing.add').single.$2, {
         'driver': 'omniflow_board',
         'host': '192.168.1.40',
+        'stableId': 'desk_board',
+        'name': 'desk_board',
       });
       expect(
         find.textContaining('On HomeWiFi at 192.168.1.40'),
@@ -98,6 +98,18 @@ void main() {
       );
     },
   );
+
+  testWidgets('a board set up again is not added twice', (tester) async {
+    engine.answers['thing.add'] = {
+      'ok': false,
+      'error': {'type': 'exists', 'message': 'this is the device desk already'},
+    };
+    await open(tester);
+    await tester.tap(find.byKey(const ValueKey('usb-save')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('already'), findsNothing);
+    expect(find.textContaining('On HomeWiFi'), findsOneWidget);
+  });
 
   testWidgets('with nothing plugged in it says how to connect one', (
     tester,

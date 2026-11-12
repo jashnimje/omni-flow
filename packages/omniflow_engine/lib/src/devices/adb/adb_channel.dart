@@ -151,9 +151,17 @@ class AdbChannel implements DriverChannel {
   Future<String> _wake(Device device, Future<String> Function() run) async {
     try {
       return await run();
-    } on TransportTimeoutException {
+    } on Exception catch (e) {
+      // Unreachable, or a held connection the TV dropped when it went into
+      // deep standby without closing it (no reply). A TV that refuses the
+      // key is not asleep.
+      final asleep =
+          e is TransportTimeoutException ||
+          (e is CommandFailedException &&
+              e is! PairingRequiredException &&
+              e is! AdbPairingException);
       final mac = device.settings['mac'];
-      if (mac is! String || !macPattern.hasMatch(mac)) rethrow;
+      if (!asleep || mac is! String || !macPattern.hasMatch(mac)) rethrow;
       await _wakeOnLan(wakeOnLanPacketFor(mac));
     }
     final deadline = DateTime.now().add(_wakeWait);
@@ -161,7 +169,11 @@ class AdbChannel implements DriverChannel {
       await Future<void>.delayed(_wakeRetry);
       try {
         return await run();
-      } on TransportTimeoutException {
+      } on Exception catch (e) {
+        if (e is PairingRequiredException || e is AdbPairingException) rethrow;
+        if (e is! TransportTimeoutException && e is! CommandFailedException) {
+          rethrow;
+        }
         if (DateTime.now().isAfter(deadline)) {
           throw TransportTimeoutException(
             '${device.id} did not answer within ${_wakeWait.inSeconds} s of '
@@ -175,19 +187,26 @@ class AdbChannel implements DriverChannel {
 
   /// Runs [command] on [device] as built by the caller, and returns what it
   /// printed. Only commands built from validated values come here.
+  ///
+  /// With [wake], a TV that does not answer gets Wake-on-LAN first, as the
+  /// driver's wake capability does.
   Future<String> run(
     Device device,
     DriverManifest manifest,
     String command, {
     Duration? timeout,
     bool offerKey = false,
-  }) => _shell(
-    device,
-    _portOf(device, manifest),
-    command,
-    timeout ?? Duration(milliseconds: manifest.reliability.timeoutMs),
-    offerKey: offerKey,
-  );
+    bool wake = false,
+  }) {
+    Future<String> once() => _shell(
+      device,
+      _portOf(device, manifest),
+      command,
+      timeout ?? Duration(milliseconds: manifest.reliability.timeoutMs),
+      offerKey: offerKey,
+    );
+    return wake ? _wake(device, once) : once();
+  }
 
   /// Runs [body] on a sync session to [device], then ends the session. A
   /// session the device never accepted is opened once more on a fresh
@@ -289,8 +308,12 @@ class AdbChannel implements DriverChannel {
         // a fresh connection cannot run the command twice.
         if (attempt == 0 && reused && !e.acknowledged) continue;
         throw CommandFailedException('${device.id} closed the ADB connection');
-      } on AdbShellTimeoutException {
-        _drop(device.id);
+      } on AdbShellTimeoutException catch (e) {
+        // One slow command is not a dead connection: the TV answered its
+        // open, or a transfer is still moving on it. Only a connection
+        // nothing answers on is dropped, so the next command reconnects.
+        final held = _connections[device.id]?.connection;
+        if (!e.acknowledged && !(held?.busy ?? false)) _drop(device.id);
         throw CommandFailedException(
           'no reply from ${device.id} to the ADB shell command',
         );

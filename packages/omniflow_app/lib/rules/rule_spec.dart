@@ -375,7 +375,10 @@ sealed class RuleStep {
       final payload = Map<String, Object?>.from(n);
       return NotifyStep(
         '${payload.remove('title') ?? ''}',
-        body: payload.remove('body') as String?,
+        // A body that is not text stays in extra, as it came.
+        body: payload['body'] is String
+            ? payload.remove('body') as String
+            : null,
         extra: payload,
       );
     }

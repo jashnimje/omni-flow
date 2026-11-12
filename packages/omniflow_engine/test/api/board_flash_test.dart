@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:omniflow_engine/omniflow_engine.dart';
+import 'package:omniflow_engine/src/api/board_commands.dart' show boardNodeName;
 import 'package:omniflow_engine/src/devices/flash/esp_rom.dart';
 import 'package:test/test.dart';
 
@@ -79,6 +80,14 @@ void main() {
       await type({'port': 'usb:x', 'chip': 'pico_w', 'file': image.path}),
       'invalid',
     );
+  });
+
+  test('any name becomes a name a board keeps', () {
+    expect(boardNodeName('Desk Board'), 'desk_board');
+    expect(boardNodeName('2nd desk'), 'nd_desk');
+    expect(boardNodeName('  kitchen-light!  '), 'kitchen-light');
+    expect(boardNodeName('बोर्ड'), isNull);
+    expect(boardNodeName('a' * 40), hasLength(23));
   });
 
   test('an agent may not flash', () {

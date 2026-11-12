@@ -1188,9 +1188,18 @@ class _Compiler {
         col: col,
         row: row,
       );
+      // Only this try's own steps: a nested try catches its own failures,
+      // and a step inside a repeat or together is not "the rest" of this
+      // try, so its failure does not jump out of the loop or branch.
+      final own = RegExp(
+        '^${RegExp.escape('$path.try')}\\[\\d+\\]'
+        r'(\.(then|else)\[\d+\])*$',
+      );
       final failed = [
         for (final n in nodes.skip(first))
-          if (n['type'] == 'device_capability' || n['type'] == 'device_toggle')
+          if ((n['type'] == 'device_capability' ||
+                  n['type'] == 'device_toggle') &&
+              own.hasMatch(origins['${n['id']}']?[''] ?? ''))
             ('${n['id']}', 'error'),
       ];
       final otherwise = (s['otherwise'] as List?)?.cast<Map<String, Object?>>();

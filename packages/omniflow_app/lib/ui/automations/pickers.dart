@@ -293,7 +293,12 @@ Future<OnTrigger?> tagTriggerForm(
     title: 'When this tag is scanned',
     result: () => tag == null
         ? null
-        : OnTrigger(thing: tag!, key: 'scanned', mode: OnMode.event),
+        : OnTrigger(
+            thing: tag!,
+            key: 'scanned',
+            mode: OnMode.event,
+            match: _keptMatch(current, tag!, 'scanned'),
+          ),
     build: (context, setState) => [
       for (final t in words.tags)
         ChoiceRow(
@@ -345,6 +350,8 @@ Future<T?> _optionsForm<T>(
   String doneLabel = 'Done',
 }) {
   var picked = selected ?? (options.length == 1 ? options.single.id : null);
+  // A chip keeps its value as it is (true, 3, "on"), not as typed text.
+  Object? chosen = initialInput;
   final field = TextEditingController(
     text: initialInput == null ? '' : valueText(initialInput),
   );
@@ -352,6 +359,8 @@ Future<T?> _optionsForm<T>(
     final option = options.where((o) => o.id == picked).firstOrNull;
     return switch (option?.input) {
       _Input.number => num.tryParse(field.text.trim()),
+      _Input.text when option!.choices.isNotEmpty =>
+        option.choices.contains(chosen) ? chosen : null,
       _Input.text =>
         field.text.trim().isEmpty ? null : literalFromText(field.text),
       _ => true,
@@ -360,6 +369,7 @@ Future<T?> _optionsForm<T>(
 
   return showFormSheet<T>(
     context,
+    owns: [field],
     title: title,
     subtitle: subtitle,
     doneLabel: doneLabel,
@@ -408,8 +418,11 @@ Future<T?> _optionsForm<T>(
                 OmniFilterChip(
                   key: ValueKey('opt-choice-$v'),
                   label: valueText(v),
-                  selected: field.text == valueText(v),
-                  onTap: () => setState(() => field.text = valueText(v)),
+                  selected: chosen == v,
+                  onTap: () => setState(() {
+                    chosen = v;
+                    field.text = valueText(v);
+                  }),
                 ),
             ],
           ),
@@ -450,6 +463,20 @@ Future<T?> _optionsForm<T>(
   );
 }
 
+/// The filter on an event's details (an agent's or the JSON's), kept while
+/// the same event stays picked, since no form here edits it.
+Map<String, Object?>? _keptMatch(
+  OnTrigger? current,
+  String thing,
+  String key,
+) =>
+    current != null &&
+        current.mode == OnMode.event &&
+        current.thing == thing &&
+        current.key == key
+    ? current.match
+    : null;
+
 /// "Turns on", "Goes above 28 °C", "Button pressed": what [thing] can report.
 Future<OnTrigger?> thingTriggerForm(
   BuildContext context,
@@ -476,7 +503,12 @@ Future<OnTrigger?> thingTriggerForm(
       _Option(
         'event-${e.key}',
         named(e.label.toLowerCase(), '').trim(),
-        (_) => OnTrigger(thing: thing.id, key: e.key, mode: OnMode.event),
+        (_) => OnTrigger(
+          thing: thing.id,
+          key: e.key,
+          mode: OnMode.event,
+          match: _keptMatch(current, thing.id, e.key),
+        ),
       ),
     for (final k in onOff) ...[
       _Option(
@@ -828,6 +860,17 @@ Future<CompareCondition?> thingConditionForm(
   String cap(String s) => '${s[0].toUpperCase()}${s.substring(1)}';
   final keys = thing.stateKeys;
   final many = keys.length > 1;
+  // "At least" and "at most" (from an agent or the JSON) have no option of
+  // their own, so editing one keeps it instead of making it strict.
+  String op(String key, String strict) {
+    final kept = current?.op;
+    return current != null &&
+            splitRef(current.ref).$2 == key &&
+            kept == '$strict='
+        ? kept!
+        : strict;
+  }
+
   final options = <_Option<CompareCondition>>[
     for (final k in keys)
       if (thing.isOnOff(k.key)) ...[
@@ -845,13 +888,23 @@ Future<CompareCondition?> thingConditionForm(
         _Option(
           'above-${k.key}',
           '${cap(k.label)} is above',
-          (v) => CompareCondition('state', '${thing.id}.${k.key}', '>', v),
+          (v) => CompareCondition(
+            'state',
+            '${thing.id}.${k.key}',
+            op(k.key, '>'),
+            v,
+          ),
           input: _Input.number,
         ),
         _Option(
           'below-${k.key}',
           '${cap(k.label)} is below',
-          (v) => CompareCondition('state', '${thing.id}.${k.key}', '<', v),
+          (v) => CompareCondition(
+            'state',
+            '${thing.id}.${k.key}',
+            op(k.key, '<'),
+            v,
+          ),
           input: _Input.number,
         ),
       ] else ...[
@@ -904,24 +957,34 @@ Future<CompareCondition?> variableForm(
   BuildContext context, [
   CompareCondition? current,
 ]) {
+  final sigil = current?.ref.startsWith('%') == true ? '%' : '\$';
   final name = TextEditingController(
-    text: current?.ref.replaceFirst(r'$', '') ?? '',
+    text: current?.ref.replaceFirst(RegExp(r'^[$%]'), '') ?? '',
   );
   final value = TextEditingController(
     text: current == null || current.value is Map
         ? ''
         : valueText(current.value),
   );
-  var negate = current?.op == '!=';
+  var op = current?.op ?? '==';
+  const ops = {
+    '==': 'is',
+    '!=': 'is not',
+    '>': 'above',
+    '<': 'below',
+    '>=': 'at least',
+    '<=': 'at most',
+  };
   return showFormSheet(
     context,
+    owns: [name, value],
     title: 'A variable has a value',
     result: () =>
         _variable.hasMatch(name.text.trim()) && value.text.trim().isNotEmpty
         ? CompareCondition(
             'var',
-            '\$${name.text.trim()}',
-            negate ? '!=' : '==',
+            '$sigil${name.text.trim()}',
+            op,
             _wordValue(value.text),
           )
         : null,
@@ -933,10 +996,16 @@ Future<CompareCondition?> variableForm(
         controller: name,
         onChanged: (_) => setState(() {}),
       ),
-      OmniSegmented<bool>(
-        segments: const [OmniSegment(false, 'is'), OmniSegment(true, 'is not')],
-        selected: negate,
-        onChanged: (v) => setState(() => negate = v),
+      _KnownVariables(controller: name, onPicked: () => setState(() {})),
+      OmniSegmented<String>(
+        key: const ValueKey('var-op'),
+        segments: [
+          for (final MapEntry(key: o, value: label) in ops.entries)
+            if (!o.endsWith('=') || o == '==' || o == '!=' || o == op)
+              OmniSegment(o, label),
+        ],
+        selected: op,
+        onChanged: (v) => setState(() => op = v),
       ),
       LabelledField(
         key: const ValueKey('var-value'),
@@ -1077,6 +1146,9 @@ Future<RuleStep?> pickStep(
             _Choice(
               key: 'pick-run',
               title: 'Run another automation',
+              subtitle: automations.isEmpty
+                  ? 'Make another automation first'
+                  : null,
               icon: OmniIcons.automations,
               onTap: automations.isEmpty
                   ? null
@@ -1268,21 +1340,27 @@ Future<bool> repeatForm(BuildContext context, RepeatStep step) async {
   final count = TextEditingController(text: times == null ? '' : '$times');
   final done = await showFormSheet<bool>(
     context,
+    owns: [count],
     title: 'How often',
     subtitle:
         'It stops at the first of these: the most passes, or what you put '
         'under Stop when.',
     result: () =>
-        (times == null || (times! >= 1 && times! <= 1000)) && every >= 0
+        (times == null
+                ? step.until.isNotEmpty
+                : times! >= 1 && times! <= 1000) &&
+            every >= 0
         ? true
         : null,
     whyNot: () => every < 0
         ? 'Wait a whole number of seconds, minutes or hours'
-        : 'Use a number from 1 to 1000, or leave it empty',
+        : times == null
+        ? 'With no limit it needs a Stop when check, or it would never end'
+        : 'Use a number from 1 to 1000',
     build: (context, setState) => [
       LabelledField(
         key: const ValueKey('repeat-times'),
-        label: 'At most this many times (empty for no limit)',
+        label: 'At most this many times (empty: up to 100, until it stops)',
         controller: count,
         number: true,
         onChanged: (t) => setState(
@@ -1362,6 +1440,7 @@ Future<NotifyStep?> notifyForm(BuildContext context, [NotifyStep? current]) {
   final body = TextEditingController(text: current?.body ?? '');
   return showFormSheet(
     context,
+    owns: [title, body],
     title: 'Notify me',
     subtitle:
         'Shows as a notification on this phone, even with the screen off.',
@@ -1391,6 +1470,8 @@ Future<NotifyStep?> notifyForm(BuildContext context, [NotifyStep? current]) {
 }
 
 Future<SetStep?> setVariableForm(BuildContext context, [SetStep? current]) {
+  // A run's own variable (%) stays one; a new one is shared.
+  final sigil = current?.name.startsWith('%') == true ? '%' : '\$';
   final name = TextEditingController(
     text: current?.name.replaceFirst(RegExp(r'^[$%]'), '') ?? '',
   );
@@ -1399,9 +1480,10 @@ Future<SetStep?> setVariableForm(BuildContext context, [SetStep? current]) {
   );
   return showFormSheet(
     context,
+    owns: [name, value],
     title: 'Set a variable',
     result: () => _variable.hasMatch(name.text.trim())
-        ? SetStep('\$${name.text.trim()}', _wordValue(value.text))
+        ? SetStep('$sigil${name.text.trim()}', _wordValue(value.text))
         : null,
     build: (context, setState) => [
       LabelledField(
@@ -1414,6 +1496,7 @@ Future<SetStep?> setVariableForm(BuildContext context, [SetStep? current]) {
             : 'Letters, numbers and _ only',
         onChanged: (_) => setState(() {}),
       ),
+      _KnownVariables(controller: name, onPicked: () => setState(() {})),
       LabelledField(
         key: const ValueKey('set-value'),
         label: 'Value',
@@ -1422,6 +1505,60 @@ Future<SetStep?> setVariableForm(BuildContext context, [SetStep? current]) {
         onChanged: (_) => setState(() {}),
       ),
     ],
+  );
+}
+
+/// The variables automations have set, as chips under a name field, so a
+/// rule checks the same spelling another one sets.
+class _KnownVariables extends ConsumerStatefulWidget {
+  const _KnownVariables({required this.controller, required this.onPicked});
+
+  final TextEditingController controller;
+  final VoidCallback onPicked;
+
+  @override
+  ConsumerState<_KnownVariables> createState() => _KnownVariablesState();
+}
+
+class _KnownVariablesState extends ConsumerState<_KnownVariables> {
+  late final Future<List<String>> _names = () async {
+    final r = await ref.read(engineClientProvider).call('var.list');
+    final vars = r['variables'];
+    return [
+      if (vars is Map)
+        for (final k in vars.keys)
+          // Names with _ are the engine's own.
+          if (!'$k'.startsWith('_')) '$k',
+    ]..sort();
+  }();
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<String>>(
+    future: _names,
+    builder: (context, snap) {
+      final names = snap.data ?? const <String>[];
+      if (names.isEmpty) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+        child: Wrap(
+          key: const ValueKey('known-variables'),
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final n in names)
+              OmniFilterChip(
+                key: ValueKey('known-var-$n'),
+                label: n,
+                selected: widget.controller.text.trim() == n,
+                onTap: () {
+                  widget.controller.text = n;
+                  widget.onPicked();
+                },
+              ),
+          ],
+        ),
+      );
+    },
   );
 }
 
@@ -1506,7 +1643,7 @@ KeepStep _keepWith(KeepStep keep, String thing, String capability, Object? v) =>
       value: v,
       whileConditions: keep.whileConditions,
       release: keep.release,
-      hasRelease: keep.hasRelease && keep.value is! bool,
+      hasRelease: keep.hasRelease && (v is bool) == (keep.value is bool),
     );
 
 /// Any device that takes commands, as a picker (a scene's actions).

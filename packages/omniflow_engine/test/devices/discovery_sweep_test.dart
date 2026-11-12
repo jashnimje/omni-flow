@@ -124,14 +124,14 @@ void main() {
     expect(lamp1['method'], 'udp_broadcast');
     expect(lamp1['host'], '127.0.0.1');
     expect(lamp1['stableId'], 'a8bb50aabbcc');
-    expect(lamp1['id'], 'test_wiz_aabbcc');
-    expect(lamp1['name'], 'Philips WiZ Light (local UDP) aabbcc');
+    expect(lamp1['id'], 'light_bbcc');
+    expect(lamp1['name'], 'Light BBCC');
     expect(lamp1['add'], {
       'driver': 'test_wiz',
       'host': '127.0.0.1',
       'stableId': 'a8bb50aabbcc',
-      'id': 'test_wiz_aabbcc',
-      'name': 'Philips WiZ Light (local UDP) aabbcc',
+      'id': 'light_bbcc',
+      'name': 'Light BBCC',
     });
   });
 

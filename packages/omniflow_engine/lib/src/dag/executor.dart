@@ -103,10 +103,14 @@ abstract interface class FlowEffects {
 }
 
 class NodeTrace {
-  NodeTrace(this.nodeId, this.type, this.startedAt, this.input);
+  NodeTrace(this.nodeId, this.type, this.startedAt, this.input, {this.label});
 
   final String nodeId;
   final String type;
+
+  /// The step's words when it ran, so a past run reads right after the
+  /// automation is edited.
+  final String? label;
   final DateTime startedAt;
   final Map<String, Object?> input;
   String? port;
@@ -117,6 +121,7 @@ class NodeTrace {
   Map<String, Object?> toJson() => {
     'node': nodeId,
     'type': type,
+    'label': ?label,
     'at': startedAt.toIso8601String(),
     if (duration != null) 'ms': duration!.inMilliseconds,
     if (port != null) 'port': port,
@@ -301,9 +306,16 @@ class FlowRunner {
           _types[triggerNodeId]?.category != NodeCategory.trigger) {
         throw ArgumentError('$triggerNodeId is not a trigger of ${flow.id}');
       }
-      final triggerTrace = NodeTrace(trigger.id, trigger.type, clock.now(), msg)
-        ..port = 'out'
-        ..duration = Duration.zero;
+      final triggerTrace =
+          NodeTrace(
+              trigger.id,
+              trigger.type,
+              clock.now(),
+              msg,
+              label: _ownLabel(trigger),
+            )
+            ..port = 'out'
+            ..duration = Duration.zero;
       run.trace.nodes.add(triggerTrace);
       await _follow(run, trigger.id, 'out', msg, clock);
       if (run.trace.nodes.any((n) => n.error != null) &&
@@ -344,7 +356,13 @@ class FlowRunner {
   ) async {
     run.token.check();
     final type = _types[node.id]!;
-    final trace = NodeTrace(node.id, node.type, clock.now(), msg);
+    final trace = NodeTrace(
+      node.id,
+      node.type,
+      clock.now(),
+      msg,
+      label: _ownLabel(node),
+    );
     run.trace.nodes.add(trace);
     final watch = Stopwatch()..start();
     String? port;
@@ -664,7 +682,7 @@ class FlowRunner {
         final payload = Map<String, Object?>.from(
           renderer.render({...c, 'type': node.type}, context) as Map,
         );
-        if (!run.dryRun) _effects.announce(payload);
+        if (!run.dryRun) _effects.announce({...payload, 'flow': flow.id});
         return {...msg, 'announced': payload};
     }
     throw ArgumentError('${node.type} is not an action');
@@ -682,3 +700,6 @@ class FlowRunner {
   static String _message(Object e) =>
       withoutTypeName(e is ArgumentError ? '${e.message}' : '$e');
 }
+
+/// A node's label when the flow gave it one: without, it is the node id.
+String? _ownLabel(NodeSpec node) => node.label == node.id ? null : node.label;

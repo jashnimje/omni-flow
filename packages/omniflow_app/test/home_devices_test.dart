@@ -207,6 +207,12 @@ class FakeAccess implements PhoneAccess {
   }
 
   @override
+  Future<bool> askLocationAlways() async {
+    asked.add('locationAlways');
+    return true;
+  }
+
+  @override
   Future<bool> askNotifications() async {
     asked.add('notifications');
     return true;
@@ -712,6 +718,29 @@ void main() {
       expect(find.byType(DevicePage), findsNothing);
     });
 
+    testWidgets('Find it on the network moves the device, keeping it', (
+      tester,
+    ) async {
+      engine.answers['device.discover'] = {
+        'ok': true,
+        'found': [
+          {'host': '192.168.1.77', 'stableId': 'a8bb50000001'},
+        ],
+      };
+      engine.answers['thing.add'] = {'ok': true, 'id': 'hall_bulb'};
+      await pump(tester, engine);
+      await openDevicePage(tester, 'hall_bulb');
+      await tapKey(tester, 'device-find');
+      expect(engine.callsOf('device.discover').single.$2['serial'], false);
+      await tapKey(tester, 'find-again-192.168.1.77');
+      final add = engine.callsOf('thing.add').single.$2;
+      expect(add['id'], 'hall_bulb');
+      expect(add['host'], '192.168.1.77');
+      expect(add['replace'], isTrue);
+      expect(add['room'], 'hall');
+      expect(add['name'], 'Hall bulb');
+    });
+
     testWidgets('8.3: offline shows what to try and what it affects', (
       tester,
     ) async {
@@ -931,6 +960,47 @@ void main() {
       expect(find.textContaining('seen by Wi-Fi'), findsOneWidget);
       expect(find.text('Wi-Fi HomeWiFi'), findsOneWidget);
       expect(find.byKey(const ValueKey('person-jade')), findsOneWidget);
+    });
+
+    testWidgets('Wi-Fi presence without location all the time warns and asks', (
+      tester,
+    ) async {
+      final access = FakeAccess(
+        const PhoneAccessState(
+          location: true,
+          locationAlways: false,
+          batteryUnrestricted: true,
+          running: true,
+        ),
+      );
+      await pump(tester, engine, access: access);
+      await openTab(tester, 'Settings');
+      await tapKey(tester, 'settings-places');
+      expect(find.byKey(const ValueKey('wifi-needs-always')), findsOneWidget);
+      await tester.tap(find.text('Allow'));
+      await tester.pumpAndSettle();
+      expect(access.asked, contains('locationAlways'));
+    });
+
+    testWidgets('the wait before away is set, and saved on the Wi-Fi', (
+      tester,
+    ) async {
+      await pump(tester, engine);
+      await openTab(tester, 'Settings');
+      await tapKey(tester, 'settings-places');
+      expect(find.text('2 min'), findsOneWidget);
+      await tapKey(tester, 'away-wait');
+      await tester.enterText(
+        find.byKey(const ValueKey('duration-amount')),
+        '5',
+      );
+      await tester.pump();
+      await tapKey(tester, 'form-done');
+      expect(
+        ((engine.callsOf('zone.save').single.$2['zone'] as Map)['wifi']
+            as Map)['awayAfterMs'],
+        300000,
+      );
     });
 
     testWidgets('a beacon is added by its name, keeping the Wi-Fi', (

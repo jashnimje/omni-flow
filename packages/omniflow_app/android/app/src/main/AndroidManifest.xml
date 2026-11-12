@@ -24,6 +24,9 @@
          it from the phone's menu, never at launch. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- The Wi-Fi name reaches the background service only with location
+         all the time, so a Wi-Fi place works with the screen off. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- Android 17 asks before an app reaches devices on the local network
          (shown as nearby devices). Every light, plug, TV and board is there.
          The app asks on first run and from Settings, Permissions. -->
@@ -60,6 +63,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- A notification opens the automation or run it names. -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="omniflow" android:host="open"/>
             </intent-filter>
             <!-- A tag OmniFlow wrote opens the app even when it is closed,
                  and MainActivity hands the scan to the engine. -->

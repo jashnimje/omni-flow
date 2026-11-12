@@ -16,37 +16,66 @@ Future<T?> showFormSheet<T>(
   required T? Function() result,
   String doneLabel = 'Done',
   String? Function()? whyNot,
+  List<ChangeNotifier> owns = const [],
 }) => showOmniSheet<T>(
   context,
-  builder: (context) => StatefulBuilder(
-    builder: (context, setState) {
-      final value = result();
-      return OmniSheet(
-        title: title,
-        subtitle: subtitle,
-        children: [
-          ...build(context, setState),
-          if ((value == null ? whyNot?.call() : null) case final why?) ...[
-            const SizedBox(height: OmniSpace.sm),
-            Text(
-              why,
-              key: const ValueKey('form-why-not'),
-              style: OmniText.caption.copyWith(color: OmniColors.warn),
+  builder: (context) => Owning(
+    owns,
+    child: StatefulBuilder(
+      builder: (context, setState) {
+        final value = result();
+        return OmniSheet(
+          title: title,
+          subtitle: subtitle,
+          children: [
+            ...build(context, setState),
+            if ((value == null ? whyNot?.call() : null) case final why?) ...[
+              const SizedBox(height: OmniSpace.sm),
+              Text(
+                why,
+                key: const ValueKey('form-why-not'),
+                style: OmniText.caption.copyWith(color: OmniColors.warn),
+              ),
+            ],
+            const SizedBox(height: OmniSpace.md),
+            OmniButton(
+              key: const ValueKey('form-done'),
+              label: doneLabel,
+              onPressed: value == null
+                  ? null
+                  : () => Navigator.of(context).pop(value),
             ),
           ],
-          const SizedBox(height: OmniSpace.md),
-          OmniButton(
-            key: const ValueKey('form-done'),
-            label: doneLabel,
-            onPressed: value == null
-                ? null
-                : () => Navigator.of(context).pop(value),
-          ),
-        ],
-      );
-    },
+        );
+      },
+    ),
   ),
 );
+
+/// Disposes [owns] when [child] leaves the tree: after a sheet or dialog
+/// has finished closing, so no field still shows a disposed controller.
+class Owning extends StatefulWidget {
+  const Owning(this.owns, {super.key, required this.child});
+
+  final List<ChangeNotifier> owns;
+  final Widget child;
+
+  @override
+  State<Owning> createState() => _OwningState();
+}
+
+class _OwningState extends State<Owning> {
+  @override
+  void dispose() {
+    for (final c in widget.owns) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
 
 /// One choice of a form: its row, with a check when it is the one picked.
 class ChoiceRow extends StatelessWidget {
@@ -320,6 +349,11 @@ class ParamControls extends StatefulWidget {
         if (e.value['max'] is num && v > (e.value['max'] as num)) return null;
       }
       out[e.key] = v;
+    }
+    // A param the action does not declare (an agent's, or a newer
+    // driver's) has no control here, so it goes back as it came.
+    for (final e in values.entries) {
+      if (!params.containsKey(e.key)) out[e.key] = e.value;
     }
     return out;
   }

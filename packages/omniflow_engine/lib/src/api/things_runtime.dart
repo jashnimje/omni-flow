@@ -348,10 +348,13 @@ class ThingsRuntime {
   }
 
   /// About once a second, so a beacon that went quiet ends in an exit.
-  Future<void> tick(DateTime at) {
+  ///
+  /// Async, so a failure is a failed future the hub tracks, never a throw
+  /// out of its timer.
+  Future<void> tick(DateTime at) async {
     final changes = zones.tick(at);
     if (changes.isNotEmpty) _source = 'ble';
-    return _apply(changes);
+    await _apply(changes);
   }
 
   /// The phone's battery level (0 to 100) and whether it is charging.

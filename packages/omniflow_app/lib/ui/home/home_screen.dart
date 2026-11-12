@@ -90,7 +90,8 @@ class _Overview extends ConsumerWidget {
     final drivers = ref.watch(driversProvider).value ?? const {};
     final now = DateTime.now();
     final name = person?.name;
-    final on = tiles?.where(isLit).length;
+    // An offline device's last state is not "on" now.
+    final on = tiles?.where((d) => d.online && isLit(d)).length;
     final active = summaries
         ?.where((a) => a.enabled && a.approved && !a.isScene)
         .length;

@@ -401,6 +401,20 @@ void main() {
       expect(wakePackets, hasLength(1));
     });
 
+    test('a key run for waking (the TV page) sends Wake-on-LAN too', () async {
+      final channel = newChannel(wakeWait: const Duration(milliseconds: 200));
+      await expectLater(
+        channel.run(
+          (await store.get('tv'))!,
+          DriverRegistry.withBuiltIns()['android_tv_adb']!,
+          'input keyevent 224',
+          wake: true,
+        ),
+        throwsA(isA<TransportTimeoutException>()),
+      );
+      expect(wakePackets, hasLength(1));
+    });
+
     test('no mac setting fails at once with no packet', () async {
       await store.remove('tv');
       await addTv(port: asleepPort);

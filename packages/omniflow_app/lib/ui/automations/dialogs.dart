@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../design/design.dart';
+import 'form_parts.dart' show Owning;
 
 /// Asks for a name, starting from [initial]. Null when cancelled.
 Future<String?> askName(
@@ -13,47 +14,53 @@ Future<String?> askName(
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) {
-        final name = controller.text.trim();
-        return AlertDialog(
-          title: Text(title),
-          content: TextField(
-            key: const ValueKey('name-field'),
-            controller: controller,
-            autofocus: true,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(labelText: 'Name', hintText: hint),
-            onChanged: (_) => setState(() {}),
-            onSubmitted: (v) {
-              if (v.trim().isNotEmpty) Navigator.of(context).pop(v.trim());
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+    builder: (context) => Owning(
+      [controller],
+      child: StatefulBuilder(
+        builder: (context, setState) {
+          final name = controller.text.trim();
+          return AlertDialog(
+            title: Text(title),
+            content: TextField(
+              key: const ValueKey('name-field'),
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(labelText: 'Name', hintText: hint),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (v) {
+                if (v.trim().isNotEmpty) Navigator.of(context).pop(v.trim());
+              },
             ),
-            OmniButton(
-              key: const ValueKey('name-ok'),
-              label: action,
-              expand: false,
-              onPressed: name.isEmpty
-                  ? null
-                  : () => Navigator.of(context).pop(name),
-            ),
-          ],
-        );
-      },
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              OmniButton(
+                key: const ValueKey('name-ok'),
+                label: action,
+                expand: false,
+                onPressed: name.isEmpty
+                    ? null
+                    : () => Navigator.of(context).pop(name),
+              ),
+            ],
+          );
+        },
+      ),
     ),
   );
 }
 
 /// "Today 19:02", "Yesterday 18:47", "3 Nov 09:12".
-String whenText(DateTime at, {DateTime? now}) {
-  final n = now ?? DateTime.now();
-  final today = DateTime(n.year, n.month, n.day);
-  final day = DateTime(at.year, at.month, at.day);
+String whenText(DateTime t, {DateTime? now}) {
+  final at = t.toLocal();
+  final n = (now ?? DateTime.now()).toLocal();
+  // Calendar days as UTC dates: local midnights are 23 or 25 hours apart
+  // across a clock change.
+  final today = DateTime.utc(n.year, n.month, n.day);
+  final day = DateTime.utc(at.year, at.month, at.day);
   final time =
       '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
   final diff = today.difference(day).inDays;

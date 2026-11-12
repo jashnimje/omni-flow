@@ -89,21 +89,29 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
     private fun sendBattery(intent: Intent) {
         val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        // Plugged in counts as charging, even when Android holds the charge
+        // at a limit (80%) and reports "not charging".
+        val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
         send(
             mapOf(
                 "kind" to "battery",
                 "level" to if (level >= 0 && scale > 0) level * 100 / scale else null,
-                "charging" to (status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                    status == BatteryManager.BATTERY_STATUS_FULL),
+                "charging" to (plugged != 0),
             ),
         )
     }
 
+    /** The Wi-Fi network last reported, so losing another one (roaming, a
+     * second local-only network) does not read as leaving Wi-Fi. */
+    @Volatile private var current: Network? = null
+
     /** Android 12 and later strip the SSID from the callback unless asked. */
     private fun wifiCallback(): ConnectivityManager.NetworkCallback {
-        val onCapabilities = { capabilities: NetworkCapabilities ->
-            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val onCapabilities = { network: Network, capabilities: NetworkCapabilities ->
+            current = network
+            // WifiInfo is a TransportInfo only from Android 12: before that
+            // the name comes from the Wi-Fi service.
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 capabilities.transportInfo as? WifiInfo
             } else {
                 @Suppress("DEPRECATION")
@@ -118,20 +126,25 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
                 ),
             )
         }
-        val onLost = { send(mapOf("kind" to "wifi", "connected" to false)) }
+        val onLost = { network: Network ->
+            if (current == null || current == network) {
+                current = null
+                send(mapOf("kind" to "wifi", "connected" to false))
+            }
+        }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             object : ConnectivityManager.NetworkCallback(ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO) {
                 override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
-                    onCapabilities(capabilities)
+                    onCapabilities(network, capabilities)
 
-                override fun onLost(network: Network) = onLost()
+                override fun onLost(network: Network) = onLost(network)
             }
         } else {
             object : ConnectivityManager.NetworkCallback() {
                 override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
-                    onCapabilities(capabilities)
+                    onCapabilities(network, capabilities)
 
-                override fun onLost(network: Network) = onLost()
+                override fun onLost(network: Network) = onLost(network)
             }
         }
     }

@@ -30,12 +30,13 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
                 call.argument<Int>("id") ?: 0,
                 call.argument<String>("title") ?: "OmniFlow",
                 call.argument<String>("body"),
+                call.argument<String>("link"),
             )
             result.success(null)
         }
     }
 
-    private fun post(channel: String, id: Int, title: String, body: String?) {
+    private fun post(channel: String, id: Int, title: String, body: String?, link: String?) {
         if (Build.VERSION.SDK_INT >= 26) {
             val (name, importance) = when (channel) {
                 PROBLEMS -> "Problems" to NotificationManager.IMPORTANCE_HIGH
@@ -43,8 +44,15 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
             }
             manager.createNotificationChannel(NotificationChannel(channel, name, importance))
         }
-        val open = app.packageManager.getLaunchIntentForPackage(app.packageName)
-            ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // A tap opens what the notification names (omniflow://open/...),
+        // which Flutter routes for a cold start and a running app alike.
+        val open = (
+            if (link != null && link.startsWith("omniflow://open/")) {
+                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)).setPackage(app.packageName)
+            } else {
+                app.packageManager.getLaunchIntentForPackage(app.packageName)
+            }
+            )?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val tap = open?.let {
             PendingIntent.getActivity(app, id, it, PendingIntent.FLAG_IMMUTABLE)
         }

@@ -5,6 +5,9 @@ import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../add/add_by_hand_page.dart';
 import '../design/design.dart';
+import 'phone_access.dart';
+import '../automations/form_parts.dart' show showFormSheet, DurationInput;
+import '../add/room_field.dart' show showOrganizeSheet;
 import '../devices/device_text.dart';
 
 /// The places that have inputs, as zone.list reports them.
@@ -47,7 +50,12 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
     }
   }
 
-  Json _zoneJson(Json zone, {Set<String>? ssids, Object? ble = _keep}) {
+  Json _zoneJson(
+    Json zone, {
+    Set<String>? ssids,
+    Object? ble = _keep,
+    int? awayAfterMs,
+  }) {
     final wifi = zone['wifi'] is Map
         ? Map<String, Object?>.from(zone['wifi'] as Map)
         : <String, Object?>{};
@@ -62,6 +70,7 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
           'ssids': nextSsids.toList(),
           'bssids': bssids,
           'required': wifi['required'] == true,
+          'awayAfterMs': ?awayAfterMs ?? wifi['awayAfterMs'],
         },
       if (identical(ble, _keep) && zone['ble'] != null) 'ble': zone['ble'],
       if (!identical(ble, _keep) && ble != null) 'ble': ble,
@@ -156,6 +165,7 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
     final ssids = (wifi['ssids'] as List? ?? const []).cast<String>();
     final ble = zone['ble'] is Map ? zone['ble'] as Map : null;
     final exitMs = (ble?['exitDwellMs'] as num?)?.toInt();
+    final awayMs = (wifi['awayAfterMs'] as num?)?.toInt() ?? _defaultAwayMs;
     return OmniPage(
       title: title,
       actions: [
@@ -195,6 +205,20 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
                   ].join(' · '),
             tone: presence?.home == true ? HeroTone.accent : HeroTone.plain,
           ),
+          if (ssids.isNotEmpty &&
+              ref.watch(phoneAccessStateProvider).value?.locationAlways ==
+                  false)
+            OmniBanner.warning(
+              key: const ValueKey('wifi-needs-always'),
+              'With the screen off, Android hides the Wi-Fi name from '
+              'OmniFlow, so arriving home goes unnoticed until you open it. '
+              'Allow location all the time to fix it.',
+              actionLabel: 'Allow',
+              onAction: () async {
+                await ref.read(phoneAccessProvider).askLocationAlways();
+                ref.invalidate(phoneAccessStateProvider);
+              },
+            ),
           const OmniSectionHeader('How OmniFlow knows you are here'),
           if (zones.isLoading && zones.value == null)
             const SizedBox(height: 52)
@@ -242,20 +266,20 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
             ),
           ],
           const SizedBox(height: OmniSpace.md),
-          OmniCard(
+          OmniListRow(
             key: const ValueKey('away-wait'),
+            icon: OmniIcons.time,
             title: 'Wait before "away"',
-            trailing: Text(
-              exitMs == null ? 'none' : _duration(exitMs),
-              style: OmniText.caption,
-            ),
-            child: Text(
-              ble == null
-                  ? 'Away is decided as soon as the phone leaves your Wi-Fi.'
-                  : 'The beacon has to stay quiet this long before you count '
-                        'as away, so a short gap does not mean you left.',
-              style: OmniText.caption,
-            ),
+            subtitle: ssids.isEmpty
+                ? (exitMs == null
+                      ? 'Set up Wi-Fi or a beacon first'
+                      : 'The beacon stays quiet ${_duration(exitMs)} first')
+                : 'Off the Wi-Fi this long first, so a router restart is not '
+                      'leaving',
+            subtitleLines: 2,
+            value: ssids.isEmpty ? null : _duration(awayMs),
+            chevron: ssids.isNotEmpty,
+            onTap: ssids.isEmpty ? null : () => _editAwayWait(zone, awayMs),
           ),
           const OmniSectionHeader('People'),
           for (final p in people)
@@ -269,6 +293,8 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
                 false => 'away',
                 null => null,
               },
+              chevron: true,
+              onTap: () => showOrganizeSheet(context, p.json),
             ),
           if (people.isEmpty)
             OmniListRow(
@@ -289,6 +315,30 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
       Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => AddByHandPage(driver: driver)),
       );
+
+  static const _defaultAwayMs = 120000;
+
+  Future<void> _editAwayWait(Json zone, int current) async {
+    var ms = current;
+    final picked = await showFormSheet<int>(
+      context,
+      title: 'Wait before "away"',
+      subtitle:
+          'How long the phone is off your Wi-Fi before you count as gone. '
+          '0 leaves at once.',
+      result: () => ms >= 0 && ms <= 3600000 ? ms : null,
+      whyNot: () => 'Up to 1 hour',
+      build: (context, setState) => [
+        DurationInput(
+          label: 'Wait',
+          ms: ms,
+          onChanged: (v) => setState(() => ms = v),
+        ),
+      ],
+    );
+    if (picked == null || picked == current) return;
+    await _save(_zoneJson(zone, awayAfterMs: picked));
+  }
 
   static String _duration(int ms) {
     final s = ms ~/ 1000;

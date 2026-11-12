@@ -49,9 +49,23 @@ Future<Started> startEngine({
 /// service stops (its notification's Stop button), it says so and offers to
 /// start it again.
 class Launcher extends StatefulWidget {
-  const Launcher({super.key, required this.start, this.platform = const []});
+  const Launcher({
+    super.key,
+    required this.start,
+    this.platform = const [],
+    this.serviceRunning,
+    this.recheck = const Duration(seconds: 2),
+  });
 
   final Future<Started> Function() start;
+
+  /// Whether the service runs again after a stop that was not the user's
+  /// (Android stopped it, then the plugin started it again), so the app
+  /// reconnects on its own. Null leaves it to the Start button.
+  final Future<bool> Function()? serviceRunning;
+
+  /// How often to look, for half a minute after such a stop.
+  final Duration recheck;
 
   /// The phone's own adapters (NFC, permissions), which tests leave out.
   final List<Override> platform;
@@ -64,6 +78,7 @@ class _LauncherState extends State<Launcher> {
   late Future<Started> _started;
   StreamSubscription<Map<String, Object?>>? _stoppedSub;
   String? _stopped;
+  Timer? _comeBack;
 
   @override
   void initState() {
@@ -73,6 +88,8 @@ class _LauncherState extends State<Launcher> {
 
   void _run() {
     _stopped = null;
+    _comeBack?.cancel();
+    _comeBack = null;
     _stoppedSub?.cancel();
     _stoppedSub = null;
     final started = _started = widget.start();
@@ -80,12 +97,40 @@ class _LauncherState extends State<Launcher> {
       if (!mounted || _started != started) return;
       _stoppedSub = s.client.events
           .where((e) => e['event'] == serviceStoppedEvent)
-          .listen((e) => setState(() => _stopped = '${e['reason']}'));
+          .listen((e) {
+            final reason = '${e['reason']}';
+            setState(() => _stopped = reason);
+            if (reason != stoppedFromNotification) _watchForRestart();
+          });
     }, onError: (Object e) => debugPrint('OmniFlow could not start: $e'));
+  }
+
+  void _watchForRestart() {
+    final running = widget.serviceRunning;
+    if (running == null) return;
+    var left =
+        (const Duration(seconds: 30).inMilliseconds /
+                widget.recheck.inMilliseconds)
+            .ceil();
+    var looking = false;
+    _comeBack?.cancel();
+    _comeBack = Timer.periodic(widget.recheck, (timer) async {
+      if (looking) return;
+      if (left-- <= 0) return timer.cancel();
+      looking = true;
+      final back = await running().catchError((Object _) => false);
+      looking = false;
+      if (!mounted || !timer.isActive || _stopped == null) return;
+      if (back) {
+        timer.cancel();
+        setState(_run);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _comeBack?.cancel();
     _stoppedSub?.cancel();
     super.dispose();
   }
@@ -132,8 +177,10 @@ class _LauncherState extends State<Launcher> {
           child: const OmniFlowApp(),
         );
       }
+      // A retry shows the spinner, not the last error, and cannot start a
+      // second connection while one is opening.
       return _screen(
-        snap.hasError
+        snap.hasError && snap.connectionState == ConnectionState.done
             ? OmniEmptyState(
                 key: const ValueKey('start-error'),
                 icon: OmniIcons.error,
