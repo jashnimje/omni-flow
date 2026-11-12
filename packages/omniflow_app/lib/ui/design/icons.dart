@@ -59,6 +59,7 @@ abstract final class OmniIcons {
   static const room = Symbols.meeting_room_rounded;
   static const scene = Symbols.movie_rounded;
   static const time = Symbols.schedule_rounded;
+  static const sun = Symbols.wb_twilight_rounded;
   static const repeat = Symbols.repeat_rounded;
   static const wait = Symbols.timer_rounded;
   static const branch = Symbols.call_split_rounded;
@@ -66,6 +67,9 @@ abstract final class OmniIcons {
   static const bluetooth = Symbols.bluetooth_rounded;
   static const hub = Symbols.monitor_rounded;
   static const permissions = Symbols.lock_rounded;
+  static const download = Symbols.download_rounded;
+  static const upload = Symbols.upload_rounded;
+  static const backup = Symbols.backup_rounded;
   static const agent = Symbols.smart_toy_rounded;
   static const developer = Symbols.swap_vert_rounded;
   static const about = Symbols.info_rounded;

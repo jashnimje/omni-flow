@@ -47,6 +47,10 @@ class Thing {
         ));
       }
     }
+    // Readings the driver does not name (a WiZ bulb's mac) are details,
+    // not something to react to, unless the driver names none at all, as a
+    // generic MQTT device that reports whole objects.
+    if (out.isNotEmpty) return out;
     for (final key in state.keys) {
       if (seen.add(key)) out.add((key: key, label: key));
     }

@@ -35,7 +35,7 @@ class _NameSheet extends StatefulWidget {
 }
 
 class _NameSheetState extends State<_NameSheet> {
-  late final _name = TextEditingController(text: widget.name);
+  late final _name = ReplaceableText(widget.name);
   late var _room = widget.room ?? '';
 
   @override
@@ -53,6 +53,7 @@ class _NameSheetState extends State<_NameSheet> {
         TextField(
           key: const ValueKey('add-name'),
           controller: _name,
+          onTap: _name.firstTap,
           autofocus: true,
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(labelText: 'Name'),

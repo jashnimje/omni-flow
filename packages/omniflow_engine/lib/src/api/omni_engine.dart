@@ -6,6 +6,7 @@ import 'add_commands.dart';
 import 'agent_policy.dart';
 import 'api_error.dart';
 import 'automation_commands.dart';
+import 'backup_commands.dart';
 import 'board_commands.dart';
 import 'board_runtime.dart';
 import 'command_args.dart';
@@ -14,6 +15,7 @@ import 'engine_core.dart';
 import 'engine_flow_host.dart';
 import 'error_of.dart';
 import 'flow_commands.dart';
+import 'home_commands.dart';
 import 'host_key_commands.dart';
 import 'hub_runtime.dart';
 import 'link_commands.dart';
@@ -31,6 +33,7 @@ import '../devices/channels.dart';
 import '../devices/device_service.dart';
 import '../devices/discovery.dart';
 import '../devices/discovery/mdns_discovery.dart';
+import '../devices/discovery/thing_finder.dart' show renamedOldDefaultName;
 import '../devices/discovery/tuya_broadcast.dart';
 import '../devices/http_channel.dart';
 import '../devices/mqtt_channel.dart';
@@ -40,6 +43,7 @@ import '../devices/tv/tv_channel.dart';
 import '../devices/virtual_channel.dart';
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
+import '../manifest/validation.dart' show ValidationIssue;
 import '../storage/database.dart';
 import '../storage/secret_store.dart';
 import '../transports/packet_tap.dart';
@@ -203,10 +207,13 @@ class OmniEngine {
         ],
       );
       engine._agentAccess = AgentAccessStore(home);
+      engine._homeLocation = HomeLocationStore(home);
+      engine.flows.homeLocation = await engine._homeLocation.read();
       engine._core.issues['driver'] = driverIssues;
       await engine._core.loadRooms();
       await engine._core.history.seed();
       await _backfillStableIds(engine._core);
+      await _renameOldDefaultNames(engine._core);
       await engine._things.migrateZoneRows();
       await engine._things.reload(quiet: true, restore: true);
       await engine._stored.migrateStored();
@@ -238,6 +245,20 @@ class OmniEngine {
           ? null
           : stableIdFromSettings(manifest, d.settings);
       if (id != null) await store.put(d.copyWith(stableId: id));
+    }
+  }
+
+  /// Things added before finds were named by what they are still carry the
+  /// old default, a driver name with an id suffix or an adb instance. Those
+  /// names, and only those, get today's name. A name the user typed never
+  /// matches the old default, so it stays.
+  static Future<void> _renameOldDefaultNames(EngineCore core) async {
+    final store = DriftDeviceStore(core.db);
+    for (final d in await store.all()) {
+      final manifest = core.registry[d.driverId];
+      if (manifest == null) continue;
+      final name = renamedOldDefaultName(manifest, d);
+      if (name != null) await store.put(d.copyWith(name: name));
     }
   }
 
@@ -295,6 +316,23 @@ class OmniEngine {
   late final _addCommands = AddCommands(_core, _deviceCommands);
   late final _tagCommands = TagCommands(_core, _things, _deviceCommands);
   late final _organizeCommands = OrganizeCommands(_core);
+  late final HomeLocationStore _homeLocation;
+  late final _homeCommands = HomeCommands(_core, _stored, _homeLocation);
+  late final _backupCommands = BackupCommands(
+    _core,
+    _stored,
+    _things,
+    _homeCommands,
+    removeThing: (id) async {
+      await _deviceCommands.remove({'id': id});
+    },
+    resetThing: (id) {
+      _hub.stopLive(id);
+      _boards.markNotSetUp(id);
+      _core.tv.forget(id);
+      _core.adb.forget(id);
+    },
+  );
 
   /// Stored records that could not be loaded, by kind (driver, zone, flow).
   /// They stay in the database and are reported, so one bad row never
@@ -331,6 +369,23 @@ class OmniEngine {
       _hub.startWizPush(listenPort: listenPort);
 
   late final AgentAccessStore _agentAccess;
+
+  /// A capability that would make a flow wait for approval (a host
+  /// command, a TV setting or an app's data) is the user's to run.
+  Future<void> _refuseHighRiskInvoke(Map<String, Object?> args) async {
+    final device = await _core.device(stringArg(args, 'id'));
+    final manifest = _core.registry[device.driverId];
+    final capability = manifest?.capability(stringArg(args, 'capability'));
+    if (manifest == null || capability == null) return;
+    if (manifest.isHighRisk ||
+        _stored.capabilityIsHighRisk(manifest, capability)) {
+      throw ApiError(
+        'needs_user',
+        '${capability.id} on ${device.id} is high risk, so only you can '
+            'run it. An automation that does it waits for your approval',
+      );
+    }
+  }
 
   late final Map<String, CommandHandler> _commands = {
     // What an agent may do, and the commands each level opens. Setting it
@@ -380,6 +435,7 @@ class OmniEngine {
       }
       final why = agentRefusal(command, inner, await _agentAccess.read());
       if (why != null) throw ApiError('needs_user', why);
+      if (command == 'device.invoke') await _refuseHighRiskInvoke(inner);
       // The engine's state decides these: a high-risk automation runs only
       // when the user starts it, and the globals it reads are not an agent's
       // to set.
@@ -417,7 +473,15 @@ class OmniEngine {
       final result = await handle(command, agentArgs(command, inner));
       if (result['ok'] != true) {
         final error = result['error'] as Map;
-        throw ApiError('${error['type']}', '${error['message']}');
+        // The issues carry the paths an agent fixes, so they go back too.
+        throw ApiError(
+          '${error['type']}',
+          '${error['message']}',
+          issues: [
+            for (final i in (error['issues'] as List? ?? const []))
+              if (i is Map) ValidationIssue('${i['path']}', '${i['message']}'),
+          ],
+        );
       }
       return {...result}..remove('ok');
     },
@@ -439,6 +503,8 @@ class OmniEngine {
         'tags': await read('tag.list'),
         'scenes': await read('scene.list'),
         'variables': await read('var.list'),
+        // Whether sun rules can be saved, without saying where home is.
+        'homeLocationSet': flows.homeLocation != null,
         'automations': [
           for (final a in (automations['automations'] as List? ?? const []))
             if (a is Map)
@@ -549,6 +615,8 @@ class OmniEngine {
     'device.history': _core.history.history,
     ..._organizeCommands.commands,
     'presence.set': _stateCommands.presenceSet,
+    ..._homeCommands.commands,
+    ..._backupCommands.commands,
     'secret.set': _deviceCommands.secretSet,
     ..._tvCommands.commands,
   };

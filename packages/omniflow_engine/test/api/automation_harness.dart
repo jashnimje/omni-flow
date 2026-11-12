@@ -30,6 +30,28 @@ class AutomationHarness implements EngineConnection {
     automations = AutomationCommands(core, stored, flowCommands, linkCommands);
     _commands = {
       ...automations.commands,
+      // An agent the user allowed to set up: its saves come untrusted, as
+      // OmniEngine's agent.call sends them, with the issues kept.
+      'agent.call': (args) async {
+        final command = stringArg(args, 'command');
+        final inner = Map<String, Object?>.from(
+          args['args'] as Map? ?? const {},
+        );
+        final result = await handle(command, agentArgs(command, inner));
+        if (result['ok'] != true) {
+          final error = result['error'] as Map;
+          throw ApiError(
+            '${error['type']}',
+            '${error['message']}',
+            issues: [
+              for (final i in (error['issues'] as List? ?? const []))
+                if (i is Map)
+                  ValidationIssue('${i['path']}', '${i['message']}'),
+            ],
+          );
+        }
+        return {...result}..remove('ok');
+      },
       'flow.save': flowCommands.save,
       'flow.get': flowCommands.get,
       'flow.list': flowCommands.list,

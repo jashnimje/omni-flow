@@ -11,11 +11,13 @@ import '../home/home_data.dart';
 import '../shell/shell.dart';
 import '../tags/tags_page.dart' show TagsPage;
 import 'agent_access.dart';
+import 'backup_page.dart';
 import 'developer_page.dart';
 import 'hubs_page.dart';
 import 'phone_access.dart';
 import 'places_page.dart';
 import 'rooms_page.dart';
+import 'variables_page.dart';
 
 /// A place in Settings that search can open.
 class SettingsPlace {
@@ -42,6 +44,8 @@ final settingsPlaces = [
   ),
   SettingsPlace('Permissions', OmniIcons.permissions, PhoneAccessPage.new),
   SettingsPlace('Hubs', OmniIcons.hub, HubsPage.new),
+  SettingsPlace('Backup and restore', OmniIcons.backup, BackupPage.new),
+  SettingsPlace('Variables', OmniIcons.level, VariablesPage.new),
   SettingsPlace('Developer', OmniIcons.developer, DeveloperScreen.new),
 ];
 
@@ -197,6 +201,22 @@ class SettingsScreen extends ConsumerWidget {
                 : shell.select(ShellTab.automations),
           ),
           const OmniSectionHeader('Advanced'),
+          OmniListRow(
+            key: const ValueKey('settings-backup'),
+            icon: OmniIcons.backup,
+            title: 'Backup and restore',
+            subtitle: 'keep a copy of the whole home in a file',
+            chevron: true,
+            onTap: () => _push(context, const BackupPage()),
+          ),
+          OmniListRow(
+            key: const ValueKey('settings-variables'),
+            icon: OmniIcons.level,
+            title: 'Variables',
+            subtitle: 'values automations set, to see or clear',
+            chevron: true,
+            onTap: () => _push(context, const VariablesPage()),
+          ),
           OmniListRow(
             key: const ValueKey('settings-developer'),
             icon: OmniIcons.developer,

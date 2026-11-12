@@ -31,6 +31,27 @@ void main() {
     expect(draft.dirty, isTrue, reason: 'a template is unsaved as it is');
   });
 
+  test('a web request step keeps its headers and reads as words', () {
+    final step = RuleStep.fromJson({
+      'http': {
+        'url': 'http://192.168.1.20:8123/api/webhook/home',
+        'method': 'POST',
+        'headers': {'x-key': 'abc'},
+        'body': {'mood': 'cosy'},
+      },
+    });
+    expect(step, isA<HttpStep>());
+    expect(step.toJson(), {
+      'http': {
+        'headers': {'x-key': 'abc'},
+        'url': 'http://192.168.1.20:8123/api/webhook/home',
+        'method': 'POST',
+        'body': {'mood': 'cosy'},
+      },
+    });
+    expect(RuleWords(const []).step(step), 'Send POST to 192.168.1.20');
+  });
+
   test('keep steps stay last', () {
     final steps = <RuleStep>[KeepStep('lamp', 'power'), WaitStep(1000)];
     keepsLast(steps);

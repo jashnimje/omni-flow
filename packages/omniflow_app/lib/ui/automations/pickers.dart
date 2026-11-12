@@ -1,10 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart' show AutomationSummary, Json;
+import '../../api/engine_client.dart';
 import '../../api/tv_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../rules/things.dart';
+import '../../service/permissions.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import 'form_parts.dart';
@@ -199,6 +203,13 @@ Future<RuleTrigger?> pickTrigger(
                 onTap: _then((c) => timeTriggerForm(c)),
               ),
               _Choice(
+                key: 'pick-sun',
+                title: 'At sunrise or sunset',
+                subtitle: 'or a while before or after, at home',
+                icon: OmniIcons.sun,
+                onTap: _then((c) => sunTriggerForm(c)),
+              ),
+              _Choice(
                 key: 'pick-interval',
                 title: 'Every few minutes',
                 icon: OmniIcons.repeat,
@@ -236,6 +247,7 @@ Future<RuleTrigger?> editTrigger(
   }
   return switch (t) {
     TimeTrigger() => timeTriggerForm(context, t),
+    SunTrigger() => sunTriggerForm(context, t),
     IntervalTrigger() => intervalTriggerForm(context, t),
     _ => null,
   };
@@ -635,6 +647,157 @@ Future<TimeTrigger?> timeTriggerForm(
   );
 }
 
+/// Today's sunrise and sunset at home, or null while home has no place on
+/// the map.
+Future<({String sunrise, String sunset})?> _sunToday(
+  EngineClient engine,
+) async {
+  final r = await engine.call('home.location');
+  if (r['ok'] != true || r['location'] == null) return null;
+  final today = r['today'] is Map ? r['today'] as Map : const {};
+  String clock(Object? at) {
+    final t = DateTime.tryParse('$at')?.toLocal();
+    return t == null
+        ? 'none today'
+        : '${t.hour.toString().padLeft(2, '0')}:'
+              '${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  return (sunrise: clock(today['sunrise']), sunset: clock(today['sunset']));
+}
+
+Future<SunTrigger?> sunTriggerForm(
+  BuildContext context, [
+  SunTrigger? current,
+]) async {
+  final engine = ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(engineClientProvider);
+  var today = await _sunToday(engine);
+  if (!context.mounted) return null;
+  var event = current?.event ?? 'sunset';
+  final initial = current?.offsetMinutes ?? 0;
+  var when = initial == 0
+      ? 'at'
+      : initial < 0
+      ? 'before'
+      : 'after';
+  final minutes = TextEditingController(
+    text: initial == 0 ? '30' : '${initial.abs()}',
+  );
+  final days = <String>{...?current?.days};
+  String? locating;
+  return showFormSheet<SunTrigger>(
+    context,
+    owns: [minutes],
+    title: 'At sunrise or sunset',
+    subtitle: 'At home, worked out from where home is each day.',
+    result: () {
+      if (today == null) return null;
+      final m = int.tryParse(minutes.text.trim());
+      if (when != 'at' && (m == null || m < 1 || m > 720)) return null;
+      return SunTrigger(
+        event,
+        offsetMinutes: switch (when) {
+          'before' => -m!,
+          'after' => m!,
+          _ => 0,
+        },
+        days: [
+          for (final d in weekDays)
+            if (days.contains(d)) d,
+        ],
+      );
+    },
+    whyNot: () => today == null
+        ? 'Set where home is first'
+        : when != 'at'
+        ? 'Minutes are 1 to 720'
+        : null,
+    build: (context, setState) => [
+      if (today == null) ...[
+        OmniBanner.info(
+          locating ??
+              'Sunrise and sunset need to know where home is. Use this '
+                  'phone\'s location while you are at home.',
+          key: const ValueKey('sun-no-home'),
+        ),
+        OmniButton(
+          key: const ValueKey('sun-use-phone'),
+          label: 'Use this phone\'s location',
+          icon: OmniIcons.place,
+          onPressed: () async {
+            final here = await const Permissions().lastLocation();
+            if (here == null) {
+              setState(
+                () => locating =
+                    'The phone has no location yet. Turn on location in '
+                    'Android, open a map once, then try again.',
+              );
+              return;
+            }
+            final r = await engine.call('home.location.set', {
+              'latitude': here.latitude,
+              'longitude': here.longitude,
+            });
+            if (r['ok'] != true) {
+              setState(() => locating = errorMessage(r));
+              return;
+            }
+            final now = await _sunToday(engine);
+            setState(() => today = now);
+          },
+        ),
+        const SizedBox(height: OmniSpace.md),
+      ] else
+        Text(
+          'Today at home: sunrise ${today!.sunrise}, sunset ${today!.sunset}',
+          key: const ValueKey('sun-today'),
+          style: OmniText.caption,
+        ),
+      const SizedBox(height: OmniSpace.sm),
+      OmniSegmented<String>(
+        key: const ValueKey('sun-event'),
+        segments: const [
+          OmniSegment('sunrise', 'Sunrise'),
+          OmniSegment('sunset', 'Sunset'),
+        ],
+        selected: event,
+        onChanged: (v) => setState(() => event = v),
+      ),
+      const SizedBox(height: OmniSpace.sm),
+      OmniSegmented<String>(
+        key: const ValueKey('sun-when'),
+        segments: const [
+          OmniSegment('before', 'Before'),
+          OmniSegment('at', 'Right then'),
+          OmniSegment('after', 'After'),
+        ],
+        selected: when,
+        onChanged: (v) => setState(() => when = v),
+      ),
+      if (when != 'at') ...[
+        const SizedBox(height: OmniSpace.sm),
+        LabelledField(
+          key: const ValueKey('sun-minutes'),
+          label: 'Minutes $when',
+          controller: minutes,
+          number: true,
+          onChanged: (_) => setState(() {}),
+        ),
+      ],
+      const SizedBox(height: OmniSpace.md),
+      Text(
+        'On ${daysText(days.toList()).replaceFirst('on ', '')}',
+        style: OmniText.caption,
+      ),
+      const SizedBox(height: OmniSpace.xs),
+      DayChips(days: days, onChanged: () => setState(() {})),
+    ],
+  );
+}
+
 Future<IntervalTrigger?> intervalTriggerForm(
   BuildContext context, [
   IntervalTrigger? current,
@@ -731,9 +894,10 @@ Future<RuleCondition?> pickCondition(BuildContext context, RuleWords words) {
 
 String _statesText(Thing t) => andList([
   if (t.stateKeys.any((k) => t.isOnOff(k.key))) 'is on or off',
-  if (t.stateKeys.any((k) => t.isNumber(k.key))) 'above or below a number',
-  if (t.stateKeys.any((k) => !t.isOnOff(k.key) && !t.isNumber(k.key)))
-    'has a value',
+  if (t.numberLabels case final numbers when numbers.isNotEmpty)
+    '${orList(numbers)} above or below a number',
+  for (final k in t.stateKeys)
+    if (!t.isOnOff(k.key) && !t.isNumber(k.key)) k.label.toLowerCase(),
 ]);
 
 Future<RuleCondition?> editCondition(
@@ -1137,6 +1301,14 @@ Future<RuleStep?> pickStep(
               onTap: _then((c) => notifyForm(c)),
             ),
             _Choice(
+              key: 'pick-http',
+              title: 'Send a web request',
+              subtitle: 'to a Mac, Home Assistant or any web address',
+              icon: AutomationIcons.web,
+              warning: true,
+              onTap: _then((c) => httpForm(c)),
+            ),
+            _Choice(
               key: 'pick-set',
               title: 'Set a variable',
               subtitle: 'for another automation to check',
@@ -1177,6 +1349,7 @@ Future<RuleStep?> editStep(
   },
   WaitStep() => waitForm(context, step),
   NotifyStep() => notifyForm(context, step),
+  HttpStep() => httpForm(context, step),
   SetStep() => setVariableForm(context, step),
   RunStep() => runForm(context, automations, step),
   _ => null,
@@ -1191,7 +1364,11 @@ Future<RuleStep?> actionForm(
   bool allowToggle = true,
 ]) {
   final toggles = thing.actions.where((c) => c['type'] == 'toggle').toList();
-  final others = thing.actions.where((c) => c['type'] != 'toggle').toList();
+  // The d-pad is a control on the device page, not a step: a rule presses
+  // a key with "Press a remote key".
+  final others = thing.actions
+      .where((c) => c['type'] != 'toggle' && c['type'] != 'dpad_remote')
+      .toList();
   String low(Object? s) => '$s'.toLowerCase();
   final many = toggles.length > 1;
   var picked = switch (current) {
@@ -1267,7 +1444,7 @@ Future<RuleStep?> actionForm(
               onTap: () => setState(() => picked = 'toggle-${c['id']}'),
             ),
         ],
-        for (final c in others)
+        for (final c in others) ...[
           ChoiceRow(
             key: ValueKey('act-${c['id']}'),
             title: '${c['label'] ?? c['id']}',
@@ -1286,18 +1463,23 @@ Future<RuleStep?> actionForm(
               picked = 'do-${c['id']}';
             }),
           ),
-        if (cap != null && paramsOf(cap).isNotEmpty) ...[
-          const SizedBox(height: OmniSpace.md),
-          ParamControls(
-            key: ValueKey('params-${cap['id']}'),
-            params: paramsOf(cap),
-            values: values,
-            onChanged: () => setState(() {}),
-            choices: {
-              if (thing.driver == TvCalls.driver)
-                'package': () => tvAppChoices(context, thing.id),
-            },
-          ),
+          // Its fields right under it, not after every other choice.
+          if (cap != null &&
+              cap['id'] == c['id'] &&
+              paramsOf(cap).isNotEmpty) ...[
+            const SizedBox(height: OmniSpace.sm),
+            ParamControls(
+              key: ValueKey('params-${cap['id']}'),
+              params: paramsOf(cap),
+              values: values,
+              onChanged: () => setState(() {}),
+              choices: {
+                if (thing.driver == TvCalls.driver)
+                  'package': () => tvAppChoices(context, thing.id),
+              },
+            ),
+            const SizedBox(height: OmniSpace.md),
+          ],
         ],
       ];
     },
@@ -1430,6 +1612,95 @@ Future<WaitForStep?> waitTimeoutForm(
         label: 'At most',
         ms: ms,
         onChanged: (v) => setState(() => ms = v),
+      ),
+    ],
+  );
+}
+
+/// A web request: where, how, and what to send. Variables go in as
+/// {{$Name}}.
+Future<HttpStep?> httpForm(BuildContext context, [HttpStep? current]) {
+  final url = TextEditingController(text: current?.url ?? 'https://');
+  final body = TextEditingController(
+    text: switch (current?.body) {
+      null => '',
+      final String s => s,
+      final other => jsonEncode(other),
+    },
+  );
+  var method = current?.method ?? 'GET';
+  bool ok() {
+    final u = Uri.tryParse(url.text.trim());
+    return u != null &&
+        (u.scheme == 'http' || u.scheme == 'https') &&
+        u.host.isNotEmpty;
+  }
+
+  Object? bodyValue() {
+    final t = body.text.trim();
+    if (t.isEmpty) return null;
+    try {
+      return jsonDecode(t);
+    } on FormatException {
+      return t;
+    }
+  }
+
+  return showFormSheet(
+    context,
+    owns: [url, body],
+    title: 'Send a web request',
+    subtitle:
+        'It counts as done when the address answers, and fails on an error '
+        'reply, so a fallback can take over.',
+    result: () => ok()
+        ? HttpStep(
+            url.text.trim(),
+            method: method,
+            body: method == 'GET' ? null : bodyValue(),
+            extra: current?.extra,
+          )
+        : null,
+    whyNot: () => ok() ? null : 'Give an http:// or https:// address',
+    build: (context, setState) => [
+      LabelledField(
+        key: const ValueKey('http-url'),
+        label: 'Address',
+        hint: 'http://192.168.1.20:8123/api/webhook/home',
+        controller: url,
+        onChanged: (_) => setState(() {}),
+      ),
+      OmniSegmented<String>(
+        key: const ValueKey('http-method'),
+        segments: const [
+          OmniSegment('GET', 'Get'),
+          OmniSegment('POST', 'Post'),
+          OmniSegment('PUT', 'Put'),
+          OmniSegment('DELETE', 'Delete'),
+        ],
+        selected: method,
+        onChanged: (v) => setState(() => method = v),
+      ),
+      if (method != 'GET') ...[
+        const SizedBox(height: OmniSpace.sm),
+        LabelledField(
+          key: const ValueKey('http-body'),
+          label: 'What to send (optional)',
+          hint: r'{"mood": "{{$Mood}}"}',
+          controller: body,
+          onChanged: (_) => setState(() {}),
+        ),
+      ],
+      if (current != null && current.extra['headers'] is Map)
+        const Text(
+          'Its headers stay as they were set.',
+          style: OmniText.caption,
+        ),
+      const SizedBox(height: OmniSpace.xs),
+      const Text(
+        'A rule with a web request is high risk: one Claude makes waits for '
+        'your approval.',
+        style: OmniText.caption,
       ),
     ],
   );

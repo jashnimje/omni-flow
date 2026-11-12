@@ -12,6 +12,7 @@ export 'icons.dart';
 export 'list_row.dart';
 export 'power_button.dart';
 export 'progress.dart';
+export 'replaceable_text.dart';
 export 'sentence.dart';
 export 'sheet.dart';
 export 'slider.dart';

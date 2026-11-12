@@ -29,6 +29,7 @@ void main() {
     tv.apps['in.startv.hotstar'] = FakeApp('in.startv.hotstar');
     adbd.fs.writeFile('/sdcard/Download/a.txt', [1]);
     engine = await OmniEngine.open(home: home, secrets: secrets);
+    await engine.handle('agent.access.set', {'access': 'setup'});
     await engine.handle('device.add', {
       'id': 'tv',
       'driver': 'android_tv_adb',

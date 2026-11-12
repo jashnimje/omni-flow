@@ -2,6 +2,8 @@ import '../devices/device_service.dart' show stateKeyOf;
 import '../manifest/capability.dart';
 import '../manifest/validation.dart';
 import '../template/template_renderer.dart';
+import 'sun.dart' show sunOffsetLimit;
+import 'web_request.dart' show webAddressOk, webMethods;
 
 enum NodeCategory { trigger, condition, gate, transformer, flowControl, action }
 
@@ -14,7 +16,12 @@ class FlowReferences {
     this.calls = const {},
     this.stateKeysOf = _unknown,
     this.eventsOf = _unknown,
+    this.homeLocationSet,
   });
+
+  /// Whether the user said where home is, which sun triggers need. Null
+  /// when the caller does not know, and then it is not checked.
+  final bool? homeLocationSet;
 
   /// The capability [capabilityId] of device [deviceId], or null.
   final CapabilitySpec? Function(String deviceId, String capabilityId)
@@ -59,6 +66,12 @@ class NodeType {
 }
 
 final _hhmm = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
+
+/// Why a sun trigger cannot be saved before home has a location.
+const homeLocationMissing =
+    'Set where home is first, with omni home location set or '
+    'home.location.set {latitude, longitude}';
+
 const _days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
 /// The built-in node types, keyed by type name.
@@ -69,6 +82,18 @@ final Map<String, NodeType> builtInNodeTypes = {
     NodeType('time_of_day', NodeCategory.trigger, ['out'], (c, p, i, _) {
       _time(c, 'at', p, i);
       _dayList(c, 'days', p, i);
+    }),
+    NodeType('sun', NodeCategory.trigger, ['out'], (c, p, i, r) {
+      _oneOf(c, 'event', ['sunrise', 'sunset'], p, i);
+      i.optionalInt(
+        c,
+        'offsetMinutes',
+        p,
+        min: -sunOffsetLimit,
+        max: sunOffsetLimit,
+      );
+      _dayList(c, 'days', p, i);
+      if (r.homeLocationSet == false) i.add(p, homeLocationMissing);
     }),
     NodeType('interval', NodeCategory.trigger, [
       'out',
@@ -196,6 +221,22 @@ final Map<String, NodeType> builtInNodeTypes = {
     ], (c, p, i, r) => _ref(c, 'flowId', r.flows, 'flow', p, i)),
     NodeType('notify', NodeCategory.action, ['out', 'error'], (c, p, i, _) {
       _string(c, 'title', p, i);
+      _templates(c, p, i);
+    }),
+    NodeType('http_request', NodeCategory.action, ['out', 'error'], (
+      c,
+      p,
+      i,
+      _,
+    ) {
+      final url = _string(c, 'url', p, i);
+      if (url != null && !webAddressOk(url)) {
+        i.add('$p.url', 'must be an http:// or https:// address');
+      }
+      final method = c['method'];
+      if (method != null && !webMethods.contains(method)) {
+        i.add('$p.method', 'must be ${webMethods.join(', ')}');
+      }
       _templates(c, p, i);
     }),
     NodeType('speak', NodeCategory.action, ['out', 'error'], (c, p, i, _) {

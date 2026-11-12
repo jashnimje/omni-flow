@@ -464,6 +464,25 @@ class OmniCommandRunner extends CommandRunner<int> {
       ),
     );
     addCommand(
+      _Group('config', 'Back the home up to one file, and restore it.', [
+        _ConfigExport(),
+        _ConfigImport(),
+      ]),
+    );
+    addCommand(
+      _Group('home', 'Where home is, for sunrise and sunset rules.', [
+        _Group('location', 'Show or set where home is.', [
+          _ApiCommand(
+            'show',
+            'Show where home is, with today\'s sunrise and sunset.',
+            'home.location',
+            (_, _) async => const {},
+          ),
+          _HomeLocationSet(),
+        ]),
+      ]),
+    );
+    addCommand(
       _Group('secret', 'Store device secrets in the keychain.', [
         _ApiCommand(
           'set',
@@ -742,6 +761,118 @@ class _DeviceAdd extends _ApiCommand {
       if (a.option('stable-id') != null) 'stableId': a.option('stable-id'),
       'settings': parseSettings(a.multiOption('set')),
     };
+  }
+}
+
+/// `omni config export [--out FILE]`: the backup alone, so the file is
+/// what `omni config import` reads.
+class _ConfigExport extends _ApiCommand {
+  _ConfigExport()
+    : super(
+        'export',
+        'Write the whole home, without secrets, as one JSON backup.',
+        'config.export',
+        (_, _) async => const {},
+      ) {
+    argParser.addOption('out', help: 'Write to FILE instead of stdout.');
+  }
+
+  @override
+  Future<int> run() async {
+    final engine = await omni.connect();
+    try {
+      final result = await engine.handle(apiCommand, const {});
+      const pretty = JsonEncoder.withIndent('  ');
+      if (result['ok'] != true) {
+        omni.out.writeln(pretty.convert(result));
+        return 1;
+      }
+      final text = pretty.convert(result['backup']);
+      final out = argResults!.option('out');
+      if (out == null) {
+        omni.out.writeln(text);
+      } else {
+        await File(out).writeAsString('$text\n', flush: true);
+        omni.out.writeln(
+          pretty.convert({
+            'ok': true,
+            'out': out,
+            'skipped': ?result['skipped'],
+          }),
+        );
+      }
+      return 0;
+    } finally {
+      await engine.close();
+    }
+  }
+}
+
+/// `omni config import FILE [--replace] [--dry-run]`.
+class _ConfigImport extends _ApiCommand {
+  _ConfigImport()
+    : super(
+        'import',
+        'Restore a backup: merge it in, or with --replace make the home '
+            'exactly the backup.',
+        'config.import',
+        (_, _) async => const {},
+        usage: 'FILE',
+      ) {
+    argParser
+      ..addFlag(
+        'replace',
+        negatable: false,
+        help: 'Remove what the backup does not have.',
+      )
+      ..addFlag(
+        'dry-run',
+        negatable: false,
+        help: 'Check the backup and say what would change, changing nothing.',
+      );
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    final file = OmniCommandRunner._one(a.rest, 'FILE');
+    final Object? backup;
+    try {
+      backup = jsonDecode(await File(file).readAsString());
+    } on FormatException catch (e) {
+      throw UsageException('$file is not valid JSON: ${e.message}', '');
+    }
+    return {
+      'backup': backup,
+      'mode': a.flag('replace') ? 'replace' : 'merge',
+      if (a.flag('dry-run')) 'dryRun': true,
+    };
+  }
+}
+
+/// `omni home location set --latitude 51.5 --longitude -0.13`. Options, so
+/// a negative number is not read as a flag.
+class _HomeLocationSet extends _ApiCommand {
+  _HomeLocationSet()
+    : super(
+        'set',
+        'Say where home is: omni home location set --latitude 19.08 '
+            '--longitude 72.88 (south and west are negative).',
+        'home.location.set',
+        (_, _) async => const {},
+      ) {
+    argParser
+      ..addOption('latitude', mandatory: true, help: 'Degrees north.')
+      ..addOption('longitude', mandatory: true, help: 'Degrees east.');
+  }
+
+  @override
+  Future<Map<String, Object?>> buildArgs() async {
+    final a = argResults!;
+    num parse(String key) =>
+        num.tryParse(a.option(key)!) ??
+        (throw UsageException('$key must be a number', ''));
+    return {'latitude': parse('latitude'), 'longitude': parse('longitude')};
   }
 }
 

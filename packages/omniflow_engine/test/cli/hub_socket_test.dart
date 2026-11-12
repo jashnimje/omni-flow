@@ -233,7 +233,9 @@ void main() {
             home.path,
             'hub',
             '--seconds',
-            '3',
+            // Long enough for both calls on a loaded machine: the whole
+            // suite in parallel once took longer than 3 s to reach them.
+            '15',
             '--wiz-port',
             '0',
             '--hello-port',

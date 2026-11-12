@@ -1,4 +1,5 @@
 import '../manifest/capability.dart';
+import '../dag/templates.dart' show powerActionsOf;
 import '../manifest/driver_manifest.dart';
 
 /// What the command bar understood: a core API call to make, or text for the
@@ -110,6 +111,15 @@ Interpretation interpretCommand(
   if (value == 'on' || value == 'off') {
     if (toggles.length == 1) {
       return invoke(toggles.single, {'value': value == 'on'}, value);
+    }
+    // A TV has no switch: on and off are its wake and sleep.
+    if (toggles.isEmpty) {
+      if (powerActionsOf(device.manifest, 'power') case final power?) {
+        final action = caps
+            .where((c) => c.id == (value == 'on' ? power.on : power.off))
+            .first;
+        return invoke(action, const {}, value);
+      }
     }
     if (toggles.length > 1) {
       return Interpretation.ask(

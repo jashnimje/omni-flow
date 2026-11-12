@@ -193,6 +193,28 @@ void main() {
     );
   });
 
+  test('a rule of keep steps alone needs no --when', () async {
+    final (code, saved) = await omni([
+      'rule',
+      'add',
+      'Evening lamp',
+      '--then',
+      jsonEncode({
+        'keep': {
+          'target': 'lamp.power',
+          'value': true,
+          'while': [
+            {
+              'between': ['18:00', '23:00'],
+            },
+          ],
+        },
+      }),
+    ]);
+    expect(code, 0, reason: '$saved');
+    expect(saved['ok'], isTrue);
+  });
+
   test('usage mistakes are caught before the engine', () async {
     final runner = _Runner(h, StringBuffer());
     for (final args in [

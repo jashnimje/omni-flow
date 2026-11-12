@@ -14,6 +14,7 @@ abstract final class AutomationIcons {
   static const link = Symbols.link_rounded;
   static const template = Symbols.auto_awesome_rounded;
   static const variable = Symbols.data_object_rounded;
+  static const web = Symbols.public_rounded;
   static const together = Symbols.alt_route_rounded;
   static const keep = Symbols.lock_clock_rounded;
   static const days = Symbols.calendar_month_rounded;
@@ -57,6 +58,26 @@ String daysText(List<String> days) {
 }
 
 /// "a", "a and b", "a, b and c".
+String orList(List<String> items) => switch (items.length) {
+  0 => '',
+  1 => items.single,
+  _ => '${items.sublist(0, items.length - 1).join(', ')} or ${items.last}',
+};
+
+/// "At sunset", "30 min before sunrise on weekdays".
+String sunText(SunTrigger t) {
+  final m = t.offsetMinutes.abs();
+  final by = m == 0
+      ? 'At ${t.event}'
+      : '${durationText(m * 60000)} ${t.offsetMinutes < 0 ? 'before' : 'after'} '
+            '${t.event}';
+  return t.days.isEmpty ? by : '$by ${daysText(t.days)}';
+}
+
+extension on String {
+  String? get nonEmpty => isEmpty ? null : this;
+}
+
 String andList(List<String> items) => switch (items.length) {
   0 => '',
   1 => items.single,
@@ -110,12 +131,19 @@ extension ThingWords on Thing {
       ) ||
       state[key] is num;
 
+  /// The readings that are numbers, in words: brightness, volume.
+  List<String> get numberLabels => [
+    for (final k in stateKeys)
+      if (!isOnOff(k.key) && isNumber(k.key)) k.label.toLowerCase(),
+  ];
+
   /// One line on what it can report, for the trigger picker.
   String get reportsText {
+    final numbers = numberLabels;
     final parts = <String>[
       for (final e in events) e.label.toLowerCase(),
       if (stateKeys.any((k) => isOnOff(k.key))) 'turns on or off',
-      if (stateKeys.any((k) => isNumber(k.key))) 'goes above or below',
+      if (numbers.isNotEmpty) '${orList(numbers)} goes above or below',
       for (final k in stateKeys)
         if (!isOnOff(k.key) && !isNumber(k.key))
           '${k.label.toLowerCase()} changes',
@@ -125,7 +153,11 @@ extension ThingWords on Thing {
 
   /// One line on what it can be told, for the step picker.
   String get actionsText {
-    final labels = [for (final a in actions) '${a['label']}'.toLowerCase()];
+    final labels = [
+      for (final a in actions)
+        if (a['type'] != 'dpad_remote' && !isHighRisk(a))
+          '${a['label']}'.toLowerCase(),
+    ];
     return labels.isEmpty
         ? 'takes no commands'
         : andList(labels.take(4).toList());
@@ -185,6 +217,7 @@ class RuleWords {
     OnTrigger() => _on(t),
     TimeTrigger() =>
       'At ${t.at}${t.days.isEmpty ? '' : ' ${daysText(t.days)}'}',
+    SunTrigger() => sunText(t),
     IntervalTrigger() => 'Every ${durationText(t.seconds * 1000)}',
     ManualTrigger() => 'Only when I run it',
   };
@@ -230,6 +263,7 @@ class RuleWords {
     OnTrigger() when thing(t.thing)?.isTag == true => OmniIcons.tag,
     OnTrigger() => thing(t.thing)?.icon ?? OmniIcons.device,
     TimeTrigger() => OmniIcons.time,
+    SunTrigger() => OmniIcons.sun,
     IntervalTrigger() => OmniIcons.repeat,
     ManualTrigger() => OmniIcons.action,
   };
@@ -320,6 +354,8 @@ class RuleWords {
           : 'Try these, with a fallback',
     RepeatStep() => 'Repeat ${repeatHow(s)}',
     NotifyStep() => 'Notify: ${s.title}',
+    HttpStep() =>
+      'Send ${s.method} to ${Uri.tryParse(s.url)?.host.nonEmpty ?? s.url}',
     SetStep() =>
       'Set ${s.name.replaceFirst(RegExp(r'^[$%]'), '')} to ${valueText(s.value)}',
     RunStep() => 'Run ${automations[s.automationId] ?? s.automationId}',
@@ -392,6 +428,7 @@ class RuleWords {
     TryStep() => AutomationIcons.fallback,
     RepeatStep() => AutomationIcons.repeat,
     NotifyStep() => OmniIcons.notifications,
+    HttpStep() => AutomationIcons.web,
     SetStep() => AutomationIcons.variable,
     RunStep() => OmniIcons.automations,
     KeepStep() => AutomationIcons.keep,

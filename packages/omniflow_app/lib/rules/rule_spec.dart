@@ -113,6 +113,13 @@ sealed class RuleTrigger {
     if (json['time'] case final String at) {
       return TimeTrigger(at, days: [...?(json['days'] as List?)?.cast()]);
     }
+    if (json['sun'] case final String event) {
+      return SunTrigger(
+        event,
+        offsetMinutes: (json['offset'] as num?)?.toInt() ?? 0,
+        days: [...?(json['days'] as List?)?.cast()],
+      );
+    }
     if (json['interval'] case final num seconds) {
       return IntervalTrigger(seconds.toInt());
     }
@@ -200,6 +207,25 @@ class TimeTrigger extends RuleTrigger {
 
   @override
   Json toJson() => {'time': at, if (days.isNotEmpty) 'days': days};
+}
+
+/// At sunrise or sunset at home, moved by [offsetMinutes] (before when
+/// negative), on [days] or every day.
+class SunTrigger extends RuleTrigger {
+  SunTrigger(this.event, {this.offsetMinutes = 0, List<String>? days})
+    : days = days ?? [];
+
+  /// `sunrise` or `sunset`.
+  String event;
+  int offsetMinutes;
+  final List<String> days;
+
+  @override
+  Json toJson() => {
+    'sun': event,
+    if (offsetMinutes != 0) 'offset': offsetMinutes,
+    if (days.isNotEmpty) 'days': days,
+  };
 }
 
 class IntervalTrigger extends RuleTrigger {
@@ -368,6 +394,15 @@ sealed class RuleStep {
         times: (r['times'] as num?)?.toInt(),
         everyMs: (r['every'] as num?)?.toInt() ?? 0,
         until: [for (final c in _maps(until)) RuleCondition.fromJson(c)],
+      );
+    }
+    if (json['http'] case final Map h) {
+      final m = Map<String, Object?>.from(h);
+      return HttpStep(
+        '${m.remove('url') ?? ''}',
+        method: '${m.remove('method') ?? 'GET'}',
+        body: m.remove('body'),
+        extra: m,
       );
     }
     if (json['notify'] case final String title) return NotifyStep(title);
@@ -552,6 +587,28 @@ class SetStep extends RuleStep {
   @override
   Json toJson() => {
     'set': {'var': name, 'value': value},
+  };
+}
+
+/// A web request: [url] with [method], and [body] sent as JSON when it
+/// is not text. Headers and anything newer are kept in [extra].
+class HttpStep extends RuleStep {
+  HttpStep(this.url, {this.method = 'GET', this.body, Json? extra})
+    : extra = extra ?? {};
+
+  String url;
+  String method;
+  Object? body;
+  final Json extra;
+
+  @override
+  Json toJson() => {
+    'http': {
+      ...extra,
+      'url': url,
+      if (method != 'GET') 'method': method,
+      'body': ?body,
+    },
   };
 }
 

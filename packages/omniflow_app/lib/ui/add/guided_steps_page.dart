@@ -151,7 +151,7 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
   String? _note;
   final _fields = <String, TextEditingController>{};
   final _shown = <String>{};
-  late final _name = TextEditingController(text: widget.name);
+  late final _name = ReplaceableText(widget.name);
   String? _room;
   Timer? _tick;
   var _waited = Duration.zero;
@@ -413,6 +413,7 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
           TextField(
             key: const ValueKey('setup-name'),
             controller: _name,
+            onTap: _name.firstTap,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(labelText: 'Name'),
             onChanged: (_) => setState(() {}),

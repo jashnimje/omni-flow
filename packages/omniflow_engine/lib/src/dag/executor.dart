@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import '../template/template_renderer.dart';
 import 'canonical.dart';
@@ -8,6 +9,7 @@ import 'flow.dart';
 import 'flow_engine.dart' show payloadMatches, stateTriggerFires;
 import 'node_types.dart';
 import 'transformers.dart';
+import 'web_request.dart';
 
 /// Time for the executor, so tests and dry runs control it.
 abstract interface class FlowClock {
@@ -187,6 +189,7 @@ class FlowRunner {
     this.onTrace,
     this.maxConcurrent = 10,
     this.maxQueued = 10,
+    this.web = const IoWebRequester(),
   }) {
     for (final n in flow.nodes) {
       final type = builtInNodeTypes[n.type];
@@ -201,6 +204,9 @@ class FlowRunner {
   final void Function(RunTrace trace)? onTrace;
   final int maxConcurrent;
   final int maxQueued;
+
+  /// Sends web request steps.
+  final WebRequester web;
   final _types = <String, NodeType>{};
   final _active = <_Run>[];
   Future<void> _queueTail = Future.value();
@@ -678,6 +684,38 @@ class FlowRunner {
           await _effects.runFlow(target, {...msg, callStackKey: callers});
         }
         return msg;
+      case 'http_request':
+        final method = '${c['method'] ?? 'GET'}';
+        final url = Uri.parse('${renderer.render(c['url'], context)}');
+        if (url.scheme != 'http' && url.scheme != 'https') {
+          throw StateError('$url is not an http or https address');
+        }
+        final headers = {
+          for (final e in (c['headers'] as Map? ?? const {}).entries)
+            '${e.key}': '${renderer.render(e.value, context)}',
+        };
+        final raw = renderer.render(c['body'], context);
+        final body = raw == null || raw is String
+            ? raw as String?
+            : jsonEncode(raw);
+        if (raw != null && raw is! String) {
+          headers.putIfAbsent('content-type', () => 'application/json');
+        }
+        if (run.dryRun) {
+          return {
+            ...msg,
+            'result': {'dryRun': true, 'method': method, 'url': '$url'},
+          };
+        }
+        final reply = await web.send(method, url, headers: headers, body: body);
+        // A refusal is a failed step, so a try's otherwise takes over.
+        if (reply.status >= 400) {
+          throw StateError('${url.host} answered ${reply.status}');
+        }
+        return {
+          ...msg,
+          'response': {'status': reply.status, 'body': reply.body},
+        };
       case 'notify' || 'speak':
         final payload = Map<String, Object?>.from(
           renderer.render({...c, 'type': node.type}, context) as Map,

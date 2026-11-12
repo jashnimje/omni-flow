@@ -39,7 +39,7 @@ class RuleEditorPage extends ConsumerStatefulWidget {
   ConsumerState<RuleEditorPage> createState() => _RuleEditorPageState();
 }
 
-enum _Menu { rename, stopOnError, history, remove }
+enum _Menu { rename, stopOnError, duplicate, history, remove }
 
 class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
   RuleDraft? _draft;
@@ -252,6 +252,18 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       case _Menu.stopOnError:
         draft.spec.stopOnError = !draft.spec.stopOnError;
         draft.changed();
+      case _Menu.duplicate:
+        // A copy of what is on screen, as a new rule that is not saved yet.
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => RuleEditorPage(
+              initial: {
+                ...draft.spec.toJson(),
+                'name': _name.isEmpty ? 'New rule copy' : '$_name copy',
+              },
+            ),
+          ),
+        );
       case _Menu.history:
         await Navigator.of(context).push<void>(
           MaterialPageRoute(
@@ -342,6 +354,11 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                     child: const Text('Stop at the first failed step'),
                   ),
                   if (widget.id != null) ...[
+                    const PopupMenuItem(
+                      key: ValueKey('rule-duplicate'),
+                      value: _Menu.duplicate,
+                      child: Text('Duplicate'),
+                    ),
                     const PopupMenuItem(
                       value: _Menu.history,
                       child: Text('Runs and test'),

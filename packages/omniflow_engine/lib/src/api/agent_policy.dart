@@ -70,8 +70,17 @@ const agentSetupCommands = {
   'automation.run',
   'automation.save',
   'board.pins',
+  // config.export shows the whole home and home.location where it is, so
+  // neither is open at read.
+  'config.export',
+  // A high-risk capability (a host command, a TV setting) is still
+  // refused: agent.call checks the capability first.
+  'device.invoke',
   'device.organize',
   'device.refresh',
+  'flow.save',
+  'home.location',
+  'home.location.set',
   'link.create',
   'link.remove',
   'room.order',
@@ -111,6 +120,8 @@ const agentUserOnly = {
   'presence.set': 'saying where the user is would fire automations falsely',
   'zone.remove': 'removing a place deletes it with its history',
   'board.flash': 'writing firmware replaces what a board runs',
+  'config.import':
+      'restoring a backup replaces the home, and only you choose to',
 };
 
 /// Globals the engine keeps for itself (presence and Wi-Fi, which rules
@@ -159,7 +170,7 @@ String? agentRefusal(
 String _needsSetup(String command) =>
     '$command sets the home up, which needs the user to allow it: in the app, '
     'Settings, Claude and agents, What agents can do, choose Set up '
-    'everything (or run omni agent access setup)';
+    'everything (or run omni agent allow setup)';
 
 /// The discovery methods an agent may use: none opens a USB port.
 const agentFindMethods = ['udp_broadcast', 'mdns', 'tuya_broadcast', 'hello'];
@@ -170,8 +181,10 @@ const agentFindMethods = ['udp_broadcast', 'mdns', 'tuya_broadcast', 'hello'];
 Map<String, Object?> agentArgs(String command, Map<String, Object?> args) =>
     switch (command) {
       'automation.save' ||
+      'flow.save' ||
       'scene.save' ||
       'link.create' => {...args, 'trusted': false},
+      'device.invoke' => {...args, 'allowPairing': false},
       _ when command.startsWith('tv.') || command == 'device.refresh' => {
         ...args,
         'allowPairing': false,

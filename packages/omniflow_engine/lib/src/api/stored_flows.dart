@@ -255,7 +255,9 @@ class StoredFlows {
     _core.setIssues('flow', issues);
   }
 
-  Future<FlowReferences> references() async {
+  /// What a flow may name. [homeLocationSet] says whether home will have a
+  /// location, for an import that brings one; else the engine's own.
+  Future<FlowReferences> references({bool? homeLocationSet}) async {
     final devices = {
       for (final d in await DriftDeviceStore(_db).all())
         d.id: manifestFor(_registry, d),
@@ -265,6 +267,7 @@ class StoredFlows {
     };
     final (_, specs, _) = await stored();
     return FlowReferences(
+      homeLocationSet: homeLocationSet ?? _flows.homeLocation != null,
       devices: devices.keys.toSet(),
       flows: {
         for (final f in await DriftFlowStore(_db).all()) f.json['id'] as String,
@@ -332,11 +335,16 @@ class StoredFlows {
       for (final d in await DriftDeviceStore(_db).all()) d.id: d.driverId,
     };
     bool drivesRisk(NodeSpec n) {
+      // A web request can reach anything on the network, with what the
+      // rule knows, so it is the user's to approve.
+      if (n.type == 'http_request') return true;
       if (n.type != 'device_capability' && n.type != 'device_toggle') {
         return false;
       }
       final manifest = _registry[drivers[n.config['deviceId']] ?? ''];
-      if (manifest == null) return false;
+      // A device that is gone (or whose driver is) may come back as one
+      // that runs commands, so the step keeps needing approval until then.
+      if (manifest == null) return true;
       if (manifest.isHighRisk) return true;
       final capability = manifest.capability('${n.config['capabilityId']}');
       return capability != null && capabilityIsHighRisk(manifest, capability);

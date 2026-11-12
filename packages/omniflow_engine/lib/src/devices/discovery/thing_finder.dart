@@ -288,6 +288,48 @@ String suggestThingName(DriverManifest driver, DiscoveredDevice d) {
   return '$kind ${short.toUpperCase()}';
 }
 
+/// The `_adb._tcp` instance name an Android TV announces, which the old
+/// namer kept as the thing's name: `adb-<serial>` and a random suffix.
+final _adbInstance = RegExp(r'^adb-[A-Za-z0-9]+(-[A-Za-z0-9]+)?$');
+
+/// Today's suggested name for [device] when its name is still the default
+/// the namer gave before finds were named by what they are, else null. The
+/// old default was the driver's name and the end of the stable id or
+/// address (`Philips WiZ Light (local UDP) 000001`), or for an Android TV
+/// the adb instance it announced. Any other name is the user's.
+String? renamedOldDefaultName(DriverManifest driver, Device device) {
+  final find = DiscoveredDevice(
+    host: device.host,
+    stableId: device.stableId,
+    reply: const {},
+  );
+  final String renamed;
+  if (device.name == '${driver.name} ${_tail(find)}') {
+    renamed = suggestThingName(driver, find);
+  } else if (driver.id == 'android_tv_adb' &&
+      _adbInstance.hasMatch(device.name)) {
+    renamed = suggestThingName(
+      driver,
+      DiscoveredDevice(
+        host: device.host,
+        // The serial tells TVs apart, the random suffix does not.
+        stableId:
+            device.stableId ??
+            device.name.substring(
+              0,
+              device.name.length -
+                  (_adbInstance.firstMatch(device.name)!.group(1)?.length ?? 0),
+            ),
+        name: device.name,
+        reply: const {},
+      ),
+    );
+  } else {
+    return null;
+  }
+  return renamed == device.name ? null : renamed;
+}
+
 String _tail(DiscoveredDevice d) {
   final id = d.stableId;
   if (id != null && id.isNotEmpty) {

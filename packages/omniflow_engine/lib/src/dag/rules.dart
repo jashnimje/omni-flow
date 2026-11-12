@@ -5,8 +5,25 @@ import '../devices/device_service.dart' show stateKeyOf;
 import 'flow.dart';
 import 'node_types.dart';
 import 'rule_shorthand.dart';
+import 'web_request.dart' show webAddressOk, webMethods;
+import 'sun.dart';
 
 export 'rule_shorthand.dart' show RuleContext;
+
+/// A sun trigger `{sun, offset?, days?}` in words: "30 min before sunset
+/// on sat, sun".
+String sunTriggerLabel(Map<String, Object?> t) {
+  final offset = t['offset'] is int ? t['offset'] as int : 0;
+  final minutes = offset.abs();
+  final amount = minutes % 60 == 0 && minutes > 0
+      ? '${minutes ~/ 60} h'
+      : '$minutes min';
+  final when = offset == 0
+      ? 'at ${t['sun']}'
+      : '$amount ${offset < 0 ? 'before' : 'after'} ${t['sun']}';
+  final days = t['days'];
+  return '$when${days is List ? ' on ${days.join(', ')}' : ''}';
+}
 
 /// A rule: when one of these, only if all of these, then these steps.
 ///
@@ -39,7 +56,7 @@ abstract final class RuleKeys {
     'enabled',
     'stopOnError',
   ];
-  static const triggers = ['on', 'time', 'interval', 'manual'];
+  static const triggers = ['on', 'time', 'sun', 'interval', 'manual'];
   static const onModes = ['event', 'change', 'crosses'];
   static const conditions = [
     'state',
@@ -61,6 +78,7 @@ abstract final class RuleKeys {
     'repeat',
     'try',
     'notify',
+    'http',
     'set',
     'run',
     'keep',
@@ -307,6 +325,25 @@ class _Normalizer {
       }
       if (map['days'] != null) _dayList(map['days'], '$path.days');
       return {'time': time, 'days': ?map['days']};
+    }
+    if (map.containsKey('sun')) {
+      _only(map, path, {'sun', 'offset', 'days'}, 'a sun trigger');
+      if (SunEvent.parse(map['sun']) == null) {
+        issues.add('$path.sun', 'must be sunrise or sunset');
+      }
+      final offset = map['offset'];
+      if (offset != null &&
+          (offset is! int ||
+              offset < -sunOffsetLimit ||
+              offset > sunOffsetLimit)) {
+        issues.add(
+          '$path.offset',
+          'must be whole minutes from -$sunOffsetLimit to $sunOffsetLimit '
+              '(negative is before)',
+        );
+      }
+      if (map['days'] != null) _dayList(map['days'], '$path.days');
+      return {'sun': map['sun'], 'offset': ?offset, 'days': ?map['days']};
     }
     if (map.containsKey('interval')) {
       _only(map, path, {'interval'}, 'an interval trigger');
@@ -567,6 +604,9 @@ class _Normalizer {
           return null;
         }
         return {'notify': Map<String, Object?>.from(payload)};
+      case 'http':
+        _only(map, path, {'http'}, 'a web request step');
+        return _http(map['http'], '$path.http', issues);
       case 'set':
         _only(map, path, {'set'}, 'a set step');
         final s = map['set'];
@@ -882,6 +922,27 @@ class _Compiler {
         row: row,
       );
     }
+    if (t.containsKey('sun')) {
+      return add(
+        id,
+        'sun',
+        sunTriggerLabel(t),
+        {
+          'event': t['sun'],
+          if (t['offset'] case final int offset when offset != 0)
+            'offsetMinutes': offset,
+          'days': ?t['days'],
+        },
+        {
+          '': path,
+          'event': '$path.sun',
+          'offsetMinutes': '$path.offset',
+          'days': '$path.days',
+        },
+        col: 0,
+        row: row,
+      );
+    }
     if (t.containsKey('interval')) {
       return add(
         id,
@@ -1178,7 +1239,8 @@ class _Compiler {
       return [(id, 'done')];
     }
     if (s.containsKey('try')) {
-      // Every device step inside it sends a failure to `otherwise`, which
+      // Every step inside it that can fail (a device, another automation,
+      // a notification, a variable) sends the failure to `otherwise`, which
       // then takes the place of the rest of the try.
       final first = nodes.length;
       final tried = steps(
@@ -1197,8 +1259,7 @@ class _Compiler {
       );
       final failed = [
         for (final n in nodes.skip(first))
-          if ((n['type'] == 'device_capability' ||
-                  n['type'] == 'device_toggle') &&
+          if (_failingSteps.contains(n['type']) &&
               own.hasMatch(origins['${n['id']}']?[''] ?? ''))
             ('${n['id']}', 'error'),
       ];
@@ -1241,6 +1302,13 @@ class _Compiler {
       final n = Map<String, Object?>.from(s['notify'] as Map);
       node('notify', 'notify ${n['title']}', n, {
         for (final k in n.keys) k: '$path.notify.$k',
+      });
+      return [(id, 'out')];
+    }
+    if (s.containsKey('http')) {
+      final h = Map<String, Object?>.from(s['http'] as Map);
+      node('http_request', '${h['method'] ?? 'GET'} ${h['url']}', h, {
+        for (final k in h.keys) k: '$path.http.$k',
       });
       return [(id, 'out')];
     }
@@ -1457,4 +1525,47 @@ class _Compiler {
       : ms % 1000 == 0
       ? '${ms ~/ 1000} s'
       : '$ms ms';
+}
+
+/// The node types whose `error` port a try sends to its `otherwise`.
+const _failingSteps = {
+  'device_capability',
+  'device_toggle',
+  'run_flow',
+  'notify',
+  'set_variable',
+  'speak',
+  'http_request',
+};
+
+/// `{"http": {"url", "method"?, "headers"?, "body"?}}`, checked: an
+/// http or https address, a known method, text headers.
+Map<String, Object?>? _http(Object? h, String at, IssueCollector issues) {
+  if (h is! Map) {
+    issues.add(at, 'must be {"url": "https://...", "method": "POST", ...}');
+    return null;
+  }
+  final out = Map<String, Object?>.from(h);
+  for (final k in out.keys) {
+    if (!const {'url', 'method', 'headers', 'body'}.contains(k)) {
+      issues.add('$at.$k', 'is not part of a web request step');
+    }
+  }
+  final url = out['url'];
+  if (url is! String || !webAddressOk(url)) {
+    issues.add('$at.url', 'must be an http:// or https:// address');
+  }
+  final method = out['method'];
+  if (method != null &&
+      (method is! String || !webMethods.contains(method.toUpperCase()))) {
+    issues.add('$at.method', 'must be ${webMethods.join(', ')}');
+  } else if (method is String) {
+    out['method'] = method.toUpperCase();
+  }
+  final headers = out['headers'];
+  if (headers != null &&
+      (headers is! Map || headers.values.any((v) => v is! String))) {
+    issues.add('$at.headers', 'must be names to text values');
+  }
+  return {'http': out};
 }

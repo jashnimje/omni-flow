@@ -192,6 +192,8 @@ void main() {
       final removed = await ok('tag.remove', {'id': 'desk'});
       expect(removed['removed'], isTrue);
       expect(removed['flows'], ['desk_flow']);
+      final again = await err('flow.enable', {'id': 'desk_flow'});
+      expect(again['type'], 'invalid', reason: 'its tag is gone');
       expect((await ok('tag.list', {}))['tags'], isEmpty);
       expect((await err('tag.remove', {'id': 'desk'}))['type'], 'not_found');
       await ok('device.add', {'id': 'lamp', 'driver': 'phone'});

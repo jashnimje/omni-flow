@@ -175,6 +175,11 @@ class FlowCommands {
     final record = await DriftFlowStore(_db).get(id);
     if (record == null) throw ApiError('not_found', 'no flow $id');
     final enabled = args['enabled'] != false;
+    // A thing it uses may have been removed since it was saved (which
+    // turned it off), so turning it back on checks it again.
+    if (enabled) {
+      await checked(StoredFlows.flowJsonOf(record), subject: 'automation $id');
+    }
     await _stored.put(
       id,
       {...StoredFlows.flowJsonOf(record), 'enabled': enabled},

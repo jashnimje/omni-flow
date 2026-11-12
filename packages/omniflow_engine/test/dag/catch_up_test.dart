@@ -125,4 +125,69 @@ void main() {
       DateTime(2026, 11, 8, 1, 0),
     );
   });
+
+  group('a sun trigger', () {
+    const HomeLocation london = (latitude: 51.5074, longitude: -0.1278);
+    final sunset = sunEventUtc(2026, 6, 21, SunEvent.sunset, 51.5074, -0.1278)!;
+
+    FlowSpec sunFlow() => FlowSpec.parse({
+      'schemaVersion': 1,
+      'id': 'dusk',
+      'name': 'Dusk',
+      'nodes': [
+        {
+          'id': 'when',
+          'type': 'sun',
+          'config': {'event': 'sunset'},
+        },
+        {
+          'id': 'say',
+          'type': 'notify',
+          'config': {'title': 'Dusk'},
+        },
+      ],
+      'edges': [
+        {
+          'id': 'e1',
+          'from': {'node': 'when', 'port': 'out'},
+          'to': {'node': 'say', 'port': 'in'},
+        },
+      ],
+    });
+
+    Future<List<Map<String, Object?>>> startAt(
+      DateTime now, {
+      HomeLocation? home = london,
+      bool ran = false,
+    }) async {
+      final host = _Host(ran: ran);
+      final engine = FlowEngine(host, clock: InstantFlowClock(now))
+        ..homeLocation = home
+        ..load([sunFlow()])
+        ..startTimers();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await engine.close();
+      return host.traces;
+    }
+
+    test('missed during a restart runs once, like a daily time', () async {
+      final traces = await startAt(sunset.add(const Duration(minutes: 5)));
+      expect(traces, hasLength(1));
+      final input = ((traces.single['nodes'] as List).first as Map)['input'];
+      expect(input, containsPair('caughtUp', true));
+      expect(input, containsPair('scheduled', sunset.toIso8601String()));
+    });
+
+    test('long past, already run, or with no home, is not run', () async {
+      expect(await startAt(sunset.add(const Duration(minutes: 30))), isEmpty);
+      expect(
+        await startAt(sunset.add(const Duration(minutes: 5)), ran: true),
+        isEmpty,
+      );
+      expect(
+        await startAt(sunset.add(const Duration(minutes: 5)), home: null),
+        isEmpty,
+      );
+    });
+  });
 }

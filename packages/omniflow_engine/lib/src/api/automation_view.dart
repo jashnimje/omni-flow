@@ -1,4 +1,5 @@
 import '../dag/node_types.dart';
+import '../dag/rules.dart' show sunTriggerLabel;
 import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../storage/database.dart';
@@ -88,6 +89,10 @@ class SentenceContext {
     if (t['time'] != null) {
       final days = t['days'];
       return 'At ${t['time']}${days is List ? ' on ${days.join(', ')}' : ''}';
+    }
+    if (t['sun'] != null) {
+      final label = sunTriggerLabel(t);
+      return '${label[0].toUpperCase()}${label.substring(1)}';
     }
     if (t['interval'] != null) return 'Every ${seconds(t['interval'])}';
     return 'When I run it';
@@ -239,6 +244,11 @@ class SentenceContext {
       return 'repeat ${how.join(', ')}: $body';
     }
     if (s['notify'] is Map) return 'notify "${(s['notify'] as Map)['title']}"';
+    if (s['http'] is Map) {
+      final h = s['http'] as Map;
+      final host = Uri.tryParse('${h['url']}')?.host ?? '${h['url']}';
+      return 'send a web request to $host';
+    }
     if (s['set'] is Map) {
       final set = s['set'] as Map;
       return 'set ${set['var']} to ${value(set['value'])}';

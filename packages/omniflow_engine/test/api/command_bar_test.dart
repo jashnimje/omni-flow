@@ -37,6 +37,16 @@ void main() {
     expect((read('desk lamp off')['args'] as Map)['params'], {'value': false});
   });
 
+  test('a TV turns on and off with wake and sleep', () {
+    final tv = CommandDevice('tv', 'TV', registry['android_tv_adb']!);
+    String? capability(String line) =>
+        (interpretCommand(line, [tv], const []).toJson()['args']
+                as Map?)?['capability']
+            as String?;
+    expect(capability('tv on'), 'wake');
+    expect(capability('TV off'), 'sleep');
+  });
+
   test('the longest matching name wins', () {
     expect((read('desk on')['args'] as Map)['id'], 'desk');
     expect((read('desk lamp on')['args'] as Map)['id'], 'desk_lamp');

@@ -693,6 +693,85 @@ void main() {
     expect(words.action('tv.power', null), 'TV power key');
   });
 
+  group('web request step', () {
+    Map<String, Object?> rule(Map<String, Object?> http) => {
+      'name': 'Tell the Mac',
+      'when': ['manual'],
+      'then': [
+        {
+          'try': [
+            {'http': http},
+          ],
+          'otherwise': ['notify:no answer'],
+        },
+      ],
+    };
+
+    Future<(List<String>, _FakeWeb)> ran(
+      Map<String, Object?> http, {
+      int status = 200,
+      bool dry = false,
+    }) async {
+      final web = _FakeWeb(status);
+      final runner = FlowRunner(
+        FlowSpec.parse(
+          compileRule(normalizeRule(rule(http), context: context)).flow,
+        ),
+        _NoEffects()..globals['Mood'] = 'cosy',
+        clock: InstantFlowClock(DateTime(2026)),
+        web: web,
+      );
+      final trace = dry
+          ? await runner.fire('when_0', {}, dryRun: true)
+          : await runner.fire('when_0', {});
+      return ([for (final n in trace.nodes) '${n.nodeId}:${n.port}'], web);
+    }
+
+    test('sends the method, headers and a JSON body with variables', () async {
+      final (ports, web) = await ran({
+        'url': 'http://192.168.1.20:8080/mood',
+        'method': 'post',
+        'headers': {'x-key': 'abc'},
+        'body': {'mood': r'{{$Mood}}'},
+      });
+      expect(ports.last, 'then_0_try_0:out');
+      expect(web.sent.single.method, 'POST');
+      expect('${web.sent.single.url}', 'http://192.168.1.20:8080/mood');
+      expect(web.sent.single.headers, {
+        'x-key': 'abc',
+        'content-type': 'application/json',
+      });
+      expect(web.sent.single.body, '{"mood":"cosy"}');
+    });
+
+    test('a refusal fails the step, so otherwise runs', () async {
+      final (ports, _) = await ran({'url': 'https://x.test/'}, status: 503);
+      expect(ports, [
+        'when_0:out',
+        'then_0_try_0:error',
+        'then_0_otherwise_0:out',
+      ]);
+    });
+
+    test('a dry run sends nothing', () async {
+      final (ports, web) = await ran({'url': 'https://x.test/'}, dry: true);
+      expect(web.sent, isEmpty);
+      expect(ports.last, 'then_0_try_0:out');
+    });
+
+    test('only http and https, and known methods', () {
+      expect(
+        issuesOf(rule({'url': 'file:///etc/passwd'})).single['path'],
+        'then[0].try[0].http.url',
+      );
+      expect(
+        issuesOf(rule({'url': 'https://x.test', 'method': 'TRACE'}))
+            .single['path'],
+        'then[0].try[0].http.method',
+      );
+    });
+  });
+
   group('try and otherwise', () {
     final rule = normalizeRule({
       'name': 'Open a film app',
@@ -736,6 +815,32 @@ void main() {
         'then_0_otherwise_0:out',
         'then_1:out',
       ]);
+    });
+
+    test('a run step that fails runs otherwise too', () async {
+      final r = normalizeRule({
+        'name': 'Run fallback',
+        'when': ['manual'],
+        'then': [
+          {
+            'try': [
+              {'run': 'missing'},
+              'notify:ran',
+            ],
+            'otherwise': ['notify:fallback'],
+          },
+        ],
+      }, context: context);
+      final trace = await FlowRunner(
+        FlowSpec.parse(compileRule(r).flow),
+        _NoEffects(),
+        clock: InstantFlowClock(DateTime(2026)),
+      ).fire('when_0', {});
+      expect(trace.outcome, RunOutcome.completed);
+      expect(
+        [for (final n in trace.nodes) '${n.nodeId}:${n.port}'],
+        ['when_0:out', 'then_0_try_0:error', 'then_0_otherwise_0:out'],
+      );
     });
 
     test(
@@ -1006,7 +1111,9 @@ class _NoEffects implements FlowEffects {
   }
 
   @override
-  Future<void> runFlow(String flowId, Map<String, Object?> msg) async {}
+  Future<void> runFlow(String flowId, Map<String, Object?> msg) async {
+    if (flowId == 'missing') throw StateError('flow missing is not loaded');
+  }
 
   @override
   Future<void> setGlobal(String name, Object? value) async {}
@@ -1017,4 +1124,23 @@ class _NoEffects implements FlowEffects {
     String capabilityId, {
     String? flowId,
   }) async => null;
+}
+
+class _FakeWeb implements WebRequester {
+  _FakeWeb(this.status);
+
+  final int status;
+  final sent =
+      <({String method, Uri url, Map<String, String> headers, String? body})>[];
+
+  @override
+  Future<WebReply> send(
+    String method,
+    Uri url, {
+    Map<String, String> headers = const {},
+    String? body,
+  }) async {
+    sent.add((method: method, url: url, headers: headers, body: body));
+    return (status: status, body: {'ok': true});
+  }
 }

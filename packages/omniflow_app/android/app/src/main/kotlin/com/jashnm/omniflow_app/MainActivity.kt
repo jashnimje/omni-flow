@@ -3,6 +3,7 @@ package com.jashnm.omniflow_app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.Uri
 import android.provider.Settings
 import android.nfc.NfcAdapter
@@ -72,6 +73,7 @@ class MainActivity : FlutterActivity() {
                 "wifiName" -> askForLocation(result)
                 "wifiNameAlways" -> askForLocationAlways(result)
                 "localNetwork" -> askForLocalNetwork(result)
+                "lastLocation" -> result.success(lastLocation())
                 "status" -> result.success(
                     mapOf(
                         "location" to granted(Manifest.permission.ACCESS_FINE_LOCATION),
@@ -173,6 +175,28 @@ class MainActivity : FlutterActivity() {
 
     private fun granted(permission: String) =
         checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Where the phone last was, for sunrise and sunset at home: the newest
+     * fix any provider kept, so nothing turns on GPS. Null without the
+     * location permission or with no fix yet.
+     */
+    private fun lastLocation(): Map<String, Double>? {
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION) &&
+            !granted(Manifest.permission.ACCESS_COARSE_LOCATION)
+        ) {
+            return null
+        }
+        val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val best = try {
+            manager.getProviders(true)
+                .mapNotNull { manager.getLastKnownLocation(it) }
+                .maxByOrNull { it.time }
+        } catch (_: SecurityException) {
+            null
+        } ?: return null
+        return mapOf("latitude" to best.latitude, "longitude" to best.longitude)
+    }
 
     /**
      * Whether this Android has the local network permission. It arrived with

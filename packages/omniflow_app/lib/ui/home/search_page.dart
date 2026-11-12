@@ -105,12 +105,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   /// The engine explains a line it half understood. Its generic answer
-  /// points at the architect, which the app does not have yet.
+  /// is for an AI the app does not have, so it gets examples instead.
   static String _askText(Json read) {
     final summary = read['summary'];
     return summary is String && summary != 'Ask the architect'
         ? summary
-        : 'Not a device or flow command. The architect is not set up yet.';
+        : 'Nothing to do for that. Try a device and what to do, like '
+              '"desk lamp 50%" or "tv off", or "run" and an automation.';
   }
 
   void _fill(String text) {

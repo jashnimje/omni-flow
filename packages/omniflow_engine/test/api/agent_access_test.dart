@@ -111,6 +111,30 @@ void main() {
       );
     });
 
+    test('a backup and the home location need setup, a restore the user', () {
+      for (final command in [
+        'config.export',
+        'home.location',
+        'home.location.set',
+      ]) {
+        expect(agentReadCommands, isNot(contains(command)));
+        expect(
+          agentRefusal(command, const {}, AgentAccess.read),
+          contains('Set up everything'),
+          reason: command,
+        );
+        expect(
+          agentRefusal(command, const {}, AgentAccess.setup),
+          isNull,
+          reason: command,
+        );
+      }
+      expect(
+        agentRefusal('config.import', const {}, AgentAccess.setup),
+        contains('for the user only'),
+      );
+    });
+
     test('saves are untrusted and TV calls never pair', () {
       expect(
         agentArgs('automation.save', const {'trusted': true})['trusted'],
@@ -195,6 +219,16 @@ void main() {
       expect((await engine.handle('agent.access', {}))['access'], 'read');
     });
 
+    test('an agent exports only at setup and never restores', () async {
+      final atRead = await call('config.export');
+      expect((atRead['error'] as Map)['type'], 'needs_user');
+      await engine.handle('agent.access.set', {'access': 'setup'});
+      final backup = await call('config.export');
+      expect(backup['ok'], isTrue, reason: '$backup');
+      final restore = await call('config.import', {'backup': backup['backup']});
+      expect((restore['error'] as Map)['type'], 'needs_user');
+    });
+
     test('an agent rule saves untrusted, and a plain one goes live', () async {
       await engine.handle('agent.access.set', {'access': 'setup'});
       final saved = await call('automation.save', {
@@ -258,6 +292,51 @@ void main() {
         expect('${(r['error'] as Map)['message']}', contains('only you'));
       },
     );
+
+    test('an agent rule with a web request waits for approval', () async {
+      await engine.handle('agent.access.set', {'access': 'setup'});
+      final saved = await call('automation.save', {
+        'form': 'rule',
+        'spec': {
+          'name': 'Ping',
+          'when': ['manual'],
+          'then': [
+            {
+              'http': {'url': 'https://example.test/hook', 'method': 'POST'},
+            },
+          ],
+        },
+      });
+      expect(saved['highRisk'], isTrue, reason: '$saved');
+      expect(saved['approved'], isFalse);
+    });
+
+    test('an agent rule stays high risk after its device is removed', () async {
+      await engine.handle('device.add', {
+        'id': 'mac_mini',
+        'name': 'Mac mini',
+        'driver': 'macos_host',
+        'host': '192.0.2.1',
+      });
+      await engine.handle('agent.access.set', {'access': 'setup'});
+      final saved = await call('automation.save', {
+        'form': 'rule',
+        'spec': {
+          'name': 'Mac sleeps',
+          'when': ['manual'],
+          'then': ['mac_mini.display_sleep'],
+        },
+      });
+      expect(saved['approved'], isFalse, reason: '$saved');
+      await engine.handle('device.remove', {'id': 'mac_mini'});
+      await call('automation.enable', {'id': saved['id']});
+      final list = await engine.handle('automation.list', {});
+      final rule = (list['automations'] as List).cast<Map>().singleWhere(
+        (a) => a['id'] == saved['id'],
+      );
+      expect(rule['highRisk'], isTrue, reason: '$rule');
+      expect(rule['approved'], isFalse);
+    });
 
     test('describe gives the whole setup in one reply', () async {
       final d = await engine.handle('agent.describe', {});

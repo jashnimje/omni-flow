@@ -10,6 +10,7 @@ import '../add/pair_sheet.dart';
 import '../automations/automations.dart';
 import '../boards/pin_sheet.dart';
 import '../design/design.dart';
+import 'host_key_sheet.dart';
 import '../home/home_data.dart';
 import '../settings/developer_page.dart';
 import '../shell/shell.dart';
@@ -227,6 +228,25 @@ class UsedInSection extends ConsumerWidget {
         : then.join(', then ');
   }
 
+  /// A new rule that already turns [d] on, when it can be, so only the
+  /// trigger is left to pick.
+  static Json _startWith(DeviceView d) {
+    final toggle = d.capabilityOf('toggle');
+    final wake = d.capabilities.where((c) => c['id'] == 'wake').firstOrNull;
+    final step = toggle != null
+        ? {
+            'do': '${d.id}.${toggle['id']}',
+            'params': {'value': true},
+          }
+        : wake != null
+        ? {'do': '${d.id}.wake'}
+        : null;
+    return {
+      'name': '${d.name} automation',
+      'then': [?step],
+    };
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final used = ref.watch(usedInProvider(device.id)).value;
@@ -238,9 +258,13 @@ class UsedInSection extends ConsumerWidget {
           device.online ? 'Used in' : 'Automations that use it',
         ),
         if (used.isEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(2, 0, 2, 8),
-            child: Text('No automation uses it yet.', style: OmniText.caption),
+          OmniListRow(
+            key: ValueKey('used-in-new-${device.id}'),
+            icon: OmniIcons.add,
+            title: 'Make an automation with it',
+            subtitle: 'No automation uses it yet',
+            chevron: true,
+            onTap: () => openRuleEditor(context, spec: _startWith(device)),
           ),
         for (final a in used)
           OmniListRow(
@@ -340,6 +364,14 @@ class DeviceSection extends ConsumerWidget {
           chevron: true,
           onTap: () => _details(context, ref, d),
         ),
+        if (usesSsh(d))
+          OmniListRow(
+            key: ValueKey('device-hostkey-${d.id}'),
+            title: 'SSH host key',
+            subtitle: 'check it, or trust a new one after a reinstall',
+            chevron: true,
+            onTap: () => showHostKeySheet(context, d),
+          ),
         const SizedBox(height: OmniSpace.lg),
         OmniButton.danger(
           key: ValueKey('device-remove-${d.id}'),
@@ -357,7 +389,7 @@ class DeviceSection extends ConsumerWidget {
     WidgetRef ref,
     DeviceView d,
   ) async {
-    final name = TextEditingController(text: d.name);
+    final name = ReplaceableText(d.name);
     final settings = await showOmniSheet<bool>(
       context,
       builder: (sheet) => OmniSheet(
@@ -366,6 +398,7 @@ class DeviceSection extends ConsumerWidget {
           TextField(
             key: const ValueKey('device-name-field'),
             controller: name,
+            onTap: name.firstTap,
             decoration: const InputDecoration(labelText: 'Name'),
           ),
           const SizedBox(height: OmniSpace.sm),

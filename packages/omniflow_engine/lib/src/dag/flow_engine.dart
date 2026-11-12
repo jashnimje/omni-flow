@@ -4,6 +4,7 @@ import 'canonical.dart';
 import 'conditions.dart';
 import 'executor.dart';
 import 'flow.dart';
+import 'sun.dart';
 
 /// Everything the flow engine needs from the rest of the engine.
 abstract interface class FlowHost {
@@ -108,7 +109,22 @@ class FlowEngine implements FlowEffects {
     return failures;
   }
 
-  /// Starts time_of_day and interval triggers (the hub calls this).
+  HomeLocation? _home;
+
+  /// Where home is, for sun triggers. Null until the user sets it, and a
+  /// sun trigger then never fires.
+  HomeLocation? get homeLocation => _home;
+
+  /// Moves home, and reschedules every running sun trigger to it.
+  set homeLocation(HomeLocation? home) {
+    _home = home;
+    if (!_timersOn) return;
+    for (final r in _runners.values) {
+      if (r.flow.nodes.any((n) => n.type == 'sun')) _startTimers(r);
+    }
+  }
+
+  /// Starts time_of_day, sun and interval triggers (the hub calls this).
   void startTimers() {
     if (_timersOn) return;
     _timersOn = true;
@@ -309,19 +325,42 @@ class FlowEngine implements FlowEffects {
         _timers
             .putIfAbsent(r.flow.id, () => [])
             .add(Timer.periodic(every, (_) => _fire(r, n, {})));
-      } else if (n.type == 'time_of_day') {
+      } else if (n.type == 'time_of_day' || n.type == 'sun') {
         _scheduleDaily(r, n);
       }
     }
   }
 
+  /// When the daily trigger [n] fires next after [now], or with [previous]
+  /// when it last fired at or before [now]. Null when it never does: a sun
+  /// trigger with no home set, or a polar night or day.
+  DateTime? _dailyTime(NodeSpec n, DateTime now, {bool previous = false}) {
+    final days = (n.config['days'] as List?)?.cast<String>();
+    if (n.type == 'time_of_day') {
+      final at = n.config['at'] as String;
+      return previous
+          ? previousTimeOfDay(now, at, days: days)
+          : nextTimeOfDay(now, at, days: days);
+    }
+    final home = _home;
+    final event = SunEvent.parse(n.config['event']);
+    if (home == null || event == null) return null;
+    final offset = (n.config['offsetMinutes'] as int?) ?? 0;
+    return previous
+        ? previousSunTrigger(
+            now,
+            event,
+            home,
+            offsetMinutes: offset,
+            days: days,
+          )
+        : nextSunTrigger(now, event, home, offsetMinutes: offset, days: days);
+  }
+
   void _scheduleDaily(FlowRunner r, NodeSpec n) {
     _catchUp(r, n);
-    final next = nextTimeOfDay(
-      _clock.now(),
-      n.config['at'] as String,
-      days: (n.config['days'] as List?)?.cast<String>(),
-    );
+    final next = _dailyTime(n, _clock.now());
+    if (next == null) return;
     final timer = Timer(next.difference(_clock.now()), () {
       final scheduled = next.toIso8601String();
       _track(() async {
@@ -338,12 +377,13 @@ class FlowEngine implements FlowEffects {
   /// and that has no run for it yet.
   void _catchUp(FlowRunner r, NodeSpec n) {
     final key = '${r.flow.id}/${n.id}';
-    if (!_caughtUp.add(key)) return;
     final now = _clock.now();
+    final last = _dailyTime(n, now, previous: true);
+    // A sun trigger with no home yet has nothing to catch up, and may once
+    // home is set.
+    if (last == null && n.type == 'sun' && _home == null) return;
+    if (!_caughtUp.add(key)) return;
     if (now.difference(_openedAt) > const Duration(minutes: 1)) return;
-    final at = n.config['at'] as String;
-    final days = (n.config['days'] as List?)?.cast<String>();
-    final last = previousTimeOfDay(now, at, days: days);
     if (last == null || now.difference(last) > catchUpWindow) return;
     final scheduled = last.toIso8601String();
     _track(() async {

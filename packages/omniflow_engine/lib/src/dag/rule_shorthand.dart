@@ -36,8 +36,9 @@ final _condition = RegExp(
 final _duration = RegExp(r'^(\d+)(ms|s|m|h)$');
 
 /// A trigger written as one string: `manual`, `time:18:00`,
-/// `time:07:00@mon,fri`, `every:30s`, `nfc:front_door`, `event:desk.button`,
-/// `home:entered`, `jade.home`, `jade.home=true`, `room.temp>28`.
+/// `time:07:00@mon,fri`, `sunset-30m`, `every:30s`, `nfc:front_door`,
+/// `event:desk.button`, `home:entered`, `jade.home`, `jade.home=true`,
+/// `room.temp>28`.
 Map<String, Object?> expandTrigger(String text, RuleContext context) {
   final s = text.trim();
   if (s == 'manual') return {'manual': true};
@@ -49,6 +50,25 @@ Map<String, Object?> expandTrigger(String text, RuleContext context) {
     return {
       'time': m.group(1),
       if (m.group(4) != null) 'days': _list(m.group(4)!),
+    };
+  }
+  // A thing may be called sunset_lamp, so only the bare word or the word
+  // with an offset or days is a sun trigger.
+  if (RegExp(r'^(sunrise|sunset)([+@-]|$)').hasMatch(s)) {
+    final m = RegExp(r'^(sunrise|sunset)(?:([+-])(\d+)(m|h))?(?:@(.+))?$')
+        .firstMatch(s);
+    if (m == null) {
+      throw ShorthandException(
+        'sun is sunset, sunset-30m or sunrise+1h@mon,fri',
+      );
+    }
+    final amount = m.group(3) == null
+        ? 0
+        : int.parse(m.group(3)!) * (m.group(4) == 'h' ? 60 : 1);
+    return {
+      'sun': m.group(1),
+      if (amount != 0) 'offset': m.group(2) == '-' ? -amount : amount,
+      if (m.group(5) != null) 'days': _list(m.group(5)!),
     };
   }
   if (s.startsWith('every:')) {

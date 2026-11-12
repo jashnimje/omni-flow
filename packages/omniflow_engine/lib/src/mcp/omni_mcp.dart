@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
 
-import '../api/agent_policy.dart';
 import '../api/local_client.dart';
 import '../api/omni_engine.dart';
 import '../version.dart';
@@ -130,15 +129,15 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
           );
         }
       }
-      final result = await engine.handle('device.invoke', {
+      final result = await asAgent('device.invoke', {
         'id': args['deviceId'],
         'capability': args['capabilityId'],
         'params': args['params'] ?? const {},
-        'allowPairing': false,
       });
       // The engine's own message also offers Pair in the app, which pairs
       // the phone's engine, not this one.
-      if (result['error'] case {'type': 'needs_user'}) {
+      if (result['error'] case {'type': 'needs_user', 'message': final String m}
+          when m.contains('pair')) {
         return refuse('needs_user', _pairCommandFor('${args['deviceId']}'));
       }
       return reply(result);
@@ -163,6 +162,15 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         return refuse(
           'needs_user',
           'this driver runs host commands, so only the user can register it',
+        );
+      }
+      // A new driver adds things an agent can then drive: setup, not read.
+      final access = await engine.handle('agent.access', {});
+      if (access['access'] != 'setup') {
+        return refuse(
+          'needs_user',
+          'registering a driver needs setup access. Ask the user to run '
+              'omni agent allow setup',
         );
       }
       // Replacing a user driver changes what that user's devices and
@@ -194,12 +202,8 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       properties: {'flow': freeObject},
       required: ['flow'],
     ),
-    callback: (args, _) async => reply(
-      await engine.handle('flow.save', {
-        'flow': args['flow'],
-        'trusted': false,
-      }),
-    ),
+    callback: (args, _) async =>
+        reply(await asAgent('flow.save', {'flow': args['flow']})),
   );
 
   server.registerTool(
@@ -223,8 +227,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       },
       required: ['from', 'to', 'mode'],
     ),
-    callback: (args, _) async =>
-        reply(await engine.handle('link.create', {...args, 'trusted': false})),
+    callback: (args, _) async => reply(await asAgent('link.create', args)),
   );
 
   server.registerTool(
@@ -277,6 +280,8 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'A trigger is {on: "thing.key", event: true, match?} (an event like front_door.scanned), '
         '{on: "thing.key", change: {to?: value}} (a state change, like jade.home to true), '
         '{on: "thing.key", crosses: {above | below: number}}, {time: "HH:MM", days?: ["mon", ...]}, '
+        '{sun: "sunrise" | "sunset", offset?: minutes (negative is before), days?} (needs home.location.set '
+        'first, describe_omniflow says homeLocationSet; no sunrise on a polar day or night means no run), '
         '{interval: seconds} or {manual: true}. Several triggers start the same steps. '
         'A condition is {state: "thing.key" | var: "\$Name" | msg: "key", op: "==" | "!=" | "<" | '
         '"<=" | ">" | ">=", value}, {between: ["HH:MM", "HH:MM"]}, {days: [...]}, {not: condition}, '
@@ -287,15 +292,17 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         '{together: [[steps], [steps]]} (side by side, then on), '
         '{repeat: {do: [steps], times?: 1-1000, until?: [conditions], every?: ms}} (checks '
         'until before each pass, needs times or until), '
-        '{try: [steps], otherwise?: [steps]} (a device step in try that fails runs otherwise '
+        '{try: [steps], otherwise?: [steps]} (a step in try that fails runs otherwise '
         'instead of the rest), {notify: {title}}, '
+        '{http: {url, method?, headers?, body?}} (a web request: a 4xx or 5xx reply fails the '
+        'step, and a rule with one waits for the user to approve it), '
         '{set: {var: "\$Name", value}}, {run: "automation_id"}, or last in then '
         '{keep: {target: "thing.action", value, while: [conditions], release?}}, which holds the '
         'value while the conditions hold and sends release (the opposite of a true or false value '
         'when left out, nothing when null) once they stop; a rule of keep steps alone needs no '
         'when. A failed step is logged and the rest still run unless the rule sets '
         'stopOnError: true. Shorthand strings work in any list: '
-        '"home:entered", "nfc:front_door", "time:18:00", "lamp.power=true", "wait:2s", '
+        '"home:entered", "nfc:front_door", "time:18:00", "sunset-30m", "lamp.power=true", "wait:2s", '
         '"notify:Welcome home". Issues come back at rule paths like then[2].do. A rule whose id '
         '(from its name) another rule has is refused with exists: give it another name. Saved untrusted: '
         'a rule that drives a host-command device waits for the user to approve it.',
@@ -304,11 +311,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['rule'],
     ),
     callback: (args, _) async => reply(
-      await engine.handle('automation.save', {
-        'form': 'rule',
-        'spec': args['rule'],
-        'trusted': false,
-      }),
+      await asAgent('automation.save', {'form': 'rule', 'spec': args['rule']}),
     ),
   );
 
@@ -327,12 +330,9 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       },
     ),
     callback: (args, _) async => reply(
-      await engine.handle('thing.add', {
+      await asAgent('thing.add', {
         if (args['windowMs'] != null) 'windowMs': args['windowMs'],
         if (args['drivers'] != null) 'drivers': args['drivers'],
-        // Opening a USB port resets an ESP32 or an Uno, which an agent
-        // must not do to a board that is running.
-        'methods': agentFindMethods,
       }),
     ),
   );

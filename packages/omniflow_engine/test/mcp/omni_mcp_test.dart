@@ -39,6 +39,8 @@ void _tools({required bool viaHub}) {
       secrets: InMemorySecretStore(),
       tap: tap,
     );
+    // These tests are of an agent the user allowed to set the home up.
+    await engine.handle('agent.access.set', {'access': 'setup'});
     await engine.handle('device.add', {
       'id': 'desk_lamp',
       'driver': 'philips_wiz_udp',
@@ -88,6 +90,56 @@ void _tools({required bool viaHub}) {
     Map<String, dynamic> args = const {},
   ]) => client.callTool(CallToolRequest(name: name, arguments: args));
 
+  test('at read access every tool that changes the home is refused', () async {
+    await engine.handle('agent.access.set', {'access': 'read'});
+    Future<String?> refused(String tool, Map<String, dynamic> args) async {
+      final r = await call(tool, args);
+      final text = (r.content.first as TextContent).text;
+      return r.isError == true && text.contains('needs_user') ? tool : text;
+    }
+
+    expect(
+      await Future.wait([
+        refused('invoke_device_capability', {
+          'deviceId': 'desk_lamp',
+          'capabilityId': 'power',
+          'params': {'value': true},
+        }),
+        refused('create_rule', {
+          'rule': {
+            'name': 'Lamp on',
+            'when': ['manual'],
+            'then': ['desk_lamp.power=true'],
+          },
+        }),
+        refused('link_devices', {
+          'from': 'desk_lamp.power',
+          'to': 'desk_lamp.power',
+          'mode': 'follow',
+        }),
+        refused('find_things', {'windowMs': 100}),
+      ]),
+      [
+        'invoke_device_capability',
+        'create_rule',
+        'link_devices',
+        'find_things',
+      ],
+    );
+    expect(
+      (await engine.handle('automation.list', {}))['automations'],
+      isEmpty,
+    );
+  });
+
+  test('a high-risk capability is refused even at setup', () async {
+    final r = await engine.handle('agent.call', {
+      'command': 'device.invoke',
+      'args': {'id': 'mac_mini', 'capability': 'display_sleep', 'params': {}},
+    });
+    expect((r['error'] as Map)['type'], 'needs_user');
+  });
+
   test(
     'an agent-made link to a host-command device waits for approval',
     () async {
@@ -110,6 +162,7 @@ void _tools({required bool viaHub}) {
 
   test('an agent organizes devices and saves scenes, and a scene it saves '
       'is untrusted', () async {
+    await engine.handle('agent.access.set', {'access': 'read'});
     final refused = body(
       await call('organize_device', {
         'deviceId': 'desk_lamp',

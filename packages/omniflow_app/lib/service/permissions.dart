@@ -43,6 +43,17 @@ class Permissions {
         : {for (final e in map.entries) '${e.key}': e.value};
   }
 
+  /// Where the phone last was, from a fix Android already has, or null
+  /// without location access or a fix.
+  Future<({double latitude, double longitude})?> lastLocation() async {
+    final map = await _invoke<Map<Object?, Object?>>('lastLocation');
+    final lat = map?['latitude'];
+    final lon = map?['longitude'];
+    return lat is num && lon is num
+        ? (latitude: lat.toDouble(), longitude: lon.toDouble())
+        : null;
+  }
+
   /// Opens OmniFlow's page in the system settings, for a permission the
   /// user refused for good.
   Future<void> openAppSettings() => _invoke<void>('appSettings');

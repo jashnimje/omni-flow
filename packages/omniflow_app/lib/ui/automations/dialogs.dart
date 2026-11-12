@@ -11,7 +11,7 @@ Future<String?> askName(
   String action = 'Save',
   String hint = 'Arrive home',
 }) {
-  final controller = TextEditingController(text: initial);
+  final controller = ReplaceableText(initial);
   return showDialog<String>(
     context: context,
     builder: (context) => Owning(
@@ -24,6 +24,7 @@ Future<String?> askName(
             content: TextField(
               key: const ValueKey('name-field'),
               controller: controller,
+              onTap: controller.firstTap,
               autofocus: true,
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(labelText: 'Name', hintText: hint),

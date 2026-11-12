@@ -118,7 +118,7 @@ void main() {
     expect(engine.callsOf('device.invoke'), isEmpty);
   });
 
-  testWidgets('a line nobody understood says the architect is not set up', (
+  testWidgets('a line nobody understood gets examples that work', (
     tester,
   ) async {
     engine.answers['command.interpret'] = {
@@ -135,12 +135,7 @@ void main() {
     );
     await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pumpAndSettle();
-    expect(
-      find.text(
-        'Not a device or flow command. The architect is not set up yet.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.textContaining('"desk lamp 50%"'), findsOneWidget);
   });
 
   testWidgets('the inspector lists packets from events', (tester) async {

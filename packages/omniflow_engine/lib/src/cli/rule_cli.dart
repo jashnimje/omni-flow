@@ -200,15 +200,15 @@ class RuleAddCommand extends _RuleCommandBase {
     if (a.rest.length != 1) throw UsageException('needs NAME', usage);
     final when = a.multiOption('when');
     final then = a.multiOption('then');
-    if (when.isEmpty || then.isEmpty) {
-      throw UsageException('needs at least one --when and one --then', usage);
-    }
+    // A rule of keep steps alone needs no --when: the engine says when one
+    // is missing.
+    if (then.isEmpty) throw UsageException('needs at least one --then', usage);
     return {
       'form': 'rule',
       'spec': {
         if (a.option('id') != null) 'id': a.option('id'),
         'name': a.rest.single,
-        'when': [for (final w in when) _item(w)],
+        if (when.isNotEmpty) 'when': [for (final w in when) _item(w)],
         if (a.multiOption('only-if').isNotEmpty)
           'onlyIf': [for (final c in a.multiOption('only-if')) _item(c)],
         'then': [for (final s in then) _item(s)],

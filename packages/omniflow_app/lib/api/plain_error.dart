@@ -18,7 +18,7 @@ const _inApp = {
   'needs_user': 'Pair it from its page first.',
   'missing_secret': 'Open the device and add the missing key or password.',
   'secret_rejected': 'Open the device and enter the key or password again.',
-  'host_key': 'Open the device and accept its new key if you trust the change.',
+  'host_key': 'Its SSH host key changed. Open the device, then SSH host key, to check it.',
   'pairing_failed': 'Look at the device, allow OmniFlow, then try again.',
 };
 
