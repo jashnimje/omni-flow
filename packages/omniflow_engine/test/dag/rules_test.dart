@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:omniflow_engine/src/api/automation_view.dart'
     show SentenceContext;
@@ -587,6 +589,45 @@ void main() {
     expect(ids[3], startsWith('vening_'));
   });
 
+  group('thing and pin ids', () {
+    final idShape = RegExp(r'^[a-z][a-z0-9_]{0,63}$');
+
+    test('a Latin name is its slug', () {
+      expect(thingIdFor('Desk lamp'), 'desk_lamp');
+      expect(thingIdFor('  Front door!  '), 'front_door');
+      expect(thingIdFor('2nd floor plug'), 'thing_2nd_floor_plug');
+      expect(pinIdFor('Red LED'), 'red_led');
+      expect(pinIdFor('13'), 'pin_13');
+      expect((thingIdFor('   '), pinIdFor('')), ('', ''));
+    });
+
+    test('non-Latin names get ids of their own', () {
+      final ids = [
+        for (final n in ['रसोई', 'बैठक', '🌙', 'Café', 'Cafe']) thingIdFor(n),
+      ];
+      expect(ids.toSet(), hasLength(5));
+      for (final id in ids) {
+        expect(id, matches(idShape), reason: id);
+      }
+      expect(thingIdFor('रसोई'), thingIdFor('रसोई'));
+      expect(ids[3], startsWith('caf_'));
+      expect(ids[4], 'cafe');
+      expect(pinIdFor('लाल'), matches(RegExp(r'^pin_[a-z0-9]+$')));
+    });
+
+    test('a long name is cut to 64, and two long names stay apart', () {
+      final a = thingIdFor('${'Living room ' * 8}lamp');
+      final b = thingIdFor('${'Living room ' * 8}fan');
+      expect(a, isNot(b));
+      for (final id in [a, b]) {
+        expect(id.length, lessThanOrEqualTo(64));
+        expect(id, matches(idShape));
+        expect(id, startsWith('living_room_living_room'));
+      }
+      expect(thingIdFor('a' * 64), 'a' * 64);
+    });
+  });
+
   group('compare values that are references', () {
     Map<String, Object?> withValue(Object? value) => {
       'name': 'Ref',
@@ -731,14 +772,14 @@ void main() {
       final (ports, web) = await ran({
         'url': 'http://192.168.1.20:8080/mood',
         'method': 'post',
-        'headers': {'x-key': 'abc'},
+        'headers': {'x-source': 'omni'},
         'body': {'mood': r'{{$Mood}}'},
       });
       expect(ports.last, 'then_0_try_0:out');
       expect(web.sent.single.method, 'POST');
       expect('${web.sent.single.url}', 'http://192.168.1.20:8080/mood');
       expect(web.sent.single.headers, {
-        'x-key': 'abc',
+        'x-source': 'omni',
         'content-type': 'application/json',
       });
       expect(web.sent.single.body, '{"mood":"cosy"}');
@@ -770,6 +811,189 @@ void main() {
         'then[0].try[0].http.method',
       );
     });
+
+    test('a placeholder may fill the path, never the host or port', () {
+      for (final url in [
+        r'http://{{$Host}}/mood',
+        r'https://hub.test:{{$Port}}/',
+        r'http://me@{{$Host}}',
+        r'{{$Scheme}}://hub.test/',
+      ]) {
+        expect(
+          issuesOf(rule({'url': url})).single['path'],
+          'then[0].try[0].http.url',
+          reason: url,
+        );
+      }
+      expect(
+        issuesOf(rule({'url': r'http://hub.test/mood/{{$Mood}}?q={{$Mood}}'})),
+        isEmpty,
+      );
+    });
+
+    test('a credential header must name a secret', () {
+      for (final header in [
+        'Authorization',
+        'cookie',
+        'Proxy-Authorization',
+        'X-API-Key',
+        'x-ha-token',
+      ]) {
+        final issue = issuesOf(
+          rule({
+            'url': 'https://hub.test/',
+            'headers': {header: 'Bearer abc'},
+          }),
+        ).single;
+        expect(issue['path'], 'then[0].try[0].http.headers.$header');
+        expect(issue['message'], contains('put the token in a secret'));
+      }
+      expect(
+        issuesOf(
+          rule({
+            'url': 'https://hub.test/',
+            'headers': {
+              'Authorization': {'secret': 'ha_token'},
+            },
+          }),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('the step\'s words leave out the query and the user', () {
+      final flow = compileRule(
+        normalizeRule(
+          rule({'url': 'https://me:pw@hub.test:8123/api/x?token=abc#f'}),
+          context: context,
+        ),
+      ).flow;
+      expect(
+        nodeOf(flow, 'then_0_try_0')['label'],
+        'GET https://hub.test:8123/api/x',
+      );
+    });
+
+    test('a secret header is read when it sends, and never traced', () async {
+      final web = _FakeWeb(200);
+      final runner = FlowRunner(
+        FlowSpec.parse(
+          compileRule(
+            normalizeRule(
+              rule({
+                'url': 'https://hub.test/',
+                'headers': {
+                  'Authorization': {'secret': 'ha_token'},
+                },
+              }),
+              context: context,
+            ),
+          ).flow,
+        ),
+        _NoEffects(),
+        clock: InstantFlowClock(DateTime(2026)),
+        web: web,
+        webSecret: (name) async => name == 'ha_token' ? 'fixture-value' : null,
+      );
+      final trace = await runner.fire('when_0', {});
+      expect(web.sent.single.headers, {'Authorization': 'fixture-value'});
+      expect(jsonEncode(trace.toJson()), isNot(contains('fixture-value')));
+      final dry = await runner.fire('when_0', {}, dryRun: true);
+      expect(web.sent, hasLength(1));
+      expect(jsonEncode(dry.toJson()), isNot(contains('fixture-value')));
+    });
+
+    test('a missing secret fails the step', () async {
+      final runner = FlowRunner(
+        FlowSpec.parse({
+          'schemaVersion': 1,
+          'id': 'f',
+          'name': 'F',
+          'nodes': [
+            {'id': 'go', 'type': 'manual'},
+            {
+              'id': 'send',
+              'type': 'http_request',
+              'config': {
+                'url': 'https://hub.test/',
+                'headers': {
+                  'Authorization': {'secret': 'ha_token'},
+                },
+              },
+            },
+          ],
+          'edges': [
+            {
+              'id': 'e',
+              'from': {'node': 'go', 'port': 'out'},
+              'to': {'node': 'send', 'port': 'in'},
+            },
+          ],
+        }),
+        _NoEffects(),
+        web: _FakeWeb(200),
+        webSecret: (_) async => null,
+      );
+      final trace = await runner.fire('go', {});
+      expect(trace.nodes.last.error, contains('no web secret ha_token'));
+    });
+
+    test(
+      'later steps read the reply, the trace keeps its status and size',
+      () async {
+        final web = _FakeWeb(200);
+        final runner = FlowRunner(
+          FlowSpec.parse({
+            'schemaVersion': 1,
+            'id': 'f',
+            'name': 'F',
+            'nodes': [
+              {'id': 'go', 'type': 'manual'},
+              {
+                'id': 'send',
+                'type': 'http_request',
+                'config': {'url': 'https://hub.test/'},
+              },
+              {
+                'id': 'set',
+                'type': 'set_variable',
+                'config': {'name': '%ok', 'value': '{{msg.response.body.ok}}'},
+              },
+            ],
+            'edges': [
+              {
+                'id': 'e1',
+                'from': {'node': 'go', 'port': 'out'},
+                'to': {'node': 'send', 'port': 'in'},
+              },
+              {
+                'id': 'e2',
+                'from': {'node': 'send', 'port': 'out'},
+                'to': {'node': 'set', 'port': 'in'},
+              },
+            ],
+          }),
+          _NoEffects(),
+          web: web,
+        );
+        final trace = await runner.fire('go', {});
+        expect(trace.outcome, RunOutcome.completed);
+        final json = trace.toJson();
+        final nodes = (json['nodes'] as List).cast<Map>();
+        expect((nodes[1]['output'] as Map)['response'], {
+          'status': 200,
+          'bytes': 11,
+        });
+        expect((nodes[2]['input'] as Map)['response'], {
+          'status': 200,
+          'bytes': 11,
+        });
+        expect(
+          ((trace.nodes[2].input['response'] as Map)['body'] as Map)['ok'],
+          isTrue,
+        );
+      },
+    );
   });
 
   group('try and otherwise', () {
@@ -1141,6 +1365,6 @@ class _FakeWeb implements WebRequester {
     String? body,
   }) async {
     sent.add((method: method, url: url, headers: headers, body: body));
-    return (status: status, body: {'ok': true});
+    return (status: status, body: {'ok': true}, bytes: 11);
   }
 }

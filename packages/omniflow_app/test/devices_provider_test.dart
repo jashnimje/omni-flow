@@ -26,4 +26,31 @@ void main() {
     final devices = await loading;
     expect((devices.single['state'] as Map)['state'], isTrue);
   });
+
+  test('a failed reload keeps the list, and a failed first load is an '
+      'error', () async {
+    final engine = FakeEngine();
+    final container = ProviderContainer(
+      overrides: [engineClientProvider.overrideWithValue(engine)],
+    );
+    addTearDown(container.dispose);
+    expect(await container.read(devicesProvider.future), hasLength(1));
+    engine.answers['device.list'] = {
+      'ok': false,
+      'error': {'type': 'timeout', 'message': 'no answer'},
+    };
+    await container.read(devicesProvider.notifier).refresh();
+    expect(container.read(devicesProvider).value, hasLength(1));
+
+    final fresh = ProviderContainer(
+      overrides: [engineClientProvider.overrideWithValue(engine)],
+      // Riverpod retries a failed load by itself: this is the first try.
+      retry: (_, _) => null,
+    );
+    addTearDown(fresh.dispose);
+    await expectLater(
+      fresh.read(devicesProvider.future),
+      throwsA(isA<EngineReadFailed>()),
+    );
+  });
 }

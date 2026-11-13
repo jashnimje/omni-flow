@@ -161,7 +161,7 @@ void main() {
       ]);
       expect(await DriftGlobalStore(db).all(), {'HomeMode': 'home'});
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 5);
+      expect(version.read<int>('user_version'), 6);
     },
   );
 
@@ -211,7 +211,7 @@ void main() {
         'board': 'esp32',
       });
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 5);
+      expect(version.read<int>('user_version'), 6);
     },
   );
 
@@ -277,7 +277,7 @@ void main() {
       expect((r.enabled, r.approved, r.trusted), (true, false, true));
     }
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 5);
+    expect(version.read<int>('user_version'), 6);
   });
 
   test('a v4 database turns each room name into a room record the devices '
@@ -369,7 +369,36 @@ void main() {
       'by': 'user',
     });
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 5);
+    expect(version.read<int>('user_version'), 6);
+  });
+
+  test('a v5 database gains the agent mark on its drivers, once', () async {
+    final dir = await Directory.systemTemp.createTemp('omni_migrate_v5');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/omniflow.sqlite');
+    final at = DateTime.utc(2026);
+    final created = OmniDatabase.file(file);
+    await DriftManifestStore(created).put('fan', '{"id":"fan"}', at);
+    await created.close();
+    for (final dropColumn in [true, false]) {
+      final raw = sqlite3.open(file.path);
+      if (dropColumn) {
+        raw.execute('ALTER TABLE driver_manifests DROP COLUMN by_agent');
+      }
+      raw.execute('PRAGMA user_version = 5');
+      raw.close();
+
+      final db = OmniDatabase.file(file);
+      final store = DriftManifestStore(db);
+      expect(await store.all(), ['{"id":"fan"}'], reason: '$dropColumn');
+      expect(await store.byAgent(), isEmpty);
+      await store.put('fan', '{"id":"fan"}', at, byAgent: true);
+      expect(await store.byAgent(), {'fan'});
+      expect(await store.approve('fan'), isTrue);
+      expect(await store.byAgent(), isEmpty);
+      expect(await store.approve('ghost'), isFalse);
+      await db.close();
+    }
   });
 
   test('a room id comes from its name, unique, with a hash for letters the '

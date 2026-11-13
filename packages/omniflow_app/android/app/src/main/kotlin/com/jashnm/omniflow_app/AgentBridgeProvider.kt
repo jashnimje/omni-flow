@@ -68,7 +68,8 @@ class AgentBridgeProvider : ContentProvider() {
             local.outputStream.flush()
             val answer = local.inputStream.bufferedReader().readLine()
                 ?: return failure("unreachable", "the engine closed the connection")
-            return JSONObject(answer).getJSONObject("result").toString()
+            return JSONObject(answer).optJSONObject("result")?.toString()
+                ?: failure("internal", "the engine sent no result")
         }
     }
 

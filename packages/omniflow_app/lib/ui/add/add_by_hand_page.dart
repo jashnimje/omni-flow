@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show thingIdFor;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
@@ -9,14 +10,8 @@ import '../design/design.dart';
 import 'guided_steps_page.dart';
 import 'room_field.dart';
 
-/// A device id from its name: lower snake case, as the engine requires.
-String deviceIdFor(String name) {
-  final id = name
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-      .replaceAll(RegExp(r'^_+|_+$'), '');
-  return RegExp(r'^[a-z]').hasMatch(id) ? id : 'device_$id';
-}
+/// A device id from its name, the engine's way for any name, Latin or not.
+String deviceIdFor(String name) => thingIdFor(name);
 
 /// Adds a thing by its driver: pick the driver, look for it or type its
 /// address (a place or a person takes none), name it and put it in a room,

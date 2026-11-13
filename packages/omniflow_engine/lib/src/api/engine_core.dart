@@ -66,6 +66,10 @@ class EngineCore {
   final AdbChannel adb;
   late final FlowEngine flows;
 
+  /// The user drivers an agent registered and the user has not approved:
+  /// everything they drive is high risk.
+  final agentDrivers = <String>{};
+
   final _events = StreamController<Map<String, Object?>>.broadcast();
 
   /// Everything the engine reports as it happens, as JSON messages.

@@ -681,6 +681,14 @@ class UnknownStep extends RuleStep {
 
 /// A typed literal from a text field: true, false, null, a number, or else
 /// the text itself.
+/// What a person types as a value: on/off and yes/no are booleans,
+/// numbers are numbers, the rest is text.
+Object? wordValue(String text) => switch (text.trim().toLowerCase()) {
+  'on' || 'yes' => true,
+  'off' || 'no' => false,
+  _ => literalFromText(text),
+};
+
 Object? literalFromText(String text) {
   final t = text.trim();
   return switch (t) {

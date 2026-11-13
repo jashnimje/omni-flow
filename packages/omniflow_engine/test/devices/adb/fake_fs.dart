@@ -45,6 +45,10 @@ class FakeFs {
 
   final nodes = <String, FakeNode>{};
 
+  /// Names a hostile TV lists in a folder that no real folder holds, like
+  /// `a/../../x`, by folder.
+  final hostileNames = <String, List<String>>{};
+
   static String parentOf(String path) {
     final i = path.lastIndexOf('/');
     return i <= 0 ? '/' : path.substring(0, i);

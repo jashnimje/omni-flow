@@ -10,6 +10,7 @@ import 'organize_commands.dart';
 import 'stored_flows.dart';
 import 'thing_setup.dart';
 import 'things_runtime.dart';
+import '../dag/web_request.dart';
 import '../devices/board.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
@@ -50,7 +51,8 @@ class DeviceCommands {
           'icon': ?m.icon,
           'transport': m.transport.type.wireName,
           'builtIn': _registry.isBuiltIn(m.id),
-          'highRisk': m.isHighRisk,
+          'highRisk': m.isHighRisk || _core.agentDrivers.contains(m.id),
+          if (_core.agentDrivers.contains(m.id)) 'byAgent': true,
           'board': isBoardDriver(m),
           if (m.pairingSpec case final p?) 'pairing': p.method.wireName,
           'settings': [
@@ -70,12 +72,33 @@ class DeviceCommands {
 
   Future<Map<String, Object?>> driverRegister(Map<String, Object?> args) async {
     final json = objectArg(args, 'manifest');
+    final byAgent = args['byAgent'] == true;
     final m = _registry.register(json);
     await DriftManifestStore(_db)
-        .put(m.id, jsonEncode(json), DateTime.now().toUtc());
+        .put(m.id, jsonEncode(json), DateTime.now().toUtc(), byAgent: byAgent);
+    _markByAgent(m.id, byAgent);
     await _stored.reloadFlows();
-    return {'id': m.id, 'highRisk': m.isHighRisk};
+    return {
+      'id': m.id,
+      'highRisk': m.isHighRisk || byAgent,
+      'byAgent': byAgent,
+    };
   }
+
+  /// `{id}`: the user approves a driver an agent registered, so what it
+  /// drives no longer waits for the user.
+  Future<Map<String, Object?>> driverApprove(Map<String, Object?> args) async {
+    final id = stringArg(args, 'id');
+    if (!await DriftManifestStore(_db).approve(id)) {
+      throw ApiError('not_found', 'no user driver $id');
+    }
+    _markByAgent(id, false);
+    await _stored.reloadFlows();
+    return {'id': id, 'approved': true};
+  }
+
+  void _markByAgent(String id, bool byAgent) =>
+      byAgent ? _core.agentDrivers.add(id) : _core.agentDrivers.remove(id);
 
   /// A scan by UID picks one tag, so two tags never share a UID. The UID
   /// is stored the way `tag.save` and a scan normalize it.
@@ -460,6 +483,21 @@ class DeviceCommands {
       _core.tv.forget(device.id);
     }
     return {'stored': deviceSecretKey(device.id, key)};
+  }
+
+  /// Stores `{name, value}`, the secret a web request header names with
+  /// `{"secret": "name"}`.
+  Future<Map<String, Object?>> webSecretSet(Map<String, Object?> args) async {
+    final name = stringArg(args, 'name');
+    if (!webSecretName.hasMatch(name)) {
+      throw ApiError(
+        'invalid',
+        'a web secret name starts with a letter and has only letters, '
+            'digits, _ and -, up to 64',
+      );
+    }
+    await _core.secrets.write(webSecretKey(name), stringArg(args, 'value'));
+    return {'stored': webSecretKey(name)};
   }
 
   /// Each capability of a device with the params it accepts, for UIs and agents.

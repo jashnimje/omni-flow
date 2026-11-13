@@ -110,7 +110,10 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       if (driver?['highRisk'] == true) {
         return refuse(
           'needs_user',
-          '${args['deviceId']} runs host commands. Ask the user to run it, or deploy a flow for approval',
+          driver?['byAgent'] == true
+              ? '${args['deviceId']} uses a driver an agent registered. Ask the user to approve '
+                    'it with omni driver approve ${driver?['id']}'
+              : '${args['deviceId']} runs host commands. Ask the user to run it, or deploy a flow for approval',
         );
       }
       // On a TV a raw setting or an app's data, state or presence is the
@@ -148,7 +151,9 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     'register_custom_driver_manifest',
     description:
         'Validates and stores a .omni_driver.json manifest (schema v1). '
-        'Drivers that run host commands must be added by the user with omni driver register.',
+        'Drivers that run host commands must be added by the user with omni driver register. '
+        'What a driver registered here drives waits for the user until they approve it with '
+        'omni driver approve.',
     inputSchema: JsonSchema.object(
       properties: {'manifest': freeObject},
       required: ['manifest'],
@@ -186,7 +191,10 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         );
       }
       return reply(
-        await engine.handle('driver.register', {'manifest': args['manifest']}),
+        await engine.handle('driver.register', {
+          'manifest': args['manifest'],
+          'byAgent': true,
+        }),
       );
     },
   );

@@ -5,7 +5,8 @@ import '../devices/device_service.dart' show stateKeyOf;
 import 'flow.dart';
 import 'node_types.dart';
 import 'rule_shorthand.dart';
-import 'web_request.dart' show webAddressOk, webMethods;
+import 'web_request.dart'
+    show webAddressProblem, webHeaderProblems, webMethods, webShownAddress;
 import 'sun.dart';
 
 export 'rule_shorthand.dart' show RuleContext;
@@ -113,6 +114,34 @@ String ruleIdFor(String name) {
     slug = slug.isEmpty ? _nameHash(name) : '${slug}_${_nameHash(name)}';
   }
   return _id.hasMatch(slug) ? slug : 'rule_$slug'.replaceAll(RegExp(r'_$'), '');
+}
+
+/// The id a device or an NFC tag named [name] takes: lower snake case from
+/// a letter, at most 64 characters, with a short hash of the name when it
+/// has letters the slug drops or is cut short, so two such names never
+/// share an id. Empty for a blank name.
+String thingIdFor(String name) => _shortIdFor(name, 'thing');
+
+/// A board pin's name from what the user typed, in the shape [thingIdFor]
+/// gives, starting `pin_` when the name does not start with a letter.
+String pinIdFor(String name) => _shortIdFor(name, 'pin');
+
+String _shortIdFor(String name, String prefix) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) return '';
+  var slug = trimmed
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'^_+|_+$'), '');
+  if (!slug.startsWith(RegExp('[a-z]'))) {
+    slug = slug.isEmpty ? prefix : '${prefix}_$slug';
+  }
+  const max = 64;
+  if (!trimmed.runes.any((r) => r > 0x7f) && slug.length <= max) return slug;
+  final hash = _nameHash(trimmed);
+  final room = max - hash.length - 1;
+  final head = slug.length > room ? slug.substring(0, room) : slug;
+  return '${head.replaceAll(RegExp(r'_+$'), '')}_$hash';
 }
 
 /// A short FNV-1a hash of [name], the same on every run.
@@ -1307,9 +1336,12 @@ class _Compiler {
     }
     if (s.containsKey('http')) {
       final h = Map<String, Object?>.from(s['http'] as Map);
-      node('http_request', '${h['method'] ?? 'GET'} ${h['url']}', h, {
-        for (final k in h.keys) k: '$path.http.$k',
-      });
+      node(
+        'http_request',
+        '${h['method'] ?? 'GET'} ${webShownAddress('${h['url']}')}',
+        h,
+        {for (final k in h.keys) k: '$path.http.$k'},
+      );
       return [(id, 'out')];
     }
     if (s.containsKey('set')) {
@@ -1552,9 +1584,10 @@ Map<String, Object?>? _http(Object? h, String at, IssueCollector issues) {
     }
   }
   final url = out['url'];
-  if (url is! String || !webAddressOk(url)) {
-    issues.add('$at.url', 'must be an http:// or https:// address');
-  }
+  final urlProblem = url is String
+      ? webAddressProblem(url)
+      : 'must be an http:// or https:// address';
+  if (urlProblem != null) issues.add('$at.url', urlProblem);
   final method = out['method'];
   if (method != null &&
       (method is! String || !webMethods.contains(method.toUpperCase()))) {
@@ -1562,10 +1595,10 @@ Map<String, Object?>? _http(Object? h, String at, IssueCollector issues) {
   } else if (method is String) {
     out['method'] = method.toUpperCase();
   }
-  final headers = out['headers'];
-  if (headers != null &&
-      (headers is! Map || headers.values.any((v) => v is! String))) {
-    issues.add('$at.headers', 'must be names to text values');
+  for (final MapEntry(:key, :value) in webHeaderProblems(
+    out['headers'],
+  ).entries) {
+    issues.add(key.isEmpty ? '$at.headers' : '$at.headers.$key', value);
   }
   return {'http': out};
 }

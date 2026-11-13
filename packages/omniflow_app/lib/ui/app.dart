@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/engine_calls.dart';
 import '../state/providers.dart';
 import 'design/design.dart';
+import 'settings/whats_new.dart' show whatsNewOnStart;
 import 'shell/shell.dart';
 import 'tags/nfc_forwarder.dart';
 import 'theme.dart';
@@ -107,6 +108,7 @@ class _HomeState extends ConsumerState<Home> {
       ref.read(nfcIntentsProvider),
     );
     unawaited(_nfc.start());
+    whatsNewOnStart(context, ref);
     // Reader mode only works while the app is in front.
     _lifecycle = AppLifecycleListener(
       onResume: () => unawaited(_nfc.resume()),

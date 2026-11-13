@@ -210,6 +210,7 @@ class OmniEngine {
       engine._homeLocation = HomeLocationStore(home);
       engine.flows.homeLocation = await engine._homeLocation.read();
       engine._core.issues['driver'] = driverIssues;
+      engine._core.agentDrivers.addAll(await DriftManifestStore(db).byAgent());
       await engine._core.loadRooms();
       await engine._core.history.seed();
       await _backfillStableIds(engine._core);
@@ -564,6 +565,7 @@ class OmniEngine {
     'driver.list': _deviceCommands.driverList,
     'driver.validate': _deviceCommands.driverValidate,
     'driver.register': _deviceCommands.driverRegister,
+    'driver.approve': _deviceCommands.driverApprove,
     'device.add': _deviceCommands.add,
     'board.provision': _boardCommands.provision,
     'board.describe': _boardCommands.describe,
@@ -618,6 +620,7 @@ class OmniEngine {
     ..._homeCommands.commands,
     ..._backupCommands.commands,
     'secret.set': _deviceCommands.secretSet,
+    'web.secret.set': _deviceCommands.webSecretSet,
     ..._tvCommands.commands,
   };
 

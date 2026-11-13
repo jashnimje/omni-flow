@@ -111,35 +111,46 @@ class ScenesPage extends ConsumerWidget {
     }
     return ListView(
       key: const ValueKey('scenes-list'),
-      children: [
-        for (final s in scenes)
-          OmniListRow(
-            key: ValueKey('scene-${s.id}'),
-            icon: sceneIconFor(s.icon),
-            title: s.name,
-            subtitle: s.needsApproval
-                ? 'Waiting for your review'
-                : s.sentence
-                      .where((p) => p.kind != SentenceKind.text)
-                      .map((p) => p.text)
-                      .join(', '),
-            subtitleLines: 2,
-            onTap: () => s.needsApproval
-                ? Navigator.of(context).push<void>(
-                    MaterialPageRoute(builder: (_) => ReviewPage(id: s.id)),
-                  )
-                : openSceneEditor(context, id: s.id),
-            trailing: s.needsApproval
-                ? const StatusDot(StatusKind.warning)
-                : OmniIconAction(
-                    key: ValueKey('scene-run-${s.id}'),
-                    icon: OmniIcons.play,
-                    label: 'Run ${s.name}',
-                    color: OmniColors.accent,
-                    onPressed: () => runScene(ref, s.id, s.name),
-                  ),
-          ),
-      ],
+      children: [for (final s in scenes) SceneRow(scene: s)],
+    );
+  }
+}
+
+/// One scene with Run, or its review while it waits for approval. The
+/// Scenes filter in Automations and the scenes page both list these.
+class SceneRow extends ConsumerWidget {
+  const SceneRow({super.key, required this.scene});
+
+  final AutomationSummary scene;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = scene;
+    return OmniListRow(
+      key: ValueKey('scene-${s.id}'),
+      icon: sceneIconFor(s.icon),
+      title: s.name,
+      subtitle: s.needsApproval
+          ? 'Waiting for your review'
+          : s.sentence
+                .where((p) => p.kind != SentenceKind.text)
+                .map((p) => p.text)
+                .join(', '),
+      subtitleLines: 2,
+      onTap: () => s.needsApproval
+          ? Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => ReviewPage(id: s.id)),
+            )
+          : openSceneEditor(context, id: s.id),
+      trailing: s.needsApproval
+          ? const StatusDot(StatusKind.warning)
+          : OmniIconAction(
+              key: ValueKey('scene-run-${s.id}'),
+              icon: OmniIcons.play,
+              label: 'Run ${s.name}',
+              color: OmniColors.accent,
+              onPressed: () => runScene(ref, s.id, s.name),
+            ),
     );
   }
 }

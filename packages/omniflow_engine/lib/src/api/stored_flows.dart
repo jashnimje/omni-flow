@@ -314,13 +314,15 @@ class StoredFlows {
   static final _globalRef = RegExp(r'\$([A-Za-z_][A-Za-z0-9_]*)');
 
   /// Whether running [capability] needs the user's approval in a flow: a
-  /// host command, or on a TV over ADB a raw setting or an app's data,
-  /// state or presence.
+  /// host command, any capability of a driver an agent registered that the
+  /// user has not approved, or on a TV over ADB a raw setting or an app's
+  /// data, state or presence.
   bool capabilityIsHighRisk(
     DriverManifest manifest,
     CapabilitySpec capability,
   ) =>
       capability.type.isHighRisk ||
+      _core.agentDrivers.contains(manifest.id) ||
       manifest.transport.type == TransportType.exec ||
       (manifest.transport.type == TransportType.adb &&
           adbCommandIsHighRisk(capability.command));
@@ -345,7 +347,9 @@ class StoredFlows {
       // A device that is gone (or whose driver is) may come back as one
       // that runs commands, so the step keeps needing approval until then.
       if (manifest == null) return true;
-      if (manifest.isHighRisk) return true;
+      if (manifest.isHighRisk || _core.agentDrivers.contains(manifest.id)) {
+        return true;
+      }
       final capability = manifest.capability('${n.config['capabilityId']}');
       return capability != null && capabilityIsHighRisk(manifest, capability);
     }

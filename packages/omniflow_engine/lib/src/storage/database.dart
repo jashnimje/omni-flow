@@ -15,6 +15,10 @@ class DriverManifests extends Table {
   TextColumn get manifestJson => text()();
   DateTimeColumn get updatedAt => dateTime()();
 
+  /// Registered by an agent, so what it drives waits for the user until
+  /// the user registers or approves it.
+  BoolColumn get byAgent => boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -165,7 +169,7 @@ class OmniDatabase extends _$OmniDatabase {
   factory OmniDatabase.memory() => OmniDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   /// The key version 2 kept the trust mark under, inside the flow JSON.
   static const legacyTrustedKey = '_trusted';
@@ -201,8 +205,17 @@ class OmniDatabase extends _$OmniDatabase {
         await m.createIndex(deviceHistoryDevice);
         await _moveRoomNamesToRecords();
       }
+      if (from < 6 && !await _hasColumn('driver_manifests', 'by_agent')) {
+        await m.addColumn(driverManifests, driverManifests.byAgent);
+      }
     },
   );
+
+  Future<bool> _hasColumn(String table, String column) async =>
+      (await customSelect(
+        'SELECT 1 FROM pragma_table_info(?) WHERE name = ?',
+        variables: [Variable.withString(table), Variable.withString(column)],
+      ).get()).isNotEmpty;
 
   /// Before version 5 a device kept its room as a name. Each name becomes a
   /// room record, in name order, and the device keeps the record's id.
@@ -355,9 +368,16 @@ class DriftFlowStore {
         );
   }
 
-  Future<bool> remove(String id) async =>
-      await (_db.delete(_db.flows)..where((f) => f.id.equals(id))).go() > 0;
+  /// Removes the flow and the daily time it last started.
+  Future<bool> remove(String id) => _db.transaction(() async {
+    await DriftGlobalStore(_db).remove(scheduledGlobalKey(id));
+    return await (_db.delete(_db.flows)..where((f) => f.id.equals(id))).go() >
+        0;
+  });
 }
+
+/// The engine-only global holding the daily time [flowId] last started.
+String scheduledGlobalKey(String flowId) => '_scheduled_$flowId';
 
 class DriftZoneStore {
   DriftZoneStore(this._db);
@@ -388,6 +408,13 @@ class DriftGlobalStore {
     for (final r in await _db.select(_db.globalVariables).get())
       r.name: jsonDecode(r.valueJson),
   };
+
+  Future<Object?> get(String name) async {
+    final row = await (_db.select(
+      _db.globalVariables,
+    )..where((g) => g.name.equals(name))).getSingleOrNull();
+    return row == null ? null : jsonDecode(row.valueJson);
+  }
 
   Future<void> put(String name, Object? value, DateTime at) => _db
       .into(_db.globalVariables)
@@ -728,15 +755,37 @@ class DriftManifestStore {
           .map((r) => r.manifestJson)
           .toList();
 
-  Future<void> put(String id, String json, DateTime at) => _db
+  /// Stores a driver. One the user stores, by registering or importing it,
+  /// is no longer [byAgent].
+  Future<void> put(
+    String id,
+    String json,
+    DateTime at, {
+    bool byAgent = false,
+  }) => _db
       .into(_db.driverManifests)
       .insertOnConflictUpdate(
         DriverManifestsCompanion.insert(
           id: id,
           manifestJson: json,
           updatedAt: at,
+          byAgent: Value(byAgent),
         ),
       );
+
+  /// The drivers an agent registered that the user has not approved.
+  Future<Set<String>> byAgent() async => {
+    for (final r in await (_db.select(
+      _db.driverManifests,
+    )..where((m) => m.byAgent.equals(true))).get())
+      r.id,
+  };
+
+  /// Marks [id] approved by the user. False when no such driver is stored.
+  Future<bool> approve(String id) async =>
+      await (_db.update(_db.driverManifests)..where((m) => m.id.equals(id)))
+          .write(const DriverManifestsCompanion(byAgent: Value(false))) >
+      0;
 
   Future<bool> remove(String id) async =>
       await (_db.delete(

@@ -4,9 +4,24 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../state/providers.dart';
+import '../../state/reload_home.dart';
 import '../design/design.dart';
+
+/// Opens Android's share sheet for a file: Save to Drive, Gmail, Files.
+/// Tests stand in for it.
+final shareFileProvider = Provider<Future<void> Function(String path)>(
+  (ref) => (path) async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(path, mimeType: 'application/json')],
+        subject: 'OmniFlow backup',
+      ),
+    );
+  },
+);
 
 /// Keeps a copy of the whole home in a file, and brings one back: things,
 /// rooms, places, tags, automations and variables. Keys and passwords
@@ -23,6 +38,14 @@ class _BackupPageState extends ConsumerState<BackupPage> {
   String? _saved;
   String? _error;
   Json? _restored;
+
+  /// Backs up, then offers the file to Drive or any app that takes it.
+  Future<void> _exportAndShare() async {
+    await _export();
+    final path = _saved;
+    if (path == null || !mounted) return;
+    await ref.read(shareFileProvider)(path);
+  }
 
   Future<void> _export() async {
     setState(() {
@@ -113,9 +136,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
         _error = errorMessage(done);
       }
     });
-    if (done['ok'] == true) {
-      await ref.read(devicesProvider.notifier).refresh();
-    }
+    if (done['ok'] == true) await reloadHome(ref);
   }
 
   /// "It adds 3 items and changes 1 item."
@@ -153,16 +174,24 @@ class _BackupPageState extends ConsumerState<BackupPage> {
           const SizedBox(height: OmniSpace.md),
           OmniListRow(
             key: const ValueKey('backup-export'),
-            icon: OmniIcons.download,
+            icon: OmniIcons.backup,
             title: 'Back up now',
             subtitle: 'saves a file in Download',
             onTap: _busy ? null : _export,
           ),
           OmniListRow(
-            key: const ValueKey('backup-restore'),
+            key: const ValueKey('backup-share'),
             icon: OmniIcons.upload,
+            title: 'Back up to Google Drive or another app',
+            subtitle:
+                'saves the file, then opens Share: pick Drive, Gmail, Files',
+            onTap: _busy ? null : _exportAndShare,
+          ),
+          OmniListRow(
+            key: const ValueKey('backup-restore'),
+            icon: OmniIcons.download,
             title: 'Restore from a file',
-            subtitle: 'shows what changes before anything does',
+            subtitle: 'from Download or Drive. Shows what changes first',
             onTap: _busy ? null : _restore,
           ),
           if (_busy)

@@ -11,6 +11,7 @@ export 'headers.dart';
 export 'icons.dart';
 export 'list_row.dart';
 export 'power_button.dart';
+export 'owning.dart';
 export 'progress.dart';
 export 'replaceable_text.dart';
 export 'sentence.dart';

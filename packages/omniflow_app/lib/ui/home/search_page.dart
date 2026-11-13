@@ -203,7 +203,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
           ],
           if (things.isNotEmpty) ...[
-            const OmniSectionHeader('Things'),
+            const OmniSectionHeader('Devices, places and tags'),
             for (final d in things)
               OmniListRow(
                 key: ValueKey('search-thing-${d.id}'),

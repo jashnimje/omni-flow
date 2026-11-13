@@ -3,7 +3,7 @@ import '../manifest/capability.dart';
 import '../manifest/validation.dart';
 import '../template/template_renderer.dart';
 import 'sun.dart' show sunOffsetLimit;
-import 'web_request.dart' show webAddressOk, webMethods;
+import 'web_request.dart' show webAddressProblem, webHeaderProblems, webMethods;
 
 enum NodeCategory { trigger, condition, gate, transformer, flowControl, action }
 
@@ -230,12 +230,16 @@ final Map<String, NodeType> builtInNodeTypes = {
       _,
     ) {
       final url = _string(c, 'url', p, i);
-      if (url != null && !webAddressOk(url)) {
-        i.add('$p.url', 'must be an http:// or https:// address');
-      }
+      final problem = url == null ? null : webAddressProblem(url);
+      if (problem != null) i.add('$p.url', problem);
       final method = c['method'];
       if (method != null && !webMethods.contains(method)) {
         i.add('$p.method', 'must be ${webMethods.join(', ')}');
+      }
+      for (final MapEntry(:key, :value) in webHeaderProblems(
+        c['headers'],
+      ).entries) {
+        i.add(key.isEmpty ? '$p.headers' : '$p.headers.$key', value);
       }
       _templates(c, p, i);
     }),

@@ -118,28 +118,31 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
     final field = TextEditingController();
     final name = await showDialog<String>(
       context: context,
-      builder: (dialog) => AlertDialog(
-        title: const Text('Bluetooth beacon'),
-        content: TextField(
-          key: const ValueKey('beacon-name'),
-          controller: field,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'The name the beacon shows',
-            helperText: 'Like OMNI_DESK. OmniFlow never uses its address.',
+      builder: (dialog) => Owning(
+        [field],
+        child: AlertDialog(
+          title: const Text('Bluetooth beacon'),
+          content: TextField(
+            key: const ValueKey('beacon-name'),
+            controller: field,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'The name the beacon shows',
+              helperText: 'Like OMNI_DESK. OmniFlow never uses its address.',
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialog).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const ValueKey('beacon-save'),
+              onPressed: () => Navigator.of(dialog).pop(field.text.trim()),
+              child: const Text('Use it'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('beacon-save'),
-            onPressed: () => Navigator.of(dialog).pop(field.text.trim()),
-            child: const Text('Use it'),
-          ),
-        ],
       ),
     );
     return name == null || name.isEmpty ? null : {'matchName': name};

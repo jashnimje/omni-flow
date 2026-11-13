@@ -377,9 +377,12 @@ class FakeSyncSession {
       case 'LIST':
         final dir = _fs.nodes[_fs.resolve(arg)];
         if (dir != null && dir.isDir) {
-          for (final name in ['.', '..', ..._fs.children(arg)]) {
+          final hostile = _fs.hostileNames[_fs.resolve(arg)] ?? const [];
+          for (final name in ['.', '..', ..._fs.children(arg), ...hostile]) {
             final node = name == '.' || name == '..'
                 ? FakeNode.dir()
+                : hostile.contains(name)
+                ? FakeNode.file([1])
                 : _fs.nodes[FakeFs.join(_fs.resolve(arg), name)]!;
             final bytes = utf8.encode(name);
             _reply([

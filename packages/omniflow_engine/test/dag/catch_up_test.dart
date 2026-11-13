@@ -27,6 +27,9 @@ class _Host implements FlowHost {
   Future<void> saveGlobal(String name, Object? value) async {}
 
   @override
+  Future<String?> webSecret(String name) async => null;
+
+  @override
   void emit(Map<String, Object?> event) {}
 
   @override
@@ -111,6 +114,34 @@ void main() {
     );
   });
 
+  test('a clock set back before the time does not fire it early', () async {
+    final clock = _SettableClock(DateTime(2026, 11, 10, 0, 59, 59, 800));
+    final host = _Host();
+    final engine = FlowEngine(host, clock: clock)
+      ..load([_daily('01:00')])
+      ..startTimers();
+    clock.at = DateTime(2026, 11, 10, 0, 30);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(host.traces, isEmpty);
+    expect(host.marked, isEmpty);
+    await engine.close();
+  });
+
+  test('a daily time on time runs once', () async {
+    final clock = _SettableClock(DateTime(2026, 11, 10, 0, 59, 59, 800));
+    final host = _Host();
+    final engine = FlowEngine(host, clock: clock)
+      ..load([_daily('01:00')])
+      ..startTimers();
+    clock.at = DateTime(2026, 11, 10, 1, 0, 0, 1);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await engine.close();
+    expect(host.traces, hasLength(1));
+    expect(host.marked, {
+      'night@${DateTime(2026, 11, 10, 1).toIso8601String()}',
+    });
+  });
+
   test('the previous time of day respects the days', () {
     expect(
       previousTimeOfDay(DateTime(2026, 11, 10, 1, 5), '01:00'),
@@ -190,4 +221,19 @@ void main() {
       );
     });
   });
+}
+
+/// A wall clock the test moves, as a user or summer time would.
+class _SettableClock implements FlowClock {
+  _SettableClock(this.at);
+
+  DateTime at;
+
+  @override
+  DateTime now() => at;
+
+  @override
+  Future<void> sleep(Duration duration, CancelToken token) async {
+    if (token.isCancelled) throw RunCancelled();
+  }
 }

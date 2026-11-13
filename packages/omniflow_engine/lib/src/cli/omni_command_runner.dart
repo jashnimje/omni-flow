@@ -109,24 +109,36 @@ class OmniCommandRunner extends CommandRunner<int> {
       ]),
     );
     addCommand(
-      _Group('driver', 'List, validate and register driver manifests.', [
-        _ApiCommand(
-          'list',
-          'List built-in and user drivers.',
-          'driver.list',
-          (_, _) async => {},
-        ),
-        _FileCommand(
-          'validate',
-          'Check a .omni_driver.json file.',
-          'driver.validate',
-        ),
-        _FileCommand(
-          'register',
-          'Add or replace a user driver from a file.',
-          'driver.register',
-        ),
-      ]),
+      _Group(
+        'driver',
+        'List, validate, register and approve driver manifests.',
+        [
+          _ApiCommand(
+            'list',
+            'List built-in and user drivers.',
+            'driver.list',
+            (_, _) async => {},
+          ),
+          _FileCommand(
+            'validate',
+            'Check a .omni_driver.json file.',
+            'driver.validate',
+          ),
+          _FileCommand(
+            'register',
+            'Add or replace a user driver from a file.',
+            'driver.register',
+          ),
+          _ApiCommand(
+            'approve',
+            'Approve a driver an agent registered, so what it drives runs '
+                'without waiting for you.',
+            'driver.approve',
+            (rest, _) async => {'id': _one(rest, 'ID')},
+            usage: 'ID',
+          ),
+        ],
+      ),
     );
     addCommand(
       _Group('device', 'Add, inspect and control devices.', [
@@ -483,7 +495,7 @@ class OmniCommandRunner extends CommandRunner<int> {
       ]),
     );
     addCommand(
-      _Group('secret', 'Store device secrets in the keychain.', [
+      _Group('secret', 'Store device and web secrets in the keychain.', [
         _ApiCommand(
           'set',
           'Store a secret setting, read from stdin: omni secret set plug localKey < key.txt',
@@ -503,6 +515,26 @@ class OmniCommandRunner extends CommandRunner<int> {
             };
           },
           usage: 'DEVICE KEY',
+        ),
+        _ApiCommand(
+          'set-web',
+          'Store a web request header secret, read from stdin: '
+              'omni secret set-web ha_token < token.txt',
+          'web.secret.set',
+          (rest, runner) async {
+            if (rest.length != 1) {
+              throw UsageException(
+                'needs NAME',
+                'omni secret set-web NAME < value',
+              );
+            }
+            final value = await utf8.decodeStream(runner.input);
+            return {
+              'name': rest.single,
+              'value': value.replaceFirst(RegExp(r'\r?\n$'), ''),
+            };
+          },
+          usage: 'NAME',
         ),
       ]),
     );

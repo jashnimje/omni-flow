@@ -1149,7 +1149,7 @@ Future<CompareCondition?> variableForm(
             'var',
             '$sigil${name.text.trim()}',
             op,
-            _wordValue(value.text),
+            wordValue(value.text),
           )
         : null,
     build: (context, setState) => [
@@ -1181,13 +1181,6 @@ Future<CompareCondition?> variableForm(
     ],
   );
 }
-
-/// What a person types as a value: on/off and yes/no are booleans.
-Object? _wordValue(String text) => switch (text.trim().toLowerCase()) {
-  'on' || 'yes' => true,
-  'off' || 'no' => false,
-  _ => literalFromText(text),
-};
 
 // Steps.
 
@@ -1754,7 +1747,7 @@ Future<SetStep?> setVariableForm(BuildContext context, [SetStep? current]) {
     owns: [name, value],
     title: 'Set a variable',
     result: () => _variable.hasMatch(name.text.trim())
-        ? SetStep('$sigil${name.text.trim()}', _wordValue(value.text))
+        ? SetStep('$sigil${name.text.trim()}', wordValue(value.text))
         : null,
     build: (context, setState) => [
       LabelledField(

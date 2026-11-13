@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show thingIdFor;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
@@ -7,16 +8,8 @@ import '../design/design.dart';
 import 'tag_page.dart';
 import 'write_tag_sheet.dart';
 
-/// A tag id from its name: lower snake case, as `tag.save` requires.
-String tagIdFor(String name) {
-  final id = name
-      .trim()
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-      .replaceAll(RegExp(r'^_+|_+$'), '');
-  final full = RegExp(r'^[a-z]').hasMatch(id) ? id : 'tag_$id';
-  return full.length > 64 ? full.substring(0, 64) : full;
-}
+/// A tag id from its name, the engine's way for any name, Latin or not.
+String tagIdFor(String name) => thingIdFor(name);
 
 Future<void> openTag(BuildContext context, String id) =>
     Navigator.of(context)

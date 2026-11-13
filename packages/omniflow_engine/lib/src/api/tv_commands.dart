@@ -875,10 +875,16 @@ class TvCommands {
       final walk = await _walkRemote(s, path);
       final total = walk.files.fold<int>(0, (a, f) => a + f.$2);
       final progress = _progress(tv.device.id, 'download', total);
-      String localFor(String remote) => [
-        target,
-        ...remote.substring(path.length).split('/').where((p) => p.isNotEmpty),
-      ].join(Platform.pathSeparator);
+      String localFor(String remote) =>
+          pathInside(
+            target,
+            remote.substring(path.length).split('/').where((p) => p.isNotEmpty),
+          ) ??
+          (throw ApiError(
+            'invalid',
+            'the TV listed $remote, which would be saved outside $target, so '
+                'the download stopped',
+          ));
       for (final d in walk.dirs) {
         await Directory(localFor(d)).create(recursive: true);
       }
@@ -1173,4 +1179,30 @@ class _Tv {
 String _firstLines(String text) {
   final lines = text.split('\n').take(3).join(' ').trim();
   return lines.length > 300 ? '${lines.substring(0, 300)}...' : lines;
+}
+
+/// [segments] joined under [root], or null when the result, with `.` and
+/// `..` worked out, is not inside [root].
+String? pathInside(String root, Iterable<String> segments) {
+  final sep = Platform.pathSeparator;
+  final joined = [root, ...segments].join(sep);
+  final base = _lexical(File(root).absolute.path);
+  final full = _lexical(File(joined).absolute.path);
+  return full == base || full.startsWith(base == sep ? sep : '$base$sep')
+      ? full
+      : null;
+}
+
+String _lexical(String path) {
+  final sep = Platform.pathSeparator;
+  final parts = <String>[];
+  for (final p in path.split(sep)) {
+    if (p.isEmpty || p == '.') continue;
+    if (p == '..') {
+      if (parts.isNotEmpty) parts.removeLast();
+    } else {
+      parts.add(p);
+    }
+  }
+  return '$sep${parts.join(sep)}';
 }

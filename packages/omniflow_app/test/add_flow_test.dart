@@ -768,7 +768,7 @@ void main() {
     expect(typedSetting('0042'), '0042');
     expect(typedSetting('hall'), 'hall');
     expect(deviceIdFor('Hall lamp'), 'hall_lamp');
-    expect(deviceIdFor('2nd lamp'), 'device_2nd_lamp');
+    expect(deviceIdFor('2nd lamp'), 'thing_2nd_lamp');
   });
 
   group('the pair sheet', () {

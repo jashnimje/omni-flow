@@ -184,6 +184,21 @@ void main() {
         'not-a-real-key',
       );
       expect(out, isNot(contains('not-a-real-key')));
+
+      (code, out, err) = await omni([
+        'secret',
+        'set-web',
+        'ha_token',
+      ], stdin: 'fixture-token\n');
+      expect(code, 0, reason: '$out$err');
+      expect(await secrets.read(webSecretKey('ha_token')), 'fixture-token');
+      expect(out, isNot(contains('fixture-token')));
+      final refused = await engine.handle('agent.call', {
+        'command': 'web.secret.set',
+        'args': {'name': 'ha_token', 'value': 'agent-value'},
+      });
+      expect((refused['error'] as Map)['type'], 'needs_user');
+      expect(await secrets.read(webSecretKey('ha_token')), 'fixture-token');
     },
   );
 

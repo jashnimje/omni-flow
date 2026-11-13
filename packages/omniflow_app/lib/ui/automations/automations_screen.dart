@@ -9,9 +9,10 @@ import 'automations_state.dart';
 import 'dialogs.dart';
 import 'new_automation.dart';
 import 'review_page.dart';
+import 'scenes.dart' show SceneRow, openSceneEditor;
 import 'test_run.dart';
 
-enum AutomationFilter { all, rules, links, off, needsYou }
+enum AutomationFilter { all, rules, links, scenes, off, needsYou }
 
 /// 2.1: every rule and link, written as its sentence, with its switch and
 /// how its last run went. Agent-made ones waiting for review are flagged
@@ -33,6 +34,7 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
       AutomationFilter.all => true,
       AutomationFilter.rules => a.source == 'rule' || a.source == 'graph',
       AutomationFilter.links => a.isLink,
+      AutomationFilter.scenes => false,
       AutomationFilter.off => !a.enabled || a.needsApproval,
       AutomationFilter.needsYou => a.needsYou,
     };
@@ -87,7 +89,11 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
       for (final a in all)
         if (!a.isScene) a,
     ];
-    if (list.isEmpty) {
+    final scenes = [
+      for (final a in all)
+        if (a.isScene) a,
+    ];
+    if (list.isEmpty && scenes.isEmpty) {
       return OmniEmptyState(
         key: const ValueKey('automations-empty'),
         icon: OmniIcons.automations,
@@ -138,11 +144,14 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                       AutomationFilter.all => 'All',
                       AutomationFilter.rules => 'Rules',
                       AutomationFilter.links => 'Links',
+                      AutomationFilter.scenes => 'Scenes',
                       AutomationFilter.off => 'Off',
                       AutomationFilter.needsYou => 'Needs you',
                     },
                     count: switch (f) {
                       AutomationFilter.all => list.length,
+                      AutomationFilter.scenes when scenes.isNotEmpty =>
+                        scenes.length,
                       AutomationFilter.needsYou when needsYou > 0 => needsYou,
                       _ => null,
                     },
@@ -174,7 +183,33 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
               onAction: () =>
                   setState(() => _filter = AutomationFilter.needsYou),
             ),
-          if (shown.isEmpty)
+          if (_filter == AutomationFilter.scenes) ...[
+            if (scenes.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: OmniSpace.xl),
+                child: Text(
+                  'No scenes yet. A scene sets several things at once, '
+                  'like Movie: lamp 20%, TV on.',
+                  key: ValueKey('scenes-empty'),
+                  textAlign: TextAlign.center,
+                  style: OmniText.caption,
+                ),
+              ),
+            for (final s in scenes)
+              if (_query.isEmpty ||
+                  s.name.toLowerCase().contains(_query.trim().toLowerCase()))
+                SceneRow(scene: s),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OmniButton.ghost(
+                key: const ValueKey('scene-new'),
+                label: 'New scene',
+                icon: OmniIcons.add,
+                expand: false,
+                onPressed: () => openSceneEditor(context),
+              ),
+            ),
+          ] else if (shown.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: OmniSpace.xl),
               child: Text(

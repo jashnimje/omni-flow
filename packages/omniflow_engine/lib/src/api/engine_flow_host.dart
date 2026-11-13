@@ -1,7 +1,6 @@
-import 'dart:convert';
-
 import 'engine_core.dart';
 import '../dag/flow_engine.dart';
+import '../dag/web_request.dart';
 import '../storage/database.dart';
 
 /// What the flow engine reaches through the engine: devices, the stored
@@ -50,22 +49,21 @@ class EngineFlowHost implements FlowHost {
   Future<void> saveTrace(Map<String, Object?> trace) =>
       ExecutionLogStore(_core.db).add(trace);
 
+  /// Every daily start is marked before it runs, so the mark alone says
+  /// whether [scheduled] ran.
   @override
   Future<bool> ranAt(String flowId, String scheduled) async =>
-      (await DriftGlobalStore(_core.db).all())[_scheduledKey(flowId)] ==
-          scheduled ||
-      (await ExecutionLogStore(_core.db).recent(
-        flowId: flowId,
-        limit: 50,
-      )).any((trace) => jsonEncode(trace).contains('"scheduled":"$scheduled"'));
+      await DriftGlobalStore(_core.db).get(scheduledGlobalKey(flowId)) ==
+      scheduled;
 
   @override
   Future<void> markScheduled(String flowId, String scheduled) =>
       DriftGlobalStore(_core.db)
-          .put(_scheduledKey(flowId), scheduled, DateTime.now().toUtc());
+          .put(scheduledGlobalKey(flowId), scheduled, DateTime.now().toUtc());
 
-  /// Engine-only: agents may not set globals that start with `_`.
-  static String _scheduledKey(String flowId) => '_scheduled_$flowId';
+  @override
+  Future<String?> webSecret(String name) =>
+      _core.secrets.read(webSecretKey(name));
 
   @override
   void emit(Map<String, Object?> event) => _core.emit(event);

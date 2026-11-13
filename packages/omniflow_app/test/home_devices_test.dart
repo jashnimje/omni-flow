@@ -817,14 +817,17 @@ void main() {
   });
 
   group('7.1 Settings', () {
-    testWidgets('lists the home, this phone, agents and advanced', (
+    testWidgets('lists the home, this phone, agents and your data', (
       tester,
     ) async {
       await pump(tester, engine);
       await openTab(tester, 'Settings');
       expect(find.text('Home · you are here'), findsOneWidget);
       expect(find.text('3 rooms'), findsOneWidget);
-      expect(find.text('1 scene'), findsOneWidget);
+      // Scenes are under Automations now, beside what they belong with.
+      expect(find.text('1 scene'), findsNothing);
+      expect(find.text('Phone setup'), findsOneWidget);
+      expect(find.text('Your data'), findsOneWidget);
       expect(find.text('On · battery saver off for OmniFlow'), findsOneWidget);
       expect(find.text('1 automation'), findsOneWidget);
     });
@@ -863,7 +866,7 @@ void main() {
       );
       await pump(tester, engine, access: access);
       await openTab(tester, 'Settings');
-      await tapKey(tester, 'settings-permissions');
+      await tapKey(tester, 'settings-background');
       expect(find.byKey(const ValueKey('grant-local-network')), findsNothing);
       expect(find.textContaining('Not needed on this Android'), findsOneWidget);
       await tapKey(tester, 'grant-location');

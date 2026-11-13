@@ -37,6 +37,22 @@ void main() {
       expect(agentRefusal('room.save', const {}, AgentAccess.setup), isNull);
     });
 
+    test('running a scene or an automation needs setup', () {
+      for (final command in ['scene.run', 'automation.run']) {
+        expect(agentReadCommands, isNot(contains(command)));
+        expect(
+          agentRefusal(command, const {'id': 'a'}, AgentAccess.read),
+          contains('Set up everything'),
+          reason: command,
+        );
+        expect(
+          agentRefusal(command, const {'id': 'a'}, AgentAccess.setup),
+          isNull,
+          reason: command,
+        );
+      }
+    });
+
     test('user-only commands are refused at every level', () {
       for (final command in agentUserOnly.keys) {
         expect(

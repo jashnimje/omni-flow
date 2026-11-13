@@ -137,6 +137,34 @@ void main() {
       expect(find.byKey(const ValueKey('backup-saved')), findsOneWidget);
     });
 
+    testWidgets('Back up to Drive saves the file and opens Share with it', (
+      tester,
+    ) async {
+      engine.answers['config.export'] = {
+        'ok': true,
+        'backup': {'schema': 'omniflow.backup', 'version': 1},
+      };
+      final shared = <String>[];
+      await pumpScreen(
+        tester,
+        engine,
+        const BackupPage(),
+        overrides: [
+          phoneFilesProvider.overrideWithValue(
+            FakePhoneFiles(downloads: dir.path),
+          ),
+          shareFileProvider.overrideWithValue((path) async => shared.add(path)),
+        ],
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const ValueKey('backup-share')));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      });
+      await tester.pumpAndSettle();
+      expect(shared.single, contains('omniflow-backup-'));
+      expect(File(shared.single).existsSync(), isTrue);
+    });
+
     testWidgets('a restore shows what changes, then lists the keys to enter', (
       tester,
     ) async {

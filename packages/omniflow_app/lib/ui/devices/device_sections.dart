@@ -11,6 +11,7 @@ import '../automations/automations.dart';
 import '../boards/pin_sheet.dart';
 import '../design/design.dart';
 import 'host_key_sheet.dart';
+import '../../state/reload_home.dart';
 import '../home/home_data.dart';
 import '../settings/developer_page.dart';
 import '../shell/shell.dart';
@@ -37,10 +38,7 @@ DeviceView? liveDevice(WidgetRef ref, String id) {
   return json == null ? null : DeviceView(json);
 }
 
-Future<void> _reloadDevices(WidgetRef ref) async {
-  await ref.read(devicesProvider.notifier).refresh();
-  ref.invalidate(roomsProvider);
-}
+Future<void> _reloadDevices(WidgetRef ref) => reloadHome(ref);
 
 class FavouriteStar extends ConsumerWidget {
   const FavouriteStar({super.key, required this.device});
@@ -392,53 +390,56 @@ class DeviceSection extends ConsumerWidget {
     final name = ReplaceableText(d.name);
     final settings = await showOmniSheet<bool>(
       context,
-      builder: (sheet) => OmniSheet(
-        title: 'Name, address and settings',
-        children: [
-          TextField(
-            key: const ValueKey('device-name-field'),
-            controller: name,
-            onTap: name.firstTap,
-            decoration: const InputDecoration(labelText: 'Name'),
-          ),
-          const SizedBox(height: OmniSpace.sm),
-          OmniButton(
-            key: const ValueKey('device-name-save'),
-            label: 'Save name',
-            onPressed: () async {
-              final text = name.text.trim();
-              if (text.isEmpty || text == d.name) {
-                Navigator.of(sheet).pop(false);
-                return;
-              }
-              final saved = await ref
-                  .read(engineApiProvider)
-                  .organizeDevice(d.id, name: text);
-              if (saved.ok) await _reloadDevices(ref);
-              if (sheet.mounted) Navigator.of(sheet).pop(false);
-            },
-          ),
-          const OmniSectionHeader('Address'),
-          OmniListRow(title: 'Id', value: d.id, valueColor: OmniColors.muted),
-          if (d.host != null)
-            OmniListRow(
-              title: 'Address',
-              value: d.host,
-              valueColor: OmniColors.muted,
+      builder: (sheet) => Owning(
+        [name],
+        child: OmniSheet(
+          title: 'Name, address and settings',
+          children: [
+            TextField(
+              key: const ValueKey('device-name-field'),
+              controller: name,
+              onTap: name.firstTap,
+              decoration: const InputDecoration(labelText: 'Name'),
             ),
-          if (d.json['stableId'] case final String stable)
-            OmniListRow(
-              title: 'Hardware id',
-              value: stable,
-              valueColor: OmniColors.muted,
+            const SizedBox(height: OmniSpace.sm),
+            OmniButton(
+              key: const ValueKey('device-name-save'),
+              label: 'Save name',
+              onPressed: () async {
+                final text = name.text.trim();
+                if (text.isEmpty || text == d.name) {
+                  Navigator.of(sheet).pop(false);
+                  return;
+                }
+                final saved = await ref
+                    .read(engineApiProvider)
+                    .organizeDevice(d.id, name: text);
+                if (saved.ok) await _reloadDevices(ref);
+                if (sheet.mounted) Navigator.of(sheet).pop(false);
+              },
             ),
-          const SizedBox(height: OmniSpace.md),
-          OmniButton.ghost(
-            key: const ValueKey('device-settings'),
-            label: 'Change its settings',
-            onPressed: () => Navigator.of(sheet).pop(true),
-          ),
-        ],
+            const OmniSectionHeader('Address'),
+            OmniListRow(title: 'Id', value: d.id, valueColor: OmniColors.muted),
+            if (d.host != null)
+              OmniListRow(
+                title: 'Address',
+                value: d.host,
+                valueColor: OmniColors.muted,
+              ),
+            if (d.json['stableId'] case final String stable)
+              OmniListRow(
+                title: 'Hardware id',
+                value: stable,
+                valueColor: OmniColors.muted,
+              ),
+            const SizedBox(height: OmniSpace.md),
+            OmniButton.ghost(
+              key: const ValueKey('device-settings'),
+              label: 'Change its settings',
+              onPressed: () => Navigator.of(sheet).pop(true),
+            ),
+          ],
+        ),
       ),
     );
     if (settings == true && context.mounted) {
@@ -501,31 +502,34 @@ Future<void> pickRoom(BuildContext context, WidgetRef ref, DeviceView d) async {
 
 /// Asks for a room's name. Null when cancelled.
 Future<String?> askRoomName(BuildContext context, {String initial = ''}) {
-  final field = TextEditingController(text: initial);
+  final field = ReplaceableText(initial);
   return showDialog<String>(
     context: context,
-    builder: (dialog) => AlertDialog(
-      title: Text(initial.isEmpty ? 'New room' : 'Rename room'),
-      content: TextField(
-        key: const ValueKey('room-name'),
-        controller: field,
-        autofocus: true,
-        decoration: const InputDecoration(labelText: 'Name'),
+    builder: (dialog) => Owning(
+      [field],
+      child: AlertDialog(
+        title: Text(initial.isEmpty ? 'New room' : 'Rename room'),
+        content: TextField(
+          key: const ValueKey('room-name'),
+          controller: field,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('room-name-save'),
+            onPressed: () {
+              final text = field.text.trim();
+              if (text.isNotEmpty) Navigator.of(dialog).pop(text);
+            },
+            child: const Text('Save'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialog).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          key: const ValueKey('room-name-save'),
-          onPressed: () {
-            final text = field.text.trim();
-            if (text.isNotEmpty) Navigator.of(dialog).pop(text);
-          },
-          child: const Text('Save'),
-        ),
-      ],
     ),
   );
 }

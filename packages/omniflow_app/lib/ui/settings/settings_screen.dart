@@ -18,6 +18,7 @@ import 'phone_access.dart';
 import 'places_page.dart';
 import 'rooms_page.dart';
 import 'variables_page.dart';
+import 'whats_new.dart';
 
 /// A place in Settings that search can open.
 class SettingsPlace {
@@ -37,11 +38,7 @@ final settingsPlaces = [
   SettingsPlace('Rooms', OmniIcons.room, RoomsPage.new),
   SettingsPlace('NFC tags', OmniIcons.tag, TagsPage.new),
   SettingsPlace('Scenes', OmniIcons.scene, ScenesPage.new),
-  SettingsPlace(
-    'Running in the background',
-    OmniIcons.settings,
-    PhoneAccessPage.new,
-  ),
+  SettingsPlace('Phone setup', OmniIcons.settings, PhoneAccessPage.new),
   SettingsPlace('Permissions', OmniIcons.permissions, PhoneAccessPage.new),
   SettingsPlace('Hubs', OmniIcons.hub, HubsPage.new),
   SettingsPlace('Backup and restore', OmniIcons.backup, BackupPage.new),
@@ -76,7 +73,6 @@ class SettingsScreen extends ConsumerWidget {
     final person = personOf(devices);
     final presence = person == null ? null : Presence.of(person.json);
     final rooms = ref.watch(roomsProvider).value;
-    final scenes = ref.watch(scenesProvider).value;
     final summaries = ref.watch(summariesProvider).value;
     final access = ref.watch(phoneAccessStateProvider).value;
     final hub = ref.watch(engineStatusProvider).value;
@@ -90,7 +86,7 @@ class SettingsScreen extends ConsumerWidget {
         key: const ValueKey('settings-list'),
         padding: const EdgeInsets.only(bottom: OmniSpace.xl),
         children: [
-          const OmniSectionHeader('Home'),
+          const OmniSectionHeader('Your home'),
           OmniListRow(
             key: const ValueKey('settings-places'),
             icon: OmniIcons.place,
@@ -120,18 +116,18 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _push(context, const TagsPage()),
           ),
           OmniListRow(
-            key: const ValueKey('settings-scenes'),
-            icon: OmniIcons.scene,
-            title: 'Scenes',
-            subtitle: _count(scenes?.length, 'scene', 'scenes'),
+            key: const ValueKey('settings-variables'),
+            icon: OmniIcons.level,
+            title: 'Variables',
+            subtitle: 'values automations set, to see or clear',
             chevron: true,
-            onTap: () => _push(context, const ScenesPage()),
+            onTap: () => _push(context, const VariablesPage()),
           ),
           const OmniSectionHeader('This phone'),
           OmniListRow(
             key: const ValueKey('settings-background'),
             icon: OmniIcons.settings,
-            title: 'Running in the background',
+            title: 'Phone setup',
             subtitle: switch (access) {
               null => 'Checking',
               PhoneAccessState(running: false) => 'Off · automations wait',
@@ -146,14 +142,6 @@ class SettingsScreen extends ConsumerWidget {
                 : access.backgroundOk
                 ? StatusKind.online
                 : StatusKind.warning,
-            onTap: () => _push(context, const PhoneAccessPage()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-permissions'),
-            icon: OmniIcons.permissions,
-            title: 'Permissions',
-            subtitle: 'location, nearby devices, NFC, notifications',
-            chevron: true,
             onTap: () => _push(context, const PhoneAccessPage()),
           ),
           OmniListRow(
@@ -200,7 +188,7 @@ class SettingsScreen extends ConsumerWidget {
                 ? shell.open(ReviewLink(waiting.single.id))
                 : shell.select(ShellTab.automations),
           ),
-          const OmniSectionHeader('Advanced'),
+          const OmniSectionHeader('Your data'),
           OmniListRow(
             key: const ValueKey('settings-backup'),
             icon: OmniIcons.backup,
@@ -209,14 +197,7 @@ class SettingsScreen extends ConsumerWidget {
             chevron: true,
             onTap: () => _push(context, const BackupPage()),
           ),
-          OmniListRow(
-            key: const ValueKey('settings-variables'),
-            icon: OmniIcons.level,
-            title: 'Variables',
-            subtitle: 'values automations set, to see or clear',
-            chevron: true,
-            onTap: () => _push(context, const VariablesPage()),
-          ),
+          const OmniSectionHeader('Advanced'),
           OmniListRow(
             key: const ValueKey('settings-developer'),
             icon: OmniIcons.developer,
@@ -229,20 +210,13 @@ class SettingsScreen extends ConsumerWidget {
             key: const ValueKey('settings-about'),
             icon: OmniIcons.about,
             title: 'About',
-            subtitle: 'OmniFlow $appVersion · licences',
+            subtitle: 'OmniFlow $appVersion · what is new, licences',
             chevron: true,
             divider: false,
-            onTap: () => showLicensePage(
-              context: context,
-              applicationName: 'OmniFlow',
-              applicationVersion: appVersion,
-            ),
+            onTap: () => _push(context, const AboutPage()),
           ),
         ],
       ),
     );
   }
 }
-
-/// The version in pubspec.yaml.
-const appVersion = '0.1.0';

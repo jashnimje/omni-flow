@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../design/design.dart';
-import 'form_parts.dart' show Owning;
 
 /// Asks for a name, starting from [initial]. Null when cancelled.
 Future<String?> askName(

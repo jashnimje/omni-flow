@@ -40,8 +40,23 @@ class $DriverManifestsTable extends DriverManifests
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _byAgentMeta = const VerificationMeta(
+    'byAgent',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, manifestJson, updatedAt];
+  late final GeneratedColumn<bool> byAgent = GeneratedColumn<bool>(
+    'by_agent',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("by_agent" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, manifestJson, updatedAt, byAgent];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -78,6 +93,12 @@ class $DriverManifestsTable extends DriverManifests
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('by_agent')) {
+      context.handle(
+        _byAgentMeta,
+        byAgent.isAcceptableOrUnknown(data['by_agent']!, _byAgentMeta),
+      );
+    }
     return context;
   }
 
@@ -99,6 +120,10 @@ class $DriverManifestsTable extends DriverManifests
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      byAgent: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}by_agent'],
+      )!,
     );
   }
 
@@ -112,10 +137,15 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
   final String id;
   final String manifestJson;
   final DateTime updatedAt;
+
+  /// Registered by an agent, so what it drives waits for the user until
+  /// the user registers or approves it.
+  final bool byAgent;
   const ManifestRow({
     required this.id,
     required this.manifestJson,
     required this.updatedAt,
+    required this.byAgent,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -123,6 +153,7 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
     map['id'] = Variable<String>(id);
     map['manifest_json'] = Variable<String>(manifestJson);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    map['by_agent'] = Variable<bool>(byAgent);
     return map;
   }
 
@@ -131,6 +162,7 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
       id: Value(id),
       manifestJson: Value(manifestJson),
       updatedAt: Value(updatedAt),
+      byAgent: Value(byAgent),
     );
   }
 
@@ -143,6 +175,7 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
       id: serializer.fromJson<String>(json['id']),
       manifestJson: serializer.fromJson<String>(json['manifestJson']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      byAgent: serializer.fromJson<bool>(json['byAgent']),
     );
   }
   @override
@@ -152,6 +185,7 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
       'id': serializer.toJson<String>(id),
       'manifestJson': serializer.toJson<String>(manifestJson),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'byAgent': serializer.toJson<bool>(byAgent),
     };
   }
 
@@ -159,10 +193,12 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
     String? id,
     String? manifestJson,
     DateTime? updatedAt,
+    bool? byAgent,
   }) => ManifestRow(
     id: id ?? this.id,
     manifestJson: manifestJson ?? this.manifestJson,
     updatedAt: updatedAt ?? this.updatedAt,
+    byAgent: byAgent ?? this.byAgent,
   );
   ManifestRow copyWithCompanion(DriverManifestsCompanion data) {
     return ManifestRow(
@@ -171,6 +207,7 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
           ? data.manifestJson.value
           : this.manifestJson,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      byAgent: data.byAgent.present ? data.byAgent.value : this.byAgent,
     );
   }
 
@@ -179,37 +216,42 @@ class ManifestRow extends DataClass implements Insertable<ManifestRow> {
     return (StringBuffer('ManifestRow(')
           ..write('id: $id, ')
           ..write('manifestJson: $manifestJson, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('byAgent: $byAgent')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, manifestJson, updatedAt);
+  int get hashCode => Object.hash(id, manifestJson, updatedAt, byAgent);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is ManifestRow &&
           other.id == this.id &&
           other.manifestJson == this.manifestJson &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.byAgent == this.byAgent);
 }
 
 class DriverManifestsCompanion extends UpdateCompanion<ManifestRow> {
   final Value<String> id;
   final Value<String> manifestJson;
   final Value<DateTime> updatedAt;
+  final Value<bool> byAgent;
   final Value<int> rowid;
   const DriverManifestsCompanion({
     this.id = const Value.absent(),
     this.manifestJson = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.byAgent = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DriverManifestsCompanion.insert({
     required String id,
     required String manifestJson,
     required DateTime updatedAt,
+    this.byAgent = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        manifestJson = Value(manifestJson),
@@ -218,12 +260,14 @@ class DriverManifestsCompanion extends UpdateCompanion<ManifestRow> {
     Expression<String>? id,
     Expression<String>? manifestJson,
     Expression<DateTime>? updatedAt,
+    Expression<bool>? byAgent,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (manifestJson != null) 'manifest_json': manifestJson,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (byAgent != null) 'by_agent': byAgent,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -232,12 +276,14 @@ class DriverManifestsCompanion extends UpdateCompanion<ManifestRow> {
     Value<String>? id,
     Value<String>? manifestJson,
     Value<DateTime>? updatedAt,
+    Value<bool>? byAgent,
     Value<int>? rowid,
   }) {
     return DriverManifestsCompanion(
       id: id ?? this.id,
       manifestJson: manifestJson ?? this.manifestJson,
       updatedAt: updatedAt ?? this.updatedAt,
+      byAgent: byAgent ?? this.byAgent,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -254,6 +300,9 @@ class DriverManifestsCompanion extends UpdateCompanion<ManifestRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (byAgent.present) {
+      map['by_agent'] = Variable<bool>(byAgent.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -266,6 +315,7 @@ class DriverManifestsCompanion extends UpdateCompanion<ManifestRow> {
           ..write('id: $id, ')
           ..write('manifestJson: $manifestJson, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('byAgent: $byAgent, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3326,6 +3376,7 @@ typedef $$DriverManifestsTableCreateCompanionBuilder =
       required String id,
       required String manifestJson,
       required DateTime updatedAt,
+      Value<bool> byAgent,
       Value<int> rowid,
     });
 typedef $$DriverManifestsTableUpdateCompanionBuilder =
@@ -3333,6 +3384,7 @@ typedef $$DriverManifestsTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> manifestJson,
       Value<DateTime> updatedAt,
+      Value<bool> byAgent,
       Value<int> rowid,
     });
 
@@ -3357,6 +3409,11 @@ class $$DriverManifestsTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get byAgent => $composableBuilder(
+    column: $table.byAgent,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3384,6 +3441,11 @@ class $$DriverManifestsTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get byAgent => $composableBuilder(
+    column: $table.byAgent,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$DriverManifestsTableAnnotationComposer
@@ -3405,6 +3467,9 @@ class $$DriverManifestsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get byAgent =>
+      $composableBuilder(column: $table.byAgent, builder: (column) => column);
 }
 
 class $$DriverManifestsTableTableManager
@@ -3443,11 +3508,13 @@ class $$DriverManifestsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> manifestJson = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<bool> byAgent = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DriverManifestsCompanion(
                 id: id,
                 manifestJson: manifestJson,
                 updatedAt: updatedAt,
+                byAgent: byAgent,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3455,11 +3522,13 @@ class $$DriverManifestsTableTableManager
                 required String id,
                 required String manifestJson,
                 required DateTime updatedAt,
+                Value<bool> byAgent = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DriverManifestsCompanion.insert(
                 id: id,
                 manifestJson: manifestJson,
                 updatedAt: updatedAt,
+                byAgent: byAgent,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

@@ -52,31 +52,6 @@ Future<T?> showFormSheet<T>(
   ),
 );
 
-/// Disposes [owns] when [child] leaves the tree: after a sheet or dialog
-/// has finished closing, so no field still shows a disposed controller.
-class Owning extends StatefulWidget {
-  const Owning(this.owns, {super.key, required this.child});
-
-  final List<ChangeNotifier> owns;
-  final Widget child;
-
-  @override
-  State<Owning> createState() => _OwningState();
-}
-
-class _OwningState extends State<Owning> {
-  @override
-  void dispose() {
-    for (final c in widget.owns) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
-}
-
 /// One choice of a form: its row, with a check when it is the one picked.
 class ChoiceRow extends StatelessWidget {
   const ChoiceRow({
@@ -548,7 +523,12 @@ class _ChoiceSheetState extends State<ChoiceSheet> {
         future: _choices,
         builder: (context, snap) {
           if (snap.hasError) {
-            return OmniBanner.error('${snap.error}');
+            final e = snap.error;
+            return OmniBanner.error(
+              e is String
+                  ? e
+                  : 'The list did not load. Close this and try again.',
+            );
           }
           final all = snap.data;
           if (all == null) {

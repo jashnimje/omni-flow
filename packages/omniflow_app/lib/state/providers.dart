@@ -106,7 +106,8 @@ String errorMessage(Json result) {
 /// Devices with their capabilities, kept current from engine events. A
 /// device the engine reports unreachable carries `online: false` and the
 /// reason in `offlineReason` until it is heard from again.
-class DevicesNotifier extends AsyncNotifier<List<Json>> {
+class DevicesNotifier extends AsyncNotifier<List<Json>>
+    with _KeepsListOnFailure {
   final _offline = <String, String>{};
   String? _lastBoardError;
 
@@ -188,23 +189,48 @@ class DevicesNotifier extends AsyncNotifier<List<Json>> {
 
   Future<List<Json>> _load(EngineClient client) async {
     final result = await client.call('device.list', {'withCapabilities': true});
+    if (result['ok'] != true) throw EngineReadFailed(errorMessage(result));
     return [
       for (final d in (result['devices'] as List? ?? const []))
         _withStatus(Map<String, Object?>.from(d as Map)),
     ];
   }
 
-  Future<void> refresh() async =>
-      state = AsyncData(await _load(ref.read(engineClientProvider)));
+  Future<void> refresh() =>
+      reloadWith(() => _load(ref.read(engineClientProvider)));
 }
 
 final devicesProvider = AsyncNotifierProvider<DevicesNotifier, List<Json>>(
   DevicesNotifier.new,
 );
 
+/// A list the engine did not give: it did not answer, or said why not.
+class EngineReadFailed implements Exception {
+  const EngineReadFailed(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// A reload that keeps the list on screen when it fails: the error shows
+/// only when there is nothing to keep.
+mixin _KeepsListOnFailure on AsyncNotifier<List<Json>> {
+  Future<void> reloadWith(Future<List<Json>> Function() load) async {
+    try {
+      final next = await load();
+      if (ref.mounted) state = AsyncData(next);
+    } on EngineReadFailed catch (e, stack) {
+      if (!ref.mounted || state.hasValue) return;
+      state = AsyncError(e, stack);
+    }
+  }
+}
+
 /// Flows, reloaded after runs finish (at most once per [settle]) or a flow
 /// changes.
-class FlowsNotifier extends AsyncNotifier<List<Json>> {
+class FlowsNotifier extends AsyncNotifier<List<Json>> with _KeepsListOnFailure {
   static const settle = Duration(milliseconds: 500);
   Timer? _reload;
 
@@ -228,16 +254,15 @@ class FlowsNotifier extends AsyncNotifier<List<Json>> {
 
   Future<List<Json>> _load(EngineClient client) async {
     final result = await client.call('flow.list');
+    if (result['ok'] != true) throw EngineReadFailed(errorMessage(result));
     return [
       for (final f in (result['flows'] as List? ?? const []))
         Map<String, Object?>.from(f as Map),
     ];
   }
 
-  Future<void> refresh() async {
-    final flows = await _load(ref.read(engineClientProvider));
-    if (ref.mounted) state = AsyncData(flows);
-  }
+  Future<void> refresh() =>
+      reloadWith(() => _load(ref.read(engineClientProvider)));
 }
 
 final flowsProvider = AsyncNotifierProvider<FlowsNotifier, List<Json>>(

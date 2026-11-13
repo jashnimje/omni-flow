@@ -27,7 +27,6 @@ const agentReadCommands = {
   'automation.list',
   'automation.log',
   'automation.templates',
-  'scene.run',
   'board.describe',
   'board.ports',
   'device.discover',
@@ -87,6 +86,7 @@ const agentSetupCommands = {
   'room.remove',
   'room.save',
   'scene.remove',
+  'scene.run',
   'scene.save',
   'tag.remove',
   'tag.save',
@@ -109,9 +109,11 @@ const agentUserOnly = {
   'device.hostkey': 'trusting a host key is a security decision',
   'device.remove': 'removing a thing deletes its secrets and history',
   'secret.set': 'keys and passwords never pass through an agent',
+  'web.secret.set': 'keys and passwords never pass through an agent',
   'driver.register':
       'use register_custom_driver_manifest, which refuses '
       'drivers that run host commands',
+  'driver.approve': 'approving a driver an agent added is the user check',
   'tv.shell': 'a shell on the TV is the user\'s',
   'tv.install': 'installing apps is the user\'s',
   'tv.settings.put': 'raw TV setting writes are the user\'s',

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
+import 'package:omniflow_engine/src/api/engine_flow_host.dart';
+
 import 'automation_harness.dart';
 
 void main() {
@@ -560,5 +562,38 @@ void main() {
     await until(() => h.core.flows.globals['Last'] == 'door');
     await h.core.devices.mergeState('jade', {'home': true});
     await until(() => h.core.flows.globals['Last'] == 'home');
+  });
+
+  test(
+    'removing an automation forgets the daily time it last started',
+    () async {
+      await ok('automation.save', {
+        'form': 'rule',
+        'spec': {
+          'name': 'Night',
+          'when': ['time:01:00'],
+          'then': ['notify:Night'],
+        },
+        'trusted': true,
+      });
+      final host = EngineFlowHost(h.core);
+      const at = '2026-11-10T01:00:00.000';
+      expect(await host.ranAt('night', at), isFalse);
+      await host.markScheduled('night', at);
+      expect(await host.ranAt('night', at), isTrue);
+      await ok('automation.remove', {'id': 'night'});
+      expect(
+        await DriftGlobalStore(h.db).get(scheduledGlobalKey('night')),
+        isNull,
+      );
+      expect(await host.ranAt('night', at), isFalse);
+    },
+  );
+
+  test('a web request reads its secret from the engine store', () async {
+    final host = EngineFlowHost(h.core);
+    expect(await host.webSecret('ha_token'), isNull);
+    await h.core.secrets.write(webSecretKey('ha_token'), 'fixture-value');
+    expect(await host.webSecret('ha_token'), 'fixture-value');
   });
 }

@@ -128,8 +128,22 @@ class NodeTrace {
     if (duration != null) 'ms': duration!.inMilliseconds,
     if (port != null) 'port': port,
     if (error != null) 'error': error,
-    'input': input,
-    if (output != null) 'output': output,
+    'input': _traced(input),
+    if (output != null) 'output': _traced(output!),
+  };
+}
+
+/// [msg] as a trace keeps it: a web reply's body stays with the run that
+/// reads it, so the run log holds only its status and size.
+Map<String, Object?> _traced(Map<String, Object?> msg) {
+  final response = msg['response'];
+  if (response is! Map || !response.containsKey('body')) return msg;
+  return {
+    ...msg,
+    'response': {
+      for (final e in response.entries)
+        if (e.key != 'body') e.key: e.value,
+    },
   };
 }
 
@@ -190,6 +204,7 @@ class FlowRunner {
     this.maxConcurrent = 10,
     this.maxQueued = 10,
     this.web = const IoWebRequester(),
+    this.webSecret,
   }) {
     for (final n in flow.nodes) {
       final type = builtInNodeTypes[n.type];
@@ -207,6 +222,9 @@ class FlowRunner {
 
   /// Sends web request steps.
   final WebRequester web;
+
+  /// Reads the secrets a web request's `{"secret": "name"}` headers name.
+  final WebSecretReader? webSecret;
   final _types = <String, NodeType>{};
   final _active = <_Run>[];
   Future<void> _queueTail = Future.value();
@@ -690,9 +708,14 @@ class FlowRunner {
         if (url.scheme != 'http' && url.scheme != 'https') {
           throw StateError('$url is not an http or https address');
         }
+        final secretHeaders = {
+          for (final e in (c['headers'] as Map? ?? const {}).entries)
+            '${e.key}': ?webSecretRef(e.value),
+        };
         final headers = {
           for (final e in (c['headers'] as Map? ?? const {}).entries)
-            '${e.key}': '${renderer.render(e.value, context)}',
+            if (!secretHeaders.containsKey('${e.key}'))
+              '${e.key}': '${renderer.render(e.value, context)}',
         };
         final raw = renderer.render(c['body'], context);
         final body = raw == null || raw is String
@@ -704,17 +727,37 @@ class FlowRunner {
         if (run.dryRun) {
           return {
             ...msg,
-            'result': {'dryRun': true, 'method': method, 'url': '$url'},
+            'result': {
+              'dryRun': true,
+              'method': method,
+              'url': webShownAddress('$url'),
+            },
           };
+        }
+        for (final MapEntry(key: header, value: name)
+            in secretHeaders.entries) {
+          final value = await webSecret?.call(name);
+          if (value == null) {
+            throw StateError(
+              'no web secret $name is stored for the $header header: set it '
+              'with omni secret set-web $name',
+            );
+          }
+          headers[header] = value;
         }
         final reply = await web.send(method, url, headers: headers, body: body);
         // A refusal is a failed step, so a try's otherwise takes over.
         if (reply.status >= 400) {
           throw StateError('${url.host} answered ${reply.status}');
         }
+        // Later steps read the body, and the trace leaves it out.
         return {
           ...msg,
-          'response': {'status': reply.status, 'body': reply.body},
+          'response': {
+            'status': reply.status,
+            'bytes': reply.bytes,
+            'body': reply.body,
+          },
         };
       case 'notify' || 'speak':
         final payload = Map<String, Object?>.from(

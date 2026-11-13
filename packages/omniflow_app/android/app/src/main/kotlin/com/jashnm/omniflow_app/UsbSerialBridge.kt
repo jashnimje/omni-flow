@@ -243,6 +243,11 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
         }
         plugReceiver = null
         permissionReceiver = null
+        // The engine asking is going away: answer it rather than leave its
+        // call waiting forever.
+        val waiting = waitingPermission.values.flatten()
+        waitingPermission.clear()
+        waiting.forEach { it.success(false) }
     }
 
     override fun onEngineWillDestroy() {}

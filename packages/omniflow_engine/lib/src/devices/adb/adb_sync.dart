@@ -122,8 +122,8 @@ class AdbSync {
     return AdbSyncEntry(_baseName(path), mode, size, mtime);
   }
 
-  /// The entries of the directory [path], without `.` and `..`. A path
-  /// that is no directory lists nothing.
+  /// The entries of the directory [path], without `.`, `..` and names with
+  /// a slash, backslash or NUL. A path that is no directory lists nothing.
   Future<List<AdbSyncEntry>> list(String path) async {
     await _request('LIST', _pathBytes(path));
     final out = <AdbSyncEntry>[];
@@ -136,7 +136,14 @@ class AdbSync {
         await _read(_u32(head, 16)),
         allowMalformed: true,
       );
-      if (name == '.' || name == '..') continue;
+      // A real directory entry is one name. Anything else would point a
+      // download outside the folder it is saved into.
+      if (name.isEmpty ||
+          name == '.' ||
+          name == '..' ||
+          name.contains(RegExp(r'[/\\\x00]'))) {
+        continue;
+      }
       out.add(AdbSyncEntry(name, _u32(head, 4), _u32(head, 8), _u32(head, 12)));
     }
   }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../rules/rule_spec.dart' show literalFromText;
+import '../../rules/rule_spec.dart' show wordValue;
 import '../../state/providers.dart';
 import '../automations/form_parts.dart';
 import '../automations/rule_words.dart' show valueText;
@@ -64,7 +64,7 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
         final n = nameField.text.trim();
         if (!valid.hasMatch(n) || isSystemVariable(n)) return null;
         if (valueField.text.trim().isEmpty) return null;
-        return (n, _wordValue(valueField.text));
+        return (n, wordValue(valueField.text));
       },
       whyNot: () {
         final n = nameField.text.trim();
@@ -204,10 +204,3 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
     );
   }
 }
-
-/// What a person types as a value: on/off and yes/no are booleans.
-Object? _wordValue(String text) => switch (text.trim().toLowerCase()) {
-  'on' || 'yes' => true,
-  'off' || 'no' => false,
-  _ => literalFromText(text),
-};

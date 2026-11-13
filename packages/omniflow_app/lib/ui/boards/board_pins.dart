@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show pinIdFor;
 
 import '../../api/engine_calls.dart';
 
@@ -127,17 +128,8 @@ class NamedPin {
   );
 }
 
-/// A pin name the engine takes, made from what the user typed: lower snake
-/// case starting with a letter. The engine still judges it.
-String pinNameFor(String typed) {
-  final id = typed
-      .trim()
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-      .replaceAll(RegExp(r'^_+|_+$'), '');
-  if (id.isEmpty) return '';
-  return RegExp(r'^[a-z]').hasMatch(id) ? id : 'pin_$id';
-}
+/// A pin name the engine takes, made from what the user typed.
+String pinNameFor(String typed) => pinIdFor(typed);
 
 /// The board type as people say it: "ESP32", "Pico W".
 String boardTypeLabel(String? board) => switch (board) {

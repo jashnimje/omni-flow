@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/engine_calls.dart';
 import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
-import '../automations/automations_state.dart';
+import '../../state/reload_home.dart';
 import '../automations/scenes.dart' show openScenes, runScene, sceneIconFor;
 import '../design/design.dart';
 import '../devices/device_controls.dart';
@@ -108,11 +108,7 @@ class _Overview extends ConsumerWidget {
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
-          onRefresh: () async {
-            await ref.read(devicesProvider.notifier).refresh();
-            ref.invalidate(roomsProvider);
-            await ref.read(automationsProvider.notifier).refresh();
-          },
+          onRefresh: () => reloadHome(ref),
           child: ListView(
             key: const ValueKey('home-list'),
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 96),

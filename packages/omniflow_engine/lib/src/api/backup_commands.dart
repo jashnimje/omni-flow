@@ -514,6 +514,7 @@ class BackupCommands {
         id,
       );
       await manifests.put(id, json, now);
+      _core.agentDrivers.remove(id);
     }
     if (replace) {
       for (final id in storedDrivers.keys) {

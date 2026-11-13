@@ -60,6 +60,18 @@ void main() {
     );
   });
 
+  testWidgets('Scenes lists the scenes with Run, and not as rules', (
+    tester,
+  ) async {
+    await pumpPage(tester, engine, const AutomationsScreen());
+    expect(find.text('Movie'), findsNothing, reason: 'not under All');
+    await tapKey(tester, 'filter-scenes');
+    expect(find.byKey(const ValueKey('scene-movie')), findsOneWidget);
+    expect(find.byKey(const ValueKey('scene-new')), findsOneWidget);
+    await tapKey(tester, 'scene-run-movie');
+    expect(engine.callsOf('scene.run').single.$2['id'], 'movie');
+  });
+
   testWidgets('the filter chips keep rules, links, the ones off and the ones '
       'that need you', (tester) async {
     await pumpPage(tester, engine, const AutomationsScreen());

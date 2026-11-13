@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:omniflow_engine/src/api/hub_runtime.dart';
+import 'package:omniflow_engine/src/api/tv_commands.dart' show pathInside;
 import 'package:omniflow_engine/src/devices/adb/adb_key.dart';
 import 'package:test/test.dart';
 
@@ -767,6 +768,38 @@ void main() {
       expect(File('${local.path}/copy/deep/2.jpg').readAsBytesSync(), [2, 2]);
       expect(progress.last, containsPair('done', 70002));
       expect(progress.last, containsPair('total', 70002));
+    });
+
+    test('get keeps a hostile TV\'s names inside the folder', () async {
+      const escape = '../../escaped.txt';
+      adbd.fs.hostileNames['/sdcard/Download/Album'] = [
+        escape,
+        r'..\escaped.txt',
+        'nul\x00.txt',
+      ];
+      adbd.fs.writeFile('/sdcard/Download/Album/$escape', [9]);
+      final listed = await ok('tv.files.list', {
+        'path': '/sdcard/Download/Album',
+      });
+      expect(
+        [for (final e in (listed['entries'] as List).cast<Map>()) e['name']],
+        ['deep', '1.jpg'],
+      );
+      final dir = await ok('tv.files.download', {
+        'path': '/sdcard/Download/Album',
+        'to': '${local.path}/a/b',
+      });
+      expect(dir['files'], 2);
+      expect(File('${local.path}/escaped.txt').existsSync(), isFalse);
+      expect(File('${local.path}/a/escaped.txt').existsSync(), isFalse);
+    });
+
+    test('a local path is checked against the target folder', () {
+      final root = '${local.path}/copy';
+      expect(pathInside(root, ['deep', '2.jpg']), '$root/deep/2.jpg');
+      expect(pathInside(root, ['a', '..', 'b']), '$root/b');
+      expect(pathInside(root, ['..', 'x']), isNull);
+      expect(pathInside(root, ['a', '..', '..', 'copy2']), isNull);
     });
 
     test('get will not overwrite a local file unless asked', () async {

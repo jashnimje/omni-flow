@@ -118,12 +118,14 @@ void _tools({required bool viaHub}) {
           'mode': 'follow',
         }),
         refused('find_things', {'windowMs': 100}),
+        refused('run_scene', {'id': 'focus'}),
       ]),
       [
         'invoke_device_capability',
         'create_rule',
         'link_devices',
         'find_things',
+        'run_scene',
       ],
     );
     expect(
@@ -530,6 +532,89 @@ void _tools({required bool viaHub}) {
     });
     expect(http.isError, isFalse);
     expect(engine.registry['fan'], isNotNull);
+
+    // What an agent's driver drives waits for the user until they approve it.
+    await engine.handle('device.add', {
+      'id': 'ceiling_fan',
+      'driver': 'fan',
+      // TEST-NET: a broken guard fails to connect instead of reaching it.
+      'host': '192.0.2.7',
+    });
+    final invoke = await call('invoke_device_capability', {
+      'deviceId': 'ceiling_fan',
+      'capabilityId': 'go',
+      'params': <String, Object?>{},
+    });
+    expect(invoke.isError, isTrue);
+    expect((body(invoke)['error'] as Map)['type'], 'needs_user');
+    expect(
+      (body(invoke)['error'] as Map)['message'],
+      contains('omni driver approve fan'),
+    );
+    final called = await engine.handle('agent.call', {
+      'command': 'device.invoke',
+      'args': {'id': 'ceiling_fan', 'capability': 'go'},
+    });
+    expect((called['error'] as Map)['type'], 'needs_user', reason: '$called');
+    expect((called['error'] as Map)['message'], contains('high risk'));
+    final rule = body(
+      await call('create_rule', {
+        'rule': {
+          'name': 'Fan on',
+          'when': ['manual'],
+          'then': ['ceiling_fan.go'],
+        },
+      }),
+    );
+    expect((rule['highRisk'], rule['approved']), (true, false));
+    final listed = await engine.handle('driver.list', {});
+    final fan = (listed['drivers'] as List).cast<Map>().firstWhere(
+      (d) => d['id'] == 'fan',
+    );
+    expect((fan['highRisk'], fan['byAgent']), (true, true));
+
+    final approved = await engine.handle('driver.approve', {'id': 'fan'});
+    expect(approved['ok'], isTrue, reason: '$approved');
+    final agentApprove = await engine.handle('agent.call', {
+      'command': 'driver.approve',
+      'args': {'id': 'fan'},
+    });
+    expect((agentApprove['error'] as Map)['type'], 'needs_user');
+    final relisted = await engine.handle('automation.list', {});
+    final fanOn = (relisted['automations'] as List).cast<Map>().firstWhere(
+      (a) => a['id'] == 'fan_on',
+    );
+    expect(fanOn['highRisk'], isFalse);
+  });
+
+  test('an agent\'s driver stays high risk after a restart', () async {
+    final registered = await call('register_custom_driver_manifest', {
+      'manifest': {
+        'schemaVersion': 1,
+        'id': 'fan',
+        'name': 'Fan',
+        'category': 'misc',
+        'transport': {'type': 'http'},
+        'capabilities': [
+          {
+            'id': 'go',
+            'type': 'action',
+            'command': {'path': '/go'},
+          },
+        ],
+      },
+    });
+    expect(registered.isError, isFalse);
+    await engine.close();
+    engine = await OmniEngine.open(
+      home: home,
+      secrets: InMemorySecretStore(),
+      tap: tap,
+    );
+    final fan = ((await engine.handle('driver.list', {}))['drivers'] as List)
+        .cast<Map>()
+        .firstWhere((d) => d['id'] == 'fan');
+    expect((fan['highRisk'], fan['byAgent']), (true, true));
   });
 
   test('an agent cannot replace a driver or a flow the user saved', () async {

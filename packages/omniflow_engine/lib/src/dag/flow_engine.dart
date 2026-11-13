@@ -5,6 +5,7 @@ import 'conditions.dart';
 import 'executor.dart';
 import 'flow.dart';
 import 'sun.dart';
+import 'web_request.dart';
 
 /// Everything the flow engine needs from the rest of the engine.
 abstract interface class FlowHost {
@@ -29,6 +30,10 @@ abstract interface class FlowHost {
   /// Notes that [flowId] starts its daily time [scheduled], before it runs,
   /// so a run cut off by a restart is not caught up again.
   Future<void> markScheduled(String flowId, String scheduled);
+
+  /// The web secret [name] a web request header names, null when none is
+  /// stored.
+  Future<String?> webSecret(String name);
   void emit(Map<String, Object?> event);
   Stream<Map<String, Object?>> get events;
 }
@@ -40,6 +45,7 @@ class FlowEngine implements FlowEffects {
     this._host, {
     this._clock = const SystemFlowClock(),
     Map<String, Object?> globals = const {},
+    this._web = const IoWebRequester(),
   }) {
     _openedAt = _clock.now();
     this.globals.addAll(globals);
@@ -48,6 +54,7 @@ class FlowEngine implements FlowEffects {
 
   final FlowHost _host;
   final FlowClock _clock;
+  final WebRequester _web;
   final _runners = <String, FlowRunner>{};
   final _timers = <String, List<Timer>>{};
 
@@ -97,7 +104,14 @@ class FlowEngine implements FlowEffects {
     for (final f in wanted.values) {
       if (_runners.containsKey(f.id)) continue;
       try {
-        final runner = FlowRunner(f, this, clock: _clock, onTrace: _onTrace);
+        final runner = FlowRunner(
+          f,
+          this,
+          clock: _clock,
+          onTrace: _onTrace,
+          web: _web,
+          webSecret: _host.webSecret,
+        );
         _runners[f.id] = runner;
         if (_timersOn) _startTimers(runner);
       } catch (e) {
@@ -362,8 +376,16 @@ class FlowEngine implements FlowEffects {
     final next = _dailyTime(n, _clock.now());
     if (next == null) return;
     final timer = Timer(next.difference(_clock.now()), () {
+      // A timer counts elapsed time, so when the wall clock went back (the
+      // end of summer time, a clock fix) it goes off before its time, which
+      // would run the trigger now and again when the time comes.
+      if (_clock.now().isBefore(next)) {
+        _scheduleDaily(r, n);
+        return;
+      }
       final scheduled = next.toIso8601String();
       _track(() async {
+        if (await _host.ranAt(r.flow.id, scheduled)) return;
         await _host.markScheduled(r.flow.id, scheduled);
         _fire(r, n, {'scheduled': scheduled});
       }());

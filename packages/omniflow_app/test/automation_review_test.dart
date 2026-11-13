@@ -152,6 +152,8 @@ void main() {
         'id': 'movie_night',
       });
       expect(find.byType(ReviewPage), findsNothing);
+      // One page closes: the list it was opened from stays.
+      expect(find.byKey(const ValueKey('open-page')), findsOneWidget);
     });
 
     testWidgets('a high-risk automation says it runs commands', (tester) async {
