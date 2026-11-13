@@ -237,12 +237,14 @@ FakeEngine tvEngine() {
 /// Shows [tab] of the open TV control centre.
 Future<void> openTvTab(WidgetTester tester, String tab) async {
   if (tab == 'Remote') return;
-  await tester.tap(
-    find.descendant(
-      of: find.byKey(const ValueKey('tv-tabs')),
-      matching: find.text(tab),
-    ),
+  final chip = find.descendant(
+    of: find.byKey(const ValueKey('tv-tabs')),
+    matching: find.text(tab),
   );
+  // The tabs scroll sideways, so the later ones may be out of view.
+  await tester.ensureVisible(chip);
+  await tester.pumpAndSettle();
+  await tester.tap(chip);
   await tester.pumpAndSettle();
 }
 

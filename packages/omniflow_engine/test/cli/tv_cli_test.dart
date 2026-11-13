@@ -200,6 +200,115 @@ void main() {
     },
   );
 
+  test('screenshot, tap, swipe, record, system and processes', () async {
+    await addTv();
+    final png = '${local.path}/shot.png';
+    final shot = await json(['tv', 'tv', 'screenshot', '--out', png]);
+    expect((shot['width'], shot['out']), (32, png));
+    expect(shot.containsKey('png'), isFalse);
+    expect(File(png).readAsBytesSync(), tv.screencap);
+    await json(['tv', 'tv', 'tap', '0.5', '0.5']);
+    await json(['tv', 'tv', 'swipe', '0', '0', '1', '1', '--ms', '500']);
+    expect(tv.touches, [
+      ['tap', '960', '540'],
+      ['swipe', '0', '0', '1919', '1079', '500'],
+    ]);
+    final started = await json([
+      'tv',
+      'tv',
+      'record',
+      'start',
+      '--seconds',
+      '10',
+      '--bit-rate',
+      '2',
+    ]);
+    expect(started['seconds'], 10);
+    expect((await json(['tv', 'tv', 'record', 'status']))['recording'], true);
+    await json(['tv', 'tv', 'record', 'stop']);
+    expect(tv.recording, isFalse);
+    expect((await json(['tv', 'tv', 'system']))['uptimeSeconds'], 12345);
+    expect((await json(['tv', 'tv', 'processes']))['apps'], isNotEmpty);
+  });
+
+  test('permissions, backup, trim-caches and power', () async {
+    await addTv();
+    tv.apps['in.startv.hotstar']!
+      ..apkPaths = ['/data/app/h/base.apk']
+      ..runtimePermissions['android.permission.RECORD_AUDIO'] = false;
+    adbd.fs.writeFile('/data/app/h/base.apk', [9, 9]);
+    final perms = await json(['tv', 'tv', 'permissions', 'in.startv.hotstar']);
+    expect(
+      (perms['permissions'] as List).single,
+      containsPair('runtime', true),
+    );
+    await json([
+      'tv',
+      'tv',
+      'permission',
+      'in.startv.hotstar',
+      'android.permission.RECORD_AUDIO',
+      '--grant',
+    ]);
+    expect(
+      tv.apps['in.startv.hotstar']!.runtimePermissions.values.single,
+      isTrue,
+    );
+    final backup = await json([
+      'tv',
+      'tv',
+      'backup',
+      'in.startv.hotstar',
+      '--to',
+      '${local.path}/apks',
+    ]);
+    expect(backup['files'], ['${local.path}/apks/in.startv.hotstar.apk']);
+
+    final (no, said, _) = await omni([
+      'tv',
+      'tv',
+      'power',
+      'reboot',
+    ], input: Stream.value(utf8.encode('n\n')));
+    expect(no, 1);
+    expect(said, contains('Restart tv? [y/N]'));
+    expect(tv.powerCommands, isEmpty);
+    final (yes, _, _) = await omni([
+      'tv',
+      'tv',
+      'power',
+      'shutdown',
+    ], input: Stream.value(utf8.encode('y\n')));
+    expect(yes, 0);
+    await json(['tv', 'tv', 'power', 'reboot', '--yes']);
+    expect(tv.powerCommands, ['reboot -p', 'reboot']);
+    final (none, _, _) = await omni([
+      'tv',
+      'tv',
+      'trim-caches',
+    ], input: const Stream.empty());
+    expect(none, 1);
+    expect(tv.trims, 0);
+    expect((await json(['tv', 'tv', 'trim-caches', '--yes']))['freedKb'], 5000);
+  });
+
+  test('the new verbs check their words before sending', () async {
+    await addTv();
+    for (final args in [
+      ['tap', '0.5'],
+      ['swipe', '0', '0', '1'],
+      ['record', 'pause'],
+      ['permission', 'a.b', 'c.d'],
+      ['permission', 'a.b', 'c.d', '--grant', '--revoke'],
+      ['backup', 'a.b'],
+      ['power', 'halt', '--yes'],
+      ['screenshot', 'extra'],
+    ]) {
+      expect((await omni(['tv', 'tv', ...args])).$1, 64, reason: '$args');
+    }
+    expect(adbd.commands, isEmpty);
+  });
+
   test('a missing verb or bad option is a usage error', () async {
     await addTv();
     expect((await omni(['tv', 'tv'])).$1, 64);

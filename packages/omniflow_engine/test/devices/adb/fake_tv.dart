@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'fake_adbd.dart';
 
 /// One app on the fake TV.
@@ -28,6 +31,49 @@ class FakeApp {
   var installed = true;
   var dataCleared = 0;
   var cacheCleared = 0;
+
+  /// What `pm path` lists. The bytes are what [FakeAdbd.fs] holds there.
+  List<String> apkPaths = const [];
+  List<String> installPermissions = const [];
+  final runtimePermissions = <String, bool>{};
+}
+
+/// A real, small RGB PNG of [width] by [height].
+List<int> fakePng(int width, int height) {
+  List<int> be32(int v) => [
+    (v >> 24) & 0xff,
+    (v >> 16) & 0xff,
+    (v >> 8) & 0xff,
+    v & 0xff,
+  ];
+  int crc32(List<int> bytes) {
+    var c = 0xffffffff;
+    for (final b in bytes) {
+      c ^= b;
+      for (var k = 0; k < 8; k++) {
+        c = (c & 1) != 0 ? (c >> 1) ^ 0xedb88320 : c >> 1;
+      }
+    }
+    return c ^ 0xffffffff;
+  }
+
+  List<int> chunk(String type, List<int> data) {
+    final body = [...ascii.encode(type), ...data];
+    return [...be32(data.length), ...body, ...be32(crc32(body))];
+  }
+
+  final raw = <int>[
+    for (var y = 0; y < height; y++) ...[
+      0,
+      for (var x = 0; x < width; x++) ...[(x * 8) & 0xff, (y * 8) & 0xff, 0x0a],
+    ],
+  ];
+  return [
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, //
+    ...chunk('IHDR', [...be32(width), ...be32(height), 8, 2, 0, 0, 0]),
+    ...chunk('IDAT', zlib.encode(raw)),
+    ...chunk('IEND', const []),
+  ];
 }
 
 /// Splits a POSIX shell line into words, honouring single and double
@@ -77,8 +123,16 @@ List<String> shellWords(String line) {
 /// they changed. Anything else prints "not found" and exits 127.
 class FakeTv {
   FakeTv(this.adbd) {
-    adbd.respond = respond;
+    adbd
+      ..respond = respond
+      ..respondExec = _exec
+      ..dropsConnection = (script) =>
+          rebootDrops &&
+          script.split('\n').any((l) => l == 'reboot' || l == 'reboot -p');
   }
+
+  List<int> _exec(String line) =>
+      line == 'screencap -p' ? screencap : utf8.encode(respond(line));
 
   final FakeAdbd adbd;
 
@@ -122,6 +176,53 @@ class FakeTv {
   final installs = <(List<String>, int)>[];
   final shellLines = <String>[];
   var cwd = '/';
+
+  /// What `exec:screencap -p` writes.
+  List<int> screencap = fakePng(32, 18);
+  var physicalSize = '1920x1080';
+  String? overrideSize;
+  var wmSizeReads = 0;
+  final touches = <List<String>>[];
+
+  /// The `cpu` lines of /proc/stat, one per read.
+  var cpuSamples = [
+    'cpu  1000 0 1000 8000 0 0 0 0 0 0',
+    'cpu  1300 0 1200 8400 100 0 0 0 0 0',
+  ];
+  var meminfo =
+      'MemTotal:        2000000 kB\nMemFree:          100000 kB\n'
+      'MemAvailable:     800000 kB\nBuffers:           10000 kB\n';
+  var dataFreeKb = 4000000;
+  var netDev =
+      'Inter-|   Receive                            |  Transmit\n'
+      ' face |bytes    packets errs drop fifo frame compressed multicast|'
+      'bytes    packets errs drop fifo colls carrier compressed\n'
+      '    lo:  5000 50 0 0 0 0 0 0  5000 50 0 0 0 0 0 0\n'
+      '  eth0: 1000000 900 0 0 0 0 0 0 200000 500 0 0 0 0 0 0\n'
+      ' wlan0: 30000 30 0 0 0 0 0 0 4000 40 0 0 0 0 0 0\n';
+  var uptime = '12345.67 40000.12\n';
+  String? thermal = '41000\n52500\n-1\n';
+  var ps =
+      '  PID   RSS NAME\n'
+      '    1  9000 init\n'
+      '    2     0 [kthreadd]\n'
+      '  410 20000 /system/bin/surfaceflinger\n'
+      ' 1200 150000 com.google.android.youtube.tv\n'
+      ' 1300  90000 com.netflix.ninja\n'
+      ' 1301  30000 com.netflix.ninja:remote\n'
+      ' 1400   5000 system_server_helper\n';
+
+  var hasScreenrecord = true;
+
+  /// False for a TV with no encoder screenrecord can use: it exits at once.
+  var encoderWorks = true;
+  var recording = false;
+  final recordCommands = <List<String>>[];
+  var trims = 0;
+  final powerCommands = <String>[];
+
+  /// Whether `reboot` takes the connection down before it answers.
+  var rebootDrops = true;
 
   String respond(String script) {
     final out = StringBuffer();
@@ -251,11 +352,86 @@ class FakeTv {
       'rm' => _rm(words),
       'mkdir' => _mkdir(words),
       'cp' || 'mv' => _cpMv(words),
+      'wm' when words[1] == 'size' => () {
+        wmSizeReads++;
+        return (
+          'Physical size: $physicalSize\n'
+              '${overrideSize == null ? '' : 'Override size: $overrideSize\n'}',
+          0,
+        );
+      }(),
+      'head' when line.contains('/proc/stat') => (
+        '${cpuSamples.join('\n')}\n',
+        0,
+      ),
+      'cat' => _cat(words[1]),
+      'df' => _df(words.skip(2)),
+      'ps' => (ps, 0),
+      'command' when words[1] == '-v' =>
+        words[2] == 'screenrecord' && hasScreenrecord
+            ? ('/system/bin/screenrecord\n', 0)
+            : ('', 1),
+      'nohup' => _nohup(words),
+      'sleep' => ('', 0),
+      'pidof' =>
+        words[1] == 'screenrecord' && recording ? ('4321\n', 0) : ('', 1),
+      'pkill' => _pkill(words),
+      'reboot' => () {
+        powerCommands.add(line);
+        return ('', 0);
+      }(),
       _ => ('sh: ${words.first}: not found\n', 127),
     };
   }
 
+  (String, int) _cat(String path) => switch (path) {
+    '/proc/meminfo' => (meminfo, 0),
+    '/proc/net/dev' => (netDev, 0),
+    '/proc/uptime' => (uptime, 0),
+    '/sys/class/thermal/thermal_zone*/temp' => (thermal ?? '', 0),
+    _ => ('cat: $path: No such file or directory\n', 1),
+  };
+
+  (String, int) _df(Iterable<String> paths) {
+    const size = 12000000;
+    final used = size - dataFreeKb;
+    final out = StringBuffer(
+      'Filesystem      1K-blocks    Used Available Use% Mounted on\n',
+    );
+    for (final p in paths) {
+      final (fs, mount) = p == '/data'
+          ? ('/dev/block/dm-5', '/data')
+          : ('/dev/fuse', '/storage/emulated');
+      out.writeln('$fs $size $used $dataFreeKb 50% $mount');
+    }
+    return (out.toString(), 0);
+  }
+
+  (String, int) _nohup(List<String> words) {
+    if (words[1] != 'screenrecord') return ('nohup: not found\n', 127);
+    if (!hasScreenrecord) return ('nohup: screenrecord: not found\n', 127);
+    final args = words.takeWhile((w) => !w.startsWith('>')).toList();
+    recordCommands.add(args.sublist(1));
+    if (encoderWorks) {
+      recording = true;
+      fs.writeFile(args.last, const []);
+    }
+    return ('', 0);
+  }
+
+  (String, int) _pkill(List<String> words) {
+    if (words.last != 'screenrecord' || !recording) return ('', 1);
+    recording = false;
+    final file = recordCommands.last.last;
+    fs.writeFile(file, List.filled(4096, 7));
+    return ('', 0);
+  }
+
   (String, int) _input(List<String> words) {
+    if (words[1] == 'tap' || words[1] == 'swipe') {
+      touches.add(words.skip(1).toList());
+      return ('', 0);
+    }
     if (words[1] == 'keyevent') {
       keys.add(words.skip(2).toList());
       return ('', 0);
@@ -320,7 +496,11 @@ class FakeTv {
       '    User 0: ceDataInode=1 installed=${a.installed} hidden=false '
       'suspended=false distractionFlags=0 stopped=false notLaunched=false '
       'enabled=${a.enabled} instant=false virtual=false\n'
-      '      firstInstallTime=2009-01-01 05:30:00\n';
+      '      firstInstallTime=2009-01-01 05:30:00\n'
+      '${a.installPermissions.isEmpty ? '' : '      install permissions:\n'}'
+      '${[for (final p in a.installPermissions) '        $p: granted=true\n'].join()}'
+      '${a.runtimePermissions.isEmpty ? '' : '      runtime permissions:\n'}'
+      '${[for (final e in a.runtimePermissions.entries) '        ${e.key}: granted=${e.value}, flags=[ USER_SENSITIVE_WHEN_GRANTED ]\n'].join()}';
 
   String _hidden(FakeApp a) =>
       '  Package [${a.package}] (9f9f9f):\n'
@@ -405,6 +585,37 @@ class FakeTv {
       installs.add((words.sublist(2, words.length - 1), node.size));
       apps['com.example.installed'] = FakeApp('com.example.installed');
       return ('Performing Streamed Install\nSuccess\n', 0);
+    }
+    if (words[1] == 'trim-caches') {
+      trims++;
+      dataFreeKb += 5000;
+      return ('', 0);
+    }
+    if (words[1] == 'path') {
+      final app = apps[words[2]];
+      if (app == null || !app.installed) return ('', 1);
+      return ([for (final p in app.apkPaths) 'package:$p\n'].join(), 0);
+    }
+    if (words[1] == 'grant' || words[1] == 'revoke') {
+      final (package, permission) = (words[2], words[3]);
+      final app = apps[package];
+      final head = "Exception occurred while executing '${words[1]}':\n";
+      if (app == null) {
+        return (
+          '${head}java.lang.IllegalArgumentException: Unknown package: '
+              '$package\n',
+          255,
+        );
+      }
+      if (!app.runtimePermissions.containsKey(permission)) {
+        return (
+          '${head}java.lang.SecurityException: Package $package has not '
+              'requested permission $permission\n',
+          255,
+        );
+      }
+      app.runtimePermissions[permission] = words[1] == 'grant';
+      return ('', 0);
     }
     final package = words.last;
     final app = apps[package];

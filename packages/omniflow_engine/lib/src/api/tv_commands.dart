@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -12,6 +13,8 @@ import '../devices/adb/adb_sync.dart';
 import '../devices/adb/tv_keys.dart';
 import '../devices/adb/tv_parsers.dart';
 import '../devices/adb/tv_settings.dart';
+import '../devices/adb/tv_system.dart';
+import '../devices/channels.dart' show CommandFailedException;
 import '../devices/device.dart';
 import '../devices/board.dart' show manifestFor;
 import '../manifest/driver_manifest.dart';
@@ -44,6 +47,12 @@ class TvCommands {
   final _lastHeal = <String, DateTime>{};
   final _askedSerial = <String>{};
 
+  /// The screen size `input` works in, kept on the ADB connection it was
+  /// read on, so a TV whose display mode changed is read again after it
+  /// reconnects.
+  final _screenSizes = Expando<(int, int)>();
+  final _recordings = <String, ({String file, DateTime startedAt})>{};
+
   Map<String, CommandHandler> get commands => {
     'tv.state': state,
     'tv.keys': keys,
@@ -69,6 +78,19 @@ class TvCommands {
     'tv.files.rename': filesRename,
     'tv.shell': shell,
     'tv.capabilityRisk': capabilityRisk,
+    'tv.screenshot': screenshot,
+    'tv.input.tap': tap,
+    'tv.input.swipe': swipe,
+    'tv.record.start': recordStart,
+    'tv.record.stop': recordStop,
+    'tv.record.status': recordStatus,
+    'tv.system': system,
+    'tv.processes': processes,
+    'tv.app.permissions': appPermissions,
+    'tv.app.permission': appPermission,
+    'tv.app.backup': appBackup,
+    'tv.cache.trim': cacheTrim,
+    'tv.power': power,
   };
 
   // Devices ------------------------------------------------------------
@@ -1098,6 +1120,478 @@ class TvCommands {
       'renaming $path',
     );
     return {'id': tv.device.id, 'from': path, 'to': target};
+  }
+
+  // Screen, touch and recording ------------------------------------------
+
+  Future<Uint8List> _execBytes(_Tv tv, String command) => _healing(
+    tv,
+    () =>
+        _core.adb.exec(tv.device, tv.manifest, command, offerKey: tv.offerKey),
+  );
+
+  Future<Map<String, Object?>> screenshot(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final png = await _execBytes(tv, 'screencap -p');
+    final size = pngSize(png);
+    if (size == null) {
+      final said = utf8
+          .decode(png.take(300).toList(), allowMalformed: true)
+          .trim();
+      throw ApiError(
+        'device_error',
+        'the TV did not send a screenshot'
+            '${said.isEmpty ? '' : ': ${_firstLines(said)}'}',
+      );
+    }
+    return {
+      'id': tv.device.id,
+      'png': base64Encode(png),
+      'width': size.$1,
+      'height': size.$2,
+    };
+  }
+
+  Future<(int, int)> _screenSize(_Tv tv) async {
+    final held = _core.adb.connectionOf(tv.device.id);
+    final known = held == null ? null : _screenSizes[held];
+    if (known != null) return known;
+    final size = parseWmSize(await _run(tv, 'wm size'));
+    if (size == null) {
+      throw ApiError(
+        'device_error',
+        '${tv.device.id} did not say its screen size',
+      );
+    }
+    final now = _core.adb.connectionOf(tv.device.id);
+    if (now != null) _screenSizes[now] = size;
+    return size;
+  }
+
+  static double _fraction(Map<String, Object?> args, String key) {
+    final value = args[key];
+    if (value is! num || !value.isFinite || value < 0 || value > 1) {
+      throw ApiError('invalid', '$key is a fraction of the screen from 0 to 1');
+    }
+    return value.toDouble();
+  }
+
+  static int _pixel(double fraction, int extent) =>
+      min((fraction * extent).floor(), extent - 1);
+
+  static int _intIn(
+    Map<String, Object?> args,
+    String key, {
+    required int low,
+    required int high,
+    required int fallback,
+  }) {
+    final value = args[key];
+    if (value == null) return fallback;
+    if (value is! int || value < low || value > high) {
+      throw ApiError('invalid', '$key is a whole number from $low to $high');
+    }
+    return value;
+  }
+
+  Future<Map<String, Object?>> tap(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final x = _fraction(args, 'x');
+    final y = _fraction(args, 'y');
+    final (width, height) = await _screenSize(tv);
+    final (px, py) = (_pixel(x, width), _pixel(y, height));
+    await _check(tv, 'input tap $px $py', 'tapping the screen');
+    return {'id': tv.device.id, 'x': px, 'y': py};
+  }
+
+  Future<Map<String, Object?>> swipe(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final from = (_fraction(args, 'x1'), _fraction(args, 'y1'));
+    final to = (_fraction(args, 'x2'), _fraction(args, 'y2'));
+    final ms = _intIn(args, 'ms', low: 50, high: 5000, fallback: 300);
+    final (width, height) = await _screenSize(tv);
+    final points = [
+      _pixel(from.$1, width),
+      _pixel(from.$2, height),
+      _pixel(to.$1, width),
+      _pixel(to.$2, height),
+    ];
+    await _check(
+      tv,
+      'input swipe ${points.join(' ')} $ms',
+      'swiping on the screen',
+    );
+    return {
+      'id': tv.device.id,
+      'x1': points[0],
+      'y1': points[1],
+      'x2': points[2],
+      'y2': points[3],
+      'ms': ms,
+    };
+  }
+
+  static const _recordFolder = '/sdcard/Movies/OmniFlow';
+  static const _stopWait = Duration(seconds: 5);
+
+  Future<bool> _recording(_Tv tv) async =>
+      (await _run(tv, 'pidof screenrecord')).trim().isNotEmpty;
+
+  static String _stamp(DateTime t) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${t.year}${two(t.month)}${two(t.day)}-'
+        '${two(t.hour)}${two(t.minute)}${two(t.second)}';
+  }
+
+  Map<String, Object?> _recordingJson(String id) {
+    final last = _recordings[id];
+    return {
+      if (last != null) 'file': last.file,
+      if (last != null) 'startedAt': last.startedAt.toIso8601String(),
+    };
+  }
+
+  Future<Map<String, Object?>> recordStart(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final seconds = _intIn(args, 'seconds', low: 1, high: 180, fallback: 180);
+    final mbps = _intIn(args, 'bitRate', low: 1, high: 20, fallback: 6);
+    if ((await _exec(tv, 'command -v screenrecord')).exitCode != 0) {
+      throw ApiError(
+        'device_error',
+        '${tv.device.id} has no screenrecord, so it cannot record its screen',
+      );
+    }
+    if (await _recording(tv)) {
+      throw ApiError(
+        'conflict',
+        '${tv.device.id} is already recording its screen: stop that first',
+      );
+    }
+    final startedAt = DateTime.now();
+    final file = '$_recordFolder/rec-${_stamp(startedAt)}.mp4';
+    // nohup and the background job keep it recording after this shell, and
+    // the stream it runs on, end.
+    final output = await _run(
+      tv,
+      [
+        'mkdir -p -- ${shellQuote(_recordFolder)}',
+        'nohup screenrecord --time-limit $seconds --bit-rate '
+            '${mbps * 1000000} ${shellQuote(file)} >/dev/null 2>&1 &',
+        'sleep 1',
+        'pidof screenrecord',
+      ].join('\n'),
+      timeout: const Duration(seconds: 15),
+    );
+    if (int.tryParse(output.trim().split(RegExp(r'\s+')).last) == null) {
+      throw ApiError(
+        'device_error',
+        '${tv.device.id} could not start recording its screen. It may have '
+            'no video encoder screenrecord can use',
+      );
+    }
+    _recordings[tv.device.id] = (file: file, startedAt: startedAt.toUtc());
+    return {
+      'id': tv.device.id,
+      ..._recordingJson(tv.device.id),
+      'seconds': seconds,
+    };
+  }
+
+  Future<Map<String, Object?>> recordStop(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final last = _recordings[tv.device.id];
+    if (await _recording(tv)) {
+      await _run(tv, 'pkill -INT screenrecord');
+      final deadline = DateTime.now().add(_stopWait);
+      while (await _recording(tv)) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw ApiError(
+            'device_error',
+            'the recording on ${tv.device.id} did not stop within '
+                '${_stopWait.inSeconds} s',
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    } else if (last == null) {
+      throw ApiError('conflict', '${tv.device.id} is not recording its screen');
+    }
+    if (last == null) return {'id': tv.device.id, 'file': null, 'bytes': null};
+    final entry = await _sync(tv, (s) => s.stat(last.file));
+    if (entry == null) {
+      throw ApiError(
+        'device_error',
+        'the recording ${last.file} is not on ${tv.device.id}. The TV may '
+            'have no video encoder screenrecord can use',
+      );
+    }
+    return {'id': tv.device.id, 'file': last.file, 'bytes': entry.size};
+  }
+
+  Future<Map<String, Object?>> recordStatus(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    return {
+      'id': tv.device.id,
+      'recording': await _recording(tv),
+      ..._recordingJson(tv.device.id),
+    };
+  }
+
+  // System, processes, permissions, backup, power ------------------------
+
+  Future<Map<String, Object?>> system(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final output = await _run(
+      tv,
+      tvSections({
+        'cpu': 'head -n 1 /proc/stat; sleep 0.5; head -n 1 /proc/stat',
+        'memory': 'cat /proc/meminfo',
+        'data': 'df -k /data',
+        'shared': 'df -k /sdcard',
+        'network': 'cat /proc/net/dev',
+        'uptime': 'cat /proc/uptime',
+        'thermal': 'cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null',
+      }),
+      timeout: const Duration(seconds: 15),
+    );
+    final sections = splitTvSections(output);
+    final cpuLines = [
+      for (final line in (sections['cpu'] ?? '').split('\n'))
+        if (line.startsWith('cpu ')) line,
+    ];
+    final memory = parseMeminfo(sections['memory'] ?? '');
+    final network = parseNetDev(sections['network'] ?? '');
+    final temperature = parseThermal(sections['thermal'] ?? '');
+    return {
+      'id': tv.device.id,
+      'cpu': {
+        'percent': cpuLines.length < 2
+            ? null
+            : cpuPercent(cpuLines[0], cpuLines[1]),
+      },
+      'memory': {
+        'totalKb': memory?.totalKb,
+        'availableKb': memory?.availableKb,
+      },
+      // Named by the folder asked about: TVs mount these under different
+      // paths (/data/user/0, /storage/emulated), which mean nothing to a user.
+      'storage': [
+        for (final (key, path) in const [
+          ('data', '/data'),
+          ('shared', '/sdcard'),
+        ])
+          if (parseDf(sections[key] ?? '').firstOrNull case final m?)
+            {'mount': path, 'sizeKb': m.sizeKb, 'usedKb': m.usedKb},
+      ],
+      'network': {'rxBytes': network.rxBytes, 'txBytes': network.txBytes},
+      'uptimeSeconds': parseUptime(sections['uptime'] ?? ''),
+      'temperatureC': ?temperature,
+    };
+  }
+
+  Future<Map<String, Object?>> processes(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final output = await _run(
+      tv,
+      tvSections({
+        'ps': 'ps -A -o PID,RSS,NAME',
+        'focus': tvStateCommands['focus']!,
+      }),
+      timeout: const Duration(seconds: 15),
+    );
+    final sections = splitTvSections(output);
+    final foreground = parseTvState({'focus': sections['focus'] ?? ''})['app'];
+    return {
+      'id': tv.device.id,
+      'apps': [
+        for (final p in parsePs(sections['ps'] ?? ''))
+          {
+            'package': p.package,
+            'pid': p.pid,
+            'memoryKb': p.memoryKb,
+            'foreground': p.package == foreground,
+          },
+      ],
+    };
+  }
+
+  static final _permissionPattern = RegExp(r'^[A-Za-z0-9_.]{1,255}$');
+
+  Future<Map<String, Object?>> appPermissions(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final package = AdbAction.packageOf(args['package']);
+    final output = await _run(
+      tv,
+      'dumpsys package ${shellQuote(package)}',
+      timeout: const Duration(seconds: 30),
+    );
+    if (!output.contains('Package [$package]')) {
+      throw ApiError('not_found', 'no app $package on ${tv.device.id}');
+    }
+    return {
+      'id': tv.device.id,
+      'package': package,
+      'permissions': [
+        for (final p in parsePermissions(output))
+          {'name': p.name, 'granted': p.granted, 'runtime': p.runtime},
+      ],
+    };
+  }
+
+  Future<Map<String, Object?>> appPermission(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final package = AdbAction.packageOf(args['package']);
+    final permission = args['permission'];
+    if (permission is! String || !_permissionPattern.hasMatch(permission)) {
+      throw ApiError(
+        'invalid',
+        'permission is a permission name such as '
+            'android.permission.RECORD_AUDIO',
+      );
+    }
+    final grant = args['grant'];
+    if (grant is! bool) throw ApiError('invalid', 'grant is true or false');
+    final verb = grant ? 'grant' : 'revoke';
+    final result = await _exec(
+      tv,
+      'pm $verb ${shellQuote(package)} ${shellQuote(permission)}',
+    );
+    final said = result.output.trim();
+    if (result.exitCode != 0 || TvShell.failure.hasMatch(said)) {
+      throw ApiError(
+        'device_error',
+        'the TV could not $verb $permission for $package'
+            '${said.isEmpty ? '' : ': ${_firstLines(said)}'}',
+      );
+    }
+    return {
+      'id': tv.device.id,
+      'package': package,
+      'permission': permission,
+      'granted': grant,
+    };
+  }
+
+  Future<Map<String, Object?>> appBackup(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final package = AdbAction.packageOf(args['package']);
+    final to = _localPath(args, 'to');
+    final overwrite = args['overwrite'] == true;
+    if (await FileSystemEntity.type(to) == FileSystemEntityType.file) {
+      throw ApiError('invalid', 'to is a folder, and $to is a file');
+    }
+    final listed = parsePmPath(
+      await _run(tv, 'pm path ${shellQuote(package)}'),
+    );
+    if (listed.isEmpty) {
+      throw ApiError('not_found', 'no app $package on ${tv.device.id}');
+    }
+    final plan = <(String, String)>[];
+    for (final remote in listed) {
+      if (!remote.startsWith('/') ||
+          !remote.toLowerCase().endsWith('.apk') ||
+          remote.contains(RegExp('[\x00\r\n]'))) {
+        throw ApiError(
+          'device_error',
+          'the TV listed $remote as an APK of $package, which is not an APK '
+              'path',
+        );
+      }
+      final name = apkBackupName(package, remote);
+      final local =
+          pathInside(to, [name]) ??
+          (throw ApiError(
+            'invalid',
+            'the TV listed $remote, which would be saved outside $to, so the '
+                'backup stopped',
+          ));
+      if (!overwrite &&
+          await FileSystemEntity.type(local) != FileSystemEntityType.notFound) {
+        throw ApiError(
+          'conflict',
+          '$name is already there: replace it, or pick another folder',
+        );
+      }
+      plan.add((remote, local));
+    }
+    await Directory(to).create(recursive: true);
+    return _sync(tv, (s) async {
+      var total = 0;
+      for (final (remote, _) in plan) {
+        total += (await s.stat(remote))?.size ?? 0;
+      }
+      final progress = _progress(tv.device.id, 'backup', total);
+      var done = 0;
+      for (final (remote, local) in plan) {
+        await _pullFile(s, remote, File(local), (n) => progress(done += n));
+      }
+      return {
+        'id': tv.device.id,
+        'package': package,
+        'files': [for (final (_, local) in plan) local],
+        'bytes': done,
+      };
+    });
+  }
+
+  Future<Map<String, Object?>> cacheTrim(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final output = await _run(
+      tv,
+      tvSections({
+        'before': 'df -k /data',
+        'trim': 'pm trim-caches 999G',
+        'after': 'df -k /data',
+      }),
+      timeout: const Duration(minutes: 2),
+    );
+    final sections = splitTvSections(output);
+    final said = (sections['trim'] ?? '').trim();
+    if (TvShell.failure.hasMatch(said)) {
+      throw ApiError(
+        'device_error',
+        'the TV could not trim its caches: ${_firstLines(said)}',
+      );
+    }
+    int? free(String? df) => parseDf(df ?? '').firstOrNull?.availableKb;
+    final before = free(sections['before']);
+    final after = free(sections['after']);
+    return {
+      'id': tv.device.id,
+      if (before != null && after != null) 'freedKb': max(0, after - before),
+    };
+  }
+
+  Future<Map<String, Object?>> power(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final action = args['action'];
+    if (action != 'reboot' && action != 'shutdown') {
+      throw ApiError('invalid', 'action is reboot or shutdown');
+    }
+    // A TV that cannot be reached or has not allowed this engine fails
+    // here. After it, a dropped connection is the TV going down.
+    await _run(tv, 'true');
+    try {
+      final result = await _exec(
+        tv,
+        action == 'reboot' ? 'reboot' : 'reboot -p',
+        timeout: const Duration(seconds: 10),
+      );
+      if (result.exitCode != null && result.exitCode != 0) {
+        final said = result.output.trim();
+        throw ApiError(
+          'device_error',
+          'the TV did not $action'
+              '${said.isEmpty ? '' : ': ${_firstLines(said)}'}',
+        );
+      }
+    } on CommandFailedException {
+      // The connection dropped as the TV went down.
+    } on TransportTimeoutException {
+      // The same, seen as a TV that stopped answering.
+    }
+    _core.adb.forget(tv.device.id);
+    return {'id': tv.device.id, 'action': action};
   }
 
   // Shell ----------------------------------------------------------------

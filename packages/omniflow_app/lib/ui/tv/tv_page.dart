@@ -12,6 +12,8 @@ import 'tv_console.dart';
 import 'tv_controller.dart';
 import 'tv_files.dart';
 import 'tv_remote.dart';
+import 'tv_screen.dart';
+import 'tv_system.dart';
 import 'tv_settings.dart';
 import 'tv_widgets.dart';
 
@@ -27,9 +29,11 @@ Future<void> openTv(BuildContext context, Json device) =>
 
 enum TvTab {
   remote('Remote'),
+  screen('Screen'),
   apps('Apps'),
-  settings('Settings'),
+  system('System'),
   files('Files'),
+  settings('Settings'),
   console('Console');
 
   const TvTab(this.label);
@@ -73,8 +77,10 @@ class _TvPageState extends ConsumerState<TvPage> {
   }
 
   Widget _body(TvTab tab) => switch (tab) {
-    TvTab.remote => TvRemoteTab(tv: tv),
+    TvTab.remote => TvRemoteTab(tv: tv, active: _tab == TvTab.remote),
+    TvTab.screen => TvScreenTab(tv: tv, active: _tab == TvTab.screen),
     TvTab.apps => TvAppsTab(tv: tv),
+    TvTab.system => TvSystemTab(tv: tv, active: _tab == TvTab.system),
     TvTab.settings => TvSettingsTab(tv: tv),
     TvTab.files => TvFilesTab(tv: tv),
     TvTab.console => TvConsoleTab(tv: tv),
@@ -149,16 +155,27 @@ class _TvPageState extends ConsumerState<TvPage> {
                       ),
                     ),
                   TvHeader(tv: tv),
-                  OmniSegmented<TvTab>(
+                  // Seven tabs do not fit a segmented bar on a phone, so
+                  // they scroll as chips.
+                  SingleChildScrollView(
                     key: const ValueKey('tv-tabs'),
-                    segments: [
-                      for (final t in TvTab.values) OmniSegment(t, t.label),
-                    ],
-                    selected: _tab,
-                    onChanged: (t) => setState(() {
-                      _tab = t;
-                      _opened.add(t);
-                    }),
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (final t in TvTab.values) ...[
+                          OmniFilterChip(
+                            key: ValueKey('tv-tab-${t.name}'),
+                            label: t.label,
+                            selected: _tab == t,
+                            onTap: () => setState(() {
+                              _tab = t;
+                              _opened.add(t);
+                            }),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -298,6 +315,8 @@ String playingLabel(String? playing) => switch (playing) {
 
 /// Android key codes the app itself uses outside the remote layout.
 abstract final class Keycodes {
+  static const home = 3;
+  static const back = 4;
   static const power = 26;
   static const sleep = 223;
   static const wakeup = 224;

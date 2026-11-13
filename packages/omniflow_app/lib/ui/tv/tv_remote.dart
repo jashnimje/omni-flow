@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../api/tv_calls.dart';
 import '../design/design.dart';
 import 'tv_controller.dart';
+import 'tv_mouse.dart';
 import 'tv_widgets.dart';
 
 /// One remote button, placed by its Android key code so the layout holds
@@ -103,9 +104,40 @@ abstract final class RemoteLayout {
     RemoteKey(90, 'Fast forward', TvIcons.forward),
   ];
 
+  // A game controller's buttons, by their Android key codes.
+  static const a = RemoteKey(96, 'A', null, 'A');
+  static const b = RemoteKey(97, 'B', null, 'B');
+  static const x = RemoteKey(99, 'X', null, 'X');
+  static const y = RemoteKey(100, 'Y', null, 'Y');
+  static const l1 = RemoteKey(102, 'L1', null, 'L1');
+  static const r1 = RemoteKey(103, 'R1', null, 'R1');
+  static const l2 = RemoteKey(104, 'L2', null, 'L2');
+  static const r2 = RemoteKey(105, 'R2', null, 'R2');
+  static const thumbL = RemoteKey(106, 'Left stick press', null, 'L3');
+  static const thumbR = RemoteKey(107, 'Right stick press', null, 'R3');
+  static const start = RemoteKey(108, 'Start', null, 'Start');
+  static const select = RemoteKey(109, 'Select', null, 'Select');
+  static const mode = RemoteKey(110, 'Mode', null, 'Mode');
+  static const gamepad = [
+    a,
+    b,
+    x,
+    y,
+    l1,
+    r1,
+    l2,
+    r2,
+    thumbL,
+    thumbR,
+    start,
+    select,
+    mode,
+  ];
+
   static final placed = <int>{
     for (final k in [
       ...top,
+      ...gamepad,
       up,
       down,
       left,
@@ -123,10 +155,15 @@ abstract final class RemoteLayout {
   };
 }
 
+enum _RemoteMode { remote, gamepad, mouse }
+
 class TvRemoteTab extends StatefulWidget {
-  const TvRemoteTab({super.key, required this.tv});
+  const TvRemoteTab({super.key, required this.tv, this.active = true});
 
   final TvController tv;
+
+  /// Whether the tab is on screen: the mouse's picture only reads then.
+  final bool active;
 
   @override
   State<TvRemoteTab> createState() => _TvRemoteTabState();
@@ -134,6 +171,9 @@ class TvRemoteTab extends StatefulWidget {
 
 class _TvRemoteTabState extends State<TvRemoteTab> {
   final _text = TextEditingController();
+
+  /// A remote, a game controller, or a touchpad that moves a pointer.
+  var _mode = _RemoteMode.remote;
 
   TvController get tv => widget.tv;
 
@@ -171,91 +211,113 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
     listenable: tv,
     builder: (context, _) => ListView(
       key: const ValueKey('tv-remote'),
+      // In Mouse mode the page holds still, so a drag on the pad moves the
+      // pointer instead of the page.
+      physics: _mode == _RemoteMode.mouse
+          ? const NeverScrollableScrollPhysics()
+          : null,
       padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
       children: [
-        TvKeyGrid(
-          columns: 4,
-          children: [for (final k in RemoteLayout.top) _key(k)],
+        OmniSegmented<_RemoteMode>(
+          key: const ValueKey('tv-remote-mode'),
+          segments: const [
+            OmniSegment(_RemoteMode.remote, 'Remote'),
+            OmniSegment(_RemoteMode.gamepad, 'Gamepad'),
+            OmniSegment(_RemoteMode.mouse, 'Mouse'),
+          ],
+          selected: _mode,
+          onChanged: (v) => setState(() => _mode = v),
         ),
-        _DPad(press: _press),
-        TvKeyGrid(
-          columns: 3,
-          children: [for (final k in RemoteLayout.middle) _key(k)],
-        ),
-        const Padding(
-          padding: EdgeInsets.only(top: OmniSpace.sm),
-          child: Text(
-            'Swipe up for numbers, colours, channels, inputs and text',
-            textAlign: TextAlign.center,
-            style: OmniText.caption,
+        const SizedBox(height: OmniSpace.sm),
+        if (_mode == _RemoteMode.gamepad)
+          ..._gamepadKeys()
+        else if (_mode == _RemoteMode.mouse)
+          TvMouse(tv: tv, active: widget.active)
+        else ...[
+          TvKeyGrid(
+            columns: 4,
+            children: [for (final k in RemoteLayout.top) _key(k)],
           ),
-        ),
-        const OmniSectionHeader('Numbers'),
-        TvKeyGrid(
-          columns: 3,
-          children: [for (final k in RemoteLayout.numbers) _key(k)],
-        ),
-        const OmniSectionHeader('Colour keys'),
-        TvKeyGrid(
-          columns: 4,
-          children: [
-            for (final (k, color) in RemoteLayout.colors)
-              _key(k, background: color, foreground: const Color(0xFF14171C)),
-          ],
-        ),
-        const OmniSectionHeader('Channels'),
-        TvKeyGrid(
-          columns: 3,
-          children: [for (final k in RemoteLayout.channels) _key(k)],
-        ),
-        const OmniSectionHeader('Inputs'),
-        TvKeyGrid(
-          columns: 4,
-          children: [for (final k in RemoteLayout.inputs) _key(k)],
-        ),
-        const OmniSectionHeader('Guide, settings and sleep'),
-        TvKeyGrid(
-          columns: 3,
-          children: [
-            for (final k in RemoteLayout.more) _key(k),
-            for (final k in RemoteLayout.playback) _key(k),
-          ],
-        ),
-        const OmniSectionHeader('Type on the TV'),
-        TextField(
-          key: const ValueKey('tv-text'),
-          controller: _text,
-          maxLength: TvCalls.maxText,
-          textInputAction: TextInputAction.send,
-          decoration: InputDecoration(
-            labelText: 'Text for the box in focus on the TV',
-            counterText: '',
-            suffixIcon: OmniIconAction(
-              key: const ValueKey('tv-text-send'),
-              icon: TvIcons.send,
-              label: 'Type it on the TV',
-              color: OmniColors.accent,
-              onPressed: _sendText,
+          _DPad(press: _press),
+          TvKeyGrid(
+            columns: 3,
+            children: [for (final k in RemoteLayout.middle) _key(k)],
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: OmniSpace.sm),
+            child: Text(
+              'Swipe up for numbers, colours, channels, inputs and text',
+              textAlign: TextAlign.center,
+              style: OmniText.caption,
             ),
           ),
-          onSubmitted: (_) => _sendText(),
-        ),
-        for (final g in tv.keyGroups)
-          if (g.keys.where((k) => !_isPlaced(k)).toList() case final extra
-              when extra.isNotEmpty) ...[
-            OmniSectionHeader('More ${g.group} keys'),
-            Wrap(
-              spacing: OmniSpace.xs,
-              children: [
-                for (final k in extra)
-                  OmniFilterChip(
-                    key: ValueKey('catalog-${k.key}'),
-                    label: k.label,
-                    onTap: () => tv.sendKey(name: k.key),
-                  ),
-              ],
+          const OmniSectionHeader('Numbers'),
+          TvKeyGrid(
+            columns: 3,
+            children: [for (final k in RemoteLayout.numbers) _key(k)],
+          ),
+          const OmniSectionHeader('Colour keys'),
+          TvKeyGrid(
+            columns: 4,
+            children: [
+              for (final (k, color) in RemoteLayout.colors)
+                _key(k, background: color, foreground: const Color(0xFF14171C)),
+            ],
+          ),
+          const OmniSectionHeader('Channels'),
+          TvKeyGrid(
+            columns: 3,
+            children: [for (final k in RemoteLayout.channels) _key(k)],
+          ),
+          const OmniSectionHeader('Inputs'),
+          TvKeyGrid(
+            columns: 4,
+            children: [for (final k in RemoteLayout.inputs) _key(k)],
+          ),
+          const OmniSectionHeader('Guide, settings and sleep'),
+          TvKeyGrid(
+            columns: 3,
+            children: [
+              for (final k in RemoteLayout.more) _key(k),
+              for (final k in RemoteLayout.playback) _key(k),
+            ],
+          ),
+          const OmniSectionHeader('Type on the TV'),
+          TextField(
+            key: const ValueKey('tv-text'),
+            controller: _text,
+            maxLength: TvCalls.maxText,
+            textInputAction: TextInputAction.send,
+            decoration: InputDecoration(
+              labelText: 'Text for the box in focus on the TV',
+              counterText: '',
+              suffixIcon: OmniIconAction(
+                key: const ValueKey('tv-text-send'),
+                icon: TvIcons.send,
+                label: 'Type it on the TV',
+                color: OmniColors.accent,
+                onPressed: _sendText,
+              ),
             ),
-          ],
+            onSubmitted: (_) => _sendText(),
+          ),
+          for (final g in tv.keyGroups)
+            if (g.keys.where((k) => !_isPlaced(k)).toList() case final extra
+                when extra.isNotEmpty) ...[
+              OmniSectionHeader('More ${g.group} keys'),
+              Wrap(
+                spacing: OmniSpace.xs,
+                children: [
+                  for (final k in extra)
+                    OmniFilterChip(
+                      key: ValueKey('catalog-${k.key}'),
+                      label: k.label,
+                      onTap: () => tv.sendKey(name: k.key),
+                    ),
+                ],
+              ),
+            ],
+        ],
         const SizedBox(height: OmniSpace.sm),
         const Text(
           'Hold a key to send a long press.',
@@ -263,6 +325,130 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
           style: OmniText.caption,
         ),
       ],
+    ),
+  );
+
+  /// Laid out like a controller: shoulder pairs at the corners, the D-pad
+  /// and the A, B, X, Y diamond side by side at the same size, small select,
+  /// mode and start in the middle, and a stick press under each side. Most
+  /// Android TV games take these keys; ones that only read a real stick do
+  /// not.
+  List<Widget> _gamepadKeys() => [
+    Row(
+      children: [
+        _pill(RemoteLayout.l2),
+        const SizedBox(width: OmniSpace.sm),
+        _pill(RemoteLayout.l1),
+        const Spacer(),
+        _pill(RemoteLayout.r1),
+        const SizedBox(width: OmniSpace.sm),
+        _pill(RemoteLayout.r2),
+      ],
+    ),
+    const SizedBox(height: OmniSpace.md),
+    Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _DPad(press: _press),
+        SizedBox.square(
+          dimension: 168,
+          child: Stack(
+            children: [
+              Align(
+                alignment: Alignment.topCenter,
+                child: _round(RemoteLayout.y),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _round(RemoteLayout.x),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _round(RemoteLayout.b),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _round(RemoteLayout.a),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+    const SizedBox(height: OmniSpace.md),
+    Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _pill(RemoteLayout.select, width: 84),
+        const SizedBox(width: OmniSpace.md),
+        _round(RemoteLayout.mode, size: 48, accent: false),
+        const SizedBox(width: OmniSpace.md),
+        _pill(RemoteLayout.start, width: 84),
+      ],
+    ),
+    const SizedBox(height: OmniSpace.md),
+    Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _round(RemoteLayout.thumbL, size: 56, accent: false),
+        _round(RemoteLayout.thumbR, size: 56, accent: false),
+      ],
+    ),
+  ];
+
+  /// A round button: the face buttons in accent, the rest plain.
+  Widget _round(RemoteKey k, {double size = 56, bool accent = true}) => _shaped(
+    k,
+    width: size,
+    height: size,
+    shape: const CircleBorder(),
+    accent: accent,
+  );
+
+  /// A shoulder or menu button: a short pill.
+  Widget _pill(RemoteKey k, {double width = 72}) => _shaped(
+    k,
+    width: width,
+    height: 44,
+    shape: const StadiumBorder(side: BorderSide(color: OmniColors.line)),
+    accent: false,
+  );
+
+  Widget _shaped(
+    RemoteKey k, {
+    required double width,
+    required double height,
+    required ShapeBorder shape,
+    required bool accent,
+  }) => SizedBox(
+    width: width,
+    height: height,
+    child: Semantics(
+      button: true,
+      label: k.label,
+      excludeSemantics: true,
+      onTap: () => _press(k),
+      onLongPress: () => _press(k, long: true),
+      child: Material(
+        key: ValueKey('key-${k.keycode}'),
+        color: accent ? OmniColors.accentSoft : OmniColors.card,
+        shape: shape,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _press(k),
+          onLongPress: () => _press(k, long: true),
+          child: Center(
+            child: Text(
+              k.text ?? k.label,
+              style: TextStyle(
+                color: accent ? OmniColors.accent : OmniColors.text,
+                fontWeight: FontWeight.w600,
+                fontSize: accent ? 18 : 13,
+              ),
+            ),
+          ),
+        ),
+      ),
     ),
   );
 

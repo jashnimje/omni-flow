@@ -30,11 +30,41 @@ omni tv ID files cp|mv FROM TO [--overwrite]
 omni tv ID files rm PATH... [-r]
 omni tv ID files mkdir PATH
 omni tv ID files rename PATH NAME
+omni tv ID screenshot [--out FILE.png]
+omni tv ID tap X Y                     (fractions of the screen, 0 to 1)
+omni tv ID swipe X1 Y1 X2 Y2 [--ms N]
+omni tv ID record start [--seconds N] [--bit-rate MBPS]
+omni tv ID record stop|status
+omni tv ID system
+omni tv ID processes
+omni tv ID permissions PACKAGE
+omni tv ID permission PACKAGE PERMISSION --grant|--revoke
+omni tv ID backup PACKAGE --to DIR [--overwrite]
+omni tv ID trim-caches [--yes]
+omni tv ID power reboot|shutdown [--yes]
 omni tv ID shell [COMMAND...]   (no COMMAND: an interactive shell)''';
 
 /// Flags the `omni tv` verbs take, wherever they appear before `shell`.
-const _flags = {'--long', '--launchable', '--replace', '--overwrite', '-r'};
-const _options = {'--repeat', '--filter', '--timeout-ms'};
+const _flags = {
+  '--long',
+  '--launchable',
+  '--replace',
+  '--overwrite',
+  '-r',
+  '--grant',
+  '--revoke',
+  '--yes',
+};
+const _options = {
+  '--repeat',
+  '--filter',
+  '--timeout-ms',
+  '--out',
+  '--ms',
+  '--to',
+  '--seconds',
+  '--bit-rate',
+};
 
 /// `omni tv ID VERB ...`: the remote, apps, settings, files and shell of an
 /// Android TV. Each verb sends one `tv.*` command.
@@ -44,8 +74,8 @@ class TvCommand extends Command<int> {
 
   @override
   String get description =>
-      'Control an Android TV: remote, text, volume, state, apps, settings, '
-      'files and shell.';
+      'Control an Android TV: remote, text, volume, state, apps, settings, files, '
+      'shell, screen, recording, system, permissions, backup and power.';
 
   @override
   String get invocation => _tvUsage;
@@ -79,13 +109,40 @@ class TvCommand extends Command<int> {
       }
     }
     final (command, args) = _request(id, verb, words, flags, options);
+    final ask = switch (command) {
+      'tv.power' when args['action'] == 'reboot' => 'Restart $id?',
+      'tv.power' => 'Shut down $id?',
+      'tv.cache.trim' => 'Clear the cache of every app on $id?',
+      _ => null,
+    };
+    if (ask != null && !flags.contains('--yes') && !await _confirm(ask)) {
+      omni.out.writeln('Nothing was changed');
+      return 1;
+    }
+    final out = options['--out'];
+    if (command == 'tv.screenshot' && out != null) {
+      return _screenshotTo(omni, args, File(out).absolute);
+    }
     return _send(omni, command, args, progress: _transfers.contains(command));
+  }
+
+  Future<bool> _confirm(String question) async {
+    omni.out.write('$question [y/N] ');
+    try {
+      final answer = await const LineSplitter()
+          .bind(utf8.decoder.bind(omni.input))
+          .first;
+      return const {'y', 'yes'}.contains(answer.trim().toLowerCase());
+    } on StateError {
+      return false;
+    }
   }
 
   static const _transfers = {
     'tv.install',
     'tv.files.download',
     'tv.files.upload',
+    'tv.app.backup',
   };
 
   (String, Map<String, Object?>) _request(
@@ -187,6 +244,88 @@ class TvCommand extends Command<int> {
           }(),
           _ => throw UsageException('unknown files verb $sub', usage),
         };
+      case 'screenshot':
+        if (words.isNotEmpty) throw UsageException('takes no words', usage);
+        return ('tv.screenshot', {'id': id});
+      case 'tap':
+        final (x, y) = two('X', 'Y');
+        return ('tv.input.tap', {'id': id, 'x': _number(x), 'y': _number(y)});
+      case 'swipe':
+        if (words.length != 4) {
+          throw UsageException('needs X1 Y1 X2 Y2', usage);
+        }
+        final ms = options['--ms'];
+        return (
+          'tv.input.swipe',
+          {
+            'id': id,
+            'x1': _number(words[0]),
+            'y1': _number(words[1]),
+            'x2': _number(words[2]),
+            'y2': _number(words[3]),
+            if (ms != null) 'ms': _number(ms),
+          },
+        );
+      case 'record':
+        final sub = one('start, stop or status');
+        if (sub == 'start') {
+          final seconds = options['--seconds'];
+          final bitRate = options['--bit-rate'];
+          return (
+            'tv.record.start',
+            {
+              'id': id,
+              if (seconds != null) 'seconds': _number(seconds),
+              if (bitRate != null) 'bitRate': _number(bitRate),
+            },
+          );
+        }
+        if (sub != 'stop' && sub != 'status') {
+          throw UsageException('record is start, stop or status', usage);
+        }
+        return ('tv.record.$sub', {'id': id});
+      case 'system':
+        return ('tv.system', {'id': id});
+      case 'processes':
+        return ('tv.processes', {'id': id});
+      case 'permissions':
+        return ('tv.app.permissions', {'id': id, 'package': one('PACKAGE')});
+      case 'permission':
+        final (package, permission) = two('PACKAGE', 'PERMISSION');
+        final grant = flags.contains('--grant');
+        if (grant == flags.contains('--revoke')) {
+          throw UsageException('needs one of --grant or --revoke', usage);
+        }
+        return (
+          'tv.app.permission',
+          {
+            'id': id,
+            'package': package,
+            'permission': permission,
+            'grant': grant,
+          },
+        );
+      case 'backup':
+        final to = options['--to'];
+        if (to == null) throw UsageException('needs --to DIR', usage);
+        return (
+          'tv.app.backup',
+          {
+            'id': id,
+            'package': one('PACKAGE'),
+            'to': File(to).absolute.path,
+            ...overwrite,
+          },
+        );
+      case 'trim-caches':
+        if (words.isNotEmpty) throw UsageException('takes no words', usage);
+        return ('tv.cache.trim', {'id': id});
+      case 'power':
+        final action = one('reboot or shutdown');
+        if (action != 'reboot' && action != 'shutdown') {
+          throw UsageException('power is reboot or shutdown', usage);
+        }
+        return ('tv.power', {'id': id, 'action': action});
       default:
         throw UsageException('unknown verb $verb', usage);
     }
@@ -270,6 +409,37 @@ class TvCommand extends Command<int> {
       default:
         throw UsageException('unknown settings verb $sub', usage);
     }
+  }
+}
+
+/// A number as typed, or the text itself, so the engine says what is wrong
+/// with it.
+Object _number(String word) => num.tryParse(word) ?? word;
+
+/// Saves the screenshot to [file] and prints the result without the image.
+Future<int> _screenshotTo(
+  OmniCommandRunner omni,
+  Map<String, Object?> args,
+  File file,
+) async {
+  final engine = await omni.connect();
+  try {
+    final result = await engine.handle('tv.screenshot', args);
+    if (result['ok'] != true) {
+      omni.out.writeln(const JsonEncoder.withIndent('  ').convert(result));
+      return 1;
+    }
+    await file.writeAsBytes(base64Decode(result['png'] as String));
+    omni.out.writeln(
+      const JsonEncoder.withIndent('  ').convert({
+        for (final e in result.entries)
+          if (e.key != 'png') e.key: e.value,
+        'out': file.path,
+      }),
+    );
+    return 0;
+  } finally {
+    await engine.close();
   }
 }
 

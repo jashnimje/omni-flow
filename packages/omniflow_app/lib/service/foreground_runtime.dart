@@ -81,6 +81,10 @@ class ForegroundServiceControl implements ServiceControl {
         serviceTypes: const [ForegroundServiceTypes.connectedDevice],
         notificationTitle: 'OmniFlow is running',
         notificationText: 'Flows keep running with the screen off',
+        notificationIcon: const NotificationIcon(
+          metaDataName: 'com.jashnm.omniflow_app.SERVICE_ICON',
+          backgroundColor: Color(0xFF00F5D4),
+        ),
         notificationButtons: const [
           NotificationButton(id: stopButtonId, text: 'Stop'),
         ],

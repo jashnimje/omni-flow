@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../../manifest/driver_manifest.dart';
 import '../../manifest/validation.dart';
@@ -268,6 +269,82 @@ class AdbChannel implements DriverChannel {
     }
   }
 
+  /// Runs [command] on the `exec:` service and returns its output byte for
+  /// byte. Unlike `shell:`, exec has no terminal, so binary output such as
+  /// a PNG arrives without line endings rewritten.
+  Future<Uint8List> exec(
+    Device device,
+    DriverManifest manifest,
+    String command, {
+    Duration timeout = const Duration(seconds: 30),
+    bool offerKey = false,
+    int maxBytes = 64 * 1024 * 1024,
+  }) async {
+    final port = _portOf(device, manifest);
+    final handshake = Duration(milliseconds: manifest.reliability.timeoutMs);
+    for (var attempt = 0; ; attempt++) {
+      final reused = _isHeld(device, port);
+      AdbStream? stream;
+      try {
+        final connection = await _connection(
+          device,
+          port,
+          handshake,
+          offerKey: offerKey,
+        );
+        stream = await connection.openStream(
+          'exec:$command',
+          timeout: handshake,
+        );
+        final out = BytesBuilder(copy: false);
+        final deadline = DateTime.now().add(timeout);
+        while (true) {
+          final left = deadline.difference(DateTime.now());
+          if (left <= Duration.zero) throw TimeoutException(null);
+          final chunk = await stream.readChunk(timeout: left);
+          if (chunk == null) break;
+          out.add(chunk);
+          if (out.length > maxBytes) {
+            stream.close();
+            throw CommandFailedException(
+              '${device.id} sent more than ${maxBytes ~/ (1024 * 1024)} MB',
+            );
+          }
+        }
+        final error = stream.error;
+        if (error is AdbConnectionClosedException) throw error;
+        return out.takeBytes();
+      } on AdbConnectionClosedException catch (e) {
+        _drop(device.id);
+        if (attempt == 0 && reused && !e.acknowledged && stream == null) {
+          continue;
+        }
+        throw CommandFailedException('${device.id} closed the ADB connection');
+      } on AdbShellTimeoutException {
+        _drop(device.id);
+        throw CommandFailedException(
+          'no reply from ${device.id} to the ADB exec request',
+        );
+      } on TimeoutException {
+        stream?.close();
+        throw CommandFailedException(
+          '${device.id} did not finish in ${timeout.inSeconds} s',
+        );
+      } on AdbStreamRefusedException {
+        throw CommandFailedException(
+          '${device.id} refused the ADB exec service',
+        );
+      }
+    }
+  }
+
+  /// The connection held for [deviceId] now, as an opaque key: what was
+  /// learned on one connection is learned again on the next.
+  Object? connectionOf(String deviceId) {
+    final connection = _connections[deviceId]?.connection;
+    return connection == null || connection.isClosed ? null : connection;
+  }
+
   int _portOf(Device device, DriverManifest manifest) =>
       device.port ?? manifest.transport.port ?? adbDefaultPort;
 
@@ -392,7 +469,7 @@ class AdbChannel implements DriverChannel {
         offerKey: offerKey,
       );
     } on AdbKeyNotAllowedException {
-      throw PairingRequiredException(device.id);
+      throw PairingRequiredException(device.id, name: device.name);
     } on SocketException catch (e) {
       throw TransportTimeoutException(
         'cannot reach ${device.id} at ${device.host}:$port (${e.message}). '

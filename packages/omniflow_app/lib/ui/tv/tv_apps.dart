@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -396,6 +397,166 @@ class _AppSheetState extends State<AppSheet> {
           icon: OmniIcons.info,
           onPressed: _busy ? null : () => _run(AppAction.info),
         ),
+        OmniButton.ghost(
+          key: const ValueKey('app-permissions'),
+          label: 'Permissions',
+          icon: OmniIcons.permissions,
+          onPressed: _busy
+              ? null
+              : () => showOmniSheet<void>(
+                  context,
+                  builder: (_) => _PermissionsSheet(tv: widget.tv, app: app),
+                ),
+        ),
+        OmniButton.ghost(
+          key: const ValueKey('app-backup'),
+          label: 'Save its APK to this phone',
+          icon: OmniIcons.download,
+          onPressed: _busy ? null : _backup,
+        ),
+      ],
+    );
+  }
+
+  /// Copies the app's APK files to Download, OmniFlow, TV, apks: to keep
+  /// a version, or install it on another TV.
+  Future<void> _backup() async {
+    final files = ProviderScope.containerOf(
+      context,
+      listen: false,
+    ).read(phoneFilesProvider);
+    final base = await files.downloadsDir();
+    final dir = Directory('${base ?? Directory.systemTemp.path}/TV/apks');
+    await dir.create(recursive: true);
+    if (!mounted) return;
+    setState(() => _busy = true);
+    final r = await widget.tv.transfer(
+      TvCalls.appBackup,
+      TvCalls.backupArgs(widget.tv.id, app.package, dir.path),
+      name: '${app.package}.apk',
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (r['ok'] == true) {
+      final count = (r['files'] as List? ?? const []).length;
+      showMessage(
+        'Saved ${count == 1 ? 'the APK' : '$count APK files'} of $_name to '
+        '${dir.path}',
+      );
+    }
+  }
+}
+
+/// An app's permissions, the ones it asks the user for first, each with a
+/// switch. Turning one off is how an app that misbehaves is stopped from
+/// using the microphone or location.
+class _PermissionsSheet extends StatefulWidget {
+  const _PermissionsSheet({required this.tv, required this.app});
+
+  final TvController tv;
+  final TvApp app;
+
+  @override
+  State<_PermissionsSheet> createState() => _PermissionsSheetState();
+}
+
+class _PermissionsSheetState extends State<_PermissionsSheet> {
+  List<TvPermission>? _all;
+  String? _error;
+  var _showAll = false;
+  String? _changing;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final r = await widget.tv.client.call(TvCalls.appPermissions, {
+      'id': widget.tv.id,
+      'package': widget.app.package,
+    });
+    if (!mounted) return;
+    setState(() {
+      if (r['ok'] == true) {
+        _all = permissionsOf(r);
+        _error = null;
+      } else {
+        _error = errorMessage(r);
+      }
+    });
+  }
+
+  static String _label(String name) {
+    final last = name.split('.').last.replaceAll('_', ' ').toLowerCase();
+    return '${last[0].toUpperCase()}${last.substring(1)}';
+  }
+
+  Future<void> _set(TvPermission p, bool grant) async {
+    setState(() => _changing = p.name);
+    final r = await widget.tv.call(
+      TvCalls.appPermission,
+      TvCalls.permissionArgs(
+        widget.tv.id,
+        widget.app.package,
+        p.name,
+        grant: grant,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _changing = null);
+    if (r['ok'] == true) await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final all = _all;
+    final shown = [
+      for (final p in all ?? const <TvPermission>[])
+        if (_showAll || p.runtime) p,
+    ];
+    return OmniSheet(
+      title: 'Permissions',
+      subtitle: appNameOf(widget.app.package, label: widget.app.label),
+      children: [
+        if (_error case final e?)
+          OmniBanner.error(e)
+        else if (all == null)
+          const Padding(
+            padding: EdgeInsets.all(OmniSpace.lg),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else ...[
+          if (shown.isEmpty)
+            const Text(
+              'It asks for nothing that can be turned off.',
+              style: OmniText.caption,
+            ),
+          for (final p in shown)
+            OmniListRow(
+              key: ValueKey('perm-${p.name}'),
+              title: _label(p.name),
+              subtitle: p.name,
+              trailing: Switch(
+                key: ValueKey('perm-switch-${p.name}'),
+                value: p.granted,
+                onChanged: !p.runtime || _changing != null
+                    ? null
+                    : (v) => _set(p, v),
+              ),
+            ),
+          if (all.any((p) => !p.runtime))
+            TextButton(
+              key: const ValueKey('perm-show-all'),
+              onPressed: () => setState(() => _showAll = !_showAll),
+              child: Text(
+                _showAll
+                    ? 'Only the ones it asks for'
+                    : 'Show all ${all.length}, including fixed ones',
+              ),
+            ),
+        ],
       ],
     );
   }

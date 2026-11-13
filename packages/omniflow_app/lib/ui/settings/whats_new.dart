@@ -138,6 +138,10 @@ class AboutPage extends StatelessWidget {
     title: 'About',
     body: ListView(
       children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: OmniSpace.lg),
+          child: Center(child: OmniMark(size: 96)),
+        ),
         OmniListRow(
           key: const ValueKey('about-version'),
           icon: OmniIcons.about,

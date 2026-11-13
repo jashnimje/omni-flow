@@ -858,6 +858,25 @@ void _registerTvTools(
   );
 
   server.registerTool(
+    'tv_system',
+    description:
+        'Reads how an Android TV is doing: CPU use in percent, memory total and available '
+        'in KiB, storage per mount (size and used in KiB), bytes received and sent over '
+        'the network, uptime in seconds and, when the TV reports it, temperature in C.',
+    inputSchema: JsonSchema.object(properties: device, required: ['deviceId']),
+    callback: (args, _) => read('tv.system', {'id': args['deviceId']}),
+  );
+
+  server.registerTool(
+    'tv_processes',
+    description:
+        'Lists the app processes running on an Android TV, largest first, each with '
+        'package, pid, memoryKb and whether it is the app on screen.',
+    inputSchema: JsonSchema.object(properties: device, required: ['deviceId']),
+    callback: (args, _) => read('tv.processes', {'id': args['deviceId']}),
+  );
+
+  server.registerTool(
     'tv_change',
     description:
         'Changing an Android TV is the user\'s step: pressing keys, typing, volume, opening, '

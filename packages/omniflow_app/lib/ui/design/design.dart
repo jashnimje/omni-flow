@@ -3,6 +3,7 @@
 library;
 
 export 'banner.dart';
+export 'brand.dart';
 export 'buttons.dart';
 export 'card.dart';
 export 'chips.dart';

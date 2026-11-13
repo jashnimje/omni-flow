@@ -228,6 +228,7 @@ void main() {
           'colors',
           'inputs',
           'system',
+          'gamepad',
         ],
       );
       final inputs = (groups[7] as Map)['keys'] as List;

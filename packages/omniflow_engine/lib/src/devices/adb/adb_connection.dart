@@ -429,6 +429,9 @@ class AdbStream extends _Stream {
 
   bool get isDone => _done;
 
+  /// Why the stream ended, when it was not closed cleanly by either side.
+  Object? get error => _error;
+
   @override
   void _accepted() {
     if (!_opened.isCompleted) _opened.complete();

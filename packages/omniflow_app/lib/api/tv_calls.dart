@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset;
+
 import 'engine_calls.dart' show Json;
 
 /// Every `tv.*` call the TV control centre makes, with its argument shapes
@@ -29,6 +31,19 @@ abstract final class TvCalls {
   static const filesMkdir = 'tv.files.mkdir';
   static const filesRename = 'tv.files.rename';
   static const shell = 'tv.shell';
+  static const screenshot = 'tv.screenshot';
+  static const tap = 'tv.input.tap';
+  static const swipe = 'tv.input.swipe';
+  static const recordStart = 'tv.record.start';
+  static const recordStop = 'tv.record.stop';
+  static const recordStatus = 'tv.record.status';
+  static const system = 'tv.system';
+  static const processes = 'tv.processes';
+  static const appPermissions = 'tv.app.permissions';
+  static const appPermission = 'tv.app.permission';
+  static const appBackup = 'tv.app.backup';
+  static const cacheTrim = 'tv.cache.trim';
+  static const power = 'tv.power';
 
   /// Raised while a transfer or install runs: `{id, op, done, total}`.
   static const progressEvent = 'tv.progress';
@@ -43,6 +58,8 @@ abstract final class TvCalls {
     filesMove,
     filesDelete,
     shell,
+    appBackup,
+    recordStop,
   };
 
   static const maxText = 500;
@@ -51,6 +68,11 @@ abstract final class TvCalls {
   static bool isTv(Json device) => device['driver'] == driver;
 
   static Json idArgs(String id) => {'id': id};
+
+  /// For a read the app makes on its own (a refresh, a live picture): a TV
+  /// that has not let OmniFlow in answers needs_user instead of showing its
+  /// Allow prompt, which only the user's own Pair should raise.
+  static Json readArgs(String id) => {'id': id, 'allowPairing': false};
 
   static TvState stateOf(Json result) => TvState.fromJson(result);
 
@@ -71,6 +93,50 @@ abstract final class TvCalls {
     if (name != null) 'key': name else 'keycode': keycode,
     if (longPress) 'longPress': true,
     if (repeat > 1) 'repeat': repeat.clamp(2, maxRepeat),
+  };
+
+  /// A tap at [x], [y] as fractions of the screen, 0 to 1.
+  static Json tapArgs(String id, double x, double y) => {
+    'id': id,
+    'x': x.clamp(0.0, 1.0),
+    'y': y.clamp(0.0, 1.0),
+  };
+
+  static Json swipeArgs(String id, Offset from, Offset to, {int ms = 300}) => {
+    'id': id,
+    'x1': from.dx.clamp(0.0, 1.0),
+    'y1': from.dy.clamp(0.0, 1.0),
+    'x2': to.dx.clamp(0.0, 1.0),
+    'y2': to.dy.clamp(0.0, 1.0),
+    'ms': ms.clamp(50, 5000),
+  };
+
+  static Json recordArgs(String id, int seconds) => {
+    'id': id,
+    'seconds': seconds.clamp(1, 180),
+  };
+
+  static Json permissionArgs(
+    String id,
+    String package,
+    String permission, {
+    required bool grant,
+  }) => {
+    'id': id,
+    'package': package,
+    'permission': permission,
+    'grant': grant,
+  };
+
+  static Json backupArgs(String id, String package, String to) => {
+    'id': id,
+    'package': package,
+    'to': to,
+  };
+
+  static Json powerArgs(String id, TvPower action) => {
+    'id': id,
+    'action': action.wire,
   };
 
   static Json textArgs(String id, String text) => {
@@ -494,3 +560,87 @@ class TvListing {
   final String path;
   final List<TvFileEntry> entries;
 }
+
+enum TvPower {
+  reboot('reboot'),
+  shutdown('shutdown');
+
+  const TvPower(this.wire);
+
+  final String wire;
+}
+
+/// `tv.system`: how hard the TV works and how full it is.
+class TvSystem {
+  const TvSystem({
+    this.cpuPercent,
+    this.memoryTotalKb,
+    this.memoryAvailableKb,
+    this.storage = const [],
+    this.rxBytes,
+    this.txBytes,
+    this.uptimeSeconds,
+    this.temperatureC,
+  });
+
+  factory TvSystem.fromJson(Json json) {
+    num? n(Object? v) => v is num ? v : null;
+    final cpu = json['cpu'] is Map ? json['cpu'] as Map : const {};
+    final memory = json['memory'] is Map ? json['memory'] as Map : const {};
+    final network = json['network'] is Map ? json['network'] as Map : const {};
+    return TvSystem(
+      cpuPercent: n(cpu['percent'])?.toDouble(),
+      memoryTotalKb: n(memory['totalKb'])?.toInt(),
+      memoryAvailableKb: n(memory['availableKb'])?.toInt(),
+      storage: [
+        for (final s in (json['storage'] as List? ?? const []))
+          if (s is Map)
+            (
+              mount: '${s['mount']}',
+              sizeKb: n(s['sizeKb'])?.toInt() ?? 0,
+              usedKb: n(s['usedKb'])?.toInt() ?? 0,
+            ),
+      ],
+      rxBytes: n(network['rxBytes'])?.toInt(),
+      txBytes: n(network['txBytes'])?.toInt(),
+      uptimeSeconds: n(json['uptimeSeconds'])?.toInt(),
+      temperatureC: n(json['temperatureC'])?.toDouble(),
+    );
+  }
+
+  final double? cpuPercent;
+  final int? memoryTotalKb;
+  final int? memoryAvailableKb;
+  final List<({String mount, int sizeKb, int usedKb})> storage;
+  final int? rxBytes;
+  final int? txBytes;
+  final int? uptimeSeconds;
+  final double? temperatureC;
+}
+
+/// One running app from `tv.processes`.
+typedef TvProcess = ({String package, int pid, int memoryKb, bool foreground});
+
+List<TvProcess> processesOf(Json result) => [
+  for (final a in (result['apps'] as List? ?? const []))
+    if (a is Map && a['package'] is String)
+      (
+        package: a['package'] as String,
+        pid: (a['pid'] as num?)?.toInt() ?? 0,
+        memoryKb: (a['memoryKb'] as num?)?.toInt() ?? 0,
+        foreground: a['foreground'] == true,
+      ),
+];
+
+/// One permission from `tv.app.permissions`.
+typedef TvPermission = ({String name, bool granted, bool runtime});
+
+List<TvPermission> permissionsOf(Json result) => [
+  for (final p in (result['permissions'] as List? ?? const []))
+    if (p is Map && p['name'] is String)
+      (
+        name: p['name'] as String,
+        granted: p['granted'] == true,
+        runtime: p['runtime'] == true,
+      ),
+];

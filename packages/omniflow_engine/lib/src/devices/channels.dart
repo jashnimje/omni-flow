@@ -53,10 +53,12 @@ class CommandFailedException implements Exception {
 /// The device is not paired with this engine, and the caller may not start
 /// a pairing ([ChannelRequest.allowPairing] is false).
 class PairingRequiredException extends CommandFailedException {
-  PairingRequiredException(String deviceId)
+  /// Named by [name] when it has one: people know a TV by its name.
+  PairingRequiredException(String deviceId, {String? name})
     : super(
-        '$deviceId is not paired with OmniFlow yet. Pair it first: '
-        'omni device pair $deviceId, or Pair in the device menu of the app',
+        '${name == null || name.isEmpty ? deviceId : name} is not paired with '
+        'OmniFlow yet. Pair it first: omni device pair $deviceId, or Pair in '
+        'the device menu of the app',
       );
 }
 

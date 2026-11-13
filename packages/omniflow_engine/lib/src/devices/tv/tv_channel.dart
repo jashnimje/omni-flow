@@ -134,7 +134,7 @@ class TvWebSocketChannel implements DriverChannel {
     final key = await _secrets.read(keyName);
     if (!request.allowPairing &&
         (key == null || _staleKeys.contains(device.id))) {
-      throw PairingRequiredException(device.id);
+      throw PairingRequiredException(device.id, name: device.name);
     }
     _checkCooldown(device, key);
     final pinName = deviceSecretKey(device.id, tvCertificateSecret);

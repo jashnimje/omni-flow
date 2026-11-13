@@ -195,7 +195,19 @@ class _LauncherState extends State<Launcher> {
                   onPressed: () => setState(_run),
                 ),
               )
-            : const CircularProgressIndicator(),
+            : const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // The same mark the splash shows, so starting reads as one.
+                  OmniMark(size: 72),
+                  SizedBox(height: OmniSpace.xl),
+                  SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  ),
+                ],
+              ),
       );
     },
   );

@@ -57,7 +57,8 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
             PendingIntent.getActivity(app, id, it, PendingIntent.FLAG_IMMUTABLE)
         }
         val notification = NotificationCompat.Builder(app, channel)
-            .setSmallIcon(app.applicationInfo.icon)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(0xFF00F5D4.toInt())
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))

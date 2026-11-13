@@ -131,6 +131,29 @@ const List<({String group, List<TvKey> keys})> tvKeyGroups = [
       (key: 'help', label: 'Help', keycode: 259),
     ],
   ),
+  (
+    group: 'gamepad',
+    keys: [
+      (key: 'dpad_up', label: 'D-pad up', keycode: 19),
+      (key: 'dpad_down', label: 'D-pad down', keycode: 20),
+      (key: 'dpad_left', label: 'D-pad left', keycode: 21),
+      (key: 'dpad_right', label: 'D-pad right', keycode: 22),
+      (key: 'dpad_center', label: 'D-pad center', keycode: 23),
+      (key: 'button_a', label: 'A', keycode: 96),
+      (key: 'button_b', label: 'B', keycode: 97),
+      (key: 'button_x', label: 'X', keycode: 99),
+      (key: 'button_y', label: 'Y', keycode: 100),
+      (key: 'button_l1', label: 'L1', keycode: 102),
+      (key: 'button_r1', label: 'R1', keycode: 103),
+      (key: 'button_l2', label: 'L2', keycode: 104),
+      (key: 'button_r2', label: 'R2', keycode: 105),
+      (key: 'button_thumbl', label: 'Left stick', keycode: 106),
+      (key: 'button_thumbr', label: 'Right stick', keycode: 107),
+      (key: 'button_start', label: 'Start', keycode: 108),
+      (key: 'button_select', label: 'Select', keycode: 109),
+      (key: 'button_mode', label: 'Mode', keycode: 110),
+    ],
+  ),
 ];
 
 /// Names the key op also takes, kept for drivers and flows written before
@@ -151,7 +174,12 @@ List<Map<String, Object?>> tvKeyCatalogJson() => [
       'group': g.group,
       'keys': [
         for (final k in g.keys)
-          {'key': k.key, 'label': k.label, 'keycode': k.keycode},
+          {
+            'key': k.key,
+            'label': k.label,
+            'keycode': k.keycode,
+            'group': g.group,
+          },
       ],
     },
 ];

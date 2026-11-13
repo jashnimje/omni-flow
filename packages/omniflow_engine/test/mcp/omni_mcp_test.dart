@@ -241,7 +241,7 @@ void _tools({required bool viaHub}) {
     expect((packets.single as Map)['text'], '{"method":"getPilot"}');
   });
 
-  test('lists the thirty-four tools', () async {
+  test('lists the thirty-six tools', () async {
     final tools = (await client.listTools()).tools.map((t) => t.name).toSet();
     expect(tools, {
       'describe_omniflow',
@@ -277,6 +277,8 @@ void _tools({required bool viaHub}) {
       'tv_app_info',
       'tv_settings',
       'tv_files',
+      'tv_system',
+      'tv_processes',
       'tv_change',
     });
   });
@@ -772,7 +774,7 @@ void _stdio() {
             .firstWhere((l) => l.contains('"id":2'))
             .timeout(const Duration(seconds: 20)),
       ) as Map;
-      expect(((list['result'] as Map)['tools'] as List), hasLength(34));
+      expect(((list['result'] as Map)['tools'] as List), hasLength(36));
       await process.stdin.close();
       expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
     },

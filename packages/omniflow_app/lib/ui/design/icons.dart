@@ -67,6 +67,15 @@ abstract final class OmniIcons {
   static const bluetooth = Symbols.bluetooth_rounded;
   static const hub = Symbols.monitor_rounded;
   static const permissions = Symbols.lock_rounded;
+  static const video = Symbols.videocam_rounded;
+  static const screen = Symbols.screen_share_rounded;
+  static const gamepad = Symbols.sports_esports_rounded;
+  static const system = Symbols.memory_rounded;
+  static const storage = Symbols.hard_drive_rounded;
+  static const network = Symbols.swap_vert_rounded;
+  static const temperature = Symbols.device_thermostat_rounded;
+  static const cleaning = Symbols.cleaning_services_rounded;
+  static const shutdown = Symbols.power_settings_new_rounded;
   static const download = Symbols.download_rounded;
   static const upload = Symbols.upload_rounded;
   static const backup = Symbols.backup_rounded;

@@ -97,6 +97,8 @@ void main() {
       ),
       ('tv_files', {'path': '/sdcard/Download'}),
       ('tv_files', {'view': 'stat', 'path': '/sdcard/Download/a.txt'}),
+      ('tv_system', <String, dynamic>{}),
+      ('tv_processes', <String, dynamic>{}),
     ]) {
       final (ok, body) = await call(name, {'deviceId': 'tv', ...args});
       expect(ok, isTrue, reason: '$name $args: $body');

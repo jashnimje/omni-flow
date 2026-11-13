@@ -118,6 +118,14 @@ class FakeAdbd {
   /// Sets the device's output for a shell command.
   String Function(String command) respond = (_) => '';
 
+  /// The bytes an `exec:` command writes, unchanged. By default what
+  /// [respond] prints.
+  List<int> Function(String command)? respondExec;
+
+  /// Whether running [command] takes the device down, so it closes the
+  /// connection without an answer, as `reboot` does.
+  bool Function(String command) dropsConnection = (_) => false;
+
   /// The files the sync service serves.
   final fs = FakeFs();
 
@@ -269,7 +277,26 @@ class FakeAdbd {
                 socket.flush().whenComplete(socket.destroy);
                 return;
               }
+              if (command.startsWith('exec:')) {
+                final line = command.substring(5);
+                final bytes =
+                    respondExec?.call(line) ?? utf8.encode(respond(line));
+                for (var i = 0; i < bytes.length; i += 64 * 1024) {
+                  send(
+                    AdbCommand.wrte,
+                    remoteId,
+                    m.arg0,
+                    bytes.sublist(i, min(i + 64 * 1024, bytes.length)),
+                  );
+                }
+                send(AdbCommand.clse, remoteId, m.arg0);
+                continue;
+              }
               final output = respond(command);
+              if (dropsConnection(command)) {
+                socket.flush().whenComplete(socket.destroy);
+                return;
+              }
               if (output.isNotEmpty) {
                 send(AdbCommand.wrte, remoteId, m.arg0, utf8.encode(output));
               }

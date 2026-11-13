@@ -34,7 +34,7 @@ void main() {
     expect(inList('com.netflix.ninja · 9.1'), findsOneWidget);
     expect(find.text('Search 2 apps'), findsOneWidget);
 
-    await tester.tap(find.text('System'));
+    await tester.tap(find.byKey(const ValueKey('apps-filter-system')));
     await tester.pumpAndSettle();
     expect(argsOf(engine, 'tv.apps').last, {'id': tvId, 'filter': 'system'});
     await tester.tap(find.text('All'));
