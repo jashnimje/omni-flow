@@ -5,7 +5,6 @@ import '../../api/engine_calls.dart';
 import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
 import '../../state/reload_home.dart';
-import '../automations/scenes.dart' show openScenes, runScene, sceneIconFor;
 import '../design/design.dart';
 import '../devices/device_controls.dart';
 import '../devices/device_text.dart';
@@ -17,6 +16,7 @@ import 'empty_home.dart';
 import 'first_run.dart';
 import 'home_data.dart';
 import 'quick_sheet.dart';
+import 'run_section.dart';
 
 /// The things Home shows as tiles: not the phone, people or places.
 List<DeviceView> tileDevices(List<Json> devices) => [
@@ -36,8 +36,8 @@ bool homeIsEmpty(WidgetRef ref) => switch (ref.watch(devicesProvider).value) {
 bool homeShowsFirstRun(WidgetRef ref) =>
     homeIsEmpty(ref) && ref.watch(firstRunDoneProvider).value == false;
 
-/// 1.1: the daily overview. A greeting, what is on, status chips, scenes,
-/// favourites and one tile grid per room. With nothing added it is the
+/// 1.1: the daily overview. A greeting, what is on, status chips, what to
+/// run (scenes and manual automations), favourites and one tile grid per room. With nothing added it is the
 /// first run (8.1) or the empty home (8.2).
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -137,14 +137,7 @@ class _Overview extends ConsumerWidget {
                 const _Loading()
               else ...[
                 _StatusChips(tiles: tiles, presence: presence, person: person),
-                if (scenes.isNotEmpty) ...[
-                  OmniSectionHeader(
-                    'Scenes',
-                    actionLabel: 'Edit',
-                    onAction: () => openScenes(context),
-                  ),
-                  _SceneRow(scenes: scenes),
-                ],
+                RunSection(items: runItems(scenes, summaries)),
                 ..._favourites(context, ref, tiles, drivers),
                 for (final g in _roomGroups(tiles, rooms)) ...[
                   OmniSectionHeader(
@@ -359,89 +352,6 @@ class _StatusChips extends ConsumerWidget {
     ];
     if (chips.isEmpty) return const SizedBox(height: OmniSpace.xs);
     return Wrap(spacing: 6, children: chips);
-  }
-}
-
-class _SceneRow extends ConsumerWidget {
-  const _SceneRow({required this.scenes});
-
-  final List<Scene> scenes;
-
-  Widget _button(BuildContext context, WidgetRef ref, Scene s) {
-    final radius = BorderRadius.circular(OmniRadii.button);
-    return Semantics(
-      button: true,
-      label: 'Run ${s.name}',
-      excludeSemantics: true,
-      onTap: () => _run(ref, s),
-      child: Material(
-        key: ValueKey('scene-${s.id}'),
-        color: OmniColors.card,
-        shape: RoundedRectangleBorder(
-          borderRadius: radius,
-          side: const BorderSide(color: OmniColors.line),
-        ),
-        child: InkWell(
-          borderRadius: radius,
-          onTap: () => _run(ref, s),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 64),
-            child: Padding(
-              padding: const EdgeInsets.all(OmniSpace.gap),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(sceneIconFor(s.icon), size: 22, color: OmniColors.text),
-                  const SizedBox(height: 2),
-                  Text(
-                    s.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: OmniColors.text,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _run(WidgetRef ref, Scene s) async {
-    if (s.id case final id?) await runScene(ref, id, s.name);
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (scenes.length <= 4) {
-      return Row(
-        children: [
-          for (var i = 0; i < scenes.length; i++) ...[
-            if (i > 0) const SizedBox(width: OmniSpace.sm),
-            Expanded(child: _button(context, ref, scenes[i])),
-          ],
-          for (var i = scenes.length; i < 4; i++) ...[
-            const SizedBox(width: OmniSpace.sm),
-            const Expanded(child: SizedBox()),
-          ],
-        ],
-      );
-    }
-    return SizedBox(
-      height: 72,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: scenes.length,
-        separatorBuilder: (_, _) => const SizedBox(width: OmniSpace.sm),
-        itemBuilder: (_, i) =>
-            SizedBox(width: 82, child: _button(context, ref, scenes[i])),
-      ),
-    );
   }
 }
 

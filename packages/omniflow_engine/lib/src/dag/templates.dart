@@ -17,6 +17,9 @@ class RuleTemplate {
     required this.description,
     required this.placeholders,
     required this.spec,
+    required this.category,
+    required this.icon,
+    required this.color,
   });
 
   final String id;
@@ -25,10 +28,20 @@ class RuleTemplate {
   final List<TemplatePlaceholder> placeholders;
   final Map<String, Object?> spec;
 
+  /// The gallery group it shows in, one of [templateCategories].
+  final String category;
+
+  /// Its icon and colour, from the automation icons and colours.
+  final String icon;
+  final String color;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'description': description,
+    'category': category,
+    'icon': icon,
+    'color': color,
     'placeholders': [for (final p in placeholders) p.toJson()],
     'spec': spec,
   };
@@ -60,6 +73,9 @@ const ruleTemplates = <RuleTemplate>[
   RuleTemplate(
     id: 'arrive_home',
     name: 'Arrive home',
+    category: 'Arrive and leave',
+    icon: 'home',
+    color: '#34D399',
     description: 'When you get home, turn things on.',
     placeholders: [
       _person,
@@ -84,6 +100,9 @@ const ruleTemplates = <RuleTemplate>[
   RuleTemplate(
     id: 'leave_home_all_off',
     name: 'Leave home, all off',
+    category: 'Arrive and leave',
+    icon: 'lock',
+    color: '#94A3B8',
     description: 'When you leave, turn everything you pick off.',
     placeholders: [
       _person,
@@ -108,6 +127,9 @@ const ruleTemplates = <RuleTemplate>[
   RuleTemplate(
     id: 'motion_light',
     name: 'Motion light',
+    category: 'Away and safety',
+    icon: 'lightbulb',
+    color: '#FACC15',
     description:
         'When motion is seen, turn a light on, and off again after a while. '
         'New motion starts the wait again.',
@@ -141,6 +163,9 @@ const ruleTemplates = <RuleTemplate>[
   RuleTemplate(
     id: 'tag_toggle',
     name: 'Tag toggle',
+    category: 'Buttons and tags',
+    icon: 'bolt',
+    color: '#00F5D4',
     description: 'Scan an NFC tag to switch something on or off.',
     placeholders: [
       TemplatePlaceholder('tag', 'Tag', 'tag'),
@@ -159,6 +184,9 @@ const ruleTemplates = <RuleTemplate>[
   RuleTemplate(
     id: 'bedtime',
     name: 'Bedtime',
+    category: 'Morning and night',
+    icon: 'moon',
+    color: '#A78BFA',
     description: 'At bedtime, turn things off and say good night.',
     placeholders: [
       TemplatePlaceholder('time', 'At', 'time', fallback: '23:00'),
@@ -180,6 +208,109 @@ const ruleTemplates = <RuleTemplate>[
       ],
     },
   ),
+  RuleTemplate(
+    id: 'ask_before_tv',
+    name: 'Ask before the TV turns on',
+    category: 'Watch and listen',
+    icon: 'tv',
+    color: '#4D9DFF',
+    description:
+        'When you get home, ask first, and turn the TV on only if you say '
+        'Run.',
+    placeholders: [_person, TemplatePlaceholder('tv', 'TV', 'toggle')],
+    spec: {
+      'name': 'Ask before the TV turns on',
+      'askFirst': true,
+      'icon': 'tv',
+      'color': '#4D9DFF',
+      'when': [
+        {
+          'on': '<person>.home',
+          'change': {'to': true},
+        },
+      ],
+      'then': [
+        {
+          'do': '<tv>',
+          'params': {'value': true},
+        },
+      ],
+    },
+  ),
+  RuleTemplate(
+    id: 'bluetooth_connected',
+    name: 'Notify when Bluetooth connects',
+    category: 'Arrive and leave',
+    icon: 'car',
+    color: '#FB923C',
+    description:
+        'When the phone connects to a Bluetooth device, such as the car, '
+        'show its name.',
+    placeholders: [],
+    spec: {
+      'name': 'Notify when Bluetooth connects',
+      'icon': 'car',
+      'color': '#FB923C',
+      'when': [
+        {'on': 'phone.bluetooth_connected', 'event': true},
+      ],
+      'then': [
+        {
+          'notify': {'title': 'Connected to {{msg.payload.name}}'},
+        },
+      ],
+    },
+  ),
+  RuleTemplate(
+    id: 'web_value_notify',
+    name: 'Read a web value into a notification',
+    category: 'Morning and night',
+    icon: 'bell',
+    color: '#F472B6',
+    description:
+        'At a time each day, read a value from a web address and show it. '
+        'Change the address and the value to read in the rule.',
+    placeholders: [
+      TemplatePlaceholder('time', 'At', 'time', fallback: '08:00'),
+    ],
+    spec: {
+      'name': 'Read a web value into a notification',
+      'icon': 'bell',
+      'color': '#F472B6',
+      'when': [
+        {'time': '<time>'},
+      ],
+      'then': [
+        {
+          'try': [
+            {
+              'http': {'url': 'https://example.com/status.json'},
+            },
+            {
+              'get': {'from': '{{%reply.body}}', 'path': 'value'},
+            },
+            {
+              'notify': {'title': 'Today: {{%value}}'},
+            },
+          ],
+          'otherwise': [
+            {
+              'notify': {'title': 'The web value could not be read'},
+            },
+          ],
+        },
+      ],
+    },
+  ),
+];
+
+/// The groups the template gallery shows, in order.
+const templateCategories = [
+  'Arrive and leave',
+  'Morning and night',
+  'Watch and listen',
+  'Away and safety',
+  'Buttons and tags',
 ];
 
 class TemplateFillException implements Exception {

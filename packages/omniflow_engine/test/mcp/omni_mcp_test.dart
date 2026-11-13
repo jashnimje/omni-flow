@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
+import 'package:omniflow_engine/src/dag/templates.dart' show ruleTemplates;
 import 'package:test/test.dart';
 
 import '../devices/tv/fake_tvs.dart';
@@ -223,7 +224,7 @@ void _tools({required bool viaHub}) {
     );
     expect(history['entries'], isEmpty);
     final templates = body(await call('list_rule_templates'));
-    expect(templates['templates'], hasLength(5));
+    expect(templates['templates'], hasLength(ruleTemplates.length));
   });
 
   test('the packet sniffer sees the engine\'s packets', () async {

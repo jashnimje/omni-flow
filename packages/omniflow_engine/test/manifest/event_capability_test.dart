@@ -95,8 +95,19 @@ void main() {
       'wifi_bssid',
       'battery',
       'charging',
+      'app_on_screen',
+      'bluetooth_devices',
+      'screen_on',
+      'dnd_on',
     });
-    expect(ids('phone', CapabilityType.event), {'nfc_scanned'});
+    expect(ids('phone', CapabilityType.event), {
+      'nfc_scanned',
+      'app_opened',
+      'app_closed',
+      'notification',
+      'bluetooth_connected',
+      'bluetooth_disconnected',
+    });
     expect(ids('person', CapabilityType.sensor), {
       'home',
       'place',

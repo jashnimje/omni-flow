@@ -11,6 +11,15 @@
     { "id": "wifi_bssid", "type": "sensor", "label": "Wi-Fi access point", "stateJsonPath": "$.wifi_bssid" },
     { "id": "battery", "type": "sensor", "label": "Battery", "stateJsonPath": "$.battery" },
     { "id": "charging", "type": "sensor", "label": "Charging", "stateJsonPath": "$.charging" },
-    { "id": "nfc_scanned", "type": "event", "label": "NFC tag scanned" }
+    { "id": "app_on_screen", "type": "sensor", "label": "App on screen", "stateJsonPath": "$.app_on_screen" },
+    { "id": "bluetooth_devices", "type": "sensor", "label": "Bluetooth devices connected", "stateJsonPath": "$.bluetooth_devices" },
+    { "id": "screen_on", "type": "sensor", "label": "Screen on", "stateJsonPath": "$.screen_on" },
+    { "id": "dnd_on", "type": "sensor", "label": "Do Not Disturb", "stateJsonPath": "$.dnd_on" },
+    { "id": "nfc_scanned", "type": "event", "label": "NFC tag scanned" },
+    { "id": "app_opened", "type": "event", "label": "An app opens" },
+    { "id": "app_closed", "type": "event", "label": "An app closes" },
+    { "id": "notification", "type": "event", "label": "A notification arrives" },
+    { "id": "bluetooth_connected", "type": "event", "label": "A Bluetooth device connects" },
+    { "id": "bluetooth_disconnected", "type": "event", "label": "A Bluetooth device disconnects" }
   ]
 }

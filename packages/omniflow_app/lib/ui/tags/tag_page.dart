@@ -23,9 +23,12 @@ String agoText(DateTime t, {DateTime? now}) {
   final d = today.difference(at);
   if (d.inMinutes < 1) return 'just now';
   if (d.inMinutes < 60) return '${d.inMinutes} min ago';
-  if (d.inHours < 24 && at.day == today.day) return '${d.inHours} h ago';
-  final midnight = DateTime(today.year, today.month, today.day);
-  if (at.isAfter(midnight.subtract(const Duration(days: 1)))) {
+  // A few hours back reads in hours even across midnight: at 1 am,
+  // "2 h ago" says more than "yesterday".
+  if (d.inHours < 6 || (d.inHours < 24 && at.day == today.day)) {
+    return '${d.inHours} h ago';
+  }
+  if (!at.isBefore(DateTime(today.year, today.month, today.day - 1))) {
     return 'yesterday';
   }
   return _day(at);

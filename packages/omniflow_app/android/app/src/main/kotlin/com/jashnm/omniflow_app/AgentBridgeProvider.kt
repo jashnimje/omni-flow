@@ -3,8 +3,6 @@ package com.jashnm.omniflow_app
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
 import android.net.Uri
 import android.os.Binder
 import android.os.Bundle
@@ -13,7 +11,6 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.net.SocketTimeoutException
-import java.io.File
 
 /**
  * Hands one engine command from a computer to the engine's private control
@@ -56,27 +53,15 @@ class AgentBridgeProvider : ContentProvider() {
 
     private fun forward(request: String): String {
         val json = JSONObject(request)
-        val line = JSONObject()
-            .put("id", 1)
-            .put("command", json.getString("command"))
-            .put("args", json.optJSONObject("args") ?: JSONObject())
-        val socket = File(context!!.filesDir, "omniflow/omni.sock")
-        LocalSocket().use { local ->
-            local.connect(LocalSocketAddress(socket.path, LocalSocketAddress.Namespace.FILESYSTEM))
-            local.soTimeout = TIMEOUT_MS
-            local.outputStream.write((line.toString() + "\n").toByteArray())
-            local.outputStream.flush()
-            val answer = local.inputStream.bufferedReader().readLine()
-                ?: return failure("unreachable", "the engine closed the connection")
-            return JSONObject(answer).optJSONObject("result")?.toString()
-                ?: failure("internal", "the engine sent no result")
-        }
+        return EngineSocket.call(
+            context!!,
+            json.getString("command"),
+            json.optJSONObject("args") ?: JSONObject(),
+            TIMEOUT_MS,
+        ).toString()
     }
 
-    private fun failure(type: String, message: String) = JSONObject()
-        .put("ok", false)
-        .put("error", JSONObject().put("type", type).put("message", message))
-        .toString()
+    private fun failure(type: String, message: String) = EngineSocket.failure(type, message).toString()
 
     override fun query(
         uri: Uri,

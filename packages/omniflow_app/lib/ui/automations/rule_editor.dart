@@ -1,14 +1,18 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:omniflow_engine/omniflow_engine.dart' show ruleIdFor;
 
 import '../../api/engine_calls.dart';
+import '../../api/rule_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import 'automations_state.dart';
 import 'dialogs.dart';
 import 'review_page.dart';
+import 'look_picker.dart';
 import 'rule_blocks.dart';
 import 'rule_words.dart';
 import 'test_run.dart';
@@ -61,6 +65,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       );
       // A template's rule is new work the user has not kept yet.
       if (widget.initial != null) _draft!.dirty = true;
+      _loadLabels();
     } else {
       _load();
     }
@@ -95,6 +100,27 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
         ),
         words: RuleWords(const []),
       );
+    });
+    _loadLabels();
+  }
+
+  /// Asks the engine for the labels of the tokens the rule's fields use,
+  /// so its rows read "Web reply · body" instead of the template.
+  Future<void> _loadLabels() async {
+    final draft = _draft;
+    if (draft == null) return;
+    final rule = draft.spec.toJson();
+    if (!jsonEncode(rule).contains('{{')) return;
+    final tokens = await RuleCalls.fetch(
+      ref.read(engineClientProvider),
+      rule,
+      'then[${draft.spec.then.length}]',
+    );
+    if (!mounted || tokens.isEmpty) return;
+    setState(() {
+      for (final t in tokens) {
+        draft.tokenLabels[t.token] = t.label;
+      }
     });
   }
 
@@ -297,7 +323,9 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     final draft = _draft;
     if (draft != null) {
       draft
-        ..words = RuleWords(things, {for (final a in automations) a.id: a.name})
+        ..words = RuleWords(things, {
+          for (final a in automations) a.id: a.name,
+        }, draft.tokenLabels)
         ..automations = [
           for (final a in automations)
             if (a.id != widget.id) a,
@@ -399,6 +427,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                     ].join('\n'),
                     key: const ValueKey('rule-errors'),
                   ),
+                _LookAndAsk(draft: draft),
                 TriggerBlock(draft: draft),
                 ConditionBlock(
                   draft: draft,
@@ -460,6 +489,90 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
           ),
         );
       },
+    );
+  }
+}
+
+/// The top of the editor: how the automation looks (its colour and icon)
+/// and how it runs (ask before running, notify when it runs). Each is a
+/// field of the rule spec the engine acts on.
+class _LookAndAsk extends StatelessWidget {
+  const _LookAndAsk({required this.draft});
+
+  final RuleDraft draft;
+
+  @override
+  Widget build(BuildContext context) {
+    final spec = draft.spec;
+    final color = automationColor(spec.color);
+    final keeps = spec.then.any((s) => s is KeepStep);
+    return Column(
+      key: const ValueKey('rule-look-and-ask'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OmniListRow(
+          key: const ValueKey('rule-look'),
+          leading: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(OmniRadii.iconBox),
+            ),
+            child: Icon(automationIcon(spec.icon), color: color, size: 22),
+          ),
+          title: 'Colour and icon',
+          subtitle:
+              '${colorNames[spec.color] ?? 'Teal'}, '
+              '${spec.icon ?? automationIconNames.first}',
+          chevron: true,
+          onTap: () async {
+            final look = await pickLook(context, (
+              color: spec.color,
+              icon: spec.icon,
+            ));
+            if (look == null) return;
+            spec
+              ..color = look.color
+              ..icon = look.icon;
+            draft.changed();
+          },
+        ),
+        OmniListRow(
+          key: const ValueKey('rule-ask-first'),
+          title: 'Ask before running',
+          subtitle:
+              draft.errorAt('askFirst') ??
+              (keeps && !spec.askFirst
+                  ? 'Not with a keep step: a keep holds its value on its own, '
+                        'so there is no run to ask about.'
+                  : 'When a trigger starts it, a notification asks first. '
+                        'Running it yourself never asks.'),
+          subtitleLines: 3,
+          trailing: Switch(
+            value: spec.askFirst,
+            // One set before a keep was added can still be turned off.
+            onChanged: keeps && !spec.askFirst
+                ? null
+                : (v) {
+                    spec.askFirst = v;
+                    draft.changed();
+                  },
+          ),
+        ),
+        OmniListRow(
+          key: const ValueKey('rule-notify-on-run'),
+          title: 'Notify when it runs',
+          subtitle: 'A notification each time it finishes.',
+          trailing: Switch(
+            value: spec.notifyOnRun,
+            onChanged: (v) {
+              spec.notifyOnRun = v;
+              draft.changed();
+            },
+          ),
+        ),
+      ],
     );
   }
 }

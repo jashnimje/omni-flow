@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Up to four scenes or automations in a row: a tap runs one. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:padding="6dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_slot0"
+            style="@style/WidgetButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="3dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/widget_slot1"
+            style="@style/WidgetButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="3dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/widget_slot2"
+            style="@style/WidgetButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="3dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/widget_slot3"
+            style="@style/WidgetButton"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="3dp"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_empty"
+        style="@style/WidgetButton"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:text="@string/widget_pick" />
+</FrameLayout>

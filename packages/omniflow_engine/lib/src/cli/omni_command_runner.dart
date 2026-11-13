@@ -432,6 +432,74 @@ class OmniCommandRunner extends CommandRunner<int> {
           usage: 'LEVEL [charging|unplugged]',
         ),
         _ApiCommand(
+          'app',
+          'An app opened or closed: omni phone app com.netflix.mediaclient opened',
+          'phone.app',
+          (rest, _) async {
+            if (rest.length < 2 ||
+                rest.length > 3 ||
+                !const {'opened', 'closed'}.contains(rest[1])) {
+              throw UsageException('needs PACKAGE opened|closed [LABEL]', '');
+            }
+            return {
+              'package': rest[0],
+              'event': rest[1],
+              if (rest.length == 3) 'label': rest[2],
+            };
+          },
+          usage: 'PACKAGE opened|closed [LABEL]',
+        ),
+        _ApiCommand(
+          'notification',
+          'A notification arrived: omni phone notification com.whatsapp [TITLE] [TEXT]',
+          'phone.notification',
+          (rest, _) async {
+            if (rest.isEmpty || rest.length > 3) {
+              throw UsageException('needs PACKAGE [TITLE] [TEXT]', '');
+            }
+            return {
+              'package': rest[0],
+              if (rest.length > 1) 'title': rest[1],
+              if (rest.length > 2) 'text': rest[2],
+            };
+          },
+          usage: 'PACKAGE [TITLE] [TEXT]',
+        ),
+        _ApiCommand(
+          'bluetooth',
+          'A Bluetooth device connected or left: omni phone bluetooth "My car" connected',
+          'phone.bluetooth',
+          (rest, _) async {
+            if (rest.length < 2 ||
+                rest.length > 3 ||
+                !const {'connected', 'disconnected'}.contains(rest[1])) {
+              throw UsageException(
+                'needs NAME connected|disconnected [ADDRESS]',
+                '',
+              );
+            }
+            return {
+              'name': rest[0],
+              'connected': rest[1] == 'connected',
+              if (rest.length == 3) 'address': rest[2],
+            };
+          },
+          usage: 'NAME connected|disconnected [ADDRESS]',
+        ),
+        for (final (verb, command, what) in const [
+          ('screen', 'phone.screen', 'The screen turned on or off'),
+          ('dnd', 'phone.dnd', 'Do Not Disturb turned on or off'),
+        ])
+          _ApiCommand(verb, '$what: omni phone $verb on', command, (
+            rest,
+            _,
+          ) async {
+            if (rest.length != 1 || !const {'on', 'off'}.contains(rest[0])) {
+              throw UsageException('needs on|off', '');
+            }
+            return {'on': rest[0] == 'on'};
+          }, usage: 'on|off'),
+        _ApiCommand(
           'nfc',
           'An NFC scan, as omni tag scan UID: omni phone nfc 04:A2:2B:1C [TAG_ID]',
           'nfc.scanned',
@@ -447,6 +515,28 @@ class OmniCommandRunner extends CommandRunner<int> {
             };
           },
           usage: 'UID [TAG_ID]',
+        ),
+      ]),
+    );
+    addCommand(
+      _Group('ask', 'Questions automations are waiting on you to answer.', [
+        _ApiCommand(
+          'pending',
+          'The questions waiting for an answer.',
+          'ask.pending',
+          (_, _) async => {},
+        ),
+        _ApiCommand(
+          'answer',
+          'Answer one: omni ask answer ASK_ID Run',
+          'ask.answer',
+          (rest, _) async {
+            if (rest.length != 2) {
+              throw UsageException('needs ASK_ID ANSWER', '');
+            }
+            return {'askId': rest[0], 'answer': rest[1]};
+          },
+          usage: 'ASK_ID ANSWER',
         ),
       ]),
     );

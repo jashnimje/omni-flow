@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Google Assistant: "Open <feature> in OmniFlow". A favourite picked as a
+     launcher shortcut is bound to this capability under its name
+     (RunShortcuts), so the Assistant can start that shortcut. Any other
+     feature name only opens the app on Automations: nothing runs from a
+     spoken name the person did not make a shortcut. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <capability android:name="actions.intent.OPEN_APP_FEATURE">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.jashnm.omniflow_app"
+            android:targetClass="com.jashnm.omniflow_app.MainActivity"
+            android:data="omniflow://open/automations">
+            <parameter
+                android:name="feature"
+                android:key="feature" />
+        </intent>
+    </capability>
+</shortcuts>

@@ -32,6 +32,12 @@ class _Host implements FlowHost {
   Stream<Map<String, Object?>> get events => _events.stream;
 
   @override
+  Future<Map<String, Object?>?> deviceState(String deviceId) async => null;
+
+  @override
+  Future<List<String>> roomDevices(String room) async => const [];
+
+  @override
   Future<Map<String, Object?>?> invokeDevice(
     String deviceId,
     String capabilityId,

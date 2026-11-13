@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../manifest/validation.dart';
 import '../devices/device_service.dart' show stateKeyOf;
+import 'data_steps.dart' show expressionProblem;
 import 'flow.dart';
 import 'node_types.dart';
 import 'rule_shorthand.dart';
@@ -56,7 +57,45 @@ abstract final class RuleKeys {
     'cooldownSeconds',
     'enabled',
     'stopOnError',
+    'color',
+    'icon',
+    'askFirst',
+    'notifyOnRun',
   ];
+
+  /// The colours and icons an automation or a scene may take.
+  static const colors = [
+    '#00F5D4',
+    '#4D9DFF',
+    '#A78BFA',
+    '#F472B6',
+    '#FB923C',
+    '#FACC15',
+    '#34D399',
+    '#94A3B8',
+  ];
+  static const icons = [
+    'bolt',
+    'home',
+    'sunrise',
+    'moon',
+    'tv',
+    'lightbulb',
+    'movie',
+    'music',
+    'fan',
+    'lock',
+    'car',
+    'bell',
+    'heart',
+    'star',
+    'leaf',
+    'fire',
+  ];
+
+  /// The most items a forEach goes through, and how many when it says not.
+  static const forEachMax = 1000;
+  static const forEachDefault = 100;
   static const triggers = ['on', 'time', 'sun', 'interval', 'manual'];
   static const onModes = ['event', 'change', 'crosses'];
   static const conditions = [
@@ -83,6 +122,12 @@ abstract final class RuleKeys {
     'set',
     'run',
     'keep',
+    'ask',
+    'get',
+    'text',
+    'math',
+    'date',
+    'forEach',
   ];
 
   /// The most passes a repeat step makes, and how many it makes when it
@@ -97,6 +142,11 @@ abstract final class RuleKeys {
 
 final _id = RegExp(r'^[a-z][a-z0-9_]*$');
 final _action = RegExp(r'^([a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)$');
+
+/// A step on the device a run variable holds: `{{%item}}.power`.
+final _runAction = RegExp(
+  r'^\{\{\s*%[A-Za-z_][A-Za-z0-9_]*\s*\}\}\.([a-z][a-z0-9_]*)$',
+);
 final _hhmm = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
 final _variable = RegExp(r'^[$%][A-Za-z_][A-Za-z0-9_]*$');
 final _msgKey = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$');
@@ -243,6 +293,33 @@ Map<String, Object?> normalizeRule(
   }
   if (rule['enabled'] != null && rule['enabled'] is! bool) {
     issues.add('enabled', 'must be true or false');
+  }
+  for (final (key, allowed, what) in [
+    ('color', RuleKeys.colors, 'colour'),
+    ('icon', RuleKeys.icons, 'icon'),
+  ]) {
+    final value = rule[key];
+    if (value == null) continue;
+    if (!allowed.contains(value)) {
+      issues.add(key, 'must be one of the $what choices: ${allowed.join(' ')}');
+    } else {
+      out[key] = value;
+    }
+  }
+  for (final key in const ['askFirst', 'notifyOnRun']) {
+    final value = rule[key];
+    if (value == null) continue;
+    if (value is! bool) {
+      issues.add(key, 'must be true or false');
+    } else if (value) {
+      out[key] = true;
+    }
+  }
+  if (out['askFirst'] == true && holds) {
+    issues.add(
+      'askFirst',
+      'cannot go with a keep step, which holds on its own',
+    );
   }
   if (issues.hasIssues) {
     throw ValidationException('rule ${id is String ? id : ''}'.trim(), [
@@ -512,16 +589,24 @@ class _Normalizer {
         }
         return keep(map, path);
       case 'do' || 'toggle':
-        _only(map, path, {kind, if (kind == 'do') 'params'}, 'a $kind step');
+        _only(map, path, {
+          kind,
+          if (kind == 'do') ...['params', 'as'],
+        }, 'a $kind step');
         final ref = map[kind];
-        if (ref is! String || !_action.hasMatch(ref)) {
-          issues.add('$path.$kind', 'must be thing.action, like lamp.power');
+        if (ref is! String ||
+            (!_action.hasMatch(ref) && !_runAction.hasMatch(ref))) {
+          issues.add(
+            '$path.$kind',
+            'must be thing.action, like lamp.power, or {{%item}}.power',
+          );
         }
         final params = map['params'];
         if (params != null && params is! Map) {
           issues.add('$path.params', 'must be an object');
         }
-        return {kind: ref, 'params': ?params};
+        if (kind == 'do') _runVar(map['as'], '$path.as');
+        return {kind: ref, 'params': ?params, 'as': ?map['as']};
       case 'wait':
         _only(map, path, {'wait'}, 'a wait');
         final ms = map['wait'];
@@ -652,6 +737,95 @@ class _Normalizer {
         return {
           'set': {'var': s['var'], 'value': s['value']},
         };
+      case 'ask':
+        return _ask(map, path);
+      case 'get':
+        final g = _inner(map, path, 'get', {'from', 'path', 'as'});
+        if (g == null) return null;
+        if (!g.containsKey('from')) issues.add('$path.get.from', 'is required');
+        final p = g['path'];
+        if (p != null && (p is! String || !valuePathPattern.hasMatch(p))) {
+          issues.add(
+            '$path.get.path',
+            'must be a path like state.on or items[0]',
+          );
+        }
+        _runVar(g['as'], '$path.get.as');
+        return {'get': g};
+      case 'text':
+        final t = _inner(map, path, 'text', {'value', 'op', 'as'});
+        if (t == null) return null;
+        if (!t.containsKey('value')) {
+          issues.add('$path.text.value', 'is required');
+        }
+        if (t['op'] != null && !textOps.contains(t['op'])) {
+          issues.add('$path.text.op', 'must be one of ${textOps.join(', ')}');
+        }
+        _runVar(t['as'], '$path.text.as');
+        return {'text': t};
+      case 'math':
+        final m = _inner(map, path, 'math', {'expr', 'as'});
+        if (m == null) return null;
+        final expr = m['expr'];
+        if (expr is! String || expr.trim().isEmpty) {
+          issues.add(
+            '$path.math.expr',
+            'needs a sum like {{%reply.body.temp}} * 2',
+          );
+        } else if (expressionProblem(expr) case final problem?) {
+          issues.add('$path.math.expr', problem);
+        }
+        _runVar(m['as'], '$path.math.as');
+        return {'math': m};
+      case 'date':
+        final d = _inner(map, path, 'date', {'format', 'offsetMinutes', 'as'});
+        if (d == null) return null;
+        final format = d['format'];
+        if (format != null && (format is! String || format.isEmpty)) {
+          issues.add('$path.date.format', 'must be a format like HH:mm');
+        }
+        final offset = d['offsetMinutes'];
+        if (offset != null &&
+            (offset is! int ||
+                offset < -dateOffsetLimit ||
+                offset > dateOffsetLimit)) {
+          issues.add(
+            '$path.date.offsetMinutes',
+            'must be whole minutes, at most a year either way',
+          );
+        }
+        _runVar(d['as'], '$path.date.as');
+        return {'date': d};
+      case 'forEach':
+        final f = _inner(map, path, 'forEach', {'in', 'as', 'do', 'max'});
+        if (f == null) return null;
+        final at = '$path.forEach';
+        final source = f['in'];
+        if (source is! List &&
+            !(source is String &&
+                (source.startsWith('room:')
+                    ? source.substring(5).trim().isNotEmpty
+                    : source.contains('{{')))) {
+          issues.add(
+            '$at.in',
+            'must be a list, a value like {{%reply.body.items}}, or '
+                'room:<room name>',
+          );
+        }
+        final max = f['max'];
+        if (max != null &&
+            (max is! int || max < 1 || max > RuleKeys.forEachMax)) {
+          issues.add('$at.max', 'must be 1 to ${RuleKeys.forEachMax}');
+        }
+        _runVar(f['as'], '$at.as');
+        return {
+          'forEach': {
+            'in': source,
+            'as': ?f['as'],
+            'do': steps(f['do'], '$at.do'),
+            'max': ?max,
+          },
+        };
       default:
         _only(map, path, {'run'}, 'a run step');
         final target = map['run'];
@@ -660,6 +834,89 @@ class _Normalizer {
         }
         return {'run': target};
     }
+  }
+
+  /// The object under [kind] of a step, with only [allowed] keys.
+  Map<String, Object?>? _inner(
+    Map<String, Object?> map,
+    String path,
+    String kind,
+    Set<String> allowed,
+  ) {
+    _only(map, path, {kind}, 'a $kind step');
+    final inner = map[kind];
+    if (inner is! Map) {
+      issues.add('$path.$kind', 'must be {${allowed.join(', ')}}');
+      return null;
+    }
+    final out = Map<String, Object?>.from(inner);
+    _only(out, '$path.$kind', allowed, 'a $kind step');
+    return out;
+  }
+
+  void _runVar(Object? as, String path) {
+    if (as != null && (as is! String || !runVariablePattern.hasMatch(as))) {
+      issues.add(path, 'must be a run variable like %answer');
+    }
+  }
+
+  Map<String, Object?>? _ask(Map<String, Object?> map, String path) {
+    final a = _inner(map, path, 'ask', {
+      'title',
+      'body',
+      'choices',
+      'input',
+      'default',
+      'timeoutMs',
+      'as',
+    });
+    if (a == null) return null;
+    final at = '$path.ask';
+    final title = a['title'];
+    if (title is! String || title.trim().isEmpty) {
+      issues.add('$at.title', 'is required: the question to ask');
+    }
+    if (a['body'] != null && a['body'] is! String) {
+      issues.add('$at.body', 'must be text');
+    }
+    final input = a['input'];
+    if (input != null && input is! bool) {
+      issues.add('$at.input', 'must be true or false');
+    }
+    final choices = a['choices'];
+    if (choices != null) {
+      if (choices is! List ||
+          choices.length < 2 ||
+          choices.length > 10 ||
+          choices.any((c) => c is! String || c.trim().isEmpty)) {
+        issues.add('$at.choices', 'must be 2 to 10 answers, each some text');
+      } else if (choices.toSet().length != choices.length) {
+        issues.add('$at.choices', 'has the same answer twice');
+      }
+      if (input == true) {
+        issues.add('$at.input', 'is for a question with no choices');
+      }
+    } else if (input != true) {
+      issues.add('$at.choices', 'needs two or more choices, or input: true');
+    }
+    final fallback = a['default'];
+    if (fallback != null) {
+      if (fallback is! String) {
+        issues.add('$at.default', 'must be text');
+      } else if (choices is List &&
+          !fallback.contains('{{') &&
+          !choices.contains(fallback)) {
+        issues.add('$at.default', 'must be one of the choices');
+      }
+    }
+    final timeout = a['timeoutMs'];
+    if (timeout != null &&
+        (timeout is! int || timeout < 1000 || timeout > 86400000)) {
+      issues.add('$at.timeoutMs', 'must be milliseconds, 1000 to 86400000');
+    }
+    _runVar(a['as'], '$at.as');
+    if (input == false) a.remove('input');
+    return {'ask': a};
   }
 
   Map<String, Object?>? keep(Map<String, Object?> map, String path) {
@@ -822,6 +1079,8 @@ RuleCompilation compileRule(
         rule['mode'] ?? (holds ? RunMode.parallel.name : RunMode.single.name),
     'cooldownSeconds': rule['cooldownSeconds'] ?? 0,
     if (rule['stopOnError'] != true) 'onError': 'continue',
+    if (rule['askFirst'] == true) 'askFirst': true,
+    if (rule['notifyOnRun'] == true) 'notifyOnRun': true,
     'nodes': c.nodes,
     'edges': c.edges,
   }, c.origins);
@@ -1190,14 +1449,46 @@ class _Compiler {
           'deviceId': ref.substring(0, dot),
           'capabilityId': ref.substring(dot + 1),
           if (!toggle) 'params': params ?? <String, Object?>{},
+          'as': ?s['as'],
         },
         {
           'deviceId': toggle ? '$path.toggle' : '$path.do',
           'capabilityId': toggle ? '$path.toggle' : '$path.do',
           'params': '$path.params',
+          'as': '$path.as',
         },
       );
       return [(id, 'out')];
+    }
+    for (final (kind, type) in _valueStepTypes) {
+      if (!s.containsKey(kind)) continue;
+      final config = Map<String, Object?>.from(s[kind] as Map);
+      node(type, _words?.step(s) ?? _valueLabel(kind, config), config, {
+        for (final k in config.keys) k: '$path.$kind.$k',
+      });
+      return [(id, 'out')];
+    }
+    if (s.containsKey('forEach')) {
+      final f = Map<String, Object?>.from(s['forEach'] as Map);
+      final at = '$path.forEach';
+      node(
+        'for_each',
+        _words?.step(s) ?? 'for each of ${f['in']}',
+        {
+          'in': f['in'],
+          'as': ?f['as'],
+          'maxIterations': f['max'] ?? RuleKeys.forEachDefault,
+        },
+        {'in': '$at.in', 'as': '$at.as', 'maxIterations': '$at.max'},
+      );
+      steps(
+        (f['do'] as List).cast(),
+        '$at.do',
+        [(id, 'body')],
+        col: col + 1,
+        row: row,
+      );
+      return [(id, 'done')];
     }
     if (s.containsKey('wait')) {
       node(
@@ -1568,6 +1859,28 @@ const _failingSteps = {
   'set_variable',
   'speak',
   'http_request',
+  'ask',
+  'get_value',
+  'format_text',
+  'calculate',
+  'format_date',
+};
+
+/// The rule steps that make a value, and the node type each compiles to.
+const _valueStepTypes = [
+  ('ask', 'ask'),
+  ('get', 'get_value'),
+  ('text', 'format_text'),
+  ('math', 'calculate'),
+  ('date', 'format_date'),
+];
+
+String _valueLabel(String kind, Map<String, Object?> c) => switch (kind) {
+  'ask' => 'ask "${c['title']}"',
+  'get' => 'get ${c['path'] ?? 'the value'} from ${c['from']}',
+  'text' => 'make the text ${c['value']}',
+  'math' => 'work out ${c['expr']}',
+  _ => 'the date as ${c['format'] ?? 'HH:mm'}',
 };
 
 /// `{"http": {"url", "method"?, "headers"?, "body"?}}`, checked: an
@@ -1579,9 +1892,13 @@ Map<String, Object?>? _http(Object? h, String at, IssueCollector issues) {
   }
   final out = Map<String, Object?>.from(h);
   for (final k in out.keys) {
-    if (!const {'url', 'method', 'headers', 'body'}.contains(k)) {
+    if (!const {'url', 'method', 'headers', 'body', 'as'}.contains(k)) {
       issues.add('$at.$k', 'is not part of a web request step');
     }
+  }
+  final as = out['as'];
+  if (as != null && (as is! String || !runVariablePattern.hasMatch(as))) {
+    issues.add('$at.as', 'must be a run variable like %reply');
   }
   final url = out['url'];
   final urlProblem = url is String

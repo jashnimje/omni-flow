@@ -76,6 +76,8 @@ class FlowSpec {
     this.mode = RunMode.single,
     this.cooldownSeconds = 0,
     this.continueOnError = false,
+    this.askFirst = false,
+    this.notifyOnRun = false,
   });
 
   /// The `onError` values: a failed action with no error edge ends its
@@ -90,6 +92,13 @@ class FlowSpec {
 
   /// Whether a failed action with no error edge goes on through `out`.
   final bool continueOnError;
+
+  /// Whether a trigger asks the person before the run starts. Running it
+  /// by hand never asks.
+  final bool askFirst;
+
+  /// Whether a run that completes is announced as `<name> ran`.
+  final bool notifyOnRun;
   final List<NodeSpec> nodes;
   final List<EdgeSpec> edges;
 
@@ -108,6 +117,8 @@ class FlowSpec {
     // Left out when it is the default, so a flow saved before it keeps its
     // revision.
     if (continueOnError) 'onError': 'continue',
+    if (askFirst) 'askFirst': true,
+    if (notifyOnRun) 'notifyOnRun': true,
     'nodes': nodes.map((n) => n.toJson()).toList(),
     'edges': edges.map((e) => e.toJson()).toList(),
   };
@@ -121,6 +132,8 @@ class FlowSpec {
     mode: mode,
     cooldownSeconds: cooldownSeconds,
     continueOnError: continueOnError,
+    askFirst: askFirst,
+    notifyOnRun: notifyOnRun,
   );
 
   static FlowSpec parseJson(String source) {
@@ -174,6 +187,11 @@ class FlowSpec {
     final onError = map['onError'] ?? 'stop';
     if (!onErrorValues.contains(onError)) {
       issues.add('$root.onError', 'must be one of ${onErrorValues.join(', ')}');
+    }
+    for (final key in const ['askFirst', 'notifyOnRun']) {
+      if (map[key] != null && map[key] is! bool) {
+        issues.add('$root.$key', 'must be true or false');
+      }
     }
 
     final nodes = <NodeSpec>[];
@@ -239,6 +257,8 @@ class FlowSpec {
       mode: mode,
       cooldownSeconds: cooldown,
       continueOnError: onError == 'continue',
+      askFirst: map['askFirst'] == true,
+      notifyOnRun: map['notifyOnRun'] == true,
       nodes: List.unmodifiable(nodes),
       edges: List.unmodifiable(edges),
     );

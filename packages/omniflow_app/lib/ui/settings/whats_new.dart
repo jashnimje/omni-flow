@@ -8,11 +8,32 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.2.0';
+const appVersion = '0.3.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.3.0',
+    date: '12 Nov 2026',
+    notes: [
+      'Rules read like sentences: tap a blue word to change just that part, '
+          'and use what an earlier step found, such as a web reply or your '
+          'answer.',
+      'Add step, trigger and condition open one searchable library with '
+          'suggestions. Search "netflix" to open it on the TV.',
+      'Automations can ask you first, or ask a question mid-run, right from '
+          'the notification, and tell you when they run.',
+      'New steps: ask, get a value, text, calculate, date and time, and '
+          'repeat with each.',
+      'New triggers: an app opens, a notification arrives, a Bluetooth device '
+          'connects, the screen or Do Not Disturb changes.',
+      'Run scenes and automations from a home screen widget, a Quick Settings '
+          'tile, the share sheet or the app icon, and from the new Run grid on '
+          'Home.',
+      'Automations take a colour and an icon, and templates are a gallery.',
+    ],
+  ),
   (
     version: '0.2.0',
     date: '10 Nov 2026',

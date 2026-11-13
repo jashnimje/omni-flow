@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../api/engine_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../state/providers.dart';
+import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automations_state.dart';
 import 'pickers.dart';
@@ -33,6 +34,15 @@ const sceneIcons = <String, IconData>{
 
 /// A scene's icon, the scene icon when it names none this app knows.
 IconData sceneIconFor(String? name) => sceneIcons[name] ?? OmniIcons.scene;
+
+/// The icon an automation.list row wears: a scene keeps its own icons, a
+/// rule or link takes one from [AutomationLook.icons].
+IconData automationIconFor(AutomationSummary a) => a.isScene
+    ? sceneIconFor(a.icon)
+    : AutomationLook.iconOf(
+        a.icon,
+        fallback: a.isLink ? AutomationIcons.link : AutomationIcons.rule,
+      );
 
 Future<void> openScenes(BuildContext context) =>
     Navigator.of(context)
@@ -128,7 +138,12 @@ class SceneRow extends ConsumerWidget {
     final s = scene;
     return OmniListRow(
       key: ValueKey('scene-${s.id}'),
-      icon: sceneIconFor(s.icon),
+      leading: AutomationBadge(
+        key: ValueKey('badge-${s.id}'),
+        icon: sceneIconFor(s.icon),
+        color: s.color,
+        size: 32,
+      ),
       title: s.name,
       subtitle: s.needsApproval
           ? 'Waiting for your review'
@@ -169,6 +184,7 @@ class SceneEditorPage extends ConsumerStatefulWidget {
 class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
   final _name = TextEditingController();
   String? _icon;
+  String? _color;
   List<SceneAction>? _actions;
   ApiFailure? _loadFailure;
   ApiFailure? _saveFailure;
@@ -203,6 +219,7 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
       if (scene != null) {
         _name.text = scene.name;
         _icon = scene.icon;
+        _color = scene.color;
         _actions = [...scene.actions];
       }
     });
@@ -252,6 +269,7 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
             id: widget.id,
             name: _name.text.trim(),
             icon: _icon,
+            color: _color,
             actions: _actions!,
           ),
         );
@@ -381,6 +399,22 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
                       selected: _icon == e.key,
                       onPressed: () {
                         _icon = e.key;
+                        _changed();
+                      },
+                    ),
+                ],
+              ),
+              const OmniSectionHeader('Colour'),
+              Wrap(
+                children: [
+                  for (final e in AutomationLook.colors.entries)
+                    ColorSwatchButton(
+                      key: ValueKey('scene-color-${e.key.substring(1)}'),
+                      color: e.value.color,
+                      label: 'Colour ${e.value.name.toLowerCase()}',
+                      selected: _color == e.key,
+                      onPressed: () {
+                        _color = _color == e.key ? null : e.key;
                         _changed();
                       },
                     ),

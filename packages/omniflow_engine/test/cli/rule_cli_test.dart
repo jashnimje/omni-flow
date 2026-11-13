@@ -193,6 +193,29 @@ void main() {
     );
   });
 
+  test('rule add sets the colour, icon, ask first and notify on run', () async {
+    final (code, saved) = await omni([
+      'rule',
+      'add',
+      'Movie time',
+      '--when',
+      'every:60s',
+      '--then',
+      'notify:hi',
+      '--color',
+      '#A78BFA',
+      '--icon',
+      'movie',
+      '--ask-first',
+      '--notify-on-run',
+    ]);
+    expect(code, 0, reason: '$saved');
+    final got = await h.handle('automation.get', {'id': saved['id']});
+    expect(got['spec'], containsPair('color', '#A78BFA'));
+    expect(got['spec'], containsPair('askFirst', true));
+    expect(got['spec'], containsPair('notifyOnRun', true));
+  });
+
   test('a rule of keep steps alone needs no --when', () async {
     final (code, saved) = await omni([
       'rule',

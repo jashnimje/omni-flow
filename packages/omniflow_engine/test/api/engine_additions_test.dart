@@ -725,7 +725,7 @@ void main() {
     });
   });
 
-  test('templates list the five starting points and fill into a rule that '
+  test('templates list the starting points and fill into a rule that '
       'saves', () async {
     final all = (await ok('automation.templates', {}))['templates'] as List;
     expect(
@@ -736,6 +736,9 @@ void main() {
         'motion_light',
         'tag_toggle',
         'bedtime',
+        'ask_before_tv',
+        'bluetooth_connected',
+        'web_value_notify',
       ],
     );
     final filled =

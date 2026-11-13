@@ -92,6 +92,88 @@ class StateCommands {
     };
   }
 
+  /// `{package, label?, event: opened | closed, phone?}`.
+  Future<Map<String, Object?>> phoneApp(Map<String, Object?> args) async {
+    final event = args['event'];
+    if (event != 'opened' && event != 'closed') {
+      throw ApiError('invalid', 'event must be opened or closed');
+    }
+    return {
+      'state': await _things.phoneApp(
+        package: _package(args),
+        label: optStringArg(args, 'label'),
+        opened: event == 'opened',
+        phoneId: optStringArg(args, 'phone'),
+      ),
+    };
+  }
+
+  /// `{package, label?, title?, text?, phone?}`. The reply carries no
+  /// words of the notification.
+  Future<Map<String, Object?>> phoneNotification(
+    Map<String, Object?> args,
+  ) async {
+    await _things.phoneNotification(
+      package: _package(args),
+      label: optStringArg(args, 'label'),
+      title: optStringArg(args, 'title'),
+      text: optStringArg(args, 'text'),
+      phoneId: optStringArg(args, 'phone'),
+    );
+    return {'received': true};
+  }
+
+  /// `{name, address?, connected, phone?}`.
+  Future<Map<String, Object?>> phoneBluetooth(Map<String, Object?> args) async {
+    final connected = args['connected'];
+    if (connected is! bool) {
+      throw ApiError('invalid', 'connected must be true or false');
+    }
+    final name = optStringArg(args, 'name')?.trim();
+    if (name == null || name.isEmpty) {
+      throw ApiError('invalid', 'name is the Bluetooth device\'s name');
+    }
+    return {
+      'state': await _things.phoneBluetooth(
+        name: name,
+        address: optStringArg(args, 'address'),
+        connected: connected,
+        phoneId: optStringArg(args, 'phone'),
+      ),
+    };
+  }
+
+  /// `{on, phone?}`: the screen turned on or off.
+  Future<Map<String, Object?>> phoneScreen(Map<String, Object?> args) =>
+      _flag(args, 'screen_on');
+
+  /// `{on, phone?}`: Do Not Disturb turned on or off.
+  Future<Map<String, Object?>> phoneDnd(Map<String, Object?> args) =>
+      _flag(args, 'dnd_on');
+
+  Future<Map<String, Object?>> _flag(
+    Map<String, Object?> args,
+    String key,
+  ) async {
+    final on = args['on'];
+    if (on is! bool) throw ApiError('invalid', 'on must be true or false');
+    return {
+      'state': await _things.phoneFlag(
+        key,
+        on,
+        phoneId: optStringArg(args, 'phone'),
+      ),
+    };
+  }
+
+  static String _package(Map<String, Object?> args) {
+    final package = optStringArg(args, 'package')?.trim();
+    if (package == null || package.isEmpty) {
+      throw ApiError('invalid', 'package is the app\'s package name');
+    }
+    return package;
+  }
+
   Future<Map<String, Object?>> phoneBattery(Map<String, Object?> args) async {
     final charging = args['charging'];
     if (charging != null && charging is! bool) {

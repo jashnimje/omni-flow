@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/ui/automations/automations.dart';
+import 'package:omniflow_app/ui/automations/sentence_row.dart';
 import 'package:omniflow_app/ui/design/design.dart';
 
 import 'automations_fixtures.dart';
@@ -61,9 +62,9 @@ void main() {
 
     await tapText(tester, 'Add trigger');
     expect(find.text('When…'), findsOneWidget);
-    expect(find.text('Me'), findsOneWidget);
-    expect(find.text('Things'), findsOneWidget);
-    expect(find.text('Time'), findsOneWidget);
+    expect(find.text('Me'), findsWidgets);
+    expect(find.text('Things'), findsWidgets);
+    expect(find.text('Time'), findsWidgets);
     await tapKey(tester, 'pick-home');
     await tapKey(tester, 'form-done');
     expect(find.text('I get home'), findsOneWidget);
@@ -372,10 +373,10 @@ void main() {
       find.descendant(of: row, matching: find.text('hall_bulb has no power')),
       findsOneWidget,
     );
-    expect(tester.widget<OmniStepRow>(row).error, 'hall_bulb has no power');
+    expect(tester.widget<SentenceRow>(row).error, 'hall_bulb has no power');
     expect(
       tester
-          .widget<OmniStepRow>(find.byKey(const ValueKey('row-then[0]')))
+          .widget<SentenceRow>(find.byKey(const ValueKey('row-then[0]')))
           .error,
       isNull,
     );
@@ -540,7 +541,7 @@ void main() {
     await tapKey(tester, 'form-done');
     await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
-    final row = tester.widget<OmniStepRow>(
+    final row = tester.widget<SentenceRow>(
       find.byKey(const ValueKey('row-then[0]')),
     );
     expect(row.text, 'If I am home…');

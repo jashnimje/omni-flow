@@ -404,6 +404,7 @@ class Scene {
     this.id,
     required this.name,
     this.icon,
+    this.color,
     this.actions = const [],
   });
 
@@ -411,6 +412,7 @@ class Scene {
     id: json['id'] as String?,
     name: '${json['name'] ?? json['id']}',
     icon: json['icon'] as String?,
+    color: json['color'] as String?,
     actions: [
       for (final a in (json['actions'] as List? ?? const []))
         if (a is Map) SceneAction.fromJson(Map<String, Object?>.from(a)),
@@ -423,12 +425,16 @@ class Scene {
 
   /// A Material Symbols name the user picked.
   final String? icon;
+
+  /// A `#RRGGBB` from the contract's colour list.
+  final String? color;
   final List<SceneAction> actions;
 
   Json toJson() => {
     'id': ?id,
     'name': name,
     'icon': ?icon,
+    'color': ?color,
     'actions': [for (final a in actions) a.toJson()],
   };
 }
@@ -563,6 +569,10 @@ class AutomationSummary {
     this.controls = const [],
     this.needsYou = false,
     this.icon,
+    this.color,
+    this.askFirst = false,
+    this.notifyOnRun = false,
+    this.manualOnly = false,
     this.revision,
   });
 
@@ -585,6 +595,10 @@ class AutomationSummary {
     controls: [for (final d in (json['controls'] as List? ?? const [])) '$d'],
     needsYou: json['needsYou'] == true,
     icon: json['icon'] as String?,
+    color: json['color'] as String?,
+    askFirst: json['askFirst'] == true,
+    notifyOnRun: json['notifyOnRun'] == true,
+    manualOnly: json['manualOnly'] == true,
     revision: json['revision'] as String?,
   );
 
@@ -609,8 +623,21 @@ class AutomationSummary {
   /// Waiting for approval, or on with a failed last run.
   final bool needsYou;
 
-  /// A scene's Material Symbols name.
+  /// A rule's icon from the contract's icon list, or a scene's Material
+  /// Symbols name.
   final String? icon;
+
+  /// A `#RRGGBB` from the contract's colour list.
+  final String? color;
+
+  /// Asks the person before a trigger runs it.
+  final bool askFirst;
+
+  /// Says so after a run that completes.
+  final bool notifyOnRun;
+
+  /// Its only trigger is manual, so it runs by hand (a Home tile).
+  final bool manualOnly;
   final String? revision;
 
   bool get isLink => source == 'link';
@@ -750,12 +777,18 @@ class AutomationTemplate {
     this.description = '',
     this.placeholders = const [],
     this.spec = const {},
+    this.category,
+    this.icon,
+    this.color,
   });
 
   factory AutomationTemplate.fromJson(Json json) => AutomationTemplate(
     id: '${json['id']}',
     name: '${json['name'] ?? json['id']}',
     description: '${json['description'] ?? ''}',
+    category: json['category'] as String?,
+    icon: json['icon'] as String?,
+    color: json['color'] as String?,
     placeholders: [
       for (final p in (json['placeholders'] as List? ?? const []))
         if (p is Map)
@@ -771,6 +804,22 @@ class AutomationTemplate {
   final String description;
   final List<TemplatePlaceholder> placeholders;
   final Json spec;
+
+  /// The gallery group, one of [AutomationTemplate.categories].
+  final String? category;
+
+  /// From the contract's icon and colour lists.
+  final String? icon;
+  final String? color;
+
+  /// The gallery's groups, in the order it shows them.
+  static const categories = [
+    'Arrive and leave',
+    'Morning and night',
+    'Watch and listen',
+    'Away and safety',
+    'Buttons and tags',
+  ];
 
   /// Whether a toggle step flips placeholder [key]. A TV turns on and off
   /// with wake and sleep but cannot be flipped, so it is not offered there.

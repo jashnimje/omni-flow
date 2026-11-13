@@ -66,6 +66,24 @@ class EngineFlowHost implements FlowHost {
       _core.secrets.read(webSecretKey(name));
 
   @override
+  Future<Map<String, Object?>?> deviceState(String deviceId) async =>
+      (await DriftDeviceStore(_core.db).get(deviceId))?.state;
+
+  @override
+  Future<List<String>> roomDevices(String room) async {
+    final wanted = room.trim().toLowerCase();
+    final match = (await DriftRoomStore(_core.db).all())
+        .where((r) => r.id == room || r.name.trim().toLowerCase() == wanted)
+        .firstOrNull;
+    if (match == null) throw StateError('there is no room called $room');
+    final devices = [
+      for (final d in await DriftDeviceStore(_core.db).all())
+        if (d.room == match.id) d,
+    ]..sort((a, b) => (a.order ?? 1 << 30).compareTo(b.order ?? 1 << 30));
+    return [for (final d in devices) d.id];
+  }
+
+  @override
   void emit(Map<String, Object?> event) => _core.emit(event);
 
   @override

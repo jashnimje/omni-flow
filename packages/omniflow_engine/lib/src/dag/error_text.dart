@@ -1,4 +1,6 @@
-final _typeName = RegExp(r'^(\w+(Exception|Error)|Exception|Error): ');
+final _typeName = RegExp(
+  r'^(\w+(Exception|Error)|Exception|Error|Bad state): ',
+);
 
 /// [text] without the leading `FooException: ` an exception's toString
 /// adds, so a run log or an app screen shows only what went wrong.

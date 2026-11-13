@@ -28,7 +28,9 @@ class SentenceContext {
   final String? person;
   final Map<String, String> automations;
 
-  String name(String thing) => names[thing] ?? thing.replaceAll('_', ' ');
+  String name(String thing) => thing.startsWith('{{')
+      ? 'each device'
+      : names[thing] ?? thing.replaceAll('_', ' ');
 
   CapabilitySpec? _capability(String thing, String key) {
     final manifest = drivers[thing];
@@ -243,7 +245,9 @@ class SentenceContext {
       ].join(' then ');
       return 'repeat ${how.join(', ')}: $body';
     }
-    if (s['notify'] is Map) return 'notify "${(s['notify'] as Map)['title']}"';
+    if (s['notify'] is Map) {
+      return 'notify "${spoken('${(s['notify'] as Map)['title']}')}"';
+    }
     if (s['http'] is Map) {
       final h = s['http'] as Map;
       final host = Uri.tryParse('${h['url']}')?.host ?? '${h['url']}';
@@ -256,7 +260,98 @@ class SentenceContext {
     if (s['run'] is String) {
       return 'run ${automations[s['run']] ?? s['run']}';
     }
+    if (s['ask'] is Map) {
+      final a = s['ask'] as Map;
+      final choices = a['choices'];
+      return choices is List && choices.isNotEmpty
+          ? 'ask "${spoken('${a['title']}')}" (${choices.join(' or ')})'
+          : 'ask "${spoken('${a['title']}')}" for an answer';
+    }
+    if (s['get'] is Map) {
+      final g = s['get'] as Map;
+      return g['path'] == null
+          ? 'get ${_valueWords(g['from'])}'
+          : 'get ${g['path']} from ${_valueWords(g['from'])}';
+    }
+    if (s['text'] is Map) {
+      final t = s['text'] as Map;
+      final how = switch (t['op']) {
+        'upper' => ' in capitals',
+        'lower' => ' in small letters',
+        'trim' => ' without spaces at the ends',
+        _ => '',
+      };
+      return 'make the text "${spoken('${t['value']}')}"$how';
+    }
+    if (s['math'] is Map) {
+      return 'work out ${spoken('${(s['math'] as Map)['expr']}')}';
+    }
+    if (s['date'] is Map) {
+      final d = s['date'] as Map;
+      final offset = d['offsetMinutes'];
+      final when = offset is int && offset != 0
+          ? '${duration(offset.abs() * 60000)} ${offset < 0 ? 'ago' : 'from now'}'
+          : 'now';
+      return 'write the time $when as ${d['format'] ?? 'HH:mm'}';
+    }
+    if (s['forEach'] is Map) {
+      final f = Map<String, Object?>.from(s['forEach'] as Map);
+      final source = f['in'];
+      final over = source is String && source.startsWith('room:')
+          ? 'each device in ${source.substring(5).trim()}'
+          : 'each item of ${_valueWords(source)}';
+      final body = [
+        for (final inner in f['do'] as List? ?? const [])
+          step(Map<String, Object?>.from(inner as Map)),
+      ].join(' then ');
+      return 'for $over: $body';
+    }
     return '$s';
+  }
+
+  /// A value a step reads, in words: a list as its items, a template as
+  /// it is written.
+  static String _valueWords(Object? v) => v is List
+      ? v.map(value).join(', ')
+      : v is String
+      ? spoken(v)
+      : value(v);
+
+  /// [text] with each `{{...}}` written as words: "Mood: {{%answer}}" reads
+  /// "Mood: the answer", "{{%reply.body.name}}" reads "the web reply's
+  /// name".
+  static String spoken(String text) => text.replaceAllMapped(
+    RegExp(r'\{\{\s*([^}]+?)\s*\}\}'),
+    (m) => _tokenWords(m[1]!),
+  );
+
+  static String _tokenWords(String ref) {
+    const named = {
+      '%answer': 'the answer',
+      '%reply': 'the web reply',
+      '%value': 'the value',
+      '%text': 'the text',
+      '%result': 'the result',
+      '%date': 'the time',
+      '%state': 'the device state',
+      '%item': 'the item',
+      'msg.value': 'the new value',
+      'msg.device': 'the device',
+      'msg.shared.text': 'the shared text',
+      'msg.shared.url': 'the shared link',
+      'msg.iteration': 'the pass number',
+      'msg.error': 'the error',
+    };
+    if (named[ref] case final words?) return words;
+    for (final e in named.entries) {
+      if (ref.startsWith('${e.key}.')) {
+        final rest = ref.substring(e.key.length + 1).replaceAll('.', ' ');
+        final base = e.key == '%reply' ? 'the web reply' : e.value;
+        return "$base's ${rest.replaceFirst(RegExp(r'^body '), '')}";
+      }
+    }
+    if (ref.startsWith(r'$') || ref.startsWith('%')) return ref.substring(1);
+    return ref;
   }
 
   /// A rule as chips: its triggers, then its conditions, an arrow, then
@@ -411,7 +506,9 @@ Set<String> thingsIn(Object? value) {
   void walk(Object? v) {
     switch (v) {
       case Map m:
-        if (m['deviceId'] case final String id) out.add(id);
+        if (m['deviceId'] case final String id when !id.startsWith('{{')) {
+          out.add(id);
+        }
         if (m['thing'] case final String id) out.add(id);
         if (m['state'] case final String ref when ref.contains('.')) {
           out.add(ref.substring(0, ref.indexOf('.')));
@@ -432,7 +529,8 @@ Set<String> thingsDriven(Map<String, Object?> flow) => {
     if (n is Map &&
         builtInNodeTypes[n['type']]?.category == NodeCategory.action &&
         n['config'] is Map &&
-        (n['config'] as Map)['deviceId'] is String)
+        (n['config'] as Map)['deviceId'] is String &&
+        !((n['config'] as Map)['deviceId'] as String).startsWith('{{'))
       (n['config'] as Map)['deviceId'] as String,
 };
 

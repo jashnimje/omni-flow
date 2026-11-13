@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../template/template_renderer.dart';
+import 'asks.dart';
 import 'canonical.dart';
 import 'conditions.dart';
+import 'data_steps.dart';
 import 'error_text.dart';
+import 'expression.dart';
 import 'flow.dart';
 import 'flow_engine.dart' show payloadMatches, stateTriggerFires;
 import 'node_types.dart';
@@ -102,6 +105,13 @@ abstract interface class FlowEffects {
 
   /// Events the `wait_for_event` node listens to.
   Stream<Map<String, Object?>> get events;
+
+  /// The stored state of [deviceId], read after a step drives it, or null.
+  Future<Map<String, Object?>?> stateOf(String deviceId);
+
+  /// The ids of the devices in the room named [room] (or with that id), in
+  /// the user's order. Throws when there is no such room.
+  Future<List<String>> roomDevices(String room);
 }
 
 class NodeTrace {
@@ -134,16 +144,51 @@ class NodeTrace {
 }
 
 /// [msg] as a trace keeps it: a web reply's body stays with the run that
-/// reads it, so the run log holds only its status and size.
+/// reads it, so the run log holds only its status and size. A phone
+/// notification's title and text stay with the run too, and so does what
+/// a step announced from them.
 Map<String, Object?> _traced(Map<String, Object?> msg) {
+  var out = msg;
   final response = msg['response'];
-  if (response is! Map || !response.containsKey('body')) return msg;
+  if (response is Map && response.containsKey('body')) {
+    out = {
+      ...out,
+      'response': {
+        for (final e in response.entries)
+          if (e.key != 'body') e.key: e.value,
+      },
+    };
+  }
+  if (isNotificationMsg(msg)) {
+    out = {
+      ...out,
+      'payload': ?_withoutPrivate(out['payload']),
+      'event': ?_withoutPrivate(out['event']),
+      if (out['announced'] is Map)
+        'announced': {'type': (out['announced'] as Map)['type']},
+    };
+  }
+  return out;
+}
+
+/// The phone event whose payload carries a notification's words.
+const notificationEvent = 'notification';
+
+/// The payload keys of a notification that never leave its run.
+const _privateKeys = {'title', 'text'};
+
+/// Whether [msg] came from a notification arriving, as a trigger or what a
+/// wait matched.
+bool isNotificationMsg(Map<String, Object?> msg) =>
+    msg['key'] == notificationEvent ||
+    (msg['event'] is Map && (msg['event'] as Map)['key'] == notificationEvent);
+
+Object? _withoutPrivate(Object? value) {
+  if (value is! Map) return value;
   return {
-    ...msg,
-    'response': {
-      for (final e in response.entries)
-        if (e.key != 'body') e.key: e.value,
-    },
+    for (final e in value.entries)
+      if (!_privateKeys.contains(e.key))
+        e.key: e.key == 'payload' ? _withoutPrivate(e.value) : e.value,
   };
 }
 
@@ -205,6 +250,7 @@ class FlowRunner {
     this.maxQueued = 10,
     this.web = const IoWebRequester(),
     this.webSecret,
+    this.asks,
   }) {
     for (final n in flow.nodes) {
       final type = builtInNodeTypes[n.type];
@@ -225,6 +271,9 @@ class FlowRunner {
 
   /// Reads the secrets a web request's `{"secret": "name"}` headers name.
   final WebSecretReader? webSecret;
+
+  /// Asks the person for ask steps. Without one an ask step fails.
+  final AskBroker? asks;
   final _types = <String, NodeType>{};
   final _active = <_Run>[];
   Future<void> _queueTail = Future.value();
@@ -416,7 +465,9 @@ class FlowRunner {
         case NodeCategory.flowControl:
           (port, out) = await _flowControl(run, node, msg, clock);
         case NodeCategory.action:
-          if (!run.dryRun && !run.reachedAction) {
+          if (!run.dryRun &&
+              !run.reachedAction &&
+              !_valueSteps.contains(node.type)) {
             run.reachedAction = true;
             if (flow.cooldownSeconds > 0) _cooldownArmedAt = clock.now();
           }
@@ -586,6 +637,16 @@ class FlowRunner {
           await _follow(run, node.id, 'body', {...msg, 'iteration': i}, clock);
         }
         return ('done', msg);
+      case 'for_each':
+        final items = await _items(run, node.config, msg);
+        final max = node.config['maxIterations'] as int;
+        final name = _varName(node.config['as'], 'item');
+        for (var i = 0; i < items.length && i < max; i++) {
+          run.token.check();
+          run.flowVars[name] = items[i];
+          await _follow(run, node.id, 'body', {...msg, 'index': i}, clock);
+        }
+        return ('done', msg);
     }
     throw ArgumentError('${node.type} is not a flow-control node');
   }
@@ -643,38 +704,43 @@ class FlowRunner {
         final params = Map<String, Object?>.from(
           renderer.render(c['params'] ?? const {}, context) as Map,
         );
+        final deviceId = _deviceOf(c['deviceId'], context);
+        final stateVar = _varName(c['as'], 'state');
         if (run.dryRun) {
+          run.flowVars[stateVar] = _effects.deviceStates[deviceId];
           return {
             ...msg,
             'result': {
               'dryRun': true,
-              'deviceId': c['deviceId'],
+              'deviceId': deviceId,
               'capabilityId': c['capabilityId'],
               'params': params,
             },
           };
         }
         final reply = await _effects.invokeDevice(
-          c['deviceId'] as String,
+          deviceId,
           c['capabilityId'] as String,
           params,
           flowId: flow.id,
         );
+        run.flowVars[stateVar] = await _effects.stateOf(deviceId);
         return {...msg, 'result': reply};
       case 'device_toggle':
+        final toggleId = _deviceOf(c['deviceId'], context);
         if (run.dryRun) {
           return {
             ...msg,
             'result': {
               'dryRun': true,
-              'deviceId': c['deviceId'],
+              'deviceId': toggleId,
               'capabilityId': c['capabilityId'],
               'toggle': true,
             },
           };
         }
         final toggled = await _effects.toggleDevice(
-          c['deviceId'] as String,
+          toggleId,
           c['capabilityId'] as String,
           flowId: flow.id,
         );
@@ -684,6 +750,13 @@ class FlowRunner {
         final value = renderer.render(c['value'], context);
         if (name.startsWith('%')) {
           run.flowVars[name.substring(1)] = value;
+        } else if (isNotificationMsg(msg)) {
+          // A global is stored, backed up and read by agents, and could
+          // keep the notification's words.
+          throw StateError(
+            'a run started by a notification cannot set the variable '
+            '${name.substring(1)}: use a %run variable',
+          );
         } else if (!run.dryRun) {
           await _effects.setGlobal(name.substring(1), value);
         }
@@ -724,7 +797,9 @@ class FlowRunner {
         if (raw != null && raw is! String) {
           headers.putIfAbsent('content-type', () => 'application/json');
         }
+        final replyVar = _varName(c['as'], 'reply');
         if (run.dryRun) {
+          run.flowVars[replyVar] = {'status': 0, 'body': null};
           return {
             ...msg,
             'result': {
@@ -750,6 +825,10 @@ class FlowRunner {
         if (reply.status >= 400) {
           throw StateError('${url.host} answered ${reply.status}');
         }
+        run.flowVars[replyVar] = {
+          'status': reply.status,
+          'body': _jsonOrText(reply.body),
+        };
         // Later steps read the body, and the trace leaves it out.
         return {
           ...msg,
@@ -765,9 +844,180 @@ class FlowRunner {
         );
         if (!run.dryRun) _effects.announce({...payload, 'flow': flow.id});
         return {...msg, 'announced': payload};
+      case 'ask':
+        run.flowVars[_varName(c['as'], 'answer')] = await _ask(
+          run,
+          c,
+          context,
+          clock,
+        );
+        return msg;
+      case 'get_value':
+        final from = renderer.render(c['from'], context);
+        final path = c['path'] as String?;
+        final (found, value) = valueAt(from, path);
+        if (!found && !run.dryRun) {
+          throw StateError('the value has nothing at $path');
+        }
+        run.flowVars[_varName(c['as'], 'value')] = value;
+        return msg;
+      case 'format_text':
+        final text = c['value'] is String
+            ? renderer.renderText(c['value'] as String, context)
+            : _text(renderer.render(c['value'], context));
+        run.flowVars[_varName(c['as'], 'text')] = applyTextOp(text, c['op']);
+        return msg;
+      case 'calculate':
+        run.flowVars[_varName(c['as'], 'result')] = _calculate(
+          run,
+          '${c['expr']}',
+          context,
+          msg,
+        );
+        return msg;
+      case 'format_date':
+        final at = clock.now().add(
+          Duration(minutes: (c['offsetMinutes'] as int?) ?? 0),
+        );
+        run.flowVars[_varName(c['as'], 'date')] = formatDate(
+          at,
+          (c['format'] as String?) ?? 'HH:mm',
+        );
+        return msg;
     }
     throw ArgumentError('${node.type} is not an action');
   }
+
+  /// The answer to an ask step: the person's, its default on a timeout, or
+  /// in a dry run the default or first choice. With no answer and no
+  /// default the step fails, so a try's otherwise runs.
+  Future<String> _ask(
+    _Run run,
+    Map<String, Object?> c,
+    TemplateContext context,
+    FlowClock clock,
+  ) async {
+    const renderer = TemplateRenderer();
+    final choices = c['choices'] == null
+        ? null
+        : [
+            for (final choice in c['choices'] as List)
+              renderer.renderText('$choice', context),
+          ];
+    final fallback = c['default'] == null
+        ? null
+        : renderer.renderText('${c['default']}', context);
+    if (run.dryRun) return fallback ?? choices?.firstOrNull ?? '';
+    final asks = this.asks;
+    if (asks == null) throw StateError('nothing here can ask you');
+    final answer = await asks.ask(
+      flow: flow.id,
+      kind: choices != null && choices.isNotEmpty
+          ? AskKind.choose
+          : AskKind.input,
+      title: renderer.renderText('${c['title']}', context),
+      body: c['body'] == null
+          ? null
+          : renderer.renderText('${c['body']}', context),
+      choices: choices,
+      fallback: fallback,
+      timeout: Duration(
+        milliseconds: (c['timeoutMs'] as int?) ?? askDefaultTimeoutMs,
+      ),
+      token: run.token,
+      clock: clock,
+    );
+    if (answer != null) return answer;
+    if (fallback != null) return fallback;
+    throw StateError('no answer came in time');
+  }
+
+  /// [expr] with its `{{...}}` filled in, worked out. Names in it read
+  /// run variables (`%count`), globals (`$Level`) and the message (`msg.x`).
+  num _calculate(
+    _Run run,
+    String expr,
+    TemplateContext context,
+    Map<String, Object?> msg,
+  ) {
+    final filled = const TemplateRenderer().renderText(expr, context);
+    num? resolve(String name) {
+      final Object? v;
+      if (name.startsWith('%')) {
+        v = valueAt(run.flowVars, name.substring(1)).$2;
+      } else if (name.startsWith(r'$')) {
+        v = valueAt(_effects.globals, name.substring(1)).$2;
+      } else if (name.startsWith('msg.')) {
+        v = valueAt(msg, name.substring(4)).$2;
+      } else {
+        v = null;
+      }
+      return v is num ? v : (v is String ? num.tryParse(v) : null);
+    }
+
+    try {
+      return evaluateExpression(filled, resolve);
+    } on ExpressionException catch (e) {
+      if (run.dryRun) return 0;
+      throw StateError('$filled cannot be worked out: ${e.message}');
+    }
+  }
+
+  /// The items a forEach goes through: a room's devices, or a list.
+  Future<List<Object?>> _items(
+    _Run run,
+    Map<String, Object?> c,
+    Map<String, Object?> msg,
+  ) async {
+    final source = c['in'];
+    if (source is String && source.startsWith('room:')) {
+      return _effects.roomDevices(source.substring(5).trim());
+    }
+    final value = const TemplateRenderer().render(
+      source,
+      TemplateContext(
+        msg: msg,
+        globals: _effects.globals,
+        flowVars: run.flowVars,
+      ),
+    );
+    final list = _jsonOrText(value);
+    if (list is List) return list;
+    if (run.dryRun) return const [];
+    throw StateError('there is no list to go through, only ${_text(list)}');
+  }
+
+  static String _varName(Object? as, String fallback) =>
+      as is String && as.startsWith('%') ? as.substring(1) : fallback;
+
+  /// A device a step names, or the one a run variable holds.
+  static String _deviceOf(Object? id, TemplateContext context) {
+    final text = '$id';
+    if (!runDevicePattern.hasMatch(text)) return text;
+    final value = const TemplateRenderer().render(text, context);
+    if (value is! String || value.isEmpty) {
+      throw StateError('$text is not a device');
+    }
+    return value;
+  }
+
+  static Object? _jsonOrText(Object? body) {
+    if (body is! String) return body;
+    final t = body.trimLeft();
+    if (!t.startsWith('{') && !t.startsWith('[')) return body;
+    try {
+      return jsonDecode(body);
+    } on FormatException {
+      return body;
+    }
+  }
+
+  static String _text(Object? value) => switch (value) {
+    String s => s,
+    null => '',
+    num() || bool() => '$value',
+    _ => jsonEncode(value),
+  };
 
   EvalContext _context(_Run run, Map<String, Object?> msg, FlowClock clock) =>
       EvalContext(
@@ -781,6 +1031,15 @@ class FlowRunner {
   static String _message(Object e) =>
       withoutTypeName(e is ArgumentError ? '${e.message}' : '$e');
 }
+
+/// Steps that only ask or work out a value, which do not start a cooldown.
+const _valueSteps = {
+  'ask',
+  'get_value',
+  'format_text',
+  'calculate',
+  'format_date',
+};
 
 /// A node's label when the flow gave it one: without, it is the node id.
 String? _ownLabel(NodeSpec node) => node.label == node.id ? null : node.label;

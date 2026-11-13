@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/engine_calls.dart';
 import '../../rules/things.dart';
 import '../../state/providers.dart';
+import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automations_state.dart';
 import 'form_parts.dart';
@@ -85,19 +86,9 @@ class _NewSheet extends ConsumerWidget {
         ),
         const OmniSectionHeader('Start from a template'),
         switch (templates) {
-          AsyncData(:final value) when value.ok => Column(
-            children: [
-              for (final t in value.value!)
-                OmniListRow(
-                  key: ValueKey('template-${t.id}'),
-                  icon: AutomationIcons.template,
-                  title: t.name,
-                  subtitle: t.description,
-                  subtitleLines: 2,
-                  chevron: true,
-                  onTap: () => pick(_NewTemplate(t)),
-                ),
-            ],
+          AsyncData(:final value) when value.ok => TemplateGallery(
+            templates: value.value!,
+            onPick: (t) => pick(_NewTemplate(t)),
           ),
           AsyncData() || AsyncError() => OmniBanner.error(
             'The templates did not load.',
@@ -111,6 +102,139 @@ class _NewSheet extends ConsumerWidget {
           ),
         },
       ],
+    );
+  }
+}
+
+/// The templates as illustrated cards, grouped under the contract's
+/// categories in their order, then any without a known one under More.
+class TemplateGallery extends StatelessWidget {
+  const TemplateGallery({
+    super.key,
+    required this.templates,
+    required this.onPick,
+  });
+
+  final List<AutomationTemplate> templates;
+  final ValueChanged<AutomationTemplate> onPick;
+
+  /// The groups in gallery order, each with its templates in list order.
+  static List<(String, List<AutomationTemplate>)> groupsOf(
+    List<AutomationTemplate> templates,
+  ) {
+    const known = AutomationTemplate.categories;
+    return [
+      for (final c in [...known, 'More'])
+        if ([
+              for (final t in templates)
+                if (known.contains(t.category) ? t.category == c : c == 'More')
+                  t,
+            ]
+            case final group when group.isNotEmpty)
+          (c, group),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = groupsOf(templates);
+    return LayoutBuilder(
+      builder: (context, box) {
+        final columns = box.maxWidth >= 340 ? 2 : 1;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (category, group) in groups) ...[
+              // One group alone needs no header over it.
+              if (groups.length > 1 || category != 'More')
+                OmniSectionHeader(category),
+              for (var i = 0; i < group.length; i += columns)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var c = 0; c < columns; c++) ...[
+                          if (c > 0) const SizedBox(width: OmniSpace.gap),
+                          Expanded(
+                            child: i + c < group.length
+                                ? _TemplateCard(
+                                    template: group[i + c],
+                                    onTap: () => onPick(group[i + c]),
+                                  )
+                                : const SizedBox(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// One template: its coloured badge, name and what it does.
+class _TemplateCard extends StatelessWidget {
+  const _TemplateCard({required this.template, required this.onTap});
+
+  final AutomationTemplate template;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = template;
+    final radius = BorderRadius.circular(OmniRadii.card);
+    return Semantics(
+      container: true,
+      button: true,
+      label: [t.name, if (t.description.isNotEmpty) t.description].join('. '),
+      hint: 'Fill it in with your devices',
+      excludeSemantics: true,
+      onTap: onTap,
+      child: Material(
+        key: ValueKey('template-${t.id}'),
+        color: AutomationLook.tintOf(t.color),
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(color: AutomationLook.lineOf(t.color)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(OmniSpace.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AutomationBadge(
+                  icon: AutomationLook.iconOf(
+                    t.icon,
+                    fallback: AutomationIcons.template,
+                  ),
+                  color: t.color,
+                  size: 44,
+                ),
+                const SizedBox(height: OmniSpace.gap),
+                Text(t.name, style: OmniText.bodyStrong),
+                if (t.description.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    t.description,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: OmniText.caption,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -176,7 +300,24 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
         children: [
           Padding(
             padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-            child: Text(widget.template.description, style: OmniText.caption),
+            child: Row(
+              children: [
+                AutomationBadge(
+                  icon: AutomationLook.iconOf(
+                    widget.template.icon,
+                    fallback: AutomationIcons.template,
+                  ),
+                  color: widget.template.color,
+                ),
+                const SizedBox(width: OmniSpace.gap),
+                Expanded(
+                  child: Text(
+                    widget.template.description,
+                    style: OmniText.caption,
+                  ),
+                ),
+              ],
+            ),
           ),
           if (_error != null)
             OmniBanner.error(_error!, key: const ValueKey('template-error')),

@@ -58,6 +58,27 @@ class RuleSpec {
   set stopOnError(bool stop) =>
       stop ? extra['stopOnError'] = true : extra.remove('stopOnError');
 
+  /// Whether a trigger asks the person before the rule runs. Running it
+  /// by hand never asks.
+  bool get askFirst => extra['askFirst'] == true;
+  set askFirst(bool ask) => _flag('askFirst', ask);
+
+  /// Whether a run that completes is announced as "name ran".
+  bool get notifyOnRun => extra['notifyOnRun'] == true;
+  set notifyOnRun(bool notify) => _flag('notifyOnRun', notify);
+
+  /// One of [automationColors], or null for the default look.
+  String? get color => extra['color'] as String?;
+  set color(String? value) =>
+      value == null ? extra.remove('color') : extra['color'] = value;
+
+  /// One of [automationIconNames], or null for the default look.
+  String? get icon => extra['icon'] as String?;
+  set icon(String? value) =>
+      value == null ? extra.remove('icon') : extra['icon'] = value;
+
+  void _flag(String key, bool on) => on ? extra[key] = true : extra.remove(key);
+
   Json toJson() => {
     ...extra,
     'name': name,
@@ -66,6 +87,38 @@ class RuleSpec {
     'then': [for (final s in then) s.toJson()],
   };
 }
+
+/// The colours an automation can take (`color` in a rule spec).
+const automationColors = [
+  '#00F5D4',
+  '#4D9DFF',
+  '#A78BFA',
+  '#F472B6',
+  '#FB923C',
+  '#FACC15',
+  '#34D399',
+  '#94A3B8',
+];
+
+/// The icons an automation can take (`icon` in a rule spec).
+const automationIconNames = [
+  'bolt',
+  'home',
+  'sunrise',
+  'moon',
+  'tv',
+  'lightbulb',
+  'movie',
+  'music',
+  'fan',
+  'lock',
+  'car',
+  'bell',
+  'heart',
+  'star',
+  'leaf',
+  'fire',
+];
 
 /// Whether [steps] has a step, and each If and Do together in it is filled.
 bool stepsComplete(List<RuleStep> steps) =>
@@ -82,6 +135,7 @@ bool stepsComplete(List<RuleStep> steps) =>
               (s.otherwise.isEmpty || stepsComplete(s.otherwise)),
         RepeatStep() =>
           stepsComplete(s.steps) && (s.times != null || s.until.isNotEmpty),
+        ForEachStep() => stepsComplete(s.steps),
         WaitForStep() => s.onTimeout.isEmpty || stepsComplete(s.onTimeout),
         KeepStep() => s.whileConditions.isNotEmpty,
         _ => true,
@@ -352,6 +406,58 @@ sealed class RuleStep {
         thing,
         capability,
         params: Map<String, Object?>.from(json['params'] as Map? ?? const {}),
+        extra: {
+          for (final e in json.entries)
+            if (e.key != 'do' && e.key != 'params') e.key: e.value,
+        },
+      );
+    }
+    if (json['ask'] case final Map ask) {
+      return AskStep.fromJson(Map<String, Object?>.from(ask));
+    }
+    if (json['get'] case final Map get) {
+      final m = Map<String, Object?>.from(get);
+      return GetStep(
+        '${m.remove('from') ?? ''}',
+        path: '${m.remove('path') ?? ''}',
+        as: m.remove('as') as String?,
+        extra: m,
+      );
+    }
+    if (json['text'] case final Map text) {
+      final m = Map<String, Object?>.from(text);
+      return TextStep(
+        '${m.remove('value') ?? ''}',
+        op: m.remove('op') as String?,
+        as: m.remove('as') as String?,
+        extra: m,
+      );
+    }
+    if (json['math'] case final Map math) {
+      final m = Map<String, Object?>.from(math);
+      return MathStep(
+        '${m.remove('expr') ?? ''}',
+        as: m.remove('as') as String?,
+        extra: m,
+      );
+    }
+    if (json['date'] case final Map date) {
+      final m = Map<String, Object?>.from(date);
+      return DateStep(
+        '${m.remove('format') ?? 'HH:mm'}',
+        offsetMinutes: (m.remove('offsetMinutes') as num?)?.toInt(),
+        as: m.remove('as') as String?,
+        extra: m,
+      );
+    }
+    if (json['forEach'] case final Map each) {
+      final m = Map<String, Object?>.from(each);
+      return ForEachStep(
+        over: m.remove('in'),
+        as: m.remove('as') as String?,
+        steps: listFromJson(m.remove('do')),
+        max: (m.remove('max') as num?)?.toInt(),
+        extra: m,
       );
     }
     if (json['toggle'] case final String ref) {
@@ -446,16 +552,198 @@ sealed class RuleStep {
 }
 
 class DoStep extends RuleStep {
-  DoStep(this.thing, this.capability, {Json? params}) : params = params ?? {};
+  DoStep(this.thing, this.capability, {Json? params, Json? extra})
+    : params = params ?? {},
+      extra = extra ?? {};
 
   String thing;
   String capability;
   Json params;
 
+  /// Other keys of the step (`as`), kept as they came.
+  final Json extra;
+
   @override
   Json toJson() => {
+    ...extra,
     'do': '$thing.$capability',
     if (params.isNotEmpty) 'params': params,
+  };
+}
+
+/// The run variable a step stores its value in when it names none.
+const defaultAs = {
+  'ask': '%answer',
+  'get': '%value',
+  'text': '%text',
+  'math': '%result',
+  'date': '%date',
+  'forEach': '%item',
+  'http': '%reply',
+};
+
+/// Asks the person from a notification and waits for the answer: one of
+/// [choices], or typed text when [input]. The answer goes into [as]
+/// (`%answer` when null). On timeout it takes [defaultAnswer].
+class AskStep extends RuleStep {
+  AskStep(
+    this.title, {
+    this.body,
+    List<String>? choices,
+    this.input,
+    this.defaultAnswer,
+    this.timeoutMs,
+    this.as,
+    Json? extra,
+  }) : choices = choices ?? [],
+       extra = extra ?? {};
+
+  factory AskStep.fromJson(Json ask) {
+    final m = Map<String, Object?>.from(ask);
+    return AskStep(
+      '${m.remove('title') ?? ''}',
+      body: m.remove('body') as String?,
+      choices: [for (final c in (m.remove('choices') as List? ?? [])) '$c'],
+      input: m.remove('input') as bool?,
+      defaultAnswer: m.remove('default') as String?,
+      timeoutMs: (m.remove('timeoutMs') as num?)?.toInt(),
+      as: m.remove('as') as String?,
+      extra: m,
+    );
+  }
+
+  String title;
+  String? body;
+  final List<String> choices;
+  bool? input;
+  String? defaultAnswer;
+  int? timeoutMs;
+  String? as;
+  final Json extra;
+
+  /// Whether it asks for typed text instead of a choice.
+  bool get asksForText => input == true || choices.isEmpty;
+
+  @override
+  Json toJson() => {
+    'ask': {
+      ...extra,
+      'title': title,
+      'body': ?body,
+      if (choices.isNotEmpty) 'choices': choices,
+      'input': ?input,
+      'default': ?defaultAnswer,
+      'timeoutMs': ?timeoutMs,
+      'as': ?as,
+    },
+  };
+}
+
+/// Reads [path] (dotted, `[n]` for list items) out of the value [from].
+class GetStep extends RuleStep {
+  GetStep(this.from, {this.path = '', this.as, Json? extra})
+    : extra = extra ?? {};
+
+  String from;
+  String path;
+  String? as;
+  final Json extra;
+
+  @override
+  Json toJson() => {
+    'get': {...extra, 'from': from, 'path': path, 'as': ?as},
+  };
+}
+
+/// Makes text from [value] (templates filled), changed by [op]: `none`,
+/// `upper`, `lower` or `trim`.
+class TextStep extends RuleStep {
+  TextStep(this.value, {this.op, this.as, Json? extra}) : extra = extra ?? {};
+
+  String value;
+  String? op;
+  String? as;
+  final Json extra;
+
+  @override
+  Json toJson() => {
+    'text': {...extra, 'value': value, 'op': ?op, 'as': ?as},
+  };
+}
+
+/// Works out [expr]: numbers, + - * / %, parentheses and round().
+class MathStep extends RuleStep {
+  MathStep(this.expr, {this.as, Json? extra}) : extra = extra ?? {};
+
+  String expr;
+  String? as;
+  final Json extra;
+
+  @override
+  Json toJson() => {
+    'math': {...extra, 'expr': expr, 'as': ?as},
+  };
+}
+
+/// The time now plus [offsetMinutes], written in [format].
+class DateStep extends RuleStep {
+  DateStep(this.format, {this.offsetMinutes, this.as, Json? extra})
+    : extra = extra ?? {};
+
+  String format;
+  int? offsetMinutes;
+  String? as;
+  final Json extra;
+
+  @override
+  Json toJson() => {
+    'date': {
+      ...extra,
+      'format': format,
+      'offsetMinutes': ?offsetMinutes,
+      'as': ?as,
+    },
+  };
+}
+
+/// Runs [steps] once for each item of [over], with the item in [as]
+/// (`%item` when null). [over] is a template that gives a list, a list, or
+/// `room:<Room name>` for every device in a room.
+class ForEachStep extends RuleStep {
+  ForEachStep({
+    this.over = '',
+    this.as,
+    List<RuleStep>? steps,
+    this.max,
+    Json? extra,
+  }) : steps = steps ?? [],
+       extra = extra ?? {};
+
+  static const roomPrefix = 'room:';
+
+  Object? over;
+  String? as;
+  final List<RuleStep> steps;
+  int? max;
+  final Json extra;
+
+  /// The room it goes through, when [over] names one.
+  String? get room => switch (over) {
+    final String s when s.startsWith(roomPrefix) => s.substring(
+      roomPrefix.length,
+    ),
+    _ => null,
+  };
+
+  @override
+  Json toJson() => {
+    'forEach': {
+      ...extra,
+      'in': over,
+      'as': ?as,
+      'do': [for (final s in steps) s.toJson()],
+      'max': ?max,
+    },
   };
 }
 

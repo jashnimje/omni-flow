@@ -9,6 +9,7 @@ import 'things_runtime.dart';
 import '../dag/flow.dart';
 import '../dag/node_types.dart';
 import '../dag/rule_shorthand.dart';
+import '../dag/rule_tokens.dart';
 import '../dag/rules.dart';
 import '../dag/templates.dart';
 import '../devices/board.dart' show manifestFor;
@@ -50,6 +51,50 @@ class AutomationCommands {
     'scene.list': listScenes,
     'scene.run': runScene,
     'scene.remove': removeScene,
+    'rule.tokens': tokens,
+    'ask.answer': answerAsk,
+    'ask.pending': pendingAsks,
+  };
+
+  /// `{rule, path}`: every value a step at `path` can use, from the
+  /// triggers and the steps before it. The rule may be unsaved.
+  Future<Map<String, Object?>> tokens(Map<String, Object?> args) async {
+    final rule = args['rule'];
+    if (rule is! Map) throw ApiError('invalid', 'rule must be an object');
+    final path = stringArg(args, 'path');
+    final words = await sentenceContext();
+    try {
+      return {
+        'tokens': ruleTokens(
+          rule,
+          path,
+          context: await ruleContext(),
+          thingName: words.name,
+        ),
+      };
+    } on RuleTokenPathException catch (e) {
+      throw ApiError('invalid', e.message);
+    }
+  }
+
+  /// `{askId, answer}`: the person answers a question a run is waiting on.
+  Future<Map<String, Object?>> answerAsk(Map<String, Object?> args) async {
+    final id = stringArg(args, 'askId');
+    final problem = _core.flows.asks.answer(id, args['answer']);
+    if (problem != null) {
+      throw ApiError(
+        _core.flows.asks.pending.any((a) => a['askId'] == id)
+            ? 'invalid'
+            : 'not_found',
+        problem,
+      );
+    }
+    return {'askId': id, 'answered': true};
+  }
+
+  /// The questions runs are waiting on, as their `ask.request` payloads.
+  Future<Map<String, Object?>> pendingAsks(Map<String, Object?> _) async => {
+    'asks': _core.flows.asks.pending,
   };
 
   /// Saves `{form, spec}`: `form` is `rule`, `link` or `graph`, `spec` the
@@ -251,10 +296,28 @@ class AutomationCommands {
         'lastRun': ?lastRun,
         'devices': things.toList()..sort(),
         'controls': thingsDriven(record.json).toList()..sort(),
-        if (record.source == FlowRecord.scene) 'icon': ?record.spec?['icon'],
+        if (record.source == FlowRecord.scene ||
+            record.source == FlowRecord.rule) ...{
+          'icon': ?record.spec?['icon'],
+          'color': ?record.spec?['color'],
+        },
+        'askFirst': record.json['askFirst'] == true,
+        'notifyOnRun': record.json['notifyOnRun'] == true,
+        'manualOnly': manualOnly(record.json),
       });
     }
     return {'automations': out, 'loadIssues': listed['loadIssues']};
+  }
+
+  /// Whether the only triggers of [flow] are manual ones: it runs by hand.
+  static bool manualOnly(Map<String, Object?> flow) {
+    final triggers = [
+      for (final n in (flow['nodes'] as List? ?? const []))
+        if (n is Map &&
+            builtInNodeTypes[n['type']]?.category == NodeCategory.trigger)
+          n['type'],
+    ];
+    return triggers.isNotEmpty && triggers.every((t) => t == 'manual');
   }
 
   /// What the automation sentences read: thing names and drivers, the
@@ -318,8 +381,8 @@ class AutomationCommands {
   ) async {
     final issues = IssueCollector();
     for (final key in scene.keys) {
-      if (!const {'id', 'name', 'icon', 'actions'}.contains(key)) {
-        issues.add(key, 'is not a scene key (id, name, icon, actions)');
+      if (!const {'id', 'name', 'icon', 'color', 'actions'}.contains(key)) {
+        issues.add(key, 'is not a scene key (id, name, icon, color, actions)');
       }
     }
     final name = scene['name'];
@@ -329,6 +392,13 @@ class AutomationCommands {
     final icon = scene['icon'];
     if (icon != null && (icon is! String || icon.isEmpty)) {
       issues.add('icon', 'must be an icon name');
+    }
+    final color = scene['color'];
+    if (color != null && !RuleKeys.colors.contains(color)) {
+      issues.add(
+        'color',
+        'must be one of the colour choices: ${RuleKeys.colors.join(' ')}',
+      );
     }
     final actions = scene['actions'];
     final steps = <Map<String, Object?>>[];
@@ -384,7 +454,13 @@ class AutomationCommands {
     try {
       final (normalized, flow) = await _compileRule(rule);
       return (
-        {'id': normalized['id'], 'name': name, 'icon': ?icon, 'actions': steps},
+        {
+          'id': normalized['id'],
+          'name': name,
+          'icon': ?icon,
+          'color': ?color,
+          'actions': steps,
+        },
         flow,
       );
     } on ValidationException catch (e) {
@@ -437,7 +513,7 @@ class AutomationCommands {
   /// `scene.save {id?, name, icon?, actions, trusted?}`.
   Future<Map<String, Object?>> saveSceneCommand(Map<String, Object?> args) =>
       saveScene({
-        for (final key in const ['id', 'name', 'icon', 'actions'])
+        for (final key in const ['id', 'name', 'icon', 'color', 'actions'])
           if (args.containsKey(key)) key: args[key],
       }, args['trusted'] == true);
 
@@ -455,6 +531,7 @@ class AutomationCommands {
             'id': a['id'],
             'name': a['name'],
             'icon': ?specs[a['id']]?['icon'],
+            'color': ?specs[a['id']]?['color'],
             'actions': specs[a['id']]?['actions'] ?? const [],
             'enabled': a['enabled'],
             'approved': a['approved'],

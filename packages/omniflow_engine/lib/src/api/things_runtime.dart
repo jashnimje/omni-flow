@@ -374,6 +374,78 @@ class ThingsRuntime {
     return (await _store.get(device.id))!.state;
   }
 
+  /// An app opened or closed on the phone: the event, and `app_on_screen`.
+  Future<Map<String, Object?>> phoneApp({
+    required String package,
+    String? label,
+    required bool opened,
+    String? phoneId,
+  }) async {
+    final device = await phone(phoneId);
+    final current = device.state['app_on_screen'];
+    _core.raiseEvent(device.id, opened ? 'app_opened' : 'app_closed', {
+      'package': package,
+      'label': label ?? package,
+    });
+    if (opened || current == package) {
+      await _merge(device.id, {'app_on_screen': opened ? package : null});
+    }
+    return (await _store.get(device.id))!.state;
+  }
+
+  /// A notification arrived on the phone. Its words go into the event and
+  /// nowhere else: not the phone's state, its history or a backup.
+  Future<void> phoneNotification({
+    required String package,
+    String? label,
+    String? title,
+    String? text,
+    String? phoneId,
+  }) async {
+    final device = await phone(phoneId);
+    _core.raiseEvent(device.id, 'notification', {
+      'package': package,
+      'label': label ?? package,
+      'title': ?title,
+      'text': ?text,
+    });
+  }
+
+  /// A Bluetooth device connected to the phone or left it: the event, and
+  /// the names in `bluetooth_devices`.
+  Future<Map<String, Object?>> phoneBluetooth({
+    required String name,
+    String? address,
+    required bool connected,
+    String? phoneId,
+  }) async {
+    final device = await phone(phoneId);
+    final before = device.state['bluetooth_devices'];
+    final names = [
+      for (final n in before is List ? before : const [])
+        if (n is String && n != name) n,
+      if (connected) name,
+    ];
+    _core.raiseEvent(
+      device.id,
+      connected ? 'bluetooth_connected' : 'bluetooth_disconnected',
+      {'name': name, 'address': ?address},
+    );
+    await _merge(device.id, {'bluetooth_devices': names});
+    return (await _store.get(device.id))!.state;
+  }
+
+  /// One on/off fact about the phone: `screen_on` or `dnd_on`.
+  Future<Map<String, Object?>> phoneFlag(
+    String key,
+    bool on, {
+    String? phoneId,
+  }) async {
+    final device = await phone(phoneId);
+    await _merge(device.id, {key: on});
+    return (await _store.get(device.id))!.state;
+  }
+
   /// Saves [zone] as the place that answers to its id. A new zone whose id
   /// another thing has gets a place id the way stored zones migrate.
   Future<String> saveZone(ZoneSpec zone) async {

@@ -15,6 +15,61 @@ typedef PostNotification = Future<void> Function({
   String? link,
 });
 
+/// An automation's question as a notification: one action per answer in
+/// [actions], a reply box when [reply], or, with more answers than Android
+/// shows as actions, a tap that opens the list in [chooser].
+class AskNotice {
+  const AskNotice({
+    required this.id,
+    required this.askId,
+    required this.title,
+    this.body,
+    this.actions = const [],
+    this.reply = false,
+    this.hint,
+    this.chooser = const [],
+    this.link,
+    this.timeoutMs,
+  });
+
+  final int id;
+  final String askId;
+  final String title;
+  final String? body;
+  final List<String> actions;
+  final bool reply;
+  final String? hint;
+  final List<String> chooser;
+  final String? link;
+
+  /// How long until the engine stops waiting, so the notification goes
+  /// when the question does.
+  final int? timeoutMs;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'askId': askId,
+    'title': title,
+    'body': ?body,
+    'actions': actions,
+    'reply': reply,
+    'hint': ?hint,
+    'chooser': chooser,
+    'link': ?link,
+    'timeoutMs': ?timeoutMs,
+  };
+}
+
+/// Posts or takes down an ask's notification.
+typedef PostAsk = Future<void> Function(AskNotice ask);
+typedef CancelNotification = Future<void> Function(int id);
+
+/// Android shows at most three actions on a notification.
+const maxAskActions = 3;
+
+/// The notification id of an ask, stable for the life of the ask.
+int askNotificationId(String askId) => 'ask/$askId'.hashCode & 0x7fffffff;
+
 /// The app link a notification opens: the automation, or one of its runs.
 String automationLink(String flow, {String? run}) {
   final ShellLink link = run == null
@@ -27,14 +82,31 @@ String automationLink(String flow, {String? run}) {
 /// show with the screen off: a rule's notify step, and an automation run
 /// that failed, once per automation until it runs well again.
 class AutomationNotifier {
-  AutomationNotifier(this._engine, {PostNotification? post})
-    : _post = post ?? _platformPost;
+  AutomationNotifier(
+    this._engine, {
+    PostNotification? post,
+    PostAsk? postAsk,
+    CancelNotification? cancel,
+    DateTime Function()? now,
+  }) : _post = post ?? _platformPost,
+       _postAsk = postAsk ?? _platformAsk,
+       _cancel = cancel ?? _platformCancel,
+       _now = now ?? DateTime.now;
+
+  static const askPending = 'ask.pending';
 
   static const channelName = 'omniflow/notify';
   static const _channel = MethodChannel(channelName);
 
   final EngineClient _engine;
   final PostNotification _post;
+  final PostAsk _postAsk;
+  final CancelNotification _cancel;
+  final DateTime Function() _now;
+
+  /// Asks on screen, so a repeat (ask.pending after the event) is not
+  /// posted twice.
+  final _asks = <String>{};
   StreamSubscription<Map<String, Object?>>? _sub;
   var _nextId = 1000;
 
@@ -61,7 +133,110 @@ class AutomationNotifier {
     }
   }
 
-  void start() => _sub ??= _engine.events.listen(_onEvent);
+  static Future<void> _platformAsk(AskNotice ask) async {
+    try {
+      await _channel.invokeMethod<void>('ask', ask.toJson());
+    } on MissingPluginException {
+      return;
+    }
+  }
+
+  static Future<void> _platformCancel(int id) async {
+    try {
+      await _channel.invokeMethod<void>('cancel', {'id': id});
+    } on MissingPluginException {
+      return;
+    }
+  }
+
+  /// Listens for events, then shows the asks still waiting from before the
+  /// service started (or while it could not post).
+  Future<void> start() async {
+    if (_sub != null) return;
+    _sub = _engine.events.listen(_onEvent);
+    final Map<String, Object?> pending;
+    try {
+      pending = await _engine.call(askPending);
+    } on Object {
+      return;
+    }
+    if (pending['ok'] != true) return;
+    for (final ask in (pending['asks'] as List? ?? const [])) {
+      if (ask is Map) await _ask(Map<String, Object?>.from(ask));
+    }
+  }
+
+  /// The notification for an `ask.request` payload, or null for one that
+  /// cannot be answered from the phone.
+  AskNotice? noticeFor(Map<String, Object?> e) {
+    final askId = e['askId'];
+    if (askId is! String || askId.isEmpty) return null;
+    final title = '${e['title'] ?? ''}'.trim();
+    final choices = [for (final c in (e['choices'] as List? ?? const [])) '$c'];
+    final flow = e['flow'];
+    final base = (
+      id: askNotificationId(askId),
+      title: title.isEmpty ? 'OmniFlow has a question' : title,
+      body: e['body'] as String?,
+      link: flow == null ? null : automationLink('$flow'),
+      timeoutMs: _timeoutOf(e['expiresAt']),
+    );
+    AskNotice notice({
+      List<String> actions = const [],
+      bool reply = false,
+      String? hint,
+      List<String> chooser = const [],
+    }) => AskNotice(
+      id: base.id,
+      askId: askId,
+      title: base.title,
+      body: base.body,
+      link: base.link,
+      timeoutMs: base.timeoutMs,
+      actions: actions,
+      reply: reply,
+      hint: hint,
+      chooser: chooser,
+    );
+    switch (e['kind']) {
+      case 'confirm':
+        return notice(
+          actions: choices.isEmpty ? const ['Run', 'Not now'] : choices,
+        );
+      case 'choose':
+        if (choices.isEmpty) return null;
+        return choices.length <= maxAskActions
+            ? notice(actions: choices)
+            : notice(chooser: choices);
+      case 'input':
+        final fallback = e['default'];
+        return notice(
+          reply: true,
+          hint: fallback == null ? null : 'Or leave it for $fallback',
+        );
+    }
+    return null;
+  }
+
+  /// [expiresAt] as milliseconds from now: epoch milliseconds or an ISO
+  /// time. Null when unknown, or already past.
+  int? _timeoutOf(Object? expiresAt) {
+    final at = switch (expiresAt) {
+      int ms => DateTime.fromMillisecondsSinceEpoch(ms),
+      num ms => DateTime.fromMillisecondsSinceEpoch(ms.round()),
+      String iso => DateTime.tryParse(iso),
+      _ => null,
+    };
+    if (at == null) return null;
+    final left = at.difference(_now()).inMilliseconds;
+    return left > 0 ? left : null;
+  }
+
+  Future<void> _ask(Map<String, Object?> e) async {
+    final notice = noticeFor(e);
+    if (notice == null || !_asks.add(notice.askId)) return;
+    await _postAsk(notice);
+  }
 
   Future<void> stop() async {
     await _sub?.cancel();
@@ -70,6 +245,13 @@ class AutomationNotifier {
 
   Future<void> _onEvent(Map<String, Object?> e) async {
     switch (e['event']) {
+      case 'ask.request':
+        await _ask(e);
+      case 'ask.closed':
+        final askId = e['askId'];
+        if (askId is! String) return;
+        _asks.remove(askId);
+        await _cancel(askNotificationId(askId));
       case 'flow.announce':
         final title = '${e['title'] ?? ''}'.trim();
         if (title.isEmpty) return;

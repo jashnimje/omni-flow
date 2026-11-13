@@ -2,13 +2,19 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart' show ApiFailure, AutomationSummary;
+import '../../api/rule_calls.dart';
 import '../../rules/rule_spec.dart';
-import '../../state/providers.dart' show messengerKey, showMessage;
+import '../../state/providers.dart'
+    show engineClientProvider, messengerKey, showMessage;
 import '../design/design.dart';
+import 'form_parts.dart' show TimeRow;
 import 'pickers.dart';
 import 'rule_words.dart';
+import 'sentence_row.dart';
+import 'token_field.dart';
 
 /// The rule being edited, shared by the editor and the pages its groups
 /// open, so an edit anywhere rebuilds every page and clears the errors the
@@ -48,6 +54,25 @@ class RuleDraft extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The labels of the tokens the engine named so far, shared with
+  /// [words] so rows show `{{%reply.body}}` as "Web reply · body".
+  final tokenLabels = <String, String>{};
+
+  /// The values a step at rule [path] can use, from `rule.tokens` on the
+  /// rule as it stands now. Rows redraw with the labels it brings.
+  TokenSource tokensAt(BuildContext context, String path) {
+    final client = ProviderScope.containerOf(
+      context,
+      listen: false,
+    ).read(engineClientProvider);
+    final rule = spec.toJson();
+    return TokenSource(() async {
+      final tokens = await RuleCalls.fetch(client, rule, path);
+      if (tokens.isNotEmpty) Future.microtask(notifyListeners);
+      return tokens;
+    }, words: words);
+  }
+
   /// The first issue the engine named at [path] or under it.
   String? errorAt(String path) => failure?.issuesAt(path).firstOrNull;
 
@@ -68,6 +93,8 @@ class RuleDraft extends ChangeNotifier {
             '.waitFor',
             '.waitFor.on',
             '.waitFor.timeoutMs',
+            '.forEach',
+            '.forEach.in',
           ].any((s) => i.path == '$path$s'),
         )
         .firstOrNull;
@@ -167,12 +194,26 @@ class TriggerBlock extends StatelessWidget {
           },
           row: (i) {
             final t = when[i];
-            return OmniStepRow(
+            return SentenceRow(
               key: ValueKey('row-when[$i]'),
               reorderIndex: i,
               icon: draft.words.triggerIcon(t),
-              text: draft.words.trigger(t),
+              parts: draft.words.triggerParts(t),
               error: draft.errorAt('when[$i]'),
+              onBlank: (blank) async {
+                if (t is! TimeTrigger) return;
+                if (blank == Blank.time) {
+                  final at = await pickTime(context, t.at);
+                  if (at == null) return;
+                  t.at = at;
+                  draft.changed();
+                  return;
+                }
+                final edited = await editTrigger(context, draft.words, t);
+                if (edited == null) return;
+                when[i] = edited;
+                draft.changed();
+              },
               onTap: t is ManualTrigger
                   ? null
                   : () async {
@@ -232,12 +273,20 @@ class ConditionBlock extends StatelessWidget {
         },
         row: (i) {
           final c = conditions[i];
-          return OmniStepRow(
+          return SentenceRow(
             key: ValueKey('row-$path[$i]'),
             reorderIndex: i,
             icon: draft.words.conditionIcon(c),
-            text: draft.words.condition(c),
+            parts: draft.words.conditionParts(c),
             error: draft.errorAt('$path[$i]'),
+            onBlank: (blank) async {
+              if (c is! BetweenCondition) return;
+              final start = blank == Blank.start;
+              final at = await pickTime(context, start ? c.start : c.end);
+              if (at == null) return;
+              start ? c.start = at : c.end = at;
+              draft.changed();
+            },
             onTap: c is UnknownCondition
                 ? null
                 : () async {
@@ -326,6 +375,8 @@ class StepBlock extends StatelessWidget {
       draft.words,
       automations: draft.automations,
       allowKeep: allowKeep,
+      rule: draft.spec,
+      tokens: draft.tokensAt(context, '$path[${steps.length}]'),
     );
     if (step == null || !context.mounted) return;
     if (step is KeepStep) {
@@ -348,15 +399,28 @@ class StepBlock extends StatelessWidget {
     final words = draft.words;
     final at = '$path[$i]';
     final group = isGroupStep(s);
-    return OmniStepRow(
+    Future<void> replaceWith(Future<RuleStep?> edit) async {
+      final edited = await edit;
+      if (edited == null) return;
+      steps[i] = edited;
+      draft.changed();
+    }
+
+    return SentenceRow(
       key: ValueKey('row-$at'),
       reorderIndex: i,
       icon: words.stepIcon(s),
-      text: words.step(s),
+      parts: words.stepParts(s),
       subtitle: switch (s) {
         WaitForStep() => 'at most ${durationText(s.timeoutMs)}',
         KeepStep() when s.hasRelease => 'then ${valueText(s.release)}',
         UnknownStep() => 'It can only be removed here',
+        AskStep(as: final store?) ||
+        GetStep(as: final store?) ||
+        TextStep(as: final store?) ||
+        MathStep(as: final store?) ||
+        DateStep(as: final store?) ||
+        ForEachStep(as: final store?) => 'as ${words.tokenText(store)}',
         _ => null,
       },
       style: switch (s) {
@@ -365,7 +429,8 @@ class StepBlock extends StatelessWidget {
         TogetherStep() ||
         WaitForStep() ||
         TryStep() ||
-        RepeatStep() => StepRowStyle.flow,
+        RepeatStep() ||
+        ForEachStep() => StepRowStyle.flow,
         _ => StepRowStyle.normal,
       },
       trailingText: switch (s) {
@@ -374,39 +439,65 @@ class StepBlock extends StatelessWidget {
         WaitForStep() => '${s.onTimeout.length}',
         TryStep() => '${s.steps.length + s.otherwise.length}',
         RepeatStep() => '${s.steps.length}',
+        ForEachStep() => '${s.steps.length}',
         _ => null,
       },
       error: group || s is KeepStep
           ? draft.groupErrorAt(at)
           : draft.errorAt(at),
+      onBlank: group || s is KeepStep || s is UnknownStep
+          ? s is ForEachStep
+                ? (_) => replaceWith(
+                    forEachForm(
+                      context,
+                      words,
+                      current: s,
+                      tokens: draft.tokensAt(context, at),
+                    ),
+                  )
+                : null
+          : (blank) => replaceWith(
+              editBlank(
+                context,
+                words,
+                s,
+                blank,
+                automations: draft.automations,
+                tokens: draft.tokensAt(context, at),
+              ),
+            ),
       onTap: switch (s) {
         UnknownStep() => null,
-        IfStep() ||
-        TogetherStep() ||
-        WaitForStep() ||
-        TryStep() ||
-        RepeatStep() => () => openGroupPage(context, draft, s, at),
+        _ when group => () => openGroupPage(context, draft, s, at),
         KeepStep() => () async {
           final kept = await openKeepPage(context, draft, s, at);
           if (kept == null) return;
           steps[i] = kept;
           draft.changed();
         },
-        _ => () async {
-          final edited = await editStep(
+        _ => () => replaceWith(
+          editStep(
             context,
             words,
             s,
             automations: draft.automations,
-          );
-          if (edited == null) return;
-          steps[i] = edited;
-          draft.changed();
-        },
+            tokens: draft.tokensAt(context, at),
+          ),
+        ),
       },
       onRemove: () => _removeWithUndo(draft, steps, i, 'Step'),
     );
   }
+}
+
+/// Opens the time picker at [hhmm] and gives the time picked, or null.
+Future<String?> pickTime(BuildContext context, String hhmm) async {
+  final picked = await showTimePicker(
+    context: context,
+    initialTime: TimeRow.parse(hhmm),
+    initialEntryMode: TimePickerEntryMode.dial,
+  );
+  return picked == null ? null : TimeRow.format(picked);
 }
 
 /// Keep steps go last in a rule's THEN, so a move, an add or an undo never
@@ -452,7 +543,8 @@ bool isGroupStep(RuleStep s) =>
     s is TogetherStep ||
     s is WaitForStep ||
     s is TryStep ||
-    s is RepeatStep;
+    s is RepeatStep ||
+    s is ForEachStep;
 
 Future<void> openGroupPage(
   BuildContext context,
@@ -501,6 +593,7 @@ class GroupPage extends StatelessWidget {
         TogetherStep() => 'Do these together',
         TryStep() => 'Try, with a fallback',
         RepeatStep() => 'Repeat',
+        ForEachStep() => 'Repeat with each',
         _ => 'Wait until',
       },
       body: ListView(
@@ -511,6 +604,22 @@ class GroupPage extends StatelessWidget {
       ),
     ),
   );
+
+  /// Changes what [each] goes through in place, so its steps stay.
+  Future<void> _editEach(BuildContext context, ForEachStep each) async {
+    final edited = await forEachForm(
+      context,
+      draft.words,
+      current: each,
+      tokens: draft.tokensAt(context, path),
+    );
+    if (edited == null) return;
+    each
+      ..over = edited.over
+      ..as = edited.as
+      ..max = edited.max;
+    draft.changed();
+  }
 
   List<Widget> _blocks(BuildContext context) => switch (step) {
     IfStep(:final conditions, :final then, :final otherwise) => [
@@ -552,6 +661,25 @@ class GroupPage extends StatelessWidget {
         heading: 'If one fails',
         caption: 'instead of the rest, or nothing to go on',
         kind: SentenceKind.flow,
+      ),
+    ],
+    final ForEachStep each => [
+      SentenceRow(
+        key: const ValueKey('foreach-how'),
+        icon: AutomationIcons.forEach,
+        parts: draft.words.stepParts(each),
+        subtitle:
+            'as ${draft.words.tokenText(each.as ?? defaultAs['forEach']!)}',
+        error: draft.errorAt('$path.forEach.in'),
+        onTap: () => _editEach(context, each),
+        onBlank: (_) => _editEach(context, each),
+      ),
+      StepBlock(
+        draft: draft,
+        steps: each.steps,
+        path: '$path.forEach.do',
+        heading: 'Each time',
+        caption: 'in order, with the item',
       ),
     ],
     final RepeatStep repeat => [

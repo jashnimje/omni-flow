@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:args/command_runner.dart';
 
@@ -36,6 +37,26 @@ class RuleCommand extends Command<int> {
         (rest) => {'id': _one(rest)},
         usage: 'ID',
         rulesOnly: true,
+      ),
+    );
+    addSubcommand(
+      _RuleApiCommand(
+        'tokens',
+        'The values a step can use: omni rule tokens rule.json "then[1]"',
+        'rule.tokens',
+        (rest) {
+          if (rest.length != 2) throw UsageException('needs FILE PATH', '');
+          final Object? rule;
+          try {
+            rule = jsonDecode(File(rest[0]).readAsStringSync());
+          } on FileSystemException catch (e) {
+            throw UsageException('cannot read ${rest[0]}: ${e.message}', '');
+          } on FormatException catch (e) {
+            throw UsageException('${rest[0]} is not JSON: ${e.message}', '');
+          }
+          return {'rule': rule, 'path': rest[1]};
+        },
+        usage: 'FILE PATH',
       ),
     );
   }
@@ -173,6 +194,18 @@ class RuleAddCommand extends _RuleCommandBase {
         negatable: false,
         help: 'Save it without turning it on.',
       )
+      ..addOption('color', help: 'Its colour, as a hex such as #A78BFA.')
+      ..addOption('icon', help: 'Its icon: bolt, home, movie, lightbulb, ...')
+      ..addFlag(
+        'ask-first',
+        negatable: false,
+        help: 'When a trigger starts it, ask on the phone before it runs.',
+      )
+      ..addFlag(
+        'notify-on-run',
+        negatable: false,
+        help: 'Notify after each run that completes.',
+      )
       ..addFlag(
         'replace',
         negatable: false,
@@ -214,6 +247,10 @@ class RuleAddCommand extends _RuleCommandBase {
         'then': [for (final s in then) _item(s)],
         if (a.option('mode') != null) 'mode': a.option('mode'),
         if (a.flag('disabled')) 'enabled': false,
+        if (a.option('color') != null) 'color': a.option('color'),
+        if (a.option('icon') != null) 'icon': a.option('icon'),
+        if (a.flag('ask-first')) 'askFirst': true,
+        if (a.flag('notify-on-run')) 'notifyOnRun': true,
       },
       'trusted': true,
       if (a.flag('replace')) 'replace': true,

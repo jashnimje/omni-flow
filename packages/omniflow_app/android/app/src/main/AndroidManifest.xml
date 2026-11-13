@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- LAN control of lights, plugs, boards and hosts. -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -34,6 +35,17 @@
     <!-- The Fix button of Settings, Running in the background: Android
          stops apps it optimises for battery, which stops automations. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- "A Bluetooth device connects" triggers: Android 12 and later send
+         the connect broadcasts only with this, asked for when the person
+         picks that trigger. Older phones need the install-time one. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <!-- "An app opens" triggers read the app on screen. The person turns on
+         usage access in the system settings from This phone; nothing reads
+         it before then. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <!-- No backup: secrets are keystore-bound, so a restored copy on another
          phone cannot be decrypted. -->
     <application
@@ -67,6 +79,8 @@
             </intent-filter>
             <!-- A notification opens the automation or run it names. -->
             <meta-data android:name="flutter_deeplinking_enabled" android:value="true" />
+            <!-- Google Assistant's "open app feature" capability. -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -118,6 +132,131 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Run from anywhere. Every run and every answer goes to the engine
+             over its private socket. The components that run or answer
+             (RunReceiver, AskReceiver, AskActivity, RunShortcutActivity) are
+             not exported, so only this app's own pending intents and
+             shortcuts reach them. The exported ones are what Android
+             requires (the launcher's widget broadcasts and configure step,
+             the tile long press, the share sheet), and they only show a
+             picker: nothing runs until the person picks. -->
+        <receiver android:name=".RunReceiver" android:exported="false" />
+        <receiver android:name=".AskReceiver" android:exported="false" />
+        <activity
+            android:name=".AskActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/PickerTheme" />
+        <activity
+            android:name=".RunShortcutActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/PickerTheme" />
+        <activity
+            android:name=".ShortcutsPickerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/PickerTheme" />
+        <activity
+            android:name=".WidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/PickerTheme">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".TilePickerActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/PickerTheme">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/share_label"
+            android:taskAffinity=""
+            android:theme="@style/PickerTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <receiver
+            android:name=".RunWidgetSmall"
+            android:exported="true"
+            android:label="@string/widget_small_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_small_info" />
+        </receiver>
+        <receiver
+            android:name=".RunWidgetWide"
+            android:exported="true"
+            android:label="@string/widget_wide_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_wide_info" />
+        </receiver>
+        <service
+            android:name=".RunTile1"
+            android:exported="true"
+            android:icon="@drawable/ic_notification"
+            android:label="@string/tile_1"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".RunTile2"
+            android:exported="true"
+            android:icon="@drawable/ic_notification"
+            android:label="@string/tile_2"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".RunTile3"
+            android:exported="true"
+            android:icon="@drawable/ic_notification"
+            android:label="@string/tile_3"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <!-- Bound by the system only, after the person turns on
+             notification access for OmniFlow. -->
+        <service
+            android:name=".NotificationTriggers"
+            android:exported="true"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <!-- adb only: AgentBridgeProvider refuses every caller but the
              shell and root users. -->
         <provider
@@ -131,6 +270,16 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- App names for "An app opens" triggers, and the home screen, which
+             counts as no app. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

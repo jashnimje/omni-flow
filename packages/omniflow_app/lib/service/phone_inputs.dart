@@ -6,12 +6,19 @@ import '../api/engine_calls.dart';
 import '../api/engine_client.dart';
 
 /// Feeds the phone thing from Android, inside the service so it keeps
-/// working with the screen off: the battery level and charging, and the
-/// Wi-Fi network. Readings come from PhoneSensorsBridge.kt on the
-/// `omniflow/phone_sensors` event channel of the service's engine:
+/// working with the screen off. Readings come from PhoneSensorsBridge.kt
+/// (and NotificationTriggers.kt through it) on the `omniflow/phone_sensors`
+/// event channel of the service's engine:
 ///
 /// - `{"kind": "battery", "level": 0..100, "charging": bool}`
 /// - `{"kind": "wifi", "connected": bool, "ssid"?: String, "bssid"?: String}`
+/// - `{"kind": "app", "package", "label"?, "event": "opened" | "closed"}`
+/// - `{"kind": "notification", "package", "label"?, "title"?, "text"?}`
+/// - `{"kind": "bluetooth", "name", "address", "connected": bool}`
+/// - `{"kind": "screen", "on": bool}` and `{"kind": "dnd", "on": bool}`
+///
+/// A notification's text is only passed on to the engine, never kept or
+/// logged here.
 class PhoneInputs {
   PhoneInputs(this._engine, {Stream<Object?>? readings})
     : _readings =
@@ -19,11 +26,19 @@ class PhoneInputs {
 
   static const channelName = 'omniflow/phone_sensors';
 
+  static const phoneApp = 'phone.app';
+  static const phoneNotification = 'phone.notification';
+  static const phoneBluetooth = 'phone.bluetooth';
+  static const phoneScreen = 'phone.screen';
+  static const phoneDnd = 'phone.dnd';
+
   final EngineClient _engine;
   final Stream<Object?> _readings;
   StreamSubscription<Object?>? _sub;
   ({int? level, bool? charging})? _battery;
   ({String? ssid, String? bssid})? _wifi;
+  bool? _screenOn;
+  bool? _dndOn;
 
   void start() {
     _sub ??= _readings.listen(
@@ -69,8 +84,50 @@ class PhoneInputs {
           EngineCalls.phoneWifi,
           EngineCalls.wifiArgs(ssid: next.ssid, bssid: next.bssid),
         );
+      case 'app':
+        final package = _text(reading['package']);
+        final event = reading['event'];
+        if (package == null || (event != 'opened' && event != 'closed')) {
+          return;
+        }
+        await _send(phoneApp, {
+          'package': package,
+          'label': ?_text(reading['label']),
+          'event': event,
+        });
+      case 'notification':
+        final package = _text(reading['package']);
+        if (package == null) return;
+        await _send(phoneNotification, {
+          'package': package,
+          'label': ?_text(reading['label']),
+          'title': ?_text(reading['title']),
+          'text': ?_text(reading['text']),
+        });
+      case 'bluetooth':
+        final address = _text(reading['address']);
+        final connected = reading['connected'];
+        if (address == null || connected is! bool) return;
+        await _send(phoneBluetooth, {
+          'name': _text(reading['name']) ?? address,
+          'address': address,
+          'connected': connected,
+        });
+      case 'screen':
+        final on = reading['on'];
+        if (on is! bool || on == _screenOn) return;
+        _screenOn = on;
+        await _send(phoneScreen, {'on': on});
+      case 'dnd':
+        final on = reading['on'];
+        if (on is! bool || on == _dndOn) return;
+        _dndOn = on;
+        await _send(phoneDnd, {'on': on});
     }
   }
+
+  static String? _text(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value : null;
 
   Future<void> _send(String command, Json args) async {
     try {

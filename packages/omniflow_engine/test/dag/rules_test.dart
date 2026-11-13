@@ -1306,6 +1306,15 @@ void main() {
       reason: 'a capability still reads under its state key',
     );
   });
+
+  test('sentences write tokens as words', () {
+    expect(SentenceContext.spoken('Mood: {{%answer}}'), 'Mood: the answer');
+    expect(
+      SentenceContext.spoken('{{ %reply.body.name }} is {{msg.value}}'),
+      "the web reply's name is the new value",
+    );
+    expect(SentenceContext.spoken(r'Hi {{$Name}}'), 'Hi Name');
+  });
 }
 
 class _NoEffects implements FlowEffects {
@@ -1317,6 +1326,12 @@ class _NoEffects implements FlowEffects {
 
   @override
   Stream<Map<String, Object?>> get events => const Stream.empty();
+
+  @override
+  Future<Map<String, Object?>?> stateOf(String deviceId) async => null;
+
+  @override
+  Future<List<String>> roomDevices(String room) async => const [];
 
   @override
   void announce(Map<String, Object?> payload) {}

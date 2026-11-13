@@ -19,8 +19,10 @@ export 'src/api/thing_setup.dart'
 export 'src/cli/omni_command_runner.dart';
 export 'src/codecs/crc32.dart';
 export 'src/codecs/tuya_codec.dart';
+export 'src/dag/asks.dart';
 export 'src/dag/cards.dart';
 export 'src/dag/conditions.dart';
+export 'src/dag/data_steps.dart';
 export 'src/dag/executor.dart';
 export 'src/dag/flow_engine.dart';
 export 'src/dag/links.dart';
@@ -30,6 +32,7 @@ export 'src/dag/expression.dart';
 export 'src/dag/flow.dart';
 export 'src/dag/node_types.dart';
 export 'src/dag/rule_shorthand.dart';
+export 'src/dag/rule_tokens.dart';
 export 'src/dag/rules.dart';
 export 'src/dag/sun.dart';
 export 'src/dag/transformers.dart';

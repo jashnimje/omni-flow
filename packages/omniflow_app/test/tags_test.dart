@@ -40,7 +40,13 @@ class WritingNfc implements NfcAdapter {
   Future<void> stop() async {}
 }
 
-final scannedAt = DateTime.now().toUtc().subtract(const Duration(hours: 2));
+/// Two hours back, or two minutes in the first hours after midnight, so
+/// the scan stays on today and the page says "Today" whatever the clock.
+final _early = DateTime.now().hour < 3;
+final scannedAt = DateTime.now().toUtc().subtract(
+  _early ? const Duration(minutes: 2) : const Duration(hours: 2),
+);
+final scannedAgo = _early ? '2 min ago' : '2 h ago';
 
 Map<String, Object?> tag({Map<String, Object?>? state}) => {
   'id': 'front_door',
@@ -123,7 +129,7 @@ void main() {
     testWidgets('says when it was scanned and by what, what a scan runs, '
         'and the recent scans', (tester) async {
       await pumpTag(tester);
-      expect(find.text('Scanned 2 h ago'), findsOneWidget);
+      expect(find.text('Scanned $scannedAgo'), findsOneWidget);
       expect(find.text('by this phone · card 04:A1:B2:C3'), findsOneWidget);
       expect(engine.callsOf('automation.list').single.$2, {
         'tag': 'front_door',
@@ -257,7 +263,7 @@ void main() {
     ) async {
       await pumpScreen(tester, engine, const TagsPage());
       expect(find.text('Front door tag'), findsOneWidget);
-      expect(find.text('scanned 2 h ago'), findsOneWidget);
+      expect(find.text('scanned $scannedAgo'), findsOneWidget);
     });
 
     testWidgets('no tags says how to add one', (tester) async {
@@ -294,6 +300,11 @@ void main() {
     expect(agoText(DateTime(2026, 11, 8, 18, 59, 40), now: now), 'just now');
     expect(agoText(DateTime(2026, 11, 8, 18, 30), now: now), '30 min ago');
     expect(agoText(DateTime(2026, 11, 8, 17), now: now), '2 h ago');
+    expect(
+      agoText(DateTime(2026, 11, 8, 23), now: DateTime(2026, 11, 9, 1)),
+      '2 h ago',
+      reason: 'across midnight',
+    );
     expect(agoText(DateTime(2026, 11, 7, 9), now: now), 'yesterday');
     expect(agoText(DateTime(2026, 11, 3, 9), now: now), '3 Nov');
     expect(whenText(DateTime(2026, 11, 8, 17, 40), now: now), 'Today 17:40');

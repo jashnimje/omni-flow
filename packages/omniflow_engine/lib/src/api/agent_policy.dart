@@ -22,6 +22,7 @@ enum AgentAccess {
 const agentReadCommands = {
   'agent.access',
   'agent.describe',
+  'ask.pending',
   'automation.dry_run',
   'automation.get',
   'automation.list',
@@ -45,6 +46,7 @@ const agentReadCommands = {
   'link.list',
   'link.options',
   'room.list',
+  'rule.tokens',
   'scene.list',
   'tag.list',
   'thing.next',
@@ -135,6 +137,12 @@ const agentUserOnly = {
   'tv.cache.trim': 'clearing every app cache is the user\'s',
   'tv.power': 'restarting or shutting down the TV is the user\'s',
   'presence.set': 'saying where the user is would fire automations falsely',
+  'ask.answer': 'an answer stands for the person, so only they give it',
+  'phone.app': 'what the phone reports would fire automations falsely',
+  'phone.notification': 'what the phone reports would fire automations falsely',
+  'phone.bluetooth': 'what the phone reports would fire automations falsely',
+  'phone.screen': 'what the phone reports would fire automations falsely',
+  'phone.dnd': 'what the phone reports would fire automations falsely',
   'zone.remove': 'removing a place deletes it with its history',
   'board.flash': 'writing firmware replaces what a board runs',
   'config.import':

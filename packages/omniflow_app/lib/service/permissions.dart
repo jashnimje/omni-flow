@@ -21,6 +21,11 @@ class Permissions {
     }
   }
 
+  /// Calls [method] on the channel, and is its answer, or false off
+  /// Android.
+  Future<bool> call(String method) async =>
+      await _invoke<bool>(method) ?? false;
+
   /// Asks for location access, and is true when it is granted.
   Future<bool> askForWifiName() async =>
       await _invoke<bool>('wifiName') ?? false;
@@ -35,7 +40,9 @@ class Permissions {
   Future<bool> askForLocalNetwork() async =>
       await _invoke<bool>('localNetwork') ?? false;
 
-  /// `{location, localNetwork, localNetworkNeeded}`, or null off Android.
+  /// `{location, locationAlways, localNetwork, localNetworkNeeded,
+  /// usageAccess, notificationAccess, bluetooth, bluetoothNeeded}`, or null
+  /// off Android.
   Future<Map<String, Object?>?> status() async {
     final map = await _invoke<Map<Object?, Object?>>('status');
     return map == null

@@ -252,7 +252,8 @@ class OmniTaskHandler extends TaskHandler {
       _engine = started.client;
       _host.attach(started.client, hubError: started.hubError);
       _inputs = inputs?.call(started.client)?..start();
-      _notifier = AutomationNotifier(started.client)..start();
+      final notifier = _notifier = AutomationNotifier(started.client);
+      unawaited(notifier.start());
     } on Object catch (e) {
       _host.fail('$e');
     }

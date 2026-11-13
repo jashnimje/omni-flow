@@ -89,6 +89,20 @@ class FakeEffects implements FlowEffects {
 
   @override
   Stream<Map<String, Object?>> get events => eventsOut.stream;
+
+  /// The devices of each room, for a forEach over one.
+  final rooms = <String, List<String>>{};
+
+  @override
+  Future<Map<String, Object?>?> stateOf(String deviceId) async =>
+      deviceStates[deviceId];
+
+  @override
+  Future<List<String>> roomDevices(String room) async {
+    final devices = rooms[room];
+    if (devices == null) throw StateError('there is no room called $room');
+    return devices;
+  }
 }
 
 Map<String, Object?> node(

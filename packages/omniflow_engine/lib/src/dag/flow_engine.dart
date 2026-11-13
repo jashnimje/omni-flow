@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'asks.dart';
 import 'canonical.dart';
 import 'conditions.dart';
 import 'executor.dart';
@@ -34,6 +35,13 @@ abstract interface class FlowHost {
   /// The web secret [name] a web request header names, null when none is
   /// stored.
   Future<String?> webSecret(String name);
+
+  /// The stored state of [deviceId], or null when there is no such device.
+  Future<Map<String, Object?>?> deviceState(String deviceId);
+
+  /// The ids of the devices in the room named [room], or with that id, in
+  /// the user's order. Throws when there is no such room.
+  Future<List<String>> roomDevices(String room);
   void emit(Map<String, Object?> event);
   Stream<Map<String, Object?>> get events;
 }
@@ -49,8 +57,12 @@ class FlowEngine implements FlowEffects {
   }) {
     _openedAt = _clock.now();
     this.globals.addAll(globals);
+    asks = AskBroker(_host.emit);
     _subscription = _host.events.listen(_onEvent);
   }
+
+  /// The questions runs and ask-first automations are waiting on.
+  late final AskBroker asks;
 
   final FlowHost _host;
   final FlowClock _clock;
@@ -111,6 +123,7 @@ class FlowEngine implements FlowEffects {
           onTrace: _onTrace,
           web: _web,
           webSecret: _host.webSecret,
+          asks: asks,
         );
         _runners[f.id] = runner;
         if (_timersOn) _startTimers(runner);
@@ -234,6 +247,13 @@ class FlowEngine implements FlowEffects {
       _host.emit({'event': 'flow.announce', ...payload});
 
   @override
+  Future<Map<String, Object?>?> stateOf(String deviceId) =>
+      _host.deviceState(deviceId);
+
+  @override
+  Future<List<String>> roomDevices(String room) => _host.roomDevices(room);
+
+  @override
   Future<void> setGlobal(String name, Object? value) async {
     final changed = globals[name] != value;
     globals[name] = value;
@@ -254,12 +274,71 @@ class FlowEngine implements FlowEffects {
   }
 
   void _fire(FlowRunner r, NodeSpec n, Map<String, Object?> msg) {
-    _track(
-      r.fire(n.id, {
-        'trigger': n.type,
-        'at': _clock.now().toIso8601String(),
-        ...msg,
-      }),
+    final full = {
+      'trigger': n.type,
+      'at': _clock.now().toIso8601String(),
+      ...msg,
+    };
+    _track(r.flow.askFirst ? _askFirst(r, n, full) : r.fire(n.id, full));
+  }
+
+  /// Asks the person before a trigger starts [r]'s run, and runs it only on
+  /// Run. While one ask is open for the automation, a second trigger is
+  /// dropped rather than asking again: the open ask stands for both.
+  Future<void> _askFirst(
+    FlowRunner r,
+    NodeSpec n,
+    Map<String, Object?> msg,
+  ) async {
+    final flow = r.flow;
+    if (asks.confirming(flow.id)) {
+      _dropRun(flow.id, n.id, 'it is already asking you');
+      return;
+    }
+    final String? answer;
+    try {
+      answer = await asks.ask(
+        flow: flow.id,
+        kind: AskKind.confirm,
+        title: 'Run ${flow.name}?',
+        timeout: const Duration(milliseconds: askDefaultTimeoutMs),
+        token: _closing,
+        clock: _clock,
+      );
+    } on RunCancelled {
+      return;
+    }
+    if (answer != askRun) {
+      _dropRun(
+        flow.id,
+        n.id,
+        answer == null ? 'not answered' : 'you chose not now',
+      );
+      return;
+    }
+    // The automation may have changed or been turned off while it asked.
+    if (!identical(_runners[flow.id], r)) {
+      _dropRun(flow.id, n.id, 'it changed while it was asking');
+      return;
+    }
+    await r.fire(n.id, msg);
+  }
+
+  /// Cancelled when the engine closes, which ends every open ask.
+  final _closing = CancelToken();
+
+  void _dropRun(String flowId, String trigger, String reason) {
+    final now = _clock.now();
+    _onTrace(
+      RunTrace(
+          '$flowId-${DateTime.now().microsecondsSinceEpoch}-ask',
+          flowId,
+          trigger,
+          now,
+        )
+        ..outcome = RunOutcome.dropped
+        ..reason = reason
+        ..finishedAt = now,
     );
   }
 
@@ -285,6 +364,7 @@ class FlowEngine implements FlowEffects {
             'payload': state,
             'thing': id,
             'deviceId': id,
+            'device': id,
             if (key != null) ...{
               'key': key,
               'value': state[key],
@@ -308,6 +388,7 @@ class FlowEngine implements FlowEffects {
             'payload': payload,
             'thing': e['thing'],
             'deviceId': e['thing'],
+            'device': e['thing'],
             'key': e['key'],
           });
         }
@@ -329,6 +410,17 @@ class FlowEngine implements FlowEffects {
       'outcome': trace.outcome.name,
       if (trace.reason != null) 'reason': trace.reason,
     });
+    final flow = _runners[trace.flowId]?.flow;
+    if (trace.outcome == RunOutcome.completed &&
+        !trace.dryRun &&
+        flow != null &&
+        flow.notifyOnRun) {
+      announce({
+        'type': 'notify',
+        'title': '${flow.name} ran',
+        'flow': flow.id,
+      });
+    }
   }
 
   void _startTimers(FlowRunner r) {
@@ -430,6 +522,8 @@ class FlowEngine implements FlowEffects {
     for (final r in _runners.values) {
       r.cancelAll();
     }
+    _closing.cancel();
+    asks.cancelAll();
     await _subscription.cancel();
     // One failed trace write must not stop close() from finishing.
     while (_pending.isNotEmpty) {

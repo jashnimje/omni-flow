@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_pick">Tap to pick what this runs</string>
+    <string name="widget_small_label">OmniFlow, one button</string>
+    <string name="widget_wide_label">OmniFlow, four buttons</string>
+    <string name="widget_small_description">Runs one scene or automation</string>
+    <string name="widget_wide_description">Runs up to four scenes or automations</string>
+    <string name="tile_label">OmniFlow</string>
+    <string name="tile_1">OmniFlow 1</string>
+    <string name="tile_2">OmniFlow 2</string>
+    <string name="tile_3">OmniFlow 3</string>
+    <string name="share_label">Run an automation</string>
+    <string name="notification_listener_label">OmniFlow notification triggers</string>
+    <string name="notification_listener_description">Starts your automations when a notification arrives from an app you picked. Notification text stays on this phone.</string>
+    <string name="feature_label">Open an automation</string>
+
+    <style name="WidgetButton">
+        <item name="android:background">@drawable/widget_button</item>
+        <item name="android:gravity">center</item>
+        <item name="android:padding">6dp</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="PickerTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

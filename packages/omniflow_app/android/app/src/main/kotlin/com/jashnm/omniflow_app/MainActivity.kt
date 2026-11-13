@@ -1,6 +1,7 @@
 package com.jashnm.omniflow_app
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
@@ -21,6 +22,7 @@ import android.nfc.tech.TagTechnology
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -74,12 +76,22 @@ class MainActivity : FlutterActivity() {
                 "wifiNameAlways" -> askForLocationAlways(result)
                 "localNetwork" -> askForLocalNetwork(result)
                 "lastLocation" -> result.success(lastLocation())
+                "bluetooth" -> askForBluetooth(result)
+                "usageAccess" -> openSettings(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS), result)
+                "notificationAccess" -> openSettings(notificationAccessIntent(), result)
+                "pickTiles" -> openSettings(Intent(this, TilePickerActivity::class.java), result)
+                "pickShortcuts" -> openSettings(Intent(this, ShortcutsPickerActivity::class.java), result)
                 "status" -> result.success(
                     mapOf(
                         "location" to granted(Manifest.permission.ACCESS_FINE_LOCATION),
                         "locationAlways" to locationAlways(),
                         "localNetwork" to (!localNetworkNeeded() || granted(LOCAL_NETWORK)),
                         "localNetworkNeeded" to localNetworkNeeded(),
+                        "usageAccess" to PhoneSensorsBridge.usageAllowed(this),
+                        "notificationAccess" to NotificationManagerCompat.getEnabledListenerPackages(this)
+                            .contains(packageName),
+                        "bluetooth" to bluetoothAllowed(),
+                        "bluetoothNeeded" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S),
                     ),
                 )
                 "appSettings" -> {
@@ -92,6 +104,53 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /** Opens a system page (or one of the app's pickers) and answers at
+     * once: the page shows the grant, and Settings reads it on return. */
+    private fun openSettings(intent: Intent, result: MethodChannel.Result) {
+        try {
+            startActivity(intent)
+            result.success(true)
+        } catch (_: android.content.ActivityNotFoundException) {
+            result.success(false)
+        }
+    }
+
+    /** Android 11 and later open OmniFlow's own switch; earlier ones the
+     * list of apps. */
+    private fun notificationAccessIntent(): Intent =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
+                Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                ComponentName(this, NotificationTriggers::class.java).flattenToString(),
+            )
+        } else {
+            Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+        }
+
+    /** Before Android 12, Bluetooth connections need no runtime grant. */
+    private fun bluetoothAllowed() = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+        granted(Manifest.permission.BLUETOOTH_CONNECT)
+
+    private fun askForBluetooth(result: MethodChannel.Result) {
+        if (bluetoothAllowed()) return result.success(true)
+        ask(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), BLUETOOTH_REQUEST, result)
+    }
+
+    /** Names on widgets, tiles and shortcuts follow renames made in the app. */
+    override fun onResume() {
+        super.onResume()
+        val app = applicationContext
+        Thread {
+            if (RunTargets.refreshNames(app)) {
+                runCatching { RunShortcuts.republish(app) }
+                mainThread.post {
+                    RunWidget.renderAll(app)
+                    RunTile.refreshAll(app)
+                }
+            }
+        }.start()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -256,6 +315,7 @@ class MainActivity : FlutterActivity() {
             when (requestCode) {
                 LOCATION_REQUEST -> granted(Manifest.permission.ACCESS_FINE_LOCATION)
                 LOCATION_ALWAYS_REQUEST -> locationAlways()
+                BLUETOOTH_REQUEST -> bluetoothAllowed()
                 else -> granted(LOCAL_NETWORK)
             },
         )
@@ -272,6 +332,7 @@ class MainActivity : FlutterActivity() {
         private const val LOCATION_REQUEST = 7102
         private const val LOCAL_NETWORK_REQUEST = 7103
         private const val LOCATION_ALWAYS_REQUEST = 7104
+        private const val BLUETOOTH_REQUEST = 7105
         private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 }

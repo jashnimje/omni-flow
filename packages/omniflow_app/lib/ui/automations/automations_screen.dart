@@ -3,13 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
+import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automation_page.dart';
 import 'automations_state.dart';
 import 'dialogs.dart';
 import 'new_automation.dart';
 import 'review_page.dart';
-import 'scenes.dart' show SceneRow, openSceneEditor;
+import 'scenes.dart' show SceneRow, automationIconFor, openSceneEditor;
 import 'test_run.dart';
 
 enum AutomationFilter { all, rules, links, scenes, off, needsYou }
@@ -301,21 +302,55 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
     final failedLast = last != null && !last.ok;
     return OmniCard(
       key: ValueKey('automation-${a.id}'),
-      title: a.name,
       onTap: widget.onOpen,
-      trailing: Semantics(
-        label: 'Run ${a.name} on its own',
-        child: Switch(
-          key: ValueKey('enable-${a.id}'),
-          // Not loaded until approved, so it shows off whatever it says.
-          value: enabled && !a.needsApproval,
-          onChanged: a.needsApproval ? null : _enable,
-        ),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            children: [
+              AutomationBadge(
+                key: ValueKey('badge-${a.id}'),
+                icon: automationIconFor(a),
+                color: a.color,
+              ),
+              const SizedBox(width: OmniSpace.gap),
+              Expanded(child: Text(a.name, style: OmniText.bodyStrong)),
+              Semantics(
+                label: 'Run ${a.name} on its own',
+                child: Switch(
+                  key: ValueKey('enable-${a.id}'),
+                  // Not loaded until approved, so it shows off whatever it
+                  // says.
+                  value: enabled && !a.needsApproval,
+                  onChanged: a.needsApproval ? null : _enable,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
           if (a.sentence.isNotEmpty) AutomationSentence(a.sentence),
+          if (a.askFirst || a.notifyOnRun)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  if (a.askFirst)
+                    BehaviourBadge(
+                      key: ValueKey('asks-first-${a.id}'),
+                      icon: AutomationLook.askIcon,
+                      label: 'Asks first',
+                    ),
+                  if (a.notifyOnRun)
+                    BehaviourBadge(
+                      key: ValueKey('tells-you-${a.id}'),
+                      icon: OmniIcons.notifications,
+                      label: 'Tells you when it runs',
+                    ),
+                ],
+              ),
+            ),
           if (a.needsApproval)
             Padding(
               padding: const EdgeInsets.only(top: 6),

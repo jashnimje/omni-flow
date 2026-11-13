@@ -241,17 +241,120 @@ final Map<String, NodeType> builtInNodeTypes = {
       ).entries) {
         i.add(key.isEmpty ? '$p.headers' : '$p.headers.$key', value);
       }
+      _as(c, p, i);
       _templates(c, p, i);
     }),
     NodeType('speak', NodeCategory.action, ['out', 'error'], (c, p, i, _) {
       _string(c, 'text', p, i);
       _templates(c, p, i);
     }),
+    // Asks the person, and waits for the answer or the time limit.
+    NodeType('ask', NodeCategory.action, ['out', 'error'], (c, p, i, _) {
+      _string(c, 'title', p, i);
+      final choices = c['choices'];
+      if (choices != null &&
+          (choices is! List || choices.any((x) => x is! String))) {
+        i.add('$p.choices', 'must be a list of text');
+      }
+      if (choices == null && c['input'] != true) {
+        i.add('$p.choices', 'needs choices, or input: true');
+      }
+      if (c['timeoutMs'] != null) {
+        _int(c, 'timeoutMs', p, i, min: 1, max: 86400000);
+      }
+      _as(c, p, i);
+      _templates(c, p, i);
+    }),
+    // Data steps: each puts what it makes in a run variable.
+    NodeType('get_value', NodeCategory.action, ['out', 'error'], (c, p, i, _) {
+      if (!c.containsKey('from')) i.add('$p.from', 'is required');
+      final path = c['path'];
+      if (path != null &&
+          (path is! String || !valuePathPattern.hasMatch(path))) {
+        i.add('$p.path', 'must be a path like state.on or items[0].name');
+      }
+      _as(c, p, i);
+      _templates(c, p, i);
+    }),
+    NodeType('format_text', NodeCategory.action, ['out', 'error'], (
+      c,
+      p,
+      i,
+      _,
+    ) {
+      if (!c.containsKey('value')) i.add('$p.value', 'is required');
+      if (c['op'] != null) _oneOf(c, 'op', textOps, p, i);
+      _as(c, p, i);
+      _templates(c, p, i);
+    }),
+    NodeType('calculate', NodeCategory.action, ['out', 'error'], (c, p, i, _) {
+      _string(c, 'expr', p, i);
+      _as(c, p, i);
+      _templates(c, p, i);
+    }),
+    NodeType('format_date', NodeCategory.action, ['out', 'error'], (
+      c,
+      p,
+      i,
+      _,
+    ) {
+      if (c['format'] != null) _string(c, 'format', p, i);
+      if (c['offsetMinutes'] != null) {
+        _int(
+          c,
+          'offsetMinutes',
+          p,
+          i,
+          min: -dateOffsetLimit,
+          max: dateOffsetLimit,
+        );
+      }
+      _as(c, p, i);
+    }),
+    // Runs its body once for each item of a list, at most maxIterations.
+    NodeType('for_each', NodeCategory.flowControl, ['body', 'done'], (
+      c,
+      p,
+      i,
+      _,
+    ) {
+      if (!c.containsKey('in')) i.add('$p.in', 'is required');
+      _int(c, 'maxIterations', p, i, min: 1, max: 1000);
+      _as(c, p, i);
+      _templates(c['in'], '$p.in', i);
+    }),
   ])
     t.type: t,
 };
 
 final _variable = RegExp(r'^[$%][A-Za-z_][A-Za-z0-9_]*$');
+
+/// A run variable a step puts its value in: `%name`.
+final runVariablePattern = RegExp(r'^%[A-Za-z_][A-Za-z0-9_]*$');
+
+/// A device a step names through a run variable, `{{%item}}`, which the
+/// step reads when it runs (each device of a room in a forEach).
+final runDevicePattern = RegExp(r'^\{\{\s*%[A-Za-z_][A-Za-z0-9_]*\s*\}\}$');
+
+/// A path into a value: dotted keys, with `[n]` for list items.
+final valuePathPattern = RegExp(
+  r'^[A-Za-z0-9_]+(\[\d+\])*(\.[A-Za-z0-9_]+(\[\d+\])*)*$|^(\[\d+\])+(\.[A-Za-z0-9_]+(\[\d+\])*)*$',
+);
+
+/// What a text step does to its text.
+const textOps = ['none', 'upper', 'lower', 'trim'];
+
+/// The furthest a date step moves from now, in minutes: a year.
+const dateOffsetLimit = 525600;
+
+void _as(Map<String, Object?> c, String p, IssueCollector i) {
+  final as = c['as'];
+  if (as != null && (as is! String || !runVariablePattern.hasMatch(as))) {
+    i.add('$p.as', 'must be a run variable like %answer');
+  }
+}
+
+bool _runDevice(Object? id) => id is String && runDevicePattern.hasMatch(id);
 
 /// A toggle flips a device's on/off capability, so the capability must be
 /// a toggle that reports its state.
@@ -261,6 +364,10 @@ void _checkToggle(
   IssueCollector i,
   FlowReferences r,
 ) {
+  if (_runDevice(c['deviceId'])) {
+    _string(c, 'capabilityId', p, i);
+    return;
+  }
   final deviceId = _ref(c, 'deviceId', r.devices, 'device', p, i);
   final capabilityId = _string(c, 'capabilityId', p, i);
   if (deviceId == null || capabilityId == null) return;
@@ -283,7 +390,11 @@ void _checkDeviceAction(
   IssueCollector i,
   FlowReferences r,
 ) {
-  final deviceId = _ref(c, 'deviceId', r.devices, 'device', p, i);
+  _as(c, p, i);
+  final runDevice = _runDevice(c['deviceId']);
+  final deviceId = runDevice
+      ? null
+      : _ref(c, 'deviceId', r.devices, 'device', p, i);
   final capabilityId = _string(c, 'capabilityId', p, i);
   final params = c['params'] ?? const {};
   if (params is! Map) {

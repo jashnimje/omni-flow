@@ -26,6 +26,76 @@ abstract final class AutomationIcons {
   static const send = Symbols.arrow_forward_rounded;
   static const stop = Symbols.block_rounded;
   static const dot = Symbols.circle_rounded;
+  static const ask = Symbols.quiz_rounded;
+  static const get = Symbols.output_rounded;
+  static const text = Symbols.text_fields_rounded;
+  static const math = Symbols.calculate_rounded;
+  static const date = Symbols.event_rounded;
+  static const forEach = Symbols.data_array_rounded;
+  static const phone = Symbols.smartphone_rounded;
+  static const app = Symbols.apps_rounded;
+  static const bluetooth = Symbols.bluetooth_rounded;
+  static const screen = Symbols.screen_lock_portrait_rounded;
+  static const dnd = Symbols.do_not_disturb_on_rounded;
+  static const charging = Symbols.battery_charging_full_rounded;
+  static const room = Symbols.meeting_room_rounded;
+  static const look = Symbols.palette_rounded;
+  static const list = Symbols.list_alt_rounded;
+}
+
+/// What a tap on part of a row's sentence edits.
+enum Blank {
+  device('device'),
+  value('what it does'),
+  duration('how long'),
+  title('text'),
+  time('time'),
+  days('days'),
+  start('start time'),
+  end('end time'),
+  automation('automation'),
+
+  /// The step's whole form: steps with many fields.
+  form('step');
+
+  const Blank(this.words);
+
+  /// For the screen reader: "Change device".
+  final String words;
+}
+
+/// A piece of a row's sentence: plain words, or a [blank] a tap edits.
+/// [token] is the inside of a `{{...}}` template it shows in words.
+class WordPart {
+  const WordPart(this.text, {this.blank, this.token});
+
+  final String text;
+  final Blank? blank;
+  final String? token;
+}
+
+String joinParts(List<WordPart> parts) => parts.map((p) => p.text).join();
+
+/// The phone's own triggers (contract section 6), in the words the trigger
+/// picker offers them with.
+abstract final class PhoneKeys {
+  static const appOpened = 'app_opened';
+  static const appClosed = 'app_closed';
+  static const notification = 'notification';
+  static const bluetoothConnected = 'bluetooth_connected';
+  static const bluetoothDisconnected = 'bluetooth_disconnected';
+  static const screenOn = 'screen_on';
+  static const dndOn = 'dnd_on';
+  static const charging = 'charging';
+
+  static const events = {
+    appOpened,
+    appClosed,
+    notification,
+    bluetoothConnected,
+    bluetoothDisconnected,
+  };
+  static const states = {screenOn, dndOn, charging};
 }
 
 const _dayNames = {
@@ -100,6 +170,10 @@ extension ThingWords on Thing {
   bool get isPerson => driver == 'person';
   bool get isTag => driver == 'nfc_tag';
   bool get isPlace => driver == 'place';
+  bool get isPhone => driver == 'phone';
+
+  /// The room it is in, by name, when it has one.
+  String? get room => json['room'] as String?;
 
   IconData get icon => OmniIcons.forDevice(json);
 
@@ -173,7 +247,11 @@ bool isHighRisk(Json capability) =>
 /// Writes triggers, conditions and steps in plain words with the names of
 /// the user's things. The household person reads as "I".
 class RuleWords {
-  RuleWords(this.things, [this.automations = const {}]);
+  RuleWords(
+    this.things, [
+    this.automations = const {},
+    Map<String, String>? tokenLabels,
+  ]) : tokenLabels = tokenLabels ?? {};
 
   final List<Thing> things;
 
@@ -192,12 +270,17 @@ class RuleWords {
       if (t.isTag) t,
   ];
 
+  /// The rooms the devices are in, by name, sorted.
+  late final List<String> rooms = {for (final t in things) ?t.room}.toList()
+    ..sort();
+
   /// The household person when there is only one.
   String? get me => people.length == 1 ? people.single.id : null;
 
   String _who(String id) => id == me ? 'I' : (thing(id)?.name ?? id);
 
-  String _name(String id) => thing(id)?.name ?? id;
+  String _name(String id) =>
+      thing(id)?.name ?? (id.startsWith('{{') ? templateText(id) : id);
 
   String _label(String id, String key) =>
       (thing(id)?.labelOf(key) ?? key).replaceAll('.', ' ').toLowerCase();
@@ -236,6 +319,9 @@ class RuleWords {
     if (th?.isTag == true && t.mode == OnMode.event) {
       return '${_name(t.thing)} is scanned';
     }
+    if (th?.isPhone == true) {
+      if (_phone(t) case final words?) return words;
+    }
     final name = _name(t.thing);
     final unit = th?.unitOf(t.key);
     return switch (t.mode) {
@@ -258,7 +344,58 @@ class RuleWords {
     };
   }
 
+  /// The phone's triggers in words, or null for a key it has no words for.
+  String? _phone(OnTrigger t) {
+    final match = t.match ?? const {};
+    final app = match['package'] is String
+        ? appName(match['package'] as String)
+        : null;
+    final device = match['name'] as String?;
+    String turns(String what) => switch (t.hasTo ? t.to : null) {
+      true => '$what turns on',
+      false => '$what turns off',
+      _ => '$what turns on or off',
+    };
+    return switch (t.key) {
+      PhoneKeys.appOpened => app == null ? 'An app opens' : '$app opens',
+      PhoneKeys.appClosed => app == null ? 'An app closes' : '$app closes',
+      PhoneKeys.notification =>
+        app == null
+            ? 'A notification arrives'
+            : 'A notification arrives from $app',
+      PhoneKeys.bluetoothConnected =>
+        device == null ? 'A Bluetooth device connects' : '$device connects',
+      PhoneKeys.bluetoothDisconnected =>
+        device == null
+            ? 'A Bluetooth device disconnects'
+            : '$device disconnects',
+      PhoneKeys.screenOn => turns('The screen'),
+      PhoneKeys.dndOn => turns('Do Not Disturb'),
+      PhoneKeys.charging => switch (t.hasTo ? t.to : null) {
+        true => 'The phone starts charging',
+        false => 'The phone stops charging',
+        _ => 'The phone starts or stops charging',
+      },
+      _ => null,
+    };
+  }
+
+  IconData _phoneIcon(String key) => switch (key) {
+    PhoneKeys.appOpened || PhoneKeys.appClosed => AutomationIcons.app,
+    PhoneKeys.notification => OmniIcons.notifications,
+    PhoneKeys.bluetoothConnected ||
+    PhoneKeys.bluetoothDisconnected => AutomationIcons.bluetooth,
+    PhoneKeys.screenOn => AutomationIcons.screen,
+    PhoneKeys.dndOn => AutomationIcons.dnd,
+    PhoneKeys.charging => AutomationIcons.charging,
+    _ => AutomationIcons.phone,
+  };
+
+  /// The phone thing, when the engine lists one.
+  Thing? get phone => things.where((t) => t.isPhone).firstOrNull;
+
   IconData triggerIcon(RuleTrigger t) => switch (t) {
+    OnTrigger() when thing(t.thing)?.isPhone == true => _phoneIcon(t.key),
     OnTrigger() when thing(t.thing)?.isPerson == true => OmniIcons.home,
     OnTrigger() when thing(t.thing)?.isTag == true => OmniIcons.tag,
     OnTrigger() => thing(t.thing)?.icon ?? OmniIcons.device,
@@ -334,9 +471,185 @@ class RuleWords {
     UnknownCondition() => OmniIcons.info,
   };
 
+  // Tokens: values from the trigger and earlier steps, as `{{...}}`.
+
+  /// Labels the engine gave for tokens (`%reply.body` -> "Web reply ·
+  /// body"), filled as `rule.tokens` answers arrive.
+  final Map<String, String> tokenLabels;
+
+  /// A token in words: the engine's label, or its name in plain words.
+  String tokenText(String inside) {
+    if (tokenLabels[inside] case final label?) return label;
+    final parts = inside.split('.');
+    final head = parts.first;
+    final name = switch (head) {
+      'msg' => 'Trigger',
+      '%reply' => 'Web reply',
+      '%answer' => 'Answer',
+      '%state' => 'New state',
+      _ when head.startsWith('%') || head.startsWith(r'$') => _capital(
+        head.substring(1).replaceAll('_', ' '),
+      ),
+      _ => head,
+    };
+    final rest = parts.skip(1).join(' ');
+    return rest.isEmpty ? name : '$name · $rest';
+  }
+
+  static final _template = RegExp(r'\{\{([^{}]+)\}\}');
+
+  /// [text] split into plain words and its `{{...}}` tokens in words, each
+  /// part marked as the [blank] it edits.
+  List<WordPart> templateParts(String text, {Blank? blank}) {
+    final out = <WordPart>[];
+    var at = 0;
+    for (final m in _template.allMatches(text)) {
+      if (m.start > at) {
+        out.add(WordPart(text.substring(at, m.start), blank: blank));
+      }
+      final inside = m.group(1)!.trim();
+      out.add(WordPart(tokenText(inside), blank: blank, token: inside));
+      at = m.end;
+    }
+    if (at < text.length || out.isEmpty) {
+      out.add(WordPart(text.substring(at), blank: blank));
+    }
+    return out;
+  }
+
+  /// [text] with its tokens in words.
+  String templateText(String text) => joinParts(templateParts(text));
+
+  // Sentences with blanks.
+
+  /// A trigger as words, with the parts a tap edits on their own.
+  List<WordPart> triggerParts(RuleTrigger t) => switch (t) {
+    TimeTrigger() => [
+      const WordPart('At '),
+      WordPart(t.at, blank: Blank.time),
+      if (t.days.isNotEmpty) ...[
+        const WordPart(' '),
+        WordPart(daysText(t.days), blank: Blank.days),
+      ],
+    ],
+    _ => [WordPart(trigger(t))],
+  };
+
+  /// A condition as words, with the parts a tap edits on their own.
+  List<WordPart> conditionParts(RuleCondition c) => switch (c) {
+    BetweenCondition() => [
+      const WordPart('Between '),
+      WordPart(c.start, blank: Blank.start),
+      const WordPart(' and '),
+      WordPart(c.end, blank: Blank.end),
+    ],
+    _ => [WordPart(condition(c))],
+  };
+
+  /// A step as words, with the parts a tap edits on their own: the device,
+  /// what it does, how long, the text. [step] is these parts joined.
+  List<WordPart> stepParts(RuleStep s) => switch (s) {
+    DoStep() => [
+      WordPart(_name(s.thing), blank: Blank.device),
+      const WordPart(' · '),
+      WordPart(_doWhat(s.thing, s.capability, s.params), blank: Blank.value),
+    ],
+    ToggleStep() => [
+      const WordPart('Toggle '),
+      WordPart(_name(s.thing), blank: Blank.device),
+      WordPart(_capSuffix(s.thing, s.capability)),
+    ],
+    WaitStep() => [
+      const WordPart('Wait '),
+      WordPart(durationText(s.ms), blank: Blank.duration),
+    ],
+    NotifyStep() => [
+      const WordPart('Notify: '),
+      ...templateParts(s.title, blank: Blank.title),
+    ],
+    SetStep() => [
+      WordPart(
+        'Set ${s.name.replaceFirst(RegExp(r'^[$%]'), '')} to ',
+        blank: Blank.form,
+      ),
+      if (s.value case final String v)
+        ...templateParts(v, blank: Blank.value)
+      else
+        WordPart(valueText(s.value), blank: Blank.value),
+    ],
+    RunStep() => [
+      const WordPart('Run '),
+      WordPart(
+        automations[s.automationId] ?? s.automationId,
+        blank: Blank.automation,
+      ),
+    ],
+    AskStep() => [
+      const WordPart('Ask: '),
+      ...templateParts(s.title, blank: Blank.form),
+      WordPart(
+        s.asksForText
+            ? ', and wait for a reply'
+            : ', with ${orList(s.choices)}',
+      ),
+    ],
+    GetStep() => [
+      const WordPart('Get '),
+      WordPart(s.path.isEmpty ? 'the value' : s.path, blank: Blank.form),
+      const WordPart(' from '),
+      ...templateParts(s.from, blank: Blank.form),
+    ],
+    TextStep() => [
+      const WordPart('Make text '),
+      ...templateParts(s.value, blank: Blank.form),
+      if (_textOps[s.op] case final op?) WordPart(' $op'),
+    ],
+    MathStep() => [
+      const WordPart('Work out '),
+      ...templateParts(s.expr, blank: Blank.form),
+    ],
+    DateStep() => [
+      const WordPart('Get the time '),
+      if ((s.offsetMinutes ?? 0) != 0)
+        WordPart(
+          '${durationText(s.offsetMinutes!.abs() * 60000)} '
+          '${s.offsetMinutes! < 0 ? 'ago ' : 'from now '}',
+        ),
+      const WordPart('as '),
+      WordPart(s.format, blank: Blank.form),
+    ],
+    ForEachStep() => [
+      const WordPart('Repeat with each '),
+      ...switch (s.over) {
+        _ when s.room != null => [
+          const WordPart('device in '),
+          WordPart(s.room!, blank: Blank.form),
+        ],
+        final List items => [
+          const WordPart('of '),
+          WordPart(andList([for (final i in items) valueText(i)])),
+        ],
+        final String over => [
+          const WordPart('item in '),
+          ...templateParts(over, blank: Blank.form),
+        ],
+        _ => [const WordPart('item')],
+      },
+    ],
+    _ => [WordPart(_plainStep(s))],
+  };
+
+  static const _textOps = {
+    'upper': 'in capitals',
+    'lower': 'in small letters',
+    'trim': 'without spaces at the ends',
+  };
+
   // Steps.
 
-  String step(RuleStep s) => switch (s) {
+  String step(RuleStep s) => joinParts(stepParts(s));
+
+  String _plainStep(RuleStep s) => switch (s) {
     DoStep() => _do(s.thing, s.capability, s.params),
     ToggleStep() =>
       'Toggle ${_name(s.thing)}${_capSuffix(s.thing, s.capability)}',
@@ -360,6 +673,12 @@ class RuleWords {
       'Set ${s.name.replaceFirst(RegExp(r'^[$%]'), '')} to ${valueText(s.value)}',
     RunStep() => 'Run ${automations[s.automationId] ?? s.automationId}',
     KeepStep() => keep(s),
+    AskStep() ||
+    GetStep() ||
+    TextStep() ||
+    MathStep() ||
+    DateStep() ||
+    ForEachStep() => joinParts(stepParts(s)),
     UnknownStep() => 'A step made outside this app',
   };
 
@@ -390,7 +709,11 @@ class RuleWords {
   }
 
   /// "TV · power on", "Hall bulb · brightness 70%".
-  String _do(String id, String capability, Json params) {
+  String _do(String id, String capability, Json params) =>
+      '${_name(id)} · ${_doWhat(id, capability, params)}';
+
+  /// "power on", "brightness 70%": what a do step tells the device.
+  String _doWhat(String id, String capability, Json params) {
     final th = thing(id);
     final cap = th?.capability(capability);
     final label = '${cap?['label'] ?? capability}'.toLowerCase();
@@ -402,7 +725,7 @@ class RuleWords {
           '${e.key} ${valueText(e.value, unit: _paramUnit(cap, e.key))}',
     ];
     final unitless = shown.map((p) => p.replaceAll(' %', '%')).join(', ');
-    return '${_name(id)} · $label${unitless.isEmpty ? '' : ' $unitless'}';
+    return '$label${unitless.isEmpty ? '' : ' $unitless'}';
   }
 
   static String? _paramUnit(Json? cap, String key) {
@@ -432,6 +755,12 @@ class RuleWords {
     SetStep() => AutomationIcons.variable,
     RunStep() => OmniIcons.automations,
     KeepStep() => AutomationIcons.keep,
+    AskStep() => AutomationIcons.ask,
+    GetStep() => AutomationIcons.get,
+    TextStep() => AutomationIcons.text,
+    MathStep() => AutomationIcons.math,
+    DateStep() => AutomationIcons.date,
+    ForEachStep() => AutomationIcons.forEach,
     UnknownStep() => OmniIcons.info,
   };
 

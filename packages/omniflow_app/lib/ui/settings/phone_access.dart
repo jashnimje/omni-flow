@@ -20,6 +20,10 @@ class PhoneAccessState {
     this.nfc,
     this.batteryUnrestricted,
     this.running,
+    this.usageAccess,
+    this.notificationAccess,
+    this.bluetooth,
+    this.bluetoothNeeded = false,
   });
 
   final bool? localNetwork;
@@ -41,8 +45,68 @@ class PhoneAccessState {
   /// Whether the background service runs.
   final bool? running;
 
+  /// Usage access, which "An app opens" triggers need to see the app on
+  /// screen.
+  final bool? usageAccess;
+
+  /// Notification access, for "A notification arrives from" triggers.
+  final bool? notificationAccess;
+
+  /// Bluetooth connect, for "A Bluetooth device connects" triggers.
+  final bool? bluetooth;
+
+  /// Whether this Android asks for Bluetooth connect at all (12 on).
+  final bool bluetoothNeeded;
+
   bool get backgroundOk => running != false && batteryUnrestricted != false;
 }
+
+/// Asks for what the phone triggers need. The rule editor calls these when
+/// the person picks the trigger, and This phone has a row for each. Usage
+/// and notification access open their system page, so the answer is known
+/// only when the person comes back. Safe off Android: each answers false.
+abstract interface class TriggerAccess {
+  /// "An app opens": the system's usage access page.
+  Future<bool> askUsageAccess();
+
+  /// "A notification arrives from": the system's notification access page.
+  Future<bool> askNotificationAccess();
+
+  /// "A Bluetooth device connects": the Bluetooth connect permission.
+  Future<bool> askBluetooth();
+
+  /// Opens the picker for the three Quick Settings tiles.
+  Future<bool> pickTiles();
+
+  /// Opens the picker for up to four launcher shortcuts.
+  Future<bool> pickShortcuts();
+}
+
+class AndroidTriggerAccess implements TriggerAccess {
+  const AndroidTriggerAccess([this.permissions = const Permissions()]);
+
+  final Permissions permissions;
+
+  @override
+  Future<bool> askUsageAccess() => permissions.call('usageAccess');
+
+  @override
+  Future<bool> askNotificationAccess() =>
+      permissions.call('notificationAccess');
+
+  @override
+  Future<bool> askBluetooth() => permissions.call('bluetooth');
+
+  @override
+  Future<bool> pickTiles() => permissions.call('pickTiles');
+
+  @override
+  Future<bool> pickShortcuts() => permissions.call('pickShortcuts');
+}
+
+final triggerAccessProvider = Provider<TriggerAccess>(
+  (ref) => const AndroidTriggerAccess(),
+);
 
 /// Reads and asks for what the screens need. Every call is safe off
 /// Android: it answers unknown or false and never throws.
@@ -95,6 +159,10 @@ class AndroidPhoneAccess implements PhoneAccess {
         () => FlutterForegroundTask.isIgnoringBatteryOptimizations,
       ),
       running: await _try(() => FlutterForegroundTask.isRunningService),
+      usageAccess: status?['usageAccess'] as bool?,
+      notificationAccess: status?['notificationAccess'] as bool?,
+      bluetooth: status?['bluetooth'] as bool?,
+      bluetoothNeeded: status?['bluetoothNeeded'] == true,
     );
   }
 
@@ -237,6 +305,101 @@ class _PhoneAccessPageState extends ConsumerState<PhoneAccessPage> {
     if (!ok) showMessage(refused);
   }
 
+  Future<void> _askTrigger(
+    Future<bool> Function(TriggerAccess) ask,
+    String refused,
+  ) async {
+    final ok = await ask(ref.read(triggerAccessProvider));
+    ref.invalidate(phoneAccessStateProvider);
+    if (!ok) showMessage(refused);
+  }
+
+  /// The phone trigger permissions, then the Run from anywhere pickers.
+  /// Hidden where Android did not say (off the phone).
+  List<Widget> _triggerRows(PhoneAccessState state) => [
+    if (state.usageAccess != null)
+      PermissionRow(
+        key: const ValueKey('permission-usage-access'),
+        id: 'usage-access',
+        icon: OmniIcons.phone,
+        title: 'Usage access',
+        why:
+            'Lets "An app opens" automations see which app is on screen. '
+            'OmniFlow checks every few seconds while the screen is on, and '
+            'only for your automations. Turn on OmniFlow on the page that '
+            'opens.',
+        granted: state.usageAccess,
+        grantLabel: 'Settings',
+        onGrant: () => _askTrigger(
+          (a) => a.askUsageAccess(),
+          'Open Settings, Usage access, and turn on OmniFlow.',
+        ),
+      ),
+    if (state.notificationAccess != null)
+      PermissionRow(
+        key: const ValueKey('permission-notification-access'),
+        id: 'notification-access',
+        icon: OmniIcons.notifications,
+        title: 'Notification access',
+        why:
+            'Lets "A notification arrives from" automations start when an '
+            'app you pick posts one. The text stays on this phone. Turn on '
+            'OmniFlow on the page that opens.',
+        granted: state.notificationAccess,
+        grantLabel: 'Settings',
+        onGrant: () => _askTrigger(
+          (a) => a.askNotificationAccess(),
+          'Open Settings, Notification access, and turn on OmniFlow.',
+        ),
+      ),
+    if (state.bluetooth != null)
+      PermissionRow(
+        key: const ValueKey('permission-bluetooth'),
+        id: 'bluetooth',
+        icon: OmniIcons.bluetooth,
+        title: 'Bluetooth devices',
+        why:
+            'Lets "A Bluetooth device connects" automations know when your '
+            'headphones, car or watch connect.',
+        granted: state.bluetooth,
+        needed: state.bluetoothNeeded,
+        onGrant: () => _askTrigger(
+          (a) => a.askBluetooth(),
+          'Without it OmniFlow cannot tell when a Bluetooth device '
+          'connects. You can allow it in the system settings.',
+        ),
+      ),
+    if (state.usageAccess != null) ...[
+      const OmniSectionHeader('Run from anywhere'),
+      OmniListRow(
+        key: const ValueKey('pick-tiles'),
+        subtitleLines: 3,
+        icon: OmniIcons.automations,
+        title: 'Quick Settings tiles',
+        subtitle:
+            'Pick what each of the three OmniFlow tiles runs. A long press '
+            'on a tile opens this too.',
+        onTap: () => _askTrigger(
+          (a) => a.pickTiles(),
+          'OmniFlow could not open the tile picker.',
+        ),
+      ),
+      OmniListRow(
+        key: const ValueKey('pick-shortcuts'),
+        subtitleLines: 3,
+        icon: OmniIcons.star,
+        title: 'Launcher shortcuts',
+        subtitle:
+            'Pick up to four favourites to show when you long press the '
+            'OmniFlow icon.',
+        onTap: () => _askTrigger(
+          (a) => a.pickShortcuts(),
+          'OmniFlow could not open the shortcut picker.',
+        ),
+      ),
+    ],
+  ];
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(phoneAccessStateProvider).value;
@@ -369,6 +532,7 @@ class _PhoneAccessPageState extends ConsumerState<PhoneAccessPage> {
               'announce.',
             ),
           ),
+          ..._triggerRows(state),
           const SizedBox(height: OmniSpace.lg),
           OmniButton.ghost(
             key: const ValueKey('open-app-settings'),
