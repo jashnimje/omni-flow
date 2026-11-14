@@ -162,6 +162,8 @@ void main() {
     expect(json, {
       'id': 7,
       'askId': 'a',
+      'channel': askChannel,
+      'group': 'ask/a',
       'title': 'T',
       'actions': ['Run'],
       'reply': false,

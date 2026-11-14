@@ -10,13 +10,15 @@ class OmniProgressBar extends StatelessWidget {
     this.value,
     this.height = 6,
     this.semanticLabel,
-    this.color = OmniColors.accent,
+    this.color,
   });
 
   final double? value;
   final double height;
   final String? semanticLabel;
-  final Color color;
+
+  /// The fill. Defaults to the accent.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -29,8 +31,8 @@ class OmniProgressBar extends StatelessWidget {
         child: LinearProgressIndicator(
           value: still ? 0.3 : v,
           minHeight: height,
-          color: color,
-          backgroundColor: OmniColors.raised,
+          color: color ?? OmniPalette.of(context).accent,
+          backgroundColor: OmniPalette.of(context).raised,
           borderRadius: BorderRadius.circular(height / 2),
         ),
       ),
@@ -60,8 +62,10 @@ class OmniStepBar extends StatelessWidget {
               duration: OmniMotion.of(context),
               height: 4,
               decoration: BoxDecoration(
-                color: i < current ? OmniColors.accent : OmniColors.raised,
-                borderRadius: BorderRadius.circular(2),
+                color: i < current
+                    ? OmniPalette.of(context).accent
+                    : OmniPalette.of(context).raised,
+                borderRadius: BorderRadius.circular(OmniShape.xs / 2),
               ),
             ),
           ),

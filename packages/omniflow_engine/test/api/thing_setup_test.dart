@@ -126,7 +126,11 @@ void main() {
         'configure:entityId',
         'configure:domain',
       ]);
-      expect(setupOf('tuya_plug'), ['configure:devId', 'secret:localKey']);
+      expect(setupOf('tuya_plug'), [
+        'configure:devId',
+        'secret:localKey',
+        'configure:version?',
+      ]);
       expect(setupOf('omniflow_board'), ['configure:pins']);
       expect(setupOf('zigbee2mqtt_device').first, 'configure:friendlyName');
       expect(setupOf('philips_wiz_udp'), isEmpty);

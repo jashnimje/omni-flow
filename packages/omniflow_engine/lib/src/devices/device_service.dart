@@ -163,7 +163,10 @@ class DeviceService {
       device,
       manifest,
       capability.command,
-      {...validated, 'value': ?capability.toDevice(validated['value'])},
+      {
+        ...capability.withDerived(validated, device.settings),
+        'value': ?capability.toDevice(validated['value']),
+      },
       allowPairing: allowPairing,
     );
     final state = _optimisticState(current.state, capability, validated);
@@ -186,14 +189,28 @@ class DeviceService {
         if (poll == null || poll['command'] == null) {
           throw DeviceNotFoundException('${manifest.id} has no statePoll');
         }
-        final (current, reply) = await _sendHealing(
+        var (current, reply) = await _sendHealing(
           device,
           manifest,
           poll['command'],
           const {},
           allowPairing: allowPairing,
         );
-        final polled = _extractObject(reply.json, poll['jsonPath'] as String?);
+        var polled = _extractObject(reply.json, poll['jsonPath'] as String?);
+        // `also` lists more reads whose objects merge into the first, for
+        // a device that spreads its state over several requests.
+        for (final extra in (poll['also'] as List?) ?? const []) {
+          final (moved, more) = await _sendHealing(
+            current,
+            manifest,
+            (extra as Map)['command'],
+            const {},
+            allowPairing: allowPairing,
+          );
+          current = moved;
+          final part = _extractObject(more.json, extra['jsonPath'] as String?);
+          if (part != null) polled = {...?polled, ...part};
+        }
         final keys = {
           for (final c in manifest.capabilities) ?stateKeyOf(c.stateJsonPath),
         };

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../api/tv_calls.dart';
+import '../../state/pending_power.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import '../tv/tv_page.dart' show Keycodes;
@@ -12,24 +16,54 @@ import 'device_text.dart';
 /// sheet and the device page: sliders for levels and warmth, colour
 /// swatches, and for a TV its volume, mute and a five-key remote.
 
-/// Switches [d] on or off through its first toggle capability.
+/// Whether [d] shows as on, counting a switch the user just flipped that
+/// the device has not confirmed yet.
+bool shownOn(WidgetRef ref, DeviceView d) =>
+    ref.watch(pendingPowerProvider)[d.id]?.on ?? isLit(d);
+
+/// Whether a switch of [d] is still on its way to the device.
+bool powerPending(WidgetRef ref, DeviceView d) =>
+    ref.watch(pendingPowerProvider)[d.id]?.sending ?? false;
+
+/// Switches [d] on or off through its first toggle capability. The tile
+/// flips at once and shimmers until the engine answers. When the call
+/// fails it flips back and says why, with Try again.
 Future<void> togglePower(WidgetRef ref, DeviceView d) async {
   final cap = d.capabilityOf('toggle');
   if (cap == null) return;
-  await ref.read(engineApiProvider).invoke(d.id, '${cap['id']}', {
-    'value': d.isOn != true,
-  });
+  final pending = ref.read(pendingPowerProvider.notifier);
+  final want = !(ref.read(pendingPowerProvider)[d.id]?.on ?? isLit(d));
+  unawaited(HapticFeedback.lightImpact());
+  pending.sending(d.id, want);
+  final reply = await EngineApi(ref.read(engineClientProvider))
+      .invoke(d.id, '${cap['id']}', {'value': want});
+  if (reply.ok) {
+    pending.accepted(d.id);
+    return;
+  }
+  pending.clear(d.id);
+  unawaited(HapticFeedback.heavyImpact());
+  showMessage(
+    'Could not turn ${d.name} ${want ? 'on' : 'off'}. '
+            '${reply.failure?.message ?? ''}'
+        .trim(),
+    action: 'Try again',
+    onAction: () => togglePower(ref, d),
+  );
 }
 
 /// Wakes a TV that is not on, and puts one that is on to sleep.
-Future<void> toggleTv(WidgetRef ref, DeviceView d) => callEngine(
-  ref,
-  TvCalls.key,
-  TvCalls.keyArgs(
-    d.id,
-    keycode: TvState.ofDevice(d.json).isOn ? Keycodes.sleep : Keycodes.wakeup,
-  ),
-);
+Future<void> toggleTv(WidgetRef ref, DeviceView d) {
+  unawaited(HapticFeedback.lightImpact());
+  return callEngine(
+    ref,
+    TvCalls.key,
+    TvCalls.keyArgs(
+      d.id,
+      keycode: TvState.ofDevice(d.json).isOn ? Keycodes.sleep : Keycodes.wakeup,
+    ),
+  );
+}
 
 /// The power switch of a sheet header: a toggle, or a TV's sleep and wake.
 class PowerSwitch extends ConsumerWidget {
@@ -46,7 +80,7 @@ class PowerSwitch extends ConsumerWidget {
         key: ValueKey(
           tv ? 'tv-card-power-${device.id}' : 'quick-power-${device.id}',
         ),
-        value: isLit(device),
+        value: shownOn(ref, device),
         onChanged: device.online || tv
             ? (_) => tv ? toggleTv(ref, device) : togglePower(ref, device)
             : null,
@@ -55,9 +89,13 @@ class PowerSwitch extends ConsumerWidget {
   }
 }
 
-const _warmth = LinearGradient(colors: [Color(0xFFFFB86B), Color(0xFFFFE7C2)]);
-const _cool = LinearGradient(colors: [Color(0xFFFFE7C2), Color(0xFFFFB86B)]);
-const _onWarmth = Color(0xFF2A1A00);
+const _warmth = LinearGradient(
+  colors: [OmniColors.warmWhite, OmniColors.coolWhite],
+);
+const _cool = LinearGradient(
+  colors: [OmniColors.coolWhite, OmniColors.warmWhite],
+);
+const _onWarmth = OmniColors.onWarmWhite;
 
 /// Sliders for every level and warmth, then the colour swatches.
 class LightControls extends ConsumerWidget {

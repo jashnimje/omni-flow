@@ -31,6 +31,7 @@ void main() {
     ) async {
       var taps = 0;
       var holds = 0;
+      var toggles = 0;
       await pumpDesign(
         tester,
         SizedBox(
@@ -41,28 +42,68 @@ void main() {
             state: '80% · warm',
             on: true,
             level: 0.8,
-            tapHint: 'Turns it off',
+            tint: const Color(0xFFFFD93D),
+            tapHint: 'Opens it',
+            iconKey: const ValueKey('icon'),
+            iconLabel: 'Turn off Desk lamp',
+            onIconTap: () => toggles++,
             onTap: () => taps++,
             onLongPress: () => holds++,
           ),
         ),
       );
       expect(find.text('Desk lamp'), findsOneWidget);
-      expect(find.byType(OmniProgressBar), findsOneWidget);
+      expect(find.byType(FractionallySizedBox), findsOneWidget);
       expect(
         tester.getSemantics(find.byType(OmniTile)),
         matchesSemantics(
           label: 'Desk lamp, 80% · warm',
-          hint: 'Turns it off',
+          hint: 'Opens it',
           isButton: true,
           hasTapAction: true,
           hasLongPressAction: true,
           onLongPressHint: 'Open controls',
         ),
       );
-      await tester.tap(find.byType(OmniTile));
-      await tester.longPress(find.byType(OmniTile));
-      expect((taps, holds), (1, 1));
+      expect(
+        tester.getSemantics(find.byKey(const ValueKey('icon'))),
+        matchesSemantics(
+          label: 'Turn off Desk lamp',
+          isButton: true,
+          hasToggledState: true,
+          isToggled: true,
+          hasTapAction: true,
+        ),
+      );
+      await tester.tap(find.text('Desk lamp'));
+      await tester.longPress(find.text('Desk lamp'));
+      await tester.tap(find.byKey(const ValueKey('icon')));
+      expect((taps, holds, toggles), (1, 1, 1));
+      // A bright yellow light gives a muted tile its text still reads on.
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+    });
+
+    testWidgets('a pending switch shimmers, then rests', (tester) async {
+      Widget tile({required bool pending}) => MaterialApp(
+        theme: omniTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 180,
+            child: OmniTile(
+              icon: OmniIcons.light,
+              name: 'Desk lamp',
+              on: true,
+              pending: pending,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(tile(pending: true));
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(find.byType(ShaderMask), findsOneWidget);
+      await tester.pumpWidget(tile(pending: false));
+      await tester.pump();
+      expect(find.byType(ShaderMask), findsNothing);
     });
 
     testWidgets('an offline tile keeps its name readable in muted grey', (

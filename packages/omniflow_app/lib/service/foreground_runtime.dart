@@ -21,11 +21,28 @@ import 'usb_links.dart';
 /// The id of the notification's Stop button.
 const stopButtonId = 'stop';
 
+/// The always-on service notification. The service keeps the options it
+/// started with, even across an app update, so the app sets them again on
+/// every start.
+const serviceTitle = 'OmniFlow is running';
+const serviceText = 'Flows keep running with the screen off';
+const serviceIcon = NotificationIcon(
+  metaDataName: 'com.jashnm.omniflow_app.SERVICE_ICON',
+  backgroundColor: Color(0xFF00F5D4),
+);
+const serviceButtons = [NotificationButton(id: stopButtonId, text: 'Stop')];
+
 /// Starts and checks the Android service, so tests can stand in for it.
 abstract interface class ServiceControl {
   Future<bool> get isRunning;
   Future<void> start();
   Future<void> restart();
+}
+
+/// A service whose notification can be set again to the current title,
+/// text, icon and buttons.
+abstract interface class RefreshableService {
+  Future<void> refreshNotification();
 }
 
 /// Connects the UI to the engine in the foreground service, starting the
@@ -42,6 +59,7 @@ Future<Started> connectToService({
     final client = ServiceEngineClient(link());
     try {
       final hubError = await client.connect(timeout: runningTimeout);
+      await _refresh(control);
       return (client: client, hubError: hubError);
     } on Object {
       await client.close();
@@ -53,6 +71,7 @@ Future<Started> connectToService({
   final client = ServiceEngineClient(link());
   try {
     final hubError = await client.connect(timeout: timeout);
+    await _refresh(control);
     return (client: client, hubError: hubError);
   } on Object {
     await client.close();
@@ -60,10 +79,22 @@ Future<Started> connectToService({
   }
 }
 
+/// A notification that does not refresh still shows, so a failure here
+/// never stops the app from connecting.
+Future<void> _refresh(ServiceControl control) async {
+  if (control is! RefreshableService) return;
+  final RefreshableService service = control as RefreshableService;
+  try {
+    await service.refreshNotification();
+  } on Object catch (e) {
+    debugPrint('OmniFlow service notification not refreshed: $e');
+  }
+}
+
 /// The service through flutter_foreground_task. The task runs in its own
 /// Flutter engine and isolate, so the UI reaches it only through
 /// [ForegroundTaskLink].
-class ForegroundServiceControl implements ServiceControl {
+class ForegroundServiceControl implements ServiceControl, RefreshableService {
   const ForegroundServiceControl();
 
   static const _serviceId = 7101;
@@ -79,18 +110,26 @@ class ForegroundServiceControl implements ServiceControl {
       await FlutterForegroundTask.startService(
         serviceId: _serviceId,
         serviceTypes: const [ForegroundServiceTypes.connectedDevice],
-        notificationTitle: 'OmniFlow is running',
-        notificationText: 'Flows keep running with the screen off',
-        notificationIcon: const NotificationIcon(
-          metaDataName: 'com.jashnm.omniflow_app.SERVICE_ICON',
-          backgroundColor: Color(0xFF00F5D4),
-        ),
-        notificationButtons: const [
-          NotificationButton(id: stopButtonId, text: 'Stop'),
-        ],
+        notificationTitle: serviceTitle,
+        notificationText: serviceText,
+        notificationIcon: serviceIcon,
+        notificationButtons: serviceButtons,
         callback: startOmniService,
       ),
     );
+  }
+
+  /// No callback, so the running task is not restarted: only the
+  /// notification changes.
+  @override
+  Future<void> refreshNotification() async {
+    final result = await FlutterForegroundTask.updateService(
+      notificationTitle: serviceTitle,
+      notificationText: serviceText,
+      notificationIcon: serviceIcon,
+      notificationButtons: serviceButtons,
+    );
+    if (result case ServiceRequestFailure(:final error)) throw error;
   }
 
   @override

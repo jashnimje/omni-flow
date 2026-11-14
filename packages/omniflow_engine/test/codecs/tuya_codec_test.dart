@@ -124,10 +124,10 @@ void main() {
     });
   });
 
-  test('a local key must be 16 bytes, and only 3.3 is implemented', () {
+  test('a local key must be 16 bytes, and the version must be known', () {
     expect(() => TuyaCodec('short'), throwsArgumentError);
     expect(
-      () => TuyaCodec('0123456789abcdef', version: '3.5'),
+      () => TuyaCodec('0123456789abcdef', version: '3.2'),
       throwsUnsupportedError,
     );
   });

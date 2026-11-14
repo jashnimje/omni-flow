@@ -39,11 +39,17 @@ enum TvTab {
   const TvTab(this.label);
 
   final String label;
+
+  /// The three a TV is used for every day, as chips. The rest sit under
+  /// More.
+  static const main = [remote, screen, apps];
+
+  bool get isMain => main.contains(this);
 }
 
 /// The TV control centre (4.1 to 4.5): the live header on every tab, then
-/// Remote, Apps, Settings, Files and Console. A tab is built the first time
-/// it is opened and kept after, so its list and scroll survive a switch.
+/// Remote, Screen and Apps as tabs, with System, Files, Settings and Console
+/// under More. A tab is built the first time it is opened and kept after, so its list and scroll survive a switch.
 class TvPage extends ConsumerStatefulWidget {
   const TvPage({
     super.key,
@@ -74,6 +80,47 @@ class _TvPageState extends ConsumerState<TvPage> {
   void dispose() {
     tv.dispose();
     super.dispose();
+  }
+
+  void _open(TvTab tab) => setState(() {
+    _tab = tab;
+    _opened.add(tab);
+  });
+
+  /// The tabs that are not chips, as a sheet to pick one from.
+  Future<void> _more() async {
+    final picked = await showOmniSheet<TvTab>(
+      context,
+      builder: (sheet) => OmniSheet(
+        title: 'More',
+        children: [
+          for (final t in TvTab.values)
+            if (!t.isMain)
+              OmniListRow(
+                key: ValueKey('tv-more-${t.name}'),
+                icon: switch (t) {
+                  TvTab.system => OmniIcons.system,
+                  TvTab.files => OmniIcons.storage,
+                  TvTab.settings => OmniIcons.settings,
+                  _ => OmniIcons.terminal,
+                },
+                title: t.label,
+                subtitle: switch (t) {
+                  TvTab.system => 'how it is doing, what runs on it, restart',
+                  TvTab.files => 'the files on the TV, to and from this phone',
+                  TvTab.settings => 'change settings on the TV',
+                  _ => 'run commands on the TV, for experts',
+                },
+                trailing: _tab == t
+                    ? const Icon(OmniIcons.check, color: OmniColors.accent)
+                    : null,
+                chevron: _tab != t,
+                onTap: () => Navigator.of(sheet).pop(t),
+              ),
+        ],
+      ),
+    );
+    if (picked != null && mounted) _open(picked);
   }
 
   Widget _body(TvTab tab) => switch (tab) {
@@ -155,25 +202,29 @@ class _TvPageState extends ConsumerState<TvPage> {
                       ),
                     ),
                   TvHeader(tv: tv),
-                  // Seven tabs do not fit a segmented bar on a phone, so
-                  // they scroll as chips.
                   SingleChildScrollView(
                     key: const ValueKey('tv-tabs'),
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        for (final t in TvTab.values) ...[
+                        for (final t in TvTab.main) ...[
                           OmniFilterChip(
                             key: ValueKey('tv-tab-${t.name}'),
                             label: t.label,
                             selected: _tab == t,
-                            onTap: () => setState(() {
-                              _tab = t;
-                              _opened.add(t);
-                            }),
+                            onTap: () => _open(t),
                           ),
                           const SizedBox(width: 6),
                         ],
+                        // Names the tab it is showing, so it is clear
+                        // where you are.
+                        OmniFilterChip(
+                          key: const ValueKey('tv-tab-more'),
+                          label: _tab.isMain ? 'More' : 'More: ${_tab.label}',
+                          icon: OmniIcons.more,
+                          selected: !_tab.isMain,
+                          onTap: _more,
+                        ),
                       ],
                     ),
                   ),

@@ -88,7 +88,7 @@ void main() {
   test('thing.add rejects an unknown method, driver or window', () async {
     for (final args in [
       {
-        'methods': ['ssdp'],
+        'methods': ['ble'],
       },
       {
         'drivers': ['nope'],
@@ -208,7 +208,7 @@ void main() {
     expect((added['device'] as Map)['settings'], {'devId': 'fixturegwid0001'});
     final next = nextOf(added);
     expect(next['step'], 'secret');
-    expect(next['remaining'], ['secret:localKey']);
+    expect(next['remaining'], ['secret:localKey', 'configure:version?']);
   });
 
   test('a board from a hello is configured with its pins', () async {

@@ -16,6 +16,7 @@ import 'engine_flow_host.dart';
 import 'error_of.dart';
 import 'flow_commands.dart';
 import 'home_commands.dart';
+import 'home_stats_commands.dart';
 import 'host_key_commands.dart';
 import 'hub_runtime.dart';
 import 'link_commands.dart';
@@ -26,6 +27,7 @@ import 'state_commands.dart';
 import 'stored_flows.dart';
 import 'things_runtime.dart';
 import 'tv_commands.dart';
+import 'tv_pointer_commands.dart';
 import '../dag/flow_engine.dart';
 import '../devices/adb/adb_channel.dart';
 import '../devices/board.dart';
@@ -623,10 +625,12 @@ class OmniEngine {
     ..._organizeCommands.commands,
     'presence.set': _stateCommands.presenceSet,
     ..._homeCommands.commands,
+    ...HomeStatsCommands(_core).commands,
     ..._backupCommands.commands,
     'secret.set': _deviceCommands.secretSet,
     'web.secret.set': _deviceCommands.webSecretSet,
     ..._tvCommands.commands,
+    ...TvPointerCommands(_core, _tvCommands).commands,
   };
 
   Iterable<String> get commandNames => _commands.keys;

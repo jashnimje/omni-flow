@@ -70,6 +70,10 @@ const discoveryMethods = {
 /// hyphens, then `._tcp` or `._udp`.
 final mdnsServicePattern = RegExp(r'^_[A-Za-z0-9-]{1,15}\._(tcp|udp)$');
 
+/// SSDP search targets are URNs or short `vendor:service` names, never
+/// header text, so a manifest cannot add lines to the M-SEARCH.
+final ssdpTargetPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$');
+
 /// How a device of a driver is paired, which `device.pair` runs.
 enum PairingMethod {
   /// The TV shows "Allow USB debugging?" for the engine's ADB key.
@@ -363,6 +367,13 @@ class DriverManifest {
           issues.add('$path.idInstance', 'cannot be used with idTxt');
         }
       }
+      if (entry['method'] == 'ssdp') {
+        final st = issues.requiredString(config, 'st', path);
+        if (st != null && !ssdpTargetPattern.hasMatch(st)) {
+          issues.add('$path.st', 'must be a search target like roku:ecp');
+        }
+        issues.optionalString(config, 'idHeader', path);
+      }
       discovery.add(
         DiscoverySpec(
           entry['method'] as String,
@@ -462,6 +473,22 @@ class DriverManifest {
     final statePoll = issues.optionalMap(map, 'statePoll', root);
     issues.jsonPath(statePush?['jsonPath'], '$root.statePush.jsonPath');
     issues.jsonPath(statePoll?['jsonPath'], '$root.statePoll.jsonPath');
+    final also = statePoll?['also'];
+    if (also != null) {
+      if (also is! List || also.any((e) => e is! Map || e['command'] == null)) {
+        issues.add(
+          '$root.statePoll.also',
+          'must be a list of {command, jsonPath} reads',
+        );
+      } else {
+        for (var i = 0; i < also.length; i++) {
+          issues.jsonPath(
+            (also[i] as Map)['jsonPath'],
+            '$root.statePoll.also[$i].jsonPath',
+          );
+        }
+      }
+    }
 
     if (issues.hasIssues ||
         id == null ||

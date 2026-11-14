@@ -4,6 +4,7 @@ import '../discovery.dart';
 import '../../manifest/driver_manifest.dart';
 import 'board_hellos.dart';
 import 'mdns_discovery.dart';
+import 'ssdp_discovery.dart';
 import 'tuya_broadcast.dart';
 
 /// Asks every USB serial port whether it is a device of [driver]. Returns
@@ -20,6 +21,7 @@ const addMethods = {
   'udp_broadcast',
   mdnsMethod,
   tuyaBroadcastMethod,
+  ssdpMethod,
   serialMethod,
   helloMethod,
 };

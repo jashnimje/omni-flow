@@ -16,15 +16,17 @@ Future<T?> showOmniSheet<T>(
   isDismissible: dismissible,
   enableDrag: dismissible,
   useSafeArea: true,
-  backgroundColor: OmniColors.sheet,
+  backgroundColor: OmniPalette.of(context).sheet,
   barrierColor: OmniColors.scrim,
   showDragHandle: false,
   sheetAnimationStyle: OmniMotion.reduced(context)
       ? AnimationStyle.noAnimation
       : const AnimationStyle(duration: OmniMotion.slow),
-  shape: const RoundedRectangleBorder(
-    borderRadius: BorderRadius.vertical(top: Radius.circular(OmniRadii.sheet)),
-    side: BorderSide(color: OmniColors.line),
+  shape: RoundedRectangleBorder(
+    borderRadius: const BorderRadius.vertical(
+      top: Radius.circular(OmniRadii.sheet),
+    ),
+    side: BorderSide(color: OmniPalette.of(context).line),
   ),
   builder: builder,
 );
@@ -50,7 +52,12 @@ class OmniSheet extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
     child: SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
+      padding: const EdgeInsets.fromLTRB(
+        OmniSpace.screen,
+        OmniSpace.md,
+        OmniSpace.screen,
+        OmniSpace.lg,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -62,7 +69,7 @@ class OmniSheet extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: OmniSpace.md),
               decoration: BoxDecoration(
                 color: OmniColors.line,
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.circular(OmniRadii.handle),
               ),
             ),
           ),
@@ -76,14 +83,7 @@ class OmniSheet extends StatelessWidget {
                       if (title != null)
                         Semantics(
                           header: true,
-                          child: Text(
-                            title!,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: OmniColors.text,
-                            ),
-                          ),
+                          child: Text(title!, style: OmniText.titleMedium),
                         ),
                       if (subtitle != null)
                         Text(subtitle!, style: OmniText.caption),

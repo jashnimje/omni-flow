@@ -54,7 +54,7 @@ class OmniFilterChip extends StatelessWidget {
               onTap: onTap,
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
+                  horizontal: OmniSpace.md,
                   vertical: 7,
                 ),
                 child: Row(
@@ -68,15 +68,19 @@ class OmniFilterChip extends StatelessWidget {
                       Icon(icon, size: 16, color: fg),
                       const SizedBox(width: 6),
                     ],
-                    Text(
-                      text,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: fg,
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                    Flexible(
+                      child: Text(
+                        text,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: fg,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
                     ),
                   ],
@@ -139,11 +143,11 @@ class OmniSegmented<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: OmniSpace.md),
-    padding: const EdgeInsets.all(3),
+    padding: const EdgeInsets.all(OmniRadii.segmented - OmniRadii.segment),
     decoration: BoxDecoration(
-      color: OmniColors.card,
+      color: OmniPalette.of(context).card,
       borderRadius: BorderRadius.circular(OmniRadii.segmented),
-      border: Border.all(color: OmniColors.line),
+      border: Border.all(color: OmniPalette.of(context).line),
     ),
     child: Row(
       children: [
@@ -155,7 +159,7 @@ class OmniSegmented<T> extends StatelessWidget {
 
   Widget _segment(BuildContext context, OmniSegment<T> s, bool on) {
     final text = s.count == null ? s.label : '${s.label} ${s.count}';
-    final radius = BorderRadius.circular(9);
+    final radius = BorderRadius.circular(OmniRadii.segment);
     return Semantics(
       button: true,
       selected: on,
@@ -167,7 +171,7 @@ class OmniSegmented<T> extends StatelessWidget {
         duration: OmniMotion.of(context, OmniMotion.fast),
         constraints: const BoxConstraints(minHeight: OmniSpace.target),
         decoration: BoxDecoration(
-          color: on ? OmniColors.raised : Colors.transparent,
+          color: on ? OmniPalette.of(context).raised : Colors.transparent,
           borderRadius: radius,
         ),
         child: Material(

@@ -46,9 +46,18 @@ class AskNotice {
   /// when the question does.
   final int? timeoutMs;
 
+  /// The heads-up channel every ask posts on.
+  String get channel => askChannel;
+
+  /// Each ask stands alone: its own group, so Android never bundles it
+  /// with other notifications and its answers stay on screen.
+  String get group => 'ask/$askId';
+
   Map<String, Object?> toJson() => {
     'id': id,
     'askId': askId,
+    'channel': channel,
+    'group': group,
     'title': title,
     'body': ?body,
     'actions': actions,
@@ -63,6 +72,11 @@ class AskNotice {
 /// Posts or takes down an ask's notification.
 typedef PostAsk = Future<void> Function(AskNotice ask);
 typedef CancelNotification = Future<void> Function(int id);
+
+/// The high-importance channel "Questions from automations", so an ask
+/// shows as a heads-up with its answers. A new id: Android never raises the
+/// importance of a channel that already exists.
+const askChannel = 'questions';
 
 /// Android shows at most three actions on a notification.
 const maxAskActions = 3;

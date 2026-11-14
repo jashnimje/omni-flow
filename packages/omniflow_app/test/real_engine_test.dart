@@ -50,9 +50,15 @@ void main() {
       }
     }
 
-    await pumpUntil(find.text('Desk lamp'));
-    expect(find.text('Desk lamp'), findsOneWidget);
-    expect(find.byKey(const ValueKey('tile-desk_lamp')), findsOneWidget);
+    // A lamp that has not answered yet sits in Home's offline row.
+    final lamp = find.textContaining('Desk lamp');
+    await pumpUntil(lamp);
+    expect(lamp, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('tile-desk_lamp')).evaluate().isNotEmpty ||
+          find.byKey(const ValueKey('home-offline')).evaluate().isNotEmpty,
+      isTrue,
+    );
 
     await tester.runAsync(() async {
       final socket = await RawDatagramSocket.bind(

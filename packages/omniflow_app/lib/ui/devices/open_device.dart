@@ -12,14 +12,18 @@ import 'device_page.dart';
 import 'device_text.dart';
 import 'sensor_page.dart';
 
-/// Opens a device's page on top of the tab it was tapped in.
-Future<void> openDevice(BuildContext context, String id) =>
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        settings: RouteSettings(name: DeviceLink(id).location),
-        builder: (_) => DeviceRoute(id: id),
-      ),
-    );
+/// Opens a device's page on top of the tab it was tapped in. With
+/// [source] (the tile's context) the page grows out of the tile.
+Future<void> openDevice(
+  BuildContext context,
+  String id, {
+  BuildContext? source,
+}) => OmniContainerRoute.open<void>(
+  context,
+  source: source,
+  settings: RouteSettings(name: DeviceLink(id).location),
+  builder: (_) => DeviceRoute(id: id),
+);
 
 /// The page a device gets: the TV control centre for a TV, the board page
 /// for a board, the tag page for an NFC tag, the sensor page for a thing
@@ -37,7 +41,7 @@ class DeviceRoute extends ConsumerWidget {
       return OmniPage(
         title: 'Device',
         body: devices.isLoading
-            ? const SizedBox()
+            ? const OmniListSkeleton(rows: 3, label: 'Loading the device')
             : const Center(
                 child: OmniEmptyState(
                   icon: AreaIcons.notFound,

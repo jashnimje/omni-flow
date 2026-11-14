@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- No INTERNET permission: the helper never opens a network socket. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:label="OmniFlow pointer"
+        android:icon="@android:drawable/ic_menu_mylocation">
+
+        <!--
+            Started over ADB with am start-foreground-service. The permission
+            is one the shell holds and ordinary apps cannot get, so no other
+            app on the TV can start it.
+        -->
+        <service
+            android:name=".PointerService"
+            android:exported="true"
+            android:permission="android.permission.WRITE_SECURE_SETTINGS"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Draws a mouse pointer moved from the OmniFlow phone app over ADB" />
+        </service>
+    </application>
+</manifest>

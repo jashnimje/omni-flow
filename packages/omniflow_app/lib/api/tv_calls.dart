@@ -51,6 +51,7 @@ abstract final class TvCalls {
   /// Commands that move whole files, which can run far longer than the
   /// service link's usual call timeout.
   static const longRunning = {
+    TvPointerCalls.install,
     install,
     filesDownload,
     filesUpload,
@@ -644,3 +645,24 @@ List<TvPermission> permissionsOf(Json result) => [
         runtime: p['runtime'] == true,
       ),
 ];
+
+/// The pointer helper's calls, with their argument shapes.
+abstract final class TvPointerCalls {
+  static const status = 'tv.helper.status';
+  static const install = 'tv.helper.install';
+  static const pointer = 'tv.pointer';
+  static const click = 'tv.pointer.click';
+
+  /// The helper APK the app carries, built by tool/tv_helper_asset.dart.
+  static const asset = 'assets/tv_helper/omniflow-tv-helper.apk';
+
+  static Json byArgs(String id, Offset by) => {
+    'id': id,
+    'by': [by.dx.clamp(-1.0, 1.0), by.dy.clamp(-1.0, 1.0)],
+  };
+
+  static Json installArgs(String id, String path) => {'id': id, 'path': path};
+
+  static bool isRunning(Json status) =>
+      status['ok'] == true && status['running'] == true;
+}

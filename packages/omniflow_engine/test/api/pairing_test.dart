@@ -433,6 +433,10 @@ void main() {
     expect(drivers['tuya_plug']!['settings'], [
       {'key': 'devId', 'label': 'Device id'},
       {'key': 'localKey', 'label': 'Local key', 'secret': true},
+      {
+        'key': 'version',
+        'label': 'Tuya protocol version: 3.3 (the default), 3.4 or 3.5',
+      },
     ]);
   });
 }

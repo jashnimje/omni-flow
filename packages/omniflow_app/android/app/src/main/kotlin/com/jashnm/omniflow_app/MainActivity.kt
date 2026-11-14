@@ -34,7 +34,8 @@ import java.util.concurrent.Executors
  * delivers while the app is not reading, on omniflow/nfc_intent. On omniflow/permissions it asks for the location
  * access Android requires before it names the Wi-Fi network, and for the
  * local network access Android 17 requires before an app reaches devices on
- * the LAN, and reports both.
+ * the LAN, and reports both. On omniflow/apps it lists the launchable apps
+ * for the app picker.
  */
 class MainActivity : FlutterActivity() {
     private var nfc: MethodChannel? = null
@@ -69,6 +70,20 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        }
+        MethodChannel(messenger, APPS_CHANNEL).setMethodCallHandler { call, result ->
+            if (call.method != "installedApps") return@setMethodCallHandler result.notImplemented()
+            val app = applicationContext
+            Thread {
+                val apps = try {
+                    installedApps(app)
+                } catch (e: RuntimeException) {
+                    null
+                }
+                mainThread.post {
+                    if (apps != null) result.success(apps) else result.error("unavailable", "Could not list the apps", null)
+                }
+            }.start()
         }
         MethodChannel(messenger, PERMISSIONS_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -232,6 +247,28 @@ class MainActivity : FlutterActivity() {
         return true
     }
 
+    /**
+     * The apps on the launcher, for the app picker: one entry per package,
+     * sorted by name, without OmniFlow. The <queries> element in the
+     * manifest is what lets Android 11 and later show them.
+     */
+    private fun installedApps(context: android.content.Context): List<Map<String, String>> {
+        val pm = context.packageManager
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val found = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(launcher, PackageManager.ResolveInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentActivities(launcher, 0)
+        }
+        return found
+            .map { it.activityInfo.packageName to it.loadLabel(pm).toString().ifBlank { it.activityInfo.packageName } }
+            .filter { it.first != context.packageName }
+            .distinctBy { it.first }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.second })
+            .map { mapOf("package" to it.first, "label" to it.second) }
+    }
+
     private fun granted(permission: String) =
         checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
@@ -329,6 +366,7 @@ class MainActivity : FlutterActivity() {
             NfcAdapter.ACTION_TAG_DISCOVERED,
         )
         private const val PERMISSIONS_CHANNEL = "omniflow/permissions"
+        private const val APPS_CHANNEL = "omniflow/apps"
         private const val LOCATION_REQUEST = 7102
         private const val LOCAL_NETWORK_REQUEST = 7103
         private const val LOCATION_ALWAYS_REQUEST = 7104

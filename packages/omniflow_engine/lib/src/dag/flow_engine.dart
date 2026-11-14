@@ -516,6 +516,40 @@ class FlowEngine implements FlowEffects {
     }
   }
 
+  /// Lets the events already sent reach the triggers, then waits while the
+  /// runs they started (and the runs those start) are going, for up to
+  /// [limit]. Returns whether everything finished in time.
+  ///
+  /// A one-shot CLI command calls this before closing an engine it opened,
+  /// so `omni device invoke` fires the automations its change triggers. A
+  /// run still waiting at [limit] is cancelled by [close] as before.
+  Future<bool> settle({Duration limit = const Duration(seconds: 2)}) async {
+    final deadline = DateTime.now().add(limit);
+    // Events travel through broadcast streams, one microtask per hop. A
+    // zero timer runs only once every queued microtask has.
+    await Future<void>.delayed(Duration.zero);
+    while (_pending.isNotEmpty) {
+      final left = deadline.difference(DateTime.now());
+      if (left <= Duration.zero) return false;
+      // A cancelled timer, not Future.delayed, so a CLI process is not kept
+      // alive by a wait nobody needs any more.
+      final timedOut = Completer<void>();
+      final timer = Timer(left, timedOut.complete);
+      try {
+        await Future.any([
+          Future.wait([
+            for (final p in List.of(_pending)) p.catchError((Object _) {}),
+          ]),
+          timedOut.future,
+        ]);
+      } finally {
+        timer.cancel();
+      }
+      await Future<void>.delayed(Duration.zero);
+    }
+    return true;
+  }
+
   Future<void> close() async {
     _cancelTimers();
     _timersOn = false;

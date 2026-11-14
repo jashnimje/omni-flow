@@ -297,13 +297,17 @@ void main() {
       final favourites = tester.getTopLeft(find.text('Favourites')).dy;
       final lounge = tester.getTopLeft(find.text('Lounge')).dy;
       final study = tester.getTopLeft(find.text('Study')).dy;
-      final hall = tester.getTopLeft(find.text('Hall')).dy;
-      expect(favourites < lounge && lounge < study && study < hall, isTrue);
+      final offline = tester.getTopLeft(find.text('Hall bulb offline')).dy;
+      expect(favourites < lounge && lounge < study && study < offline, isTrue);
+      // The hall's only device is offline, so it has no grid of its own.
+      expect(find.text('Hall'), findsNothing);
       expect(find.byKey(const ValueKey('tile-desk_lamp')), findsNWidgets(2));
       expect(find.text('80% · warm'), findsNothing);
       expect(find.text('80%'), findsNWidgets(2));
-      expect(find.text('Netflix · vol 35'), findsOneWidget);
-      expect(find.text('Offline'), findsOneWidget);
+      expect(find.text('Netflix'), findsOneWidget);
+      expect(find.text('Playing · vol 35'), findsOneWidget);
+      expect(find.byKey(const ValueKey('tile-hall_bulb')), findsNothing);
+      expect(find.text('Hall bulb offline'), findsOneWidget);
       expect(find.text('24.5 °C'), findsOneWidget);
       expect(find.byKey(const ValueKey('tile-jade')), findsNothing);
       expect(find.byKey(const ValueKey('tile-this_phone')), findsNothing);
@@ -322,21 +326,50 @@ void main() {
       expect(engine.callsOf('device.invoke'), isEmpty);
     });
 
-    testWidgets('an offline tile opens the help, not a switch', (tester) async {
+    testWidgets('the offline row opens the help, not a switch', (tester) async {
       await pump(tester, engine);
-      await tapKey(tester, 'tile-hall_bulb');
+      await tapKey(tester, 'home-offline');
       expect(find.byKey(const ValueKey('offline-hall_bulb')), findsOneWidget);
       expect(find.textContaining('switched off at the wall'), findsOneWidget);
       expect(engine.callsOf('device.invoke'), isEmpty);
     });
 
-    testWidgets('the problem chip opens the device that is offline', (
+    testWidgets('several offline devices collapse into one row for Devices', (
+      tester,
+    ) async {
+      engine.devices = [
+        lamp(),
+        tv(),
+        bulb(),
+        sensor(),
+        person(),
+        phone(),
+        {...bulb(), 'id': 'porch_bulb', 'name': 'Porch bulb'},
+      ];
+      await pump(tester, engine);
+      expect(find.text('2 offline'), findsOneWidget);
+      expect(find.byKey(const ValueKey('tile-porch_bulb')), findsNothing);
+      await tapKey(tester, 'home-offline');
+      expect(
+        find.byKey(const ValueKey('device-row-porch_bulb')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('device-row-desk_lamp')), findsNothing);
+    });
+
+    testWidgets('tapping a tile opens it, and its icon switches it', (
       tester,
     ) async {
       await pump(tester, engine);
-      await tapKey(tester, 'chip-offline');
+      await tapKey(tester, 'tile-power-lounge_tv');
+      expect(engine.callsOf('tv.key').single.$2, {
+        'id': 'lounge_tv',
+        'keycode': 223,
+      });
+      await tester.tap(find.byKey(const ValueKey('tile-desk_lamp')).first);
+      await tester.pumpAndSettle();
       expect(find.byType(DevicePage), findsOneWidget);
-      expect(find.text('Hall bulb'), findsWidgets);
+      expect(engine.callsOf('device.invoke'), isEmpty);
     });
 
     testWidgets('the presence chip opens places and people', (tester) async {
@@ -374,13 +407,17 @@ void main() {
     });
 
     testWidgets('loading shows tile skeletons', (tester) async {
-      engine.delay = const Duration(seconds: 1);
+      // Longer than the skeleton's shimmer, which rests after a few sweeps.
+      engine.delay = const Duration(seconds: 30);
       await pump(tester, engine);
       expect(find.byType(OmniTileSkeleton), findsWidgets);
-      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 31));
       await tester.pumpAndSettle();
       expect(find.byType(OmniTileSkeleton), findsNothing);
       expect(find.byKey(const ValueKey('tile-desk_lamp')), findsWidgets);
+      // Let the slow reads Home started after the list finish.
+      await tester.pump(const Duration(minutes: 2));
+      await tester.pumpAndSettle();
     });
 
     testWidgets('an engine that does not answer says so with Try again', (
@@ -770,6 +807,7 @@ void main() {
       );
       await tapKey(tester, 'device-retry');
       expect(engine.callsOf('device.refresh').single.$2, {'id': 'hall_bulb'});
+      await tapKey(tester, 'device-advanced');
       await tapKey(tester, 'device-packets');
       expect(find.byType(DeveloperScreen), findsOneWidget);
       expect(

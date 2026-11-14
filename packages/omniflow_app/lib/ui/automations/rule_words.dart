@@ -227,11 +227,17 @@ extension ThingWords on Thing {
 
   /// One line on what it can be told, for the step picker.
   String get actionsText {
-    final labels = [
+    final labels = <String>{
       for (final a in actions)
-        if (a['type'] != 'dpad_remote' && !isHighRisk(a))
-          '${a['label']}'.toLowerCase(),
-    ];
+        if (a['type'] != 'dpad_remote' && !isHighRisk(a)) plainAction(a),
+    };
+    // A board that sends both reads as one kind of thing, not two.
+    const codes = ['infrared codes', 'radio codes'];
+    if (labels.containsAll(codes)) {
+      labels
+        ..removeAll(codes)
+        ..add('infrared and radio codes');
+    }
     return labels.isEmpty
         ? 'takes no commands'
         : andList(labels.take(4).toList());
@@ -239,6 +245,30 @@ extension ThingWords on Thing {
 
   /// Whether any action runs commands on it (a shell, an uninstall).
   bool get hasHighRisk => actions.any(isHighRisk);
+}
+
+/// What [capability] does in a person's words, from its type and label
+/// rather than the protocol it uses: "on and off", "brightness",
+/// "infrared codes" for "Send NEC IR (32-bit code, MSB first)".
+String plainAction(Json capability) {
+  final type = capability['type'];
+  final id = '${capability['id'] ?? ''}'.toLowerCase();
+  final label = '${capability['label'] ?? id}'
+      .replaceAll(RegExp(r'\s*\([^)]*\)'), '')
+      .trim()
+      .toLowerCase();
+  bool names(String word) =>
+      RegExp('(^|[^a-z])$word([^a-z]|\$)').hasMatch(id) ||
+      RegExp('\\b$word\\b').hasMatch(label);
+  if (names('ir') || names('infrared')) return 'infrared codes';
+  if (names('rf') || label.contains('mhz')) return 'radio codes';
+  return switch (type) {
+    'toggle' when label == 'power' => 'on and off',
+    'toggle' => '$label on and off',
+    'color_rgb' => 'colour',
+    _ when id == 'launch_app' => 'open apps',
+    _ => label,
+  };
 }
 
 bool isHighRisk(Json capability) =>
@@ -549,6 +579,9 @@ class RuleWords {
   /// A step as words, with the parts a tap edits on their own: the device,
   /// what it does, how long, the text. [step] is these parts joined.
   List<WordPart> stepParts(RuleStep s) => switch (s) {
+    DoStep() when isEachDevice(s.thing) => [
+      WordPart(eachDo(s.capability, s.params)),
+    ],
     DoStep() => [
       WordPart(_name(s.thing), blank: Blank.device),
       const WordPart(' · '),
@@ -708,9 +741,47 @@ class RuleWords {
     return ' ${'${label ?? capability}'.toLowerCase()}';
   }
 
+  static final _runDevice = RegExp(r'^\{\{\s*%[A-Za-z_][A-Za-z0-9_]*\s*\}\}$');
+
+  /// Whether a step names its device through a run variable, `{{%item}}`:
+  /// each device of a room in a Repeat with each.
+  static bool isEachDevice(String thing) => _runDevice.hasMatch(thing);
+
+  /// What a step does to each device of a room: "Turn each device on",
+  /// "Set each device's brightness to 40%", "Wake on each device". The
+  /// label comes from any device that has [capability].
+  String eachDo(String capability, Json params) {
+    final cap = things
+        .map((t) => t.capability(capability))
+        .nonNulls
+        .firstOrNull;
+    final label = '${cap?['label'] ?? capability}'
+        .replaceAll(RegExp(r'\s*\([^)]*\)'), '')
+        .toLowerCase();
+    final value = params['value'];
+    if (cap?['type'] == 'toggle' && value is bool && params.length == 1) {
+      final onOff = value ? 'on' : 'off';
+      return label == 'power'
+          ? 'Turn each device $onOff'
+          : "Turn each device's $label $onOff";
+    }
+    if (value != null && params.length == 1) {
+      final to = valueText(value, unit: _paramUnit(cap, 'value'));
+      return "Set each device's $label to ${to.replaceAll(' %', '%')}";
+    }
+    final what = label.isEmpty
+        ? capability
+        : '${label[0].toUpperCase()}${label.substring(1)}';
+    final shown = [
+      for (final e in params.entries) '${e.key} ${valueText(e.value)}',
+    ];
+    return '$what on each device${shown.isEmpty ? '' : ', ${shown.join(', ')}'}';
+  }
+
   /// "TV · power on", "Hall bulb · brightness 70%".
-  String _do(String id, String capability, Json params) =>
-      '${_name(id)} · ${_doWhat(id, capability, params)}';
+  String _do(String id, String capability, Json params) => isEachDevice(id)
+      ? eachDo(capability, params)
+      : '${_name(id)} · ${_doWhat(id, capability, params)}';
 
   /// "power on", "brightness 70%": what a do step tells the device.
   String _doWhat(String id, String capability, Json params) {

@@ -1,0 +1,111 @@
+{
+  "generator": "tinytuya 1.20.0",
+  "localKey": "0123456789abcdef",
+  "devId": "bf0000000000000000test",
+  "v34": {
+    "localNonceHex": "636c69656e742d6e6f6e63652d303136",
+    "remoteNonceHex": "6465766963652d6e6f6e63652d303136",
+    "sessionKeyHex": "2ca44ab4f844696081da9686bab4fffd",
+    "step1": {
+      "seq": 1,
+      "cmd": 3,
+      "frameHex": "000055aa000000010000000300000044715d69ecdc7eeb2f99920205225369ae377222e061a924c591cd9c27ea163ed4bff4e96cce2cce04bff0cc5d6869596e06856c20b766324458cf551c48b151d50000aa55"
+    },
+    "step2": {
+      "seq": 1,
+      "cmd": 4,
+      "frameHex": "000055aa0000000100000004000000680000000089c996988108c87cf16da140e3075ebb9020bd6ab7711772185854cf919ffee3673821b3aa11f1309874b4768ff7dbaa377222e061a924c591cd9c27ea163ed47ad45e898ee4bb848c8d9bf693f48867c7d354afe4481e392f701dbc19125fca0000aa55"
+    },
+    "step3": {
+      "seq": 2,
+      "cmd": 5,
+      "frameHex": "000055aa000000020000000500000054a4da61211c32f9b2c932cee065ea0085f446b4ec6323af74d2bd09785dec4e26377222e061a924c591cd9c27ea163ed4806ba0f58473f9bdf3ad450f66157d247ffc8e175926084880b21f0d52d5ea800000aa55"
+    },
+    "control": {
+      "seq": 3,
+      "cmd": 13,
+      "body": {
+        "protocol": 5,
+        "t": 1700000000,
+        "data": {
+          "dps": {
+            "1": true
+          }
+        }
+      },
+      "frameHex": "000055aa000000030000000d000000740d5c083695c6d302e296bf98fa34b51ea03ea701cf89518ce74708eb7571297b73f5828858fff4e6dc2c2ec8723e8ce9b942f357992d27462e935ac837f463705ac98f14ee2a4e127e68136a57f4df973f9a241be1d55b110ee876f7d34f18861dcfab0f704110d09fc7863475d7680a0000aa55"
+    },
+    "query": {
+      "seq": 4,
+      "cmd": 16,
+      "body": {},
+      "frameHex": "000055aa000000040000001000000034b6fbfb7cf9d0c347faed0fb7323f008c49634346b62a71b497453c023471271f66e5e4b5fed890cdfa8a1909942f95370000aa55"
+    },
+    "push": {
+      "seq": 0,
+      "cmd": 8,
+      "body": {
+        "protocol": 4,
+        "t": 1700000000,
+        "data": {
+          "dps": {
+            "1": true,
+            "2": 0
+          }
+        }
+      },
+      "frameHex": "000055aa000000000000000800000078000000000d5c083695c6d302e296bf98fa34b51e1695e52353e6cab98e37a70dda4567a973f5828858fff4e6dc2c2ec8723e8ce9b942f357992d27462e935ac837f46370e99a4aaf107c30f21a3528c4ce291da0aff58fce4b7bb9f8fc0a56ecd11cf24c313383187cdc29f4824812412dea43820000aa55"
+    }
+  },
+  "v35": {
+    "localNonceHex": "636c69656e742d6e6f6e63652d303136",
+    "remoteNonceHex": "6465766963652d6e6f6e63652d303136",
+    "clientIvHex": "636c69656e742d69762d3132",
+    "deviceIvHex": "6465766963652d69762d3132",
+    "sessionKeyHex": "6305f43e8304764d3a48ed9f33f99795",
+    "step1": {
+      "seq": 1,
+      "cmd": 3,
+      "frameHex": "00006699000000000001000000030000002c636c69656e742d69762d31329bc5ba2f08402f3cbcbfbe85b01fba244f97a7b81fa2496b97287542fead7ede00009966"
+    },
+    "step2": {
+      "seq": 1,
+      "cmd": 4,
+      "frameHex": "0000669900000000000100000004000000506465766963652d69762d31328a2f3fac85033bbe95f37447d83b9157bed7fce8efbe8deff3e47718aa7540023494ae451f9840b71bf549074772ee2c4e05706dc628d30f89219f8fbc2d69341b86612900009966"
+    },
+    "step3": {
+      "seq": 2,
+      "cmd": 5,
+      "frameHex": "00006699000000000002000000050000003c636c69656e742d69762d313263c51f271298dae56b597c225296424ad005dcf740e81eeb657998af9fa901dc770ca4bf11f9cb98e13d6b37e151629600009966"
+    },
+    "control": {
+      "seq": 3,
+      "cmd": 13,
+      "body": {
+        "protocol": 5,
+        "t": 1700000000,
+        "data": {
+          "dps": {
+            "1": true
+          }
+        }
+      },
+      "frameHex": "000066990000000000030000000d00000062636c69656e742d69762d313275265aac02d567b74c5c87210744af1f82da68cac62c8c6c17f3a2270337eac2a6e9b63cd75314df8818a7b3c548bdef6ef5088b9c99556a4258e1ecf2f55eda4368d1fd31ab41aedaefd986d13158279010fe677ce600009966"
+    },
+    "push": {
+      "seq": 7,
+      "cmd": 8,
+      "body": {
+        "protocol": 4,
+        "t": 1700000000,
+        "data": {
+          "dps": {
+            "1": true,
+            "2": 0
+          }
+        }
+      },
+      "frameHex": "00006699000000000007000000080000006c6465766963652d69762d3132bc67b23fc72fdf3c6b9b180b92d1fda3876e58542420019d4156fec6c7c68b6520beb24eb6acf0ccf735c20a19e8361b45d52bcbda2cfb7bf24c9c6599e387cb540c5f4df05a0de0394cfecb3afc705a1b419c0d602cf2fea46a88f7c0e681a400009966"
+    }
+  }
+}

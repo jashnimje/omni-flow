@@ -18,6 +18,7 @@ import '../storage/keychain_secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../version.dart';
 import 'add_cli.dart';
+import 'one_shot.dart';
 import 'organize_cli.dart';
 import 'rule_cli.dart';
 import 'tv_cli.dart';
@@ -572,7 +573,20 @@ class OmniCommandRunner extends CommandRunner<int> {
       ]),
     );
     addCommand(
-      _Group('home', 'Where home is, for sunrise and sunset rules.', [
+      _Group('home', 'Where home is, and what your home did this week.', [
+        _ApiCommand(
+          'stats',
+          'Runs, taps saved, your streak and achievements: omni home stats [DAYS]',
+          'home.stats',
+          (rest, _) async {
+            if (rest.length > 1) throw UsageException('takes at most DAYS', '');
+            return {
+              if (rest.isNotEmpty)
+                'days': int.tryParse(rest.single) ?? rest.single,
+            };
+          },
+          usage: '[DAYS]',
+        ),
         _Group('location', 'Show or set where home is.', [
           _ApiCommand(
             'show',
@@ -800,7 +814,7 @@ class _ApiCommand extends Command<int> {
       omni.out.writeln(const JsonEncoder.withIndent('  ').convert(result));
       return result['ok'] == true ? 0 : 1;
     } finally {
-      await engine.close();
+      await closeOneShot(engine);
     }
   }
 }

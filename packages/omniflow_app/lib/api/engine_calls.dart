@@ -1429,3 +1429,12 @@ class Added {
   /// Why a board could not be set up now (it is offline).
   final String? provisionError;
 }
+
+/// The `home.stats` command and the events that move its numbers.
+abstract final class HomeStatsCalls {
+  static const homeStats = 'home.stats';
+  static const achievementEarnedEvent = 'home.achievementEarned';
+
+  /// Ends a run, so the numbers move.
+  static const runFinishedEvent = 'run.finished';
+}

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "tuya_light",
+  "name": "Tuya smart bulb (local, colour data points 20 to 24)",
+  "category": "lighting",
+  "icon": "lightbulb",
+  "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
+  "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
+  "settings": [
+    { "key": "devId", "label": "Device id" },
+    { "key": "localKey", "label": "Local key", "secret": true },
+    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5" }
+  ],
+  "setup": ["configure:devId", "secret:localKey", "configure:version?"],
+  "statePush": { "jsonPath": "$.dps" },
+  "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
+  "reliability": { "timeoutMs": 1500, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "cmd": "control", "dps": { "20": "{{value}}" } },
+      "stateJsonPath": "$['20']"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "White brightness (10 dim to 1000 full)",
+      "params": { "value": { "type": "number", "integer": true, "min": 10, "max": 1000 } },
+      "command": { "cmd": "control", "dps": { "20": true, "22": "{{value}}" } },
+      "stateJsonPath": "$['22']"
+    },
+    {
+      "id": "color_temp",
+      "type": "level",
+      "label": "White temperature (0 warm to 1000 cool)",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 1000 } },
+      "command": { "cmd": "control", "dps": { "20": true, "21": "white", "23": "{{value}}" } },
+      "stateJsonPath": "$['23']"
+    },
+    {
+      "id": "rgb",
+      "type": "color_rgb",
+      "label": "Colour",
+      "params": { "brightness": { "type": "number", "integer": true, "min": 10, "max": 1000, "optional": true } },
+      "derive": "tuya_hsv",
+      "command": { "cmd": "control", "dps": { "20": true, "21": "colour", "24": "{{hsv}}" } },
+      "stateJsonPath": "$['24']"
+    },
+    {
+      "id": "mode",
+      "type": "text_command",
+      "label": "Mode (white, colour, the bulb's scene, or music)",
+      "params": { "value": { "type": "enum", "values": ["white", "colour", "scene", "music"] } },
+      "command": { "cmd": "control", "dps": { "20": true, "21": "{{value}}" } },
+      "stateJsonPath": "$['21']"
+    }
+  ]
+}

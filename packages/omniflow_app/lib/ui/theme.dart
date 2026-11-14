@@ -7,34 +7,36 @@ export 'design/tokens.dart';
 
 /// The app's Material theme, from the design tokens, so plain Material
 /// widgets (switches, app bars, dialogs, text fields) already match the
-/// mockups.
-ThemeData omniTheme() {
-  const scheme = ColorScheme.dark(
-    primary: OmniColors.accent,
-    onPrimary: OmniColors.accentInk,
-    primaryContainer: OmniColors.accentSoft,
-    onPrimaryContainer: OmniColors.onAccentSoft,
-    secondary: OmniColors.accent,
-    onSecondary: OmniColors.accentInk,
-    secondaryContainer: OmniColors.accentSoft,
-    onSecondaryContainer: OmniColors.onAccentSoft,
+/// mockups. [palette] is the Appearance setting: teal by default, the
+/// wallpaper's colours, or either on pure black.
+ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
+  final p = palette;
+  final scheme = ColorScheme.dark(
+    primary: p.accent,
+    onPrimary: p.onAccent,
+    primaryContainer: p.accentSoft,
+    onPrimaryContainer: p.onAccentSoft,
+    secondary: p.accent,
+    onSecondary: p.onAccent,
+    secondaryContainer: p.accentSoft,
+    onSecondaryContainer: p.onAccentSoft,
     tertiary: OmniColors.condition,
     error: OmniColors.bad,
-    onError: Color(0xFF3A0A0A),
+    onError: OmniColors.onBad,
     errorContainer: OmniColors.badSoft,
     onErrorContainer: OmniColors.bad,
-    surface: OmniColors.background,
+    surface: p.background,
     onSurface: OmniColors.text,
     onSurfaceVariant: OmniColors.muted,
-    surfaceContainerLowest: OmniColors.background,
-    surfaceContainerLow: OmniColors.bar,
-    surfaceContainer: OmniColors.card,
-    surfaceContainerHigh: OmniColors.raised,
-    surfaceContainerHighest: OmniColors.raised,
+    surfaceContainerLowest: p.background,
+    surfaceContainerLow: p.bar,
+    surfaceContainer: p.card,
+    surfaceContainerHigh: p.raised,
+    surfaceContainerHighest: OmniSurface.highest,
     outline: OmniColors.muted,
-    outlineVariant: OmniColors.line,
+    outlineVariant: p.line,
     inverseSurface: OmniColors.text,
-    onInverseSurface: OmniColors.background,
+    onInverseSurface: p.background,
     scrim: Colors.black,
   );
   final buttonShape = RoundedRectangleBorder(
@@ -43,46 +45,51 @@ ThemeData omniTheme() {
   const minTarget = Size(OmniSpace.target, OmniSpace.target);
   return ThemeData(
     colorScheme: scheme,
-    scaffoldBackgroundColor: OmniColors.background,
-    canvasColor: OmniColors.background,
-    dividerColor: OmniColors.line,
+    extensions: [p],
+    scaffoldBackgroundColor: p.background,
+    canvasColor: p.background,
+    dividerColor: p.line,
     materialTapTargetSize: MaterialTapTargetSize.padded,
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {TargetPlatform.android: _MotionAwareTransitions()},
     ),
     textTheme: const TextTheme(
-      headlineSmall: OmniText.screenTitle,
-      titleLarge: OmniText.pageTitle,
-      titleMedium: OmniText.bodyStrong,
-      titleSmall: OmniText.section,
-      bodyLarge: OmniText.body,
+      displaySmall: OmniText.displaySmall,
+      headlineLarge: OmniText.headlineLarge,
+      headlineMedium: OmniText.headlineMedium,
+      headlineSmall: OmniText.headlineSmall,
+      titleLarge: OmniText.titleLarge,
+      titleMedium: OmniText.titleMedium,
+      titleSmall: OmniText.titleSmall,
+      bodyLarge: OmniText.bodyLarge,
       bodyMedium: OmniText.body,
       bodySmall: OmniText.caption,
       labelLarge: OmniText.label,
-      labelSmall: TextStyle(fontSize: 11, color: OmniColors.muted),
+      labelMedium: OmniText.labelMedium,
+      labelSmall: OmniText.navLabel,
     ),
     iconTheme: const IconThemeData(color: OmniColors.text, size: 22),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: OmniColors.background,
+    appBarTheme: AppBarTheme(
+      backgroundColor: p.background,
       foregroundColor: OmniColors.text,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
       titleTextStyle: OmniText.pageTitle,
-      iconTheme: IconThemeData(color: OmniColors.muted),
-      actionsIconTheme: IconThemeData(color: OmniColors.muted),
+      iconTheme: const IconThemeData(color: OmniColors.muted),
+      actionsIconTheme: const IconThemeData(color: OmniColors.muted),
+      systemOverlayStyle: omniSystemBars,
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: OmniColors.bar,
+      backgroundColor: p.bar,
       surfaceTintColor: Colors.transparent,
-      indicatorColor: OmniColors.accentSoft,
+      indicatorColor: p.accentSoft,
       height: 64,
       elevation: 0,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       labelTextStyle: WidgetStateProperty.resolveWith(
-        (states) => TextStyle(
-          fontSize: 11,
+        (states) => OmniText.navLabel.copyWith(
           color: states.contains(WidgetState.selected)
               ? OmniColors.text
               : OmniColors.muted,
@@ -100,25 +107,42 @@ ThemeData omniTheme() {
         ),
       ),
     ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: p.bar,
+      indicatorColor: p.accentSoft,
+      labelType: NavigationRailLabelType.all,
+      selectedIconTheme: const IconThemeData(color: OmniColors.text, size: 22),
+      unselectedIconTheme: const IconThemeData(
+        color: OmniColors.muted,
+        size: 22,
+      ),
+      selectedLabelTextStyle: OmniText.navLabel.copyWith(
+        color: OmniColors.text,
+        fontWeight: FontWeight.w600,
+      ),
+      unselectedLabelTextStyle: OmniText.navLabel,
+    ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: OmniColors.accent,
-      foregroundColor: OmniColors.accentInk,
+      backgroundColor: p.accent,
+      foregroundColor: p.onAccent,
       elevation: 6,
       highlightElevation: 8,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(OmniRadii.fab),
+      ),
       extendedTextStyle: const TextStyle(
         fontSize: 14,
         fontWeight: FontWeight.w700,
       ),
     ),
     cardTheme: CardThemeData(
-      color: OmniColors.card,
+      color: p.card,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       margin: const EdgeInsets.only(bottom: OmniSpace.gap),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(OmniRadii.card),
-        side: const BorderSide(color: OmniColors.line),
+        side: BorderSide(color: p.line),
       ),
     ),
     listTileTheme: const ListTileThemeData(
@@ -126,47 +150,43 @@ ThemeData omniTheme() {
       textColor: OmniColors.text,
       minVerticalPadding: 10,
     ),
-    dividerTheme: const DividerThemeData(
-      color: OmniColors.line,
-      thickness: 1,
-      space: 1,
-    ),
+    dividerTheme: DividerThemeData(color: p.line, thickness: 1, space: 1),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith(
         (states) => states.contains(WidgetState.disabled)
             ? OmniColors.muted.withValues(alpha: 0.5)
             : states.contains(WidgetState.selected)
-            ? OmniColors.accentInk
+            ? p.onAccent
             : OmniColors.muted,
       ),
       trackColor: WidgetStateProperty.resolveWith(
         (states) => states.contains(WidgetState.disabled)
-            ? OmniColors.raised.withValues(alpha: 0.5)
+            ? p.raised.withValues(alpha: 0.5)
             : states.contains(WidgetState.selected)
-            ? OmniColors.accent
-            : OmniColors.raised,
+            ? p.accent
+            : p.raised,
       ),
       trackOutlineColor: WidgetStateProperty.resolveWith(
         (states) => states.contains(WidgetState.disabled)
-            ? OmniColors.line.withValues(alpha: 0.5)
+            ? p.line.withValues(alpha: 0.5)
             : states.contains(WidgetState.selected)
-            ? OmniColors.accent
-            : OmniColors.line,
+            ? p.accent
+            : p.line,
       ),
     ),
-    sliderTheme: const SliderThemeData(
-      activeTrackColor: OmniColors.accent,
-      inactiveTrackColor: OmniColors.raised,
-      thumbColor: OmniColors.accent,
+    sliderTheme: SliderThemeData(
+      activeTrackColor: p.accent,
+      inactiveTrackColor: p.raised,
+      thumbColor: p.accent,
     ),
-    progressIndicatorTheme: const ProgressIndicatorThemeData(
-      color: OmniColors.accent,
-      linearTrackColor: OmniColors.raised,
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: p.accent,
+      linearTrackColor: p.raised,
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: OmniColors.accent,
-        foregroundColor: OmniColors.accentInk,
+        backgroundColor: p.accent,
+        foregroundColor: p.onAccent,
         minimumSize: minTarget,
         shape: buttonShape,
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
@@ -175,14 +195,14 @@ ThemeData omniTheme() {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: OmniColors.text,
-        side: const BorderSide(color: OmniColors.line),
+        side: BorderSide(color: p.line),
         minimumSize: minTarget,
         shape: buttonShape,
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: OmniColors.accent,
+        foregroundColor: p.accent,
         minimumSize: minTarget,
       ),
     ),
@@ -191,60 +211,62 @@ ThemeData omniTheme() {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: OmniColors.card,
+      fillColor: p.card,
       labelStyle: const TextStyle(color: OmniColors.muted),
       hintStyle: const TextStyle(color: OmniColors.muted),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(OmniRadii.field),
-        borderSide: const BorderSide(color: OmniColors.line),
+        borderSide: BorderSide(color: p.line),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(OmniRadii.field),
-        borderSide: const BorderSide(color: OmniColors.line),
+        borderSide: BorderSide(color: p.line),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(OmniRadii.field),
-        borderSide: const BorderSide(color: OmniColors.accent),
+        borderSide: BorderSide(color: p.accent),
       ),
     ),
     chipTheme: ChipThemeData(
-      backgroundColor: OmniColors.card,
-      selectedColor: OmniColors.accent,
-      side: const BorderSide(color: OmniColors.line),
+      backgroundColor: p.card,
+      selectedColor: p.accent,
+      side: BorderSide(color: p.line),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(OmniRadii.chip),
       ),
       labelStyle: const TextStyle(fontSize: 12, color: OmniColors.text),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: OmniColors.sheet,
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: p.sheet,
       surfaceTintColor: Colors.transparent,
       modalBarrierColor: OmniColors.scrim,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(OmniRadii.sheet),
         ),
       ),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: OmniColors.card,
+      backgroundColor: p.card,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(OmniRadii.sheet),
       ),
     ),
-    snackBarTheme: const SnackBarThemeData(
-      backgroundColor: OmniColors.raised,
-      contentTextStyle: TextStyle(color: OmniColors.text, fontSize: 14),
-      actionTextColor: OmniColors.accent,
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: p.raised,
+      contentTextStyle: const TextStyle(color: OmniColors.text, fontSize: 14),
+      actionTextColor: p.accent,
       behavior: SnackBarBehavior.floating,
     ),
-    tooltipTheme: const TooltipThemeData(
+    tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(
-        color: OmniColors.raised,
-        borderRadius: BorderRadius.all(Radius.circular(8)),
+        color: p.raised,
+        borderRadius: const BorderRadius.all(
+          Radius.circular(OmniRadii.tooltip),
+        ),
       ),
-      textStyle: TextStyle(color: OmniColors.text, fontSize: 12),
+      textStyle: const TextStyle(color: OmniColors.text, fontSize: 12),
     ),
   );
 }

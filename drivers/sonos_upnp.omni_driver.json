@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "id": "sonos_upnp",
+  "name": "Sonos speaker (local UPnP on port 1400)",
+  "category": "media",
+  "icon": "speaker",
+  "transport": { "type": "http", "port": 1400, "reply": "xml" },
+  "discovery": [{ "method": "ssdp", "st": "urn:schemas-upnp-org:device:ZonePlayer:1", "idHeader": "usn" }],
+  "statePoll": {
+    "intervalSeconds": 15,
+    "command": {
+      "method": "POST",
+      "path": "/MediaRenderer/AVTransport/Control",
+      "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "GetTransportInfo", "args": { "InstanceID": 0 } }
+    },
+    "also": [
+      {
+        "command": {
+          "method": "POST",
+          "path": "/MediaRenderer/RenderingControl/Control",
+          "soap": { "service": "urn:schemas-upnp-org:service:RenderingControl:1", "action": "GetVolume", "args": { "InstanceID": 0, "Channel": "Master" } }
+        }
+      },
+      {
+        "command": {
+          "method": "POST",
+          "path": "/MediaRenderer/RenderingControl/Control",
+          "soap": { "service": "urn:schemas-upnp-org:service:RenderingControl:1", "action": "GetMute", "args": { "InstanceID": 0, "Channel": "Master" } }
+        }
+      }
+    ]
+  },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "play",
+      "type": "action",
+      "label": "Play",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Play", "args": { "InstanceID": 0, "Speed": 1 } }
+      }
+    },
+    {
+      "id": "pause",
+      "type": "action",
+      "label": "Pause",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Pause", "args": { "InstanceID": 0 } }
+      }
+    },
+    {
+      "id": "next",
+      "type": "action",
+      "label": "Next track",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Next", "args": { "InstanceID": 0 } }
+      }
+    },
+    {
+      "id": "previous",
+      "type": "action",
+      "label": "Previous track",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Previous", "args": { "InstanceID": 0 } }
+      }
+    },
+    {
+      "id": "volume",
+      "type": "level",
+      "label": "Volume",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 100 } },
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/RenderingControl/Control",
+        "soap": {
+          "service": "urn:schemas-upnp-org:service:RenderingControl:1",
+          "action": "SetVolume",
+          "args": { "InstanceID": 0, "Channel": "Master", "DesiredVolume": "{{value}}" }
+        }
+      },
+      "stateJsonPath": "$.CurrentVolume"
+    },
+    {
+      "id": "mute",
+      "type": "toggle",
+      "label": "Mute",
+      "onOff": [1, 0],
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/RenderingControl/Control",
+        "soap": {
+          "service": "urn:schemas-upnp-org:service:RenderingControl:1",
+          "action": "SetMute",
+          "args": { "InstanceID": 0, "Channel": "Master", "DesiredMute": "{{value}}" }
+        }
+      },
+      "stateJsonPath": "$.CurrentMute"
+    },
+    {
+      "id": "playback",
+      "type": "sensor",
+      "label": "Playback (PLAYING, PAUSED_PLAYBACK, STOPPED or TRANSITIONING)",
+      "stateJsonPath": "$.CurrentTransportState",
+      "values": ["PLAYING", "PAUSED_PLAYBACK", "STOPPED", "TRANSITIONING"]
+    }
+  ]
+}

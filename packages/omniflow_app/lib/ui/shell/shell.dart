@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../state/appearance.dart';
 import '../add/add_page.dart';
-import '../design/design.dart';
+import '../theme.dart';
 import 'links.dart';
 import 'tabs.dart';
 
@@ -110,9 +111,12 @@ final shellControllerProvider = Provider<ShellController>((ref) {
   return controller;
 });
 
-/// The four tabs (Home, Automations, Devices, Settings) in a bottom bar,
-/// each with its own back stack, and the Add or New button of the tab's
-/// root. [banner] shows above every tab (the hub did not start).
+/// The four tabs (Home, Automations, Devices, Settings), each with its own
+/// back stack, and the Add or New button of the tab's root. The tabs sit
+/// in a bottom bar on a phone and in a rail on wider screens, and a tab
+/// slides in on a shared axis. [banner] shows above every tab (the hub
+/// did not start). The shell applies the Appearance setting, so changing
+/// it recolours the app at once.
 class OmniShell extends ConsumerStatefulWidget {
   const OmniShell({super.key, this.banner});
 
@@ -128,11 +132,25 @@ class _OmniShellState extends ConsumerState<OmniShell> {
   late final _observers = {
     for (final t in ShellTab.values) t: _DepthObserver(t, _shell._setDepth),
   };
+  var _previous = ShellTab.home;
+  OmniPalette? _palette;
+  ThemeData? _theme;
 
   @override
   void initState() {
     super.initState();
     _shell._attach();
+    // Pages draw under the status and navigation bars; each pads itself
+    // by the real insets.
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+  }
+
+  ThemeData _themeFor(OmniPalette palette) {
+    if (palette != _palette || _theme == null) {
+      _palette = palette;
+      _theme = omniTheme(palette: palette);
+    }
+    return _theme!;
   }
 
   @override
@@ -155,89 +173,231 @@ class _OmniShellState extends ConsumerState<OmniShell> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: _shell,
-    builder: (context, _) {
-      final tab = _shell.tab;
-      _built.add(tab);
-      final spec = _shell.atRoot(tab) ? shellTabs[tab]!.fab : null;
-      final fab = spec?.hiddenWhen?.call(ref) == true ? null : spec;
-      Widget tabs = IndexedStack(
-        index: tab.index,
-        children: [
-          for (final t in ShellTab.values)
-            TickerMode(
-              enabled: t == tab,
+  Widget build(BuildContext context) {
+    final theme = _themeFor(ref.watch(paletteProvider));
+    return AnimatedTheme(
+      data: theme,
+      duration: OmniMotion.of(context),
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: omniSystemBars,
+        child: ListenableBuilder(listenable: _shell, builder: _frame),
+      ),
+    );
+  }
+
+  Widget _frame(BuildContext context, Widget? _) {
+    final tab = _shell.tab;
+    final forward = tab.index >= _previous.index;
+    _previous = tab;
+    _built.add(tab);
+    final spec = _shell.atRoot(tab) ? shellTabs[tab]!.fab : null;
+    final fab = spec?.hiddenWhen?.call(ref) == true ? null : spec;
+    final fullScreen = shellTabs[tab]!.fullScreenWhen?.call(ref) == true;
+    final wide = OmniWidth.of(context) != OmniWidth.compact;
+    Widget tabs = IndexedStack(
+      index: tab.index,
+      children: [
+        for (final t in ShellTab.values)
+          TickerMode(
+            enabled: t == tab,
+            child: _TabEntrance(
+              active: t == tab,
+              forward: forward,
               child: _built.contains(t) ? _navigator(t) : const SizedBox(),
             ),
+          ),
+      ],
+    );
+    if (widget.banner case final banner?) {
+      tabs = Column(
+        children: [
+          SafeArea(
+            bottom: false,
+            left: !wide,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                OmniSpace.screen,
+                OmniSpace.sm,
+                OmniSpace.screen,
+                0,
+              ),
+              child: banner,
+            ),
+          ),
+          Expanded(
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: tabs,
+            ),
+          ),
         ],
       );
-      if (widget.banner case final banner?) {
-        tabs = Column(
-          children: [
-            SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-                child: banner,
-              ),
+    }
+    final palette = OmniPalette.of(context);
+    if (wide && !fullScreen) {
+      tabs = Row(
+        children: [
+          _rail(context, tab, palette),
+          VerticalDivider(width: 1, color: palette.line),
+          Expanded(
+            child: MediaQuery.removePadding(
+              context: context,
+              removeLeft: true,
+              child: tabs,
             ),
-            Expanded(
-              child: MediaQuery.removePadding(
-                context: context,
-                removeTop: true,
-                child: tabs,
+          ),
+        ],
+      );
+    }
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_back());
+      },
+      child: Scaffold(
+        body: tabs,
+        floatingActionButton: fab == null
+            ? null
+            : FloatingActionButton.extended(
+                key: fab.key,
+                heroTag: null,
+                onPressed: () {
+                  final nav = _shell.navigators[tab]!.currentContext;
+                  if (nav != null) fab.onPressed(nav);
+                },
+                icon: Icon(fab.icon, weight: 600),
+                label: Text(fab.label),
               ),
+        bottomNavigationBar: fullScreen || wide
+            ? null
+            : DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: palette.line)),
+                ),
+                child: _bar(context, tab),
+              ),
+      ),
+    );
+  }
+
+  void _select(int i) {
+    unawaited(HapticFeedback.selectionClick());
+    _shell.select(ShellTab.values[i]);
+  }
+
+  /// The bottom bar. It grows with the text size, and its labels stop
+  /// growing at one and a half times so four still fit across a phone.
+  Widget _bar(BuildContext context, ShellTab tab) {
+    final scaler = MediaQuery.textScalerOf(context)
+        .clamp(maxScaleFactor: _maxLabelScale);
+    final label = scaler.scale(OmniText.navLabel.fontSize!) * 1.4;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: scaler),
+      child: NavigationBar(
+        key: const ValueKey('shell-tabs'),
+        height: 48 + label,
+        selectedIndex: tab.index,
+        animationDuration: OmniMotion.of(context, OmniMotion.slow),
+        onDestinationSelected: _select,
+        destinations: [
+          for (final t in ShellTab.values)
+            NavigationDestination(
+              key: ValueKey('tab-${t.name}'),
+              icon: Icon(shellTabs[t]!.icon),
+              selectedIcon: Icon(shellTabs[t]!.icon, fill: 1),
+              label: shellTabs[t]!.label,
             ),
-          ],
-        );
-      }
-      return PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) unawaited(_back());
-        },
-        child: Scaffold(
-          body: tabs,
-          floatingActionButton: fab == null
-              ? null
-              : FloatingActionButton.extended(
-                  key: fab.key,
-                  heroTag: null,
-                  onPressed: () {
-                    final nav = _shell.navigators[tab]!.currentContext;
-                    if (nav != null) fab.onPressed(nav);
-                  },
-                  icon: Icon(fab.icon, weight: 600),
-                  label: Text(fab.label),
+        ],
+      ),
+    );
+  }
+
+  static const _maxLabelScale = 1.5;
+
+  /// The rail of a foldable or tablet.
+  Widget _rail(BuildContext context, ShellTab tab, OmniPalette palette) =>
+      MediaQuery.withClampedTextScaling(
+        maxScaleFactor: _maxLabelScale,
+        child: SafeArea(
+          right: false,
+          child: NavigationRail(
+            key: const ValueKey('shell-rail'),
+            selectedIndex: tab.index,
+            onDestinationSelected: _select,
+            groupAlignment: -0.9,
+            destinations: [
+              for (final t in ShellTab.values)
+                NavigationRailDestination(
+                  icon: Icon(shellTabs[t]!.icon),
+                  selectedIcon: Icon(shellTabs[t]!.icon, fill: 1),
+                  label: Text(shellTabs[t]!.label),
                 ),
-          bottomNavigationBar: shellTabs[tab]!.fullScreenWhen?.call(ref) == true
-              ? null
-              : DecoratedBox(
-                  decoration: const BoxDecoration(
-                    border: Border(top: BorderSide(color: OmniColors.line)),
-                  ),
-                  child: NavigationBar(
-                    key: const ValueKey('shell-tabs'),
-                    selectedIndex: tab.index,
-                    animationDuration: OmniMotion.of(context, OmniMotion.slow),
-                    onDestinationSelected: (i) =>
-                        _shell.select(ShellTab.values[i]),
-                    destinations: [
-                      for (final t in ShellTab.values)
-                        NavigationDestination(
-                          key: ValueKey('tab-${t.name}'),
-                          icon: Icon(shellTabs[t]!.icon),
-                          selectedIcon: Icon(shellTabs[t]!.icon, fill: 1),
-                          label: shellTabs[t]!.label,
-                        ),
-                    ],
-                  ),
-                ),
+            ],
+          ),
         ),
       );
-    },
+}
+
+/// A tab arriving: it slides a little from the side it comes from and
+/// fades in (Material's shared axis). Nothing moves under reduced motion.
+class _TabEntrance extends StatefulWidget {
+  const _TabEntrance({
+    required this.active,
+    required this.forward,
+    required this.child,
+  });
+
+  final bool active;
+  final bool forward;
+  final Widget child;
+
+  @override
+  State<_TabEntrance> createState() => _TabEntranceState();
+}
+
+class _TabEntranceState extends State<_TabEntrance>
+    with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: OmniMotion.medium,
+    value: 1,
   );
+  late final _curve = CurvedAnimation(
+    parent: _controller,
+    curve: OmniMotion.emphasizedIn,
+  );
+
+  @override
+  void didUpdateWidget(_TabEntrance old) {
+    super.didUpdateWidget(old);
+    if (widget.active && !old.active && !OmniMotion.reduced(context)) {
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _curve.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final side = widget.forward ? 1.0 : -1.0;
+    return AnimatedBuilder(
+      animation: _curve,
+      child: widget.child,
+      builder: (context, child) {
+        final t = _curve.value;
+        return FractionalTranslation(
+          translation: Offset(side * 0.08 * (1 - t), 0),
+          child: Opacity(opacity: t, child: child),
+        );
+      },
+    );
+  }
 }
 
 /// Counts the routes on one tab's navigator. A sheet or menu opened in the

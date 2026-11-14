@@ -65,7 +65,7 @@ class DevicePage extends ConsumerWidget {
       for (final c in d.capabilities)
         if (!_shownAbove(d, c)) c,
     ];
-    final lit = isLit(d);
+    final lit = shownOn(ref, d);
     return OmniPage(
       title: d.name,
       actions: [

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omniflow_app/ui/design/design.dart';
 
 import 'fake_engine.dart';
 
@@ -26,15 +27,36 @@ void main() {
     expect(find.widgetWithText(OutlinedButton, 'Wake'), findsOneWidget);
   });
 
-  testWidgets('tapping a tile with power switches it', (tester) async {
+  testWidgets('tapping a tile icon switches it at once', (tester) async {
     await pumpApp(tester, engine);
-    await tester.tap(find.byKey(const ValueKey('tile-desk_lamp')));
+    await tester.tap(find.byKey(const ValueKey('tile-power-desk_lamp')));
     await tester.pump();
     expect(engine.callsOf('device.invoke').single.$2, {
       'id': 'desk_lamp',
       'capability': 'power',
       'params': {'value': true},
     });
+    // The tile shows on before the lamp reports it.
+    expect(
+      tester.widget<OmniTile>(find.byKey(const ValueKey('tile-desk_lamp'))).on,
+      isTrue,
+    );
+  });
+
+  testWidgets('a switch that fails flips back and says so', (tester) async {
+    engine.answers['device.invoke'] = {
+      'ok': false,
+      'error': {'type': 'timeout', 'message': 'no reply'},
+    };
+    await pumpApp(tester, engine);
+    await tester.tap(find.byKey(const ValueKey('tile-power-desk_lamp')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<OmniTile>(find.byKey(const ValueKey('tile-desk_lamp'))).on,
+      isFalse,
+    );
+    expect(find.textContaining('Could not turn Desk lamp on'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
   });
 
   testWidgets('releasing the slider invokes the level as a whole number', (

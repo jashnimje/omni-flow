@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shelly_gen1_relay",
+  "name": "Shelly Gen1 relay or plug (local HTTP API, relay 0)",
+  "category": "power",
+  "icon": "plug",
+  "transport": { "type": "http", "port": 80 },
+  "statePoll": { "intervalSeconds": 60, "command": { "path": "/status" }, "jsonPath": "$.relays[0]" },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["on", "off"],
+      "command": { "path": "/relay/0", "query": { "turn": "{{value}}" } },
+      "stateJsonPath": "$.ison"
+    }
+  ]
+}

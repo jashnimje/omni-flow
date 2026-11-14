@@ -4,7 +4,11 @@ import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import android.Manifest
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -122,7 +126,60 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
         val power = app.getSystemService(Context.POWER_SERVICE) as PowerManager
         send(mapOf("kind" to "screen", "on" to power.isInteractive))
         sendDnd()
+        sendConnectedBluetooth()
         main.post(readApps)
+    }
+
+    /**
+     * The headsets and speakers already connected when the service starts,
+     * once, so a rule waiting on "connected" knows the current state. Android
+     * sends the connect broadcast only at the moment a device connects.
+     * Nothing is read without the Bluetooth connect permission.
+     */
+    private fun sendConnectedBluetooth() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return
+        val sent = mutableSetOf<String>()
+        val listener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                try {
+                    for (device in proxy.connectedDevices) {
+                        val address = device.address
+                        val first = synchronized(sent) { sent.add(address) }
+                        if (first) send(bluetoothReading(device, true))
+                    }
+                } catch (_: SecurityException) {
+                } finally {
+                    runCatching { adapter.closeProfileProxy(profile, proxy) }
+                }
+            }
+
+            override fun onServiceDisconnected(profile: Int) {}
+        }
+        for (profile in intArrayOf(BluetoothProfile.HEADSET, BluetoothProfile.A2DP)) {
+            try {
+                adapter.getProfileProxy(app, listener, profile)
+            } catch (_: SecurityException) {
+            }
+        }
+    }
+
+    private fun bluetoothReading(device: BluetoothDevice, connected: Boolean): Map<String, Any?> {
+        val name = try {
+            device.name
+        } catch (_: SecurityException) {
+            null
+        }
+        return mapOf(
+            "kind" to "bluetooth",
+            "name" to (name ?: device.address),
+            "address" to device.address,
+            "connected" to connected,
+        )
     }
 
     /** Reading Do Not Disturb needs no permission; only changing it would. */
@@ -142,19 +199,7 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
         } ?: return
-        val name = try {
-            device.name
-        } catch (_: SecurityException) {
-            null
-        }
-        send(
-            mapOf(
-                "kind" to "bluetooth",
-                "name" to (name ?: device.address),
-                "address" to device.address,
-                "connected" to connected,
-            ),
-        )
+        send(bluetoothReading(device, connected))
     }
 
     /** The app the person last brought to the screen, from the usage

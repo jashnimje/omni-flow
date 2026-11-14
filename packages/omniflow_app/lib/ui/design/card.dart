@@ -13,7 +13,10 @@ class OmniCard extends StatelessWidget {
     this.child,
     this.onTap,
     this.highlighted = false,
-    this.padding = const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    this.padding = const EdgeInsets.symmetric(
+      horizontal: OmniSpace.screen,
+      vertical: OmniSpace.md,
+    ),
     this.margin = const EdgeInsets.only(bottom: OmniSpace.gap),
   });
 
@@ -57,11 +60,13 @@ class OmniCard extends StatelessWidget {
     return Padding(
       padding: margin,
       child: Material(
-        color: OmniColors.card,
+        color: OmniPalette.of(context).card,
         shape: RoundedRectangleBorder(
           borderRadius: radius,
           side: BorderSide(
-            color: highlighted ? OmniColors.accentLine : OmniColors.line,
+            color: highlighted
+                ? OmniPalette.of(context).accentLine
+                : OmniPalette.of(context).line,
           ),
         ),
         clipBehavior: Clip.antiAlias,
@@ -104,8 +109,9 @@ class OmniHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = tone == HeroTone.accent;
+    final palette = OmniPalette.of(context);
     final captionColor = switch (tone) {
-      HeroTone.accent => OmniColors.onAccentSoft,
+      HeroTone.accent => palette.onAccentSoft,
       HeroTone.plain => OmniColors.muted,
       HeroTone.problem => OmniColors.bad,
     };
@@ -142,18 +148,18 @@ class OmniHeroCard extends StatelessWidget {
       padding: const EdgeInsets.all(OmniSpace.lg),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(OmniRadii.hero),
-        color: accent ? null : OmniColors.card,
+        color: accent ? null : palette.card,
         gradient: accent
-            ? const LinearGradient(
+            ? LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [OmniColors.heroTop, OmniColors.heroBottom],
+                colors: [palette.heroTop, palette.heroBottom],
               )
             : null,
         border: Border.all(
           color: switch (tone) {
-            HeroTone.accent => OmniColors.accentLine,
-            HeroTone.plain => OmniColors.line,
+            HeroTone.accent => palette.accentLine,
+            HeroTone.plain => palette.line,
             HeroTone.problem => OmniColors.badLine,
           },
         ),

@@ -22,42 +22,45 @@ class OmniPowerButton extends StatelessWidget {
   final double size;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    container: true,
-    button: true,
-    toggled: on,
-    enabled: onPressed != null,
-    label: label,
-    excludeSemantics: true,
-    onTap: onPressed,
-    child: AnimatedContainer(
-      duration: OmniMotion.of(context),
-      curve: OmniMotion.curve,
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: on ? OmniColors.accent : OmniColors.raised,
-        border: on ? null : Border.all(color: OmniColors.line),
-      ),
-      child: Material(
-        type: MaterialType.transparency,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          child: Icon(
-            OmniIcons.power,
-            size: size * 0.42,
-            weight: 600,
-            color: onPressed == null
-                ? OmniColors.muted
-                : on
-                ? OmniColors.accentInk
-                : OmniColors.text,
+  Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
+    return Semantics(
+      container: true,
+      button: true,
+      toggled: on,
+      enabled: onPressed != null,
+      label: label,
+      excludeSemantics: true,
+      onTap: onPressed,
+      child: AnimatedContainer(
+        duration: OmniMotion.of(context),
+        curve: OmniMotion.curve,
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: on ? palette.accent : palette.raised,
+          border: on ? null : Border.all(color: palette.line),
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
+            child: Icon(
+              OmniIcons.power,
+              size: size * 0.42,
+              weight: 600,
+              color: onPressed == null
+                  ? OmniColors.muted
+                  : on
+                  ? palette.onAccent
+                  : OmniColors.text,
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }

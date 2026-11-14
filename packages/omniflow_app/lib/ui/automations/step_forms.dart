@@ -1047,24 +1047,83 @@ Future<ForEachStep?> forEachForm(
     return o != null && (o is! List || o.isNotEmpty);
   }
 
+  // "Do this to each device": one step on the device the repeat holds.
+  final existing = current?.steps
+      .whereType<DoStep>()
+      .where((s) => RuleWords.isEachDevice(s.thing))
+      .firstOrNull;
+  var each = switch (existing) {
+    DoStep(:final capability, :final params)
+        when params.length == 1 && params['value'] is bool =>
+      '${params['value'] == true ? 'on' : 'off'}-$capability',
+    DoStep(:final capability, :final params) when params.length == 1 =>
+      'set-$capability',
+    DoStep(:final capability) => 'do-$capability',
+    null => null,
+  };
+  final eachValue = TextEditingController(
+    text: each?.startsWith('set-') ?? false
+        ? valueText(existing!.params['value'])
+        : '',
+  );
+  RuleStep? eachStep() {
+    final choice = each;
+    if (choice == null || mode != 'room') return null;
+    final dash = choice.indexOf('-');
+    final kind = choice.substring(0, dash);
+    final cap = choice.substring(dash + 1);
+    final device = '{{${store.keep(current?.as) ?? defaultAs['forEach']}}}';
+    return switch (kind) {
+      'on' || 'off' => DoStep(device, cap, params: {'value': kind == 'on'}),
+      'set' => switch (num.tryParse(eachValue.text.trim())) {
+        final n? => DoStep(device, cap, params: {'value': n}),
+        null => null,
+      },
+      _ => DoStep(device, cap),
+    };
+  }
+
+  bool eachMissing() =>
+      mode == 'room' &&
+      (each?.startsWith('set-') ?? false) &&
+      eachStep() == null;
+  List<RuleStep>? stepsWith() {
+    final steps = [...?current?.steps];
+    final at = existing == null ? -1 : steps.indexOf(existing);
+    final step = eachStep();
+    if (mode != 'room') return current?.steps;
+    if (step == null) {
+      if (at >= 0) steps.removeAt(at);
+    } else if (at >= 0) {
+      steps[at] = step;
+    } else {
+      steps.add(step);
+    }
+    return steps;
+  }
+
   return showFormSheet(
     context,
-    owns: [value, list, max, store.controller],
+    owns: [value, list, max, store.controller, eachValue],
     title: 'Repeat with each',
     subtitle: 'Each item goes into Item for the steps inside.',
     whyNot: () => !filled()
         ? 'Choose what to go through'
         : maxValue() == -1
         ? 'At most 1 to 1000 times'
+        : eachMissing()
+        ? 'Type a number for each device'
         : store.ok
         ? null
         : 'Name it with letters, numbers and _',
     result: () {
-      if (!filled() || maxValue() == -1 || !store.ok) return null;
+      if (!filled() || maxValue() == -1 || !store.ok || eachMissing()) {
+        return null;
+      }
       return ForEachStep(
         over: over(),
         as: store.keep(current?.as),
-        steps: current?.steps,
+        steps: stepsWith(),
         max: maxValue(),
         extra: current?.extra,
       );
@@ -1101,7 +1160,7 @@ Future<ForEachStep?> forEachForm(
           controller: list,
           onChanged: (_) => setState(() {}),
         )
-      else
+      else ...[
         for (final r in {...words.rooms, ?room})
           ChoiceRow(
             key: ValueKey('foreach-room-$r'),
@@ -1111,6 +1170,15 @@ Future<ForEachStep?> forEachForm(
             selected: r == room,
             onTap: () => setState(() => room = r),
           ),
+        ..._eachDeviceChoices(
+          words,
+          room,
+          each,
+          eachValue,
+          (v) => setState(() => each = v),
+          setState,
+        ),
+      ],
       LabelledField(
         key: const ValueKey('foreach-max'),
         label: 'At most this many (empty: 100)',
@@ -1121,6 +1189,98 @@ Future<ForEachStep?> forEachForm(
       store.field(setState, 'foreach'),
     ],
   );
+}
+
+/// What every device in [room] can be told without a device of its own:
+/// an on/off switch, a level, or an action that takes nothing. A
+/// capability counts when each device has it with the same id and type.
+List<Json> eachDeviceActions(RuleWords words, String? room) {
+  final devices = [
+    for (final t in words.things)
+      if (room != null && t.room == room && t.actions.isNotEmpty) t,
+  ];
+  if (devices.isEmpty) return const [];
+  bool fits(Json c) => switch (c['type']) {
+    'toggle' => c['stateKey'] != null,
+    'level' => true,
+    'action' => (c['params'] as Map? ?? const {}).isEmpty,
+    _ => false,
+  };
+  return [
+    for (final c in devices.first.actions)
+      if (fits(c) &&
+          devices.every(
+            (d) => d.capability('${c['id']}')?['type'] == c['type'],
+          ))
+        c,
+  ];
+}
+
+String _capLabel(Json c) => '${c['label'] ?? c['id']}'
+    .replaceAll(RegExp(r'\s*\([^)]*\)'), '')
+    .toLowerCase();
+
+/// "Do this to each device" in a Repeat with each over [room]: a choice
+/// for each thing they all can do, then the number a level takes.
+List<Widget> _eachDeviceChoices(
+  RuleWords words,
+  String? room,
+  String? each,
+  TextEditingController value,
+  ValueChanged<String?> pick,
+  StateSetter setState,
+) {
+  final caps = eachDeviceActions(words, room);
+  final choices = <(String, String)>[
+    for (final c in caps)
+      ...switch (c['type']) {
+        'toggle' => [
+          ('on-${c['id']}', words.eachDo('${c['id']}', {'value': true})),
+          ('off-${c['id']}', words.eachDo('${c['id']}', {'value': false})),
+        ],
+        'level' => [('set-${c['id']}', "Set each device's ${_capLabel(c)}")],
+        _ => [('do-${c['id']}', words.eachDo('${c['id']}', const {}))],
+      },
+  ];
+  return [
+    const OmniSectionHeader('Do this to each device'),
+    if (choices.isEmpty)
+      const Padding(
+        padding: EdgeInsets.only(bottom: OmniSpace.sm),
+        child: Text(
+          'These devices have nothing they all can do. Add steps inside '
+          'the repeat instead.',
+          key: ValueKey('foreach-each-none'),
+          style: OmniText.caption,
+        ),
+      )
+    else ...[
+      ChoiceRow(
+        key: const ValueKey('foreach-each-later'),
+        title: 'Choose the steps inside later',
+        selected: each == null,
+        onTap: () => pick(null),
+      ),
+      for (final (key, title) in choices) ...[
+        ChoiceRow(
+          key: ValueKey('foreach-each-$key'),
+          title: title,
+          icon: AutomationIcons.forEach,
+          selected: each == key,
+          onTap: () => pick(key),
+        ),
+        if (each == key && key.startsWith('set-'))
+          LabelledField(
+            key: const ValueKey('foreach-each-value'),
+            label: 'To',
+            hint: '50',
+            controller: value,
+            number: true,
+            onChanged: (_) => setState(() {}),
+          ),
+      ],
+    ],
+  ];
 }
 
 Future<RunStep?> runForm(

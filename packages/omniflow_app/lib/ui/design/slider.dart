@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'tokens.dart';
 
@@ -74,10 +75,16 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
 
   String _text(double v) => widget.format?.call(v) ?? '${v.round()}';
 
+  /// Which tenth of the range [v] is in, so a drag clicks at each tenth.
+  int _detent(double v) => widget.max <= widget.min
+      ? 0
+      : ((v - widget.min) / (widget.max - widget.min) * 10).floor();
+
   void _setFrom(Offset local, double width) {
     final f = (local.dx / width).clamp(0.0, 1.0);
     final v = _clamp(widget.min + f * (widget.max - widget.min));
     if (v == _value) return;
+    if (_detent(v) != _detent(_value)) HapticFeedback.selectionClick();
     setState(() => _value = v);
     widget.onChanged?.call(v);
   }
@@ -89,6 +96,7 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
 
   void _nudge(int direction) {
     final step = widget.step ?? (widget.max - widget.min) / 20;
+    HapticFeedback.selectionClick();
     setState(() => _value = _clamp(_value + direction * step));
     widget.onChangeEnd?.call(_value);
   }
@@ -148,8 +156,10 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
                       height: widget.height,
                       child: Stack(
                         children: [
-                          const Positioned.fill(
-                            child: ColoredBox(color: OmniColors.raised),
+                          Positioned.fill(
+                            child: ColoredBox(
+                              color: OmniPalette.of(context).raised,
+                            ),
                           ),
                           Positioned(
                             left: 0,
@@ -168,7 +178,7 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
                           Positioned.fill(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
+                                horizontal: OmniSpace.screen,
                               ),
                               child: Row(
                                 children: [

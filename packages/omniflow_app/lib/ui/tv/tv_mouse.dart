@@ -1,19 +1,29 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:path_provider/path_provider.dart';
 
 import '../../api/tv_calls.dart';
+import '../../state/providers.dart' show showMessage;
 import '../design/design.dart';
 import 'tv_controller.dart';
 import 'tv_page.dart' show Keycodes;
 
+/// Whether the TV runs OmniFlow's pointer helper, which draws a live
+/// pointer on the TV itself. [unanswered] is a TV that did not say, which
+/// keeps the picture without offering an install.
+enum _Helper { unknown, unanswered, missing, running }
+
 /// A touchpad for apps that want a pointer: a browser, a game's menu, a
-/// settings screen with no focus. Android TV draws no pointer for touches
-/// sent over ADB, so the TV's picture sits above the pad with the pointer
-/// drawn on it. One finger moves it, a tap clicks where it is, two fingers
-/// scroll, and a long press holds.
+/// settings screen with no focus. With OmniFlow's pointer helper on the TV
+/// the pointer moves live on the TV. Without it, Android TV draws no
+/// pointer for touches sent over ADB, so the TV's picture sits above the
+/// pad with the pointer drawn on it. One finger moves it, a tap clicks
+/// where it is, two fingers scroll, and a long press holds.
 class TvMouse extends StatefulWidget {
   const TvMouse({super.key, required this.tv, required this.active});
 
@@ -31,6 +41,9 @@ class _TvMouseState extends State<TvMouse> {
   /// over the screen, as a laptop touchpad feels.
   static const _speed = 1.2;
 
+  /// How often a drag sends the live pointer a move: about 30 a second.
+  static const _sendEvery = Duration(milliseconds: 33);
+
   Offset _pointer = const Offset(0.5, 0.5);
   Uint8List? _frame;
   Size _screen = const Size(1920, 1080);
@@ -40,7 +53,18 @@ class _TvMouseState extends State<TvMouse> {
   /// Why the last picture did not come, shown in its place.
   String? _error;
 
+  var _helper = _Helper.unknown;
+  var _checking = false;
+  var _installing = false;
+
+  /// The drag not sent to the live pointer yet, as fractions of the screen.
+  Offset _unsent = Offset.zero;
+  Timer? _sendTimer;
+  var _sending = false;
+
   TvController get tv => widget.tv;
+
+  bool get _live => _helper == _Helper.running;
 
   @override
   void initState() {
@@ -51,6 +75,10 @@ class _TvMouseState extends State<TvMouse> {
   @override
   void didUpdateWidget(TvMouse old) {
     super.didUpdateWidget(old);
+    // Opening the tab again asks a TV that did not answer before.
+    if (widget.active && !old.active && _helper == _Helper.unanswered) {
+      _helper = _Helper.unknown;
+    }
     _sync();
   }
 
@@ -58,11 +86,16 @@ class _TvMouseState extends State<TvMouse> {
   void dispose() {
     _holdTimer?.cancel();
     _refresh?.cancel();
+    _sendTimer?.cancel();
     super.dispose();
   }
 
   void _sync() {
-    if (widget.active) {
+    if (widget.active && _helper == _Helper.unknown) {
+      unawaited(_checkHelper());
+    }
+    // The picture waits for the answer, as a TV with the helper needs none.
+    if (widget.active && _helper != _Helper.unknown && !_live) {
       if (_refresh != null) return;
       unawaited(_read());
       _refresh = Timer.periodic(
@@ -75,8 +108,99 @@ class _TvMouseState extends State<TvMouse> {
     }
   }
 
+  Future<void> _checkHelper() async {
+    if (_checking) return;
+    _checking = true;
+    try {
+      final r = await tv.client.call(
+        TvPointerCalls.status,
+        TvCalls.readArgs(tv.id),
+      );
+      if (!mounted) return;
+      setState(
+        () => _helper = r['ok'] != true
+            ? _Helper.unanswered
+            : TvPointerCalls.isRunning(r)
+            ? _Helper.running
+            : _Helper.missing,
+      );
+      _sync();
+      if (_live) await _showLive();
+    } finally {
+      _checking = false;
+    }
+  }
+
+  /// Puts the TV's pointer where the pad's is, so a click lands there.
+  Future<void> _showLive() async {
+    final r = await tv.client.call(TvPointerCalls.pointer, {
+      'id': tv.id,
+      'to': [_pointer.dx, _pointer.dy],
+    });
+    if ((r['error'] as Map?)?['type'] == 'not_ready') _lostHelper();
+  }
+
+  /// The helper stopped answering: back to the picture until it is
+  /// installed or started again.
+  void _lostHelper() {
+    if (!mounted || !_live) return;
+    setState(() => _helper = _Helper.missing);
+    _sync();
+  }
+
+  Future<void> _installHelper() async {
+    final ok = await confirm(
+      context,
+      title: 'Install the pointer helper on the TV?',
+      body:
+          'OmniFlow puts its own small app on the TV that draws a mouse '
+          'pointer, so you see it move as you drag here. It may draw over '
+          'other apps and keeps running in the background. It never uses '
+          'the network: it has no internet permission and takes moves only '
+          'from OmniFlow over the TV\'s debugging link. You can uninstall '
+          'it from the TV\'s apps at any time.',
+      action: 'Install',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _installing = true);
+    try {
+      final String path;
+      try {
+        path = await _helperApk();
+      } on Object {
+        showMessage(
+          'This build of OmniFlow does not carry the pointer helper.',
+        );
+        return;
+      }
+      final r = await tv.call(
+        TvPointerCalls.install,
+        TvPointerCalls.installArgs(tv.id, path),
+      );
+      if (!mounted || r['ok'] != true) return;
+      setState(
+        () => _helper = TvPointerCalls.isRunning(r)
+            ? _Helper.running
+            : _Helper.missing,
+      );
+      _sync();
+      if (_live) await _showLive();
+    } finally {
+      if (mounted) setState(() => _installing = false);
+    }
+  }
+
+  /// The bundled APK as a file the engine reads.
+  Future<String> _helperApk() async {
+    final data = await rootBundle.load(TvPointerCalls.asset);
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/${TvPointerCalls.asset.split('/').last}');
+    await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
+    return file.path;
+  }
+
   Future<void> _read() async {
-    if (_reading) return;
+    if (_reading || _live) return;
     _reading = true;
     try {
       final r = await tv.client.call(
@@ -107,15 +231,50 @@ class _TvMouseState extends State<TvMouse> {
 
   void _move(Offset delta, Size pad) {
     if (pad.isEmpty) return;
+    final by = Offset(
+      delta.dx / pad.width * _speed,
+      delta.dy / pad.height * _speed,
+    );
     setState(() {
       _pointer = Offset(
-        (_pointer.dx + delta.dx / pad.width * _speed).clamp(0.0, 1.0),
-        (_pointer.dy + delta.dy / pad.height * _speed).clamp(0.0, 1.0),
+        (_pointer.dx + by.dx).clamp(0.0, 1.0),
+        (_pointer.dy + by.dy).clamp(0.0, 1.0),
       );
     });
+    if (!_live) return;
+    _unsent += by;
+    _sendTimer ??= Timer(_sendEvery, _sendMove);
+  }
+
+  /// Sends the drag gathered since the last move, one call at a time.
+  Future<void> _sendMove() async {
+    _sendTimer = null;
+    if (_sending || _unsent == Offset.zero) return;
+    final by = _unsent;
+    _unsent = Offset.zero;
+    _sending = true;
+    try {
+      final r = await tv.client.call(
+        TvPointerCalls.pointer,
+        TvPointerCalls.byArgs(tv.id, by),
+      );
+      if (r['ok'] != true) {
+        if ((r['error'] as Map?)?['type'] == 'not_ready') _lostHelper();
+        return;
+      }
+    } finally {
+      _sending = false;
+      if (_unsent != Offset.zero && _live) {
+        _sendTimer ??= Timer(_sendEvery, _sendMove);
+      }
+    }
   }
 
   Future<void> _click() async {
+    if (_live) {
+      await tv.call(TvPointerCalls.click, TvCalls.idArgs(tv.id));
+      return;
+    }
     await tv.call(
       TvCalls.tap,
       TvCalls.tapArgs(tv.id, _pointer.dx, _pointer.dy),
@@ -239,63 +398,92 @@ class _TvMouseState extends State<TvMouse> {
         ),
       );
 
+  /// The TV's picture with the pointer drawn on it, for a TV without the
+  /// helper.
+  Widget _picture() {
+    final frame = _frame;
+    return AspectRatio(
+      aspectRatio: _screen.width / _screen.height,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: ColoredBox(
+          color: Colors.black,
+          child: LayoutBuilder(
+            builder: (context, box) => Stack(
+              fit: StackFit.expand,
+              children: [
+                if (frame != null)
+                  Image.memory(
+                    frame,
+                    gaplessPlayback: true,
+                    fit: BoxFit.fill,
+                    filterQuality: FilterQuality.medium,
+                  )
+                else if (_error case final e?)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(OmniSpace.md),
+                      child: Text(
+                        e,
+                        key: const ValueKey('tv-mouse-error'),
+                        textAlign: TextAlign.center,
+                        style: OmniText.caption,
+                      ),
+                    ),
+                  )
+                else
+                  const Center(child: CircularProgressIndicator()),
+                Positioned(
+                  left: _pointer.dx * box.maxWidth - 2,
+                  top: _pointer.dy * box.maxHeight - 2,
+                  child: const IgnorePointer(
+                    child: Icon(
+                      Icons.navigation_rounded,
+                      key: ValueKey('tv-mouse-pointer'),
+                      size: 22,
+                      color: OmniColors.accent,
+                      shadows: [Shadow(blurRadius: 3)],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final frame = _frame;
     return Column(
       key: const ValueKey('tv-mouse'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AspectRatio(
-          aspectRatio: _screen.width / _screen.height,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: ColoredBox(
-              color: Colors.black,
-              child: LayoutBuilder(
-                builder: (context, box) => Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (frame != null)
-                      Image.memory(
-                        frame,
-                        gaplessPlayback: true,
-                        fit: BoxFit.fill,
-                        filterQuality: FilterQuality.medium,
-                      )
-                    else if (_error case final e?)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(OmniSpace.md),
-                          child: Text(
-                            e,
-                            key: const ValueKey('tv-mouse-error'),
-                            textAlign: TextAlign.center,
-                            style: OmniText.caption,
-                          ),
-                        ),
-                      )
-                    else
-                      const Center(child: CircularProgressIndicator()),
-                    Positioned(
-                      left: _pointer.dx * box.maxWidth - 2,
-                      top: _pointer.dy * box.maxHeight - 2,
-                      child: const IgnorePointer(
-                        child: Icon(
-                          Icons.navigation_rounded,
-                          key: ValueKey('tv-mouse-pointer'),
-                          size: 22,
-                          color: OmniColors.accent,
-                          shadows: [Shadow(blurRadius: 3)],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+        if (_live)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: OmniSpace.xs),
+            child: Text(
+              'The pointer moves on the TV as you drag.',
+              key: ValueKey('tv-mouse-live'),
+              textAlign: TextAlign.center,
+              style: OmniText.caption,
             ),
-          ),
-        ),
+          )
+        else ...[
+          _picture(),
+          if (_helper == _Helper.missing) ...[
+            const SizedBox(height: OmniSpace.sm),
+            OmniButton.ghost(
+              key: const ValueKey('tv-mouse-install-helper'),
+              label: _installing
+                  ? 'Installing the pointer helper...'
+                  : 'Install the pointer helper on the TV',
+              icon: Icons.mouse_rounded,
+              onPressed: _installing ? null : _installHelper,
+            ),
+          ],
+        ],
         const SizedBox(height: OmniSpace.sm),
         LayoutBuilder(
           builder: (context, box) {

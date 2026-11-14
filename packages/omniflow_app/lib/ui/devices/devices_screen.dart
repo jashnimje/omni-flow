@@ -45,37 +45,59 @@ List<DeviceView> listedDevices(List<Json> devices) => [
     if (!presenceDrivers.contains(j['driver'])) DeviceView(j),
 ];
 
-/// The type group a device is listed under in By type.
+/// The groups of By type, in the order they show.
+const typeGroups = [
+  'Lights',
+  'Plugs',
+  'TVs',
+  'Sensors',
+  'Boards',
+  'Computers',
+  'Other',
+];
+
+/// The type group a device is listed under in By type, in plain words.
 String typeGroup(DeviceView d, Map<String, Json> drivers) {
   switch (kindOf(d)) {
     case DeviceKind.tv:
       return 'TVs';
-    case DeviceKind.tag:
-      return 'Tags';
     case DeviceKind.board:
       return 'Boards';
-    case DeviceKind.phone:
-      return 'Phones';
     case DeviceKind.sensor:
       return 'Sensors';
-    case DeviceKind.person || DeviceKind.place:
-      return 'People and places';
+    case DeviceKind.tag ||
+        DeviceKind.phone ||
+        DeviceKind.person ||
+        DeviceKind.place:
+      return 'Other';
     case DeviceKind.simple:
       return switch (drivers[d.driver]?['category']) {
         'lighting' => 'Lights',
-        'power' => 'Plugs and switches',
+        'power' => 'Plugs',
         'computer' => 'Computers',
         'media' => 'TVs',
-        'zigbee' => 'Zigbee',
+        'sensor' => 'Sensors',
         _ =>
           d.capabilityOf('level') != null ||
                   d.capabilityOf('color_temp') != null
               ? 'Lights'
               : d.hasPower
-              ? 'Plugs and switches'
+              ? 'Plugs'
               : 'Other',
       };
   }
+}
+
+/// Whether [d] matches what was typed in Devices' search: its name, room
+/// or driver, ignoring case.
+bool matchesQuery(DeviceView d, String query, Map<String, Json> drivers) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  return [
+    d.name,
+    d.room ?? '',
+    shortDriverName(drivers[d.driver], d.driver),
+  ].any((s) => s.toLowerCase().contains(q));
 }
 
 /// The user's order first, then by name.
@@ -106,8 +128,11 @@ List<({String title, List<DeviceView> devices})> groupDevices(
       final none = groups.remove('Not in a room');
       if (none != null) groups['Not in a room'] = none;
     case DevicesView.byType:
+      for (final g in typeGroups) {
+        groups[g] = [];
+      }
       for (final d in devices) {
-        groups.putIfAbsent(typeGroup(d, drivers), () => []).add(d);
+        groups[typeGroup(d, drivers)]!.add(d);
       }
     case DevicesView.problems:
       final problems = devices.where(hasProblem).toList();
@@ -121,18 +146,83 @@ List<({String title, List<DeviceView> devices})> groupDevices(
 }
 
 /// 3.1: every thing, by room, by type or only the ones with a problem,
-/// each opening its page.
-class DevicesScreen extends ConsumerWidget {
+/// with a search field over the list. A row opens its page; on a wide
+/// screen the page shows beside the list instead.
+class DevicesScreen extends ConsumerStatefulWidget {
   const DevicesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DevicesScreen> createState() => _DevicesScreenState();
+}
+
+class _DevicesScreenState extends ConsumerState<DevicesScreen> {
+  final _search = TextEditingController();
+  String? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _search.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final view = ref.watch(devicesViewProvider);
     final devices = ref.watch(devicesProvider);
     final drivers = ref.watch(driversProvider).value ?? const {};
     final rooms = ref.watch(roomsProvider).value ?? const [];
     final listed = devices.value == null ? null : listedDevices(devices.value!);
     final problems = listed?.where(hasProblem).length ?? 0;
+    final twoPanes = OmniWidth.of(context) == OmniWidth.expanded;
+    final query = _search.text;
+    final list = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OmniSegmented<DevicesView>(
+          key: const ValueKey('devices-view'),
+          segments: [
+            const OmniSegment(DevicesView.byRoom, 'By room'),
+            const OmniSegment(DevicesView.byType, 'By type'),
+            OmniSegment(
+              DevicesView.problems,
+              'Problems',
+              count: problems == 0 ? null : problems,
+            ),
+          ],
+          selected: view,
+          onChanged: ref.read(devicesViewProvider.notifier).show,
+        ),
+        if (listed != null && listed.isNotEmpty)
+          _SearchField(controller: _search),
+        Expanded(
+          child: switch ((devices, listed)) {
+            (_, final all?) => _DeviceList(
+              devices: [
+                for (final d in all)
+                  if (matchesQuery(d, query, drivers)) d,
+              ],
+              anyListed: all.isNotEmpty,
+              query: query,
+              view: view,
+              rooms: rooms,
+              drivers: drivers,
+              selected: twoPanes ? _selected : null,
+              onOpen: twoPanes ? (id) => setState(() => _selected = id) : null,
+            ),
+            (AsyncError(), _) => EngineSilent(
+              onRetry: () => ref.invalidate(devicesProvider),
+            ),
+            _ => const OmniListSkeleton(label: 'Loading devices'),
+          },
+        ),
+      ],
+    );
     return OmniTabPage(
       title: 'Devices',
       actions: [
@@ -144,38 +234,85 @@ class DevicesScreen extends ConsumerWidget {
               ref.read(shellControllerProvider).open(const SearchLink()),
         ),
       ],
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          OmniSegmented<DevicesView>(
-            key: const ValueKey('devices-view'),
-            segments: [
-              const OmniSegment(DevicesView.byRoom, 'By room'),
-              const OmniSegment(DevicesView.byType, 'By type'),
-              OmniSegment(
-                DevicesView.problems,
-                'Problems',
-                count: problems == 0 ? null : problems,
+      body: !twoPanes
+          ? list
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: 360, child: list),
+                const SizedBox(width: OmniSpace.lg),
+                Expanded(
+                  child: _DetailPane(
+                    key: ValueKey('devices-detail-$_selected'),
+                    id: _selected,
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Filters the list as you type.
+class _SearchField extends StatelessWidget {
+  const _SearchField({required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+    child: TextField(
+      key: const ValueKey('devices-filter'),
+      controller: controller,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        hintText: 'Find a device',
+        prefixIcon: const Icon(OmniIcons.search, color: OmniColors.muted),
+        isDense: true,
+        suffixIcon: controller.text.isEmpty
+            ? null
+            : OmniIconAction(
+                key: const ValueKey('devices-filter-clear'),
+                icon: OmniIcons.close,
+                label: 'Clear search',
+                onPressed: controller.clear,
               ),
-            ],
-            selected: view,
-            onChanged: ref.read(devicesViewProvider.notifier).show,
-          ),
-          Expanded(
-            child: switch ((devices, listed)) {
-              (_, final list?) => _DeviceList(
-                devices: list,
-                view: view,
-                rooms: rooms,
-                drivers: drivers,
+      ),
+    ),
+  );
+}
+
+/// The right pane of a wide Devices: the chosen device's page, with its
+/// own back stack, or a prompt to choose one.
+class _DetailPane extends StatelessWidget {
+  const _DetailPane({super.key, required this.id});
+
+  final String? id;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(OmniRadii.card),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: palette.background,
+          border: Border.all(color: palette.line),
+          borderRadius: BorderRadius.circular(OmniRadii.card),
+        ),
+        child: id == null
+            ? const OmniEmptyState(
+                icon: OmniIcons.devices,
+                title: 'Choose a device',
+                message: 'Its controls and history show here.',
+              )
+            : Navigator(
+                onGenerateRoute: (settings) => MaterialPageRoute<void>(
+                  settings: RouteSettings(name: DeviceLink(id!).location),
+                  builder: (_) => DeviceRoute(id: id!),
+                ),
               ),
-              (AsyncError(), _) => EngineSilent(
-                onRetry: () => ref.invalidate(devicesProvider),
-              ),
-              _ => const _ListSkeleton(),
-            },
-          ),
-        ],
       ),
     );
   }
@@ -184,19 +321,31 @@ class DevicesScreen extends ConsumerWidget {
 class _DeviceList extends ConsumerWidget {
   const _DeviceList({
     required this.devices,
+    required this.anyListed,
+    required this.query,
     required this.view,
     required this.rooms,
     required this.drivers,
+    this.selected,
+    this.onOpen,
   });
 
   final List<DeviceView> devices;
+
+  /// Whether anything is listed before the search filters it.
+  final bool anyListed;
+  final String query;
   final DevicesView view;
   final List<Room> rooms;
   final Map<String, Json> drivers;
+  final String? selected;
+
+  /// Shows a device beside the list. Null pushes its page.
+  final void Function(String id)? onOpen;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (devices.isEmpty) {
+    if (!anyListed) {
       return OmniEmptyState(
         icon: OmniIcons.devices,
         title: 'No devices yet',
@@ -212,17 +361,23 @@ class _DeviceList extends ConsumerWidget {
     }
     final groups = groupDevices(devices, view, rooms, drivers);
     if (groups.isEmpty) {
-      return const OmniEmptyState(
-        icon: AreaIcons.ok,
-        title: 'Nothing needs a look',
-        message: 'Every device is answering.',
-      );
+      return query.trim().isNotEmpty
+          ? OmniEmptyState(
+              icon: AreaIcons.notFound,
+              title: 'No device matches "${query.trim()}"',
+              message: 'Try part of its name, its room or its make.',
+            )
+          : const OmniEmptyState(
+              icon: AreaIcons.ok,
+              title: 'Nothing needs a look',
+              message: 'Every device is answering.',
+            );
     }
     return RefreshIndicator(
       onRefresh: () => ref.read(devicesProvider.notifier).refresh(),
       child: ListView(
         key: const ValueKey('devices-list'),
-        padding: const EdgeInsets.only(bottom: 96),
+        padding: EdgeInsets.only(bottom: OmniInsets.fabClearance(context)),
         children: [
           for (final g in groups) ...[
             OmniSectionHeader(g.title, trailingText: '${g.devices.length}'),
@@ -236,7 +391,9 @@ class _DeviceList extends ConsumerWidget {
                   shortDriverName(drivers[d.driver], d.driver),
                 ),
                 dot: statusOf(d),
-                onTap: () => openDevice(context, d.id),
+                selected: selected == d.id,
+                onTap: () =>
+                    onOpen == null ? openDevice(context, d.id) : onOpen!(d.id),
               ),
           ],
         ],
@@ -264,28 +421,6 @@ class EngineSilent extends StatelessWidget {
       icon: OmniIcons.retry,
       expand: false,
       onPressed: onRetry,
-    ),
-  );
-}
-
-class _ListSkeleton extends StatelessWidget {
-  const _ListSkeleton();
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    label: 'Loading devices',
-    child: Column(
-      children: [
-        for (var i = 0; i < 5; i++)
-          Container(
-            height: 52,
-            margin: const EdgeInsets.only(bottom: OmniSpace.sm),
-            decoration: BoxDecoration(
-              color: OmniColors.card,
-              borderRadius: BorderRadius.circular(OmniRadii.card),
-            ),
-          ),
-      ],
     ),
   );
 }

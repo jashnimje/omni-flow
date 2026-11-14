@@ -141,6 +141,7 @@ class _LibraryState extends State<_Library> {
         children: [
           TextField(
             key: const ValueKey('picker-search'),
+            autofocus: true,
             decoration: InputDecoration(
               hintText: widget.hint,
               prefixIcon: const Icon(OmniIcons.search),
@@ -166,22 +167,25 @@ class _LibraryState extends State<_Library> {
           ],
           if (!searching) ...[
             const SizedBox(height: OmniSpace.sm),
-            Wrap(
+            // One row that scrolls sideways, so the list starts right under it.
+            SingleChildScrollView(
               key: const ValueKey('library-categories'),
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final cat in widget.categories)
-                  if (all.any((c) => c.category == cat && !c.searchOnly))
-                    OmniFilterChip(
-                      key: ValueKey('category-$cat'),
-                      label: cat,
-                      selected: _category == cat,
-                      onTap: () => setState(
-                        () => _category = _category == cat ? null : cat,
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                spacing: 6,
+                children: [
+                  for (final cat in widget.categories)
+                    if (all.any((c) => c.category == cat && !c.searchOnly))
+                      OmniFilterChip(
+                        key: ValueKey('category-$cat'),
+                        label: cat,
+                        selected: _category == cat,
+                        onTap: () => setState(
+                          () => _category = _category == cat ? null : cat,
+                        ),
                       ),
-                    ),
-              ],
+                ],
+              ),
             ),
           ],
           if (sections.isEmpty)

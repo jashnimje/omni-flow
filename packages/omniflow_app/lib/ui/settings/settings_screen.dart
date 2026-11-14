@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/appearance.dart';
 import '../../state/providers.dart';
 import '../automations/scenes.dart' show ScenesPage;
 import '../boards/usb_board.dart' show showUsbBoardSheet;
@@ -11,6 +12,7 @@ import '../home/home_data.dart';
 import '../shell/shell.dart';
 import '../tags/tags_page.dart' show TagsPage;
 import 'agent_access.dart';
+import 'appearance_page.dart';
 import 'backup_page.dart';
 import 'developer_page.dart';
 import 'hubs_page.dart';
@@ -39,6 +41,7 @@ final settingsPlaces = [
   SettingsPlace('NFC tags', OmniIcons.tag, TagsPage.new),
   SettingsPlace('Scenes', OmniIcons.scene, ScenesPage.new),
   SettingsPlace('Phone setup', OmniIcons.settings, PhoneAccessPage.new),
+  SettingsPlace('Appearance', OmniIcons.color, AppearancePage.new),
   SettingsPlace('Permissions', OmniIcons.permissions, PhoneAccessPage.new),
   SettingsPlace('Hubs', OmniIcons.hub, HubsPage.new),
   SettingsPlace('Backup and restore', OmniIcons.backup, BackupPage.new),
@@ -77,6 +80,7 @@ class SettingsScreen extends ConsumerWidget {
     final access = ref.watch(phoneAccessStateProvider).value;
     final hub = ref.watch(engineStatusProvider).value;
     final hubError = ref.watch(hubErrorProvider);
+    final appearance = ref.watch(appearanceProvider).value;
     final tags = devices.where((d) => d.driver == 'nfc_tag').length;
     final waiting = summaries?.where((a) => a.needsApproval).toList();
     final shell = ref.read(shellControllerProvider);
@@ -84,7 +88,7 @@ class SettingsScreen extends ConsumerWidget {
       title: 'Settings',
       body: ListView(
         key: const ValueKey('settings-list'),
-        padding: const EdgeInsets.only(bottom: OmniSpace.xl),
+        padding: EdgeInsets.only(bottom: OmniInsets.bottom(context)),
         children: [
           const OmniSectionHeader('Your home'),
           OmniListRow(
@@ -119,7 +123,7 @@ class SettingsScreen extends ConsumerWidget {
             key: const ValueKey('settings-variables'),
             icon: OmniIcons.level,
             title: 'Variables',
-            subtitle: 'values automations set, to see or clear',
+            subtitle: 'Values automations set, to see or clear',
             chevron: true,
             onTap: () => _push(context, const VariablesPage()),
           ),
@@ -145,6 +149,16 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _push(context, const PhoneAccessPage()),
           ),
           OmniListRow(
+            key: const ValueKey('settings-appearance'),
+            icon: OmniIcons.color,
+            title: 'Appearance',
+            subtitle: appearance == null
+                ? 'Colours and background'
+                : AppearancePage.summary(appearance),
+            chevron: true,
+            onTap: () => _push(context, const AppearancePage()),
+          ),
+          OmniListRow(
             key: const ValueKey('settings-hubs'),
             icon: OmniIcons.hub,
             title: 'Hubs',
@@ -165,7 +179,7 @@ class SettingsScreen extends ConsumerWidget {
             key: const ValueKey('settings-usb'),
             icon: OmniIcons.board,
             title: 'Boards on USB',
-            subtitle: 'set up a board, or install firmware on it',
+            subtitle: 'Set up a board, or install firmware on it',
             chevron: true,
             onTap: () => showUsbBoardSheet(context),
           ),
@@ -193,7 +207,7 @@ class SettingsScreen extends ConsumerWidget {
             key: const ValueKey('settings-backup'),
             icon: OmniIcons.backup,
             title: 'Backup and restore',
-            subtitle: 'keep a copy of the whole home in a file',
+            subtitle: 'Keep a copy of the whole home in a file',
             chevron: true,
             onTap: () => _push(context, const BackupPage()),
           ),
@@ -202,7 +216,7 @@ class SettingsScreen extends ConsumerWidget {
             key: const ValueKey('settings-developer'),
             icon: OmniIcons.developer,
             title: 'Developer',
-            subtitle: 'packets, run log, drivers, engine',
+            subtitle: 'Packets, run log, drivers, engine',
             chevron: true,
             onTap: () => shell.open(const DeveloperLink()),
           ),

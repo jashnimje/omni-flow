@@ -8,9 +8,10 @@
   "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
   "settings": [
     { "key": "devId", "label": "Device id" },
-    { "key": "localKey", "label": "Local key", "secret": true }
+    { "key": "localKey", "label": "Local key", "secret": true },
+    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5" }
   ],
-  "setup": ["configure:devId", "secret:localKey"],
+  "setup": ["configure:devId", "secret:localKey", "configure:version?"],
   "statePush": { "jsonPath": "$.dps" },
   "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
   "reliability": { "timeoutMs": 1500, "retries": 1 },

@@ -9,6 +9,7 @@ import '../manifest/driver_manifest.dart';
 import '../transports/udp_transport.dart';
 import 'device_service.dart';
 import 'discovery/mdns_discovery.dart';
+import 'discovery/ssdp_discovery.dart';
 import 'discovery/tuya_broadcast.dart';
 
 class DiscoveredDevice {
@@ -57,23 +58,29 @@ class DiscoverySweep {
 }
 
 /// Runs every network discovery method a driver declares and merges the
-/// results: `udp_broadcast`, `tuya_broadcast` and `mdns`. Serial discovery
+/// results: `udp_broadcast`, `tuya_broadcast`, `mdns` and `ssdp`. Serial discovery
 /// stays with the serial channel, which owns the ports.
 class DeviceDiscovery {
   DeviceDiscovery({
     required this.udp,
     TuyaDiscovery? tuya,
     MdnsDiscovery? mdns,
+    SsdpDiscovery? ssdp,
     this.tuyaMinimumWindow = const Duration(seconds: 6),
     this.tuyaLocateWindow = const Duration(seconds: 8),
     Future<Set<String>> Function()? ownAddresses,
   }) : tuya = tuya ?? TuyaDiscovery(),
        mdns = mdns ?? MdnsDiscovery(),
+       ssdp = ssdp ?? SsdpDiscovery(targets: udp._targets),
        ownAddresses = ownAddresses ?? localAddresses;
 
   final UdpDiscovery udp;
   final TuyaDiscovery tuya;
   final MdnsDiscovery mdns;
+
+  /// Probes go where the UDP probes go when those are set (a test passes
+  /// loopback or none), else to the SSDP multicast group.
+  final SsdpDiscovery ssdp;
 
   /// Tuya devices announce on a timer of several seconds rather than in
   /// answer to a probe, so a short window often hears nothing.
@@ -219,6 +226,46 @@ class DeviceDiscovery {
       }
     }
 
+    final byTarget = <String, List<(DriverManifest, DiscoverySpec)>>{};
+    for (final driver in drivers) {
+      for (final spec in driver.discovery) {
+        final st = spec.config['st'];
+        if (spec.method != ssdpMethod || st is! String) continue;
+        (byTarget[st] ??= []).add((driver, spec));
+      }
+    }
+    if (wanted(ssdpMethod)) {
+      for (final MapEntry(key: st, value: users) in byTarget.entries) {
+        var targetWindow = window;
+        for (final (_, spec) in users) {
+          targetWindow = _longer(targetWindow, spec.config['windowMs']);
+        }
+        run(
+          ssdpMethod,
+          ssdp
+              .discover(st, window: targetWindow)
+              .then(
+                (replies) => [
+                  for (final (driver, spec) in users)
+                    for (final r in replies)
+                      (
+                        driver.id,
+                        DiscoveredDevice(
+                          host: r.host,
+                          port: r.port,
+                          stableId: r.stableId(
+                            spec.config['idHeader'] as String? ?? 'usn',
+                          ),
+                          reply: r.toJson(),
+                          method: ssdpMethod,
+                        ),
+                      ),
+                ],
+              ),
+        );
+      }
+    }
+
     final found = <String, List<DiscoveredDevice>>{
       for (final d in drivers) d.id: [],
     };
@@ -276,7 +323,9 @@ class DeviceDiscovery {
       final host = await tuya.locate(stableId, window: tuyaLocateWindow);
       if (host != null) return host;
     }
-    if (!methods.contains('udp_broadcast') && !methods.contains(mdnsMethod)) {
+    if (!methods.contains('udp_broadcast') &&
+        !methods.contains(mdnsMethod) &&
+        !methods.contains(ssdpMethod)) {
       return null;
     }
     final hits = await discover(driver);

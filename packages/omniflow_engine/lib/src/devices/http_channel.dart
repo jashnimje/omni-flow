@@ -11,6 +11,7 @@ import '../transports/packet_tap.dart';
 import '../transports/udp_transport.dart';
 import 'channels.dart';
 import 'device.dart';
+import 'xml_reply.dart';
 
 /// The secret setting a Hue light keeps its bridge username in.
 const hueUsernameSecret = 'username';
@@ -100,6 +101,10 @@ List<ValidationIssue> httpTransportIssues(DriverManifest manifest) {
   if (flatten != null && (flatten is! String || flatten.isEmpty)) {
     issues.add('$at.flattenReply', 'must name a key of the reply');
   }
+  final reply = options['reply'];
+  if (reply != null && reply != 'json' && reply != 'xml') {
+    issues.add('$at.reply', 'must be json or xml');
+  }
 
   void checkCommand(Object? command, String path) {
     if (command is! Map) return;
@@ -115,7 +120,7 @@ List<ValidationIssue> httpTransportIssues(DriverManifest manifest) {
         }
       }
     }
-    for (final part in ['query', 'body']) {
+    for (final part in ['query', 'body', 'soap']) {
       if (_mentionsSecret(command[part])) {
         issues.add(
           '$path.$part',
@@ -132,6 +137,16 @@ List<ValidationIssue> httpTransportIssues(DriverManifest manifest) {
     );
   }
   checkCommand(manifest.statePoll?['command'], r'$.statePoll.command');
+  final also = manifest.statePoll?['also'];
+  if (also is List) {
+    for (var i = 0; i < also.length; i++) {
+      final extra = also[i];
+      checkCommand(
+        extra is Map ? extra['command'] : null,
+        '\$.statePoll.also[$i].command',
+      );
+    }
+  }
   return issues.issues;
 }
 
@@ -166,6 +181,12 @@ bool _mentionsSecret(Object? node) => switch (node) {
 /// `type` is in the `authErrorTypes` option, is a [SecretRejectedException].
 /// The option `"flattenReply": "attributes"` lifts that object's keys to the
 /// top of a JSON reply, so a capability reads `$.brightness`.
+///
+/// For UPnP and Roku: a command part `"soap": {"service", "action", "args"}`
+/// is sent as a SOAP envelope with its SOAPACTION header, every argument
+/// escaped ([soapRequest]), and the option `"reply": "xml"` reads the reply
+/// as XML, its leaf elements becoming keys ([flattenXml]). A UPnP fault is a
+/// failed command naming its error code.
 class HttpChannel implements DriverChannel {
   HttpChannel({
     this._renderer = const TemplateRenderer(),
@@ -261,13 +282,22 @@ class HttpChannel implements DriverChannel {
       headers[header] = scheme == null ? token : '$scheme $token';
       shown += '\n$header: ${scheme == null ? '***' : '$scheme ***'}';
     }
+    final soap = rendered['soap'] == null
+        ? null
+        : soapRequest(rendered['soap']);
+    if (soap != null) {
+      headers['SOAPACTION'] = '"${soap.$2}"';
+      shown += '\nSOAPACTION: "${soap.$2}"';
+    }
+    final xmlReply = options['reply'] == 'xml';
     final reliability = manifest.reliability;
     final (status, text, _) = await _exchange(
       deviceId: device.id,
       method: method,
       uri: uri,
       headers: headers,
-      body: rendered['body'],
+      body: soap == null ? rendered['body'] : null,
+      xmlBody: soap?.$1,
       shown: shown,
       secrets: secrets.values,
       timeout: Duration(milliseconds: reliability.timeoutMs),
@@ -288,8 +318,18 @@ class HttpChannel implements DriverChannel {
       );
     }
     if (status >= 400) {
+      final upnp = xmlReply ? flattenXml(text) : null;
+      final code = upnp?['errorCode'];
+      if (code != null) {
+        final words = upnp?['errorDescription'];
+        throw CommandFailedException(
+          '${device.id} refused the command: UPnP error $code'
+          '${words is String && words.isNotEmpty ? ' ($words)' : ''}',
+        );
+      }
       throw CommandFailedException('${device.id} answered HTTP $status: $text');
     }
+    if (xmlReply) return ChannelReply(flattenXml(text), raw: text);
     final decoded = _tryDecode(text);
     if (decoded is List) {
       final errors = [
@@ -403,13 +443,14 @@ class HttpChannel implements DriverChannel {
     required Uri uri,
     required Map<String, String> headers,
     required Object? body,
+    String? xmlBody,
     required String shown,
     required Iterable<String> secrets,
     Iterable<String> Function(String text)? revealed,
     required Duration timeout,
     required int retries,
   }) async {
-    final encoded = body == null ? null : jsonEncode(body);
+    final encoded = xmlBody ?? (body == null ? null : jsonEncode(body));
     for (var attempt = 0; attempt <= retries; attempt++) {
       final client = HttpClient()..connectionTimeout = timeout;
       try {
@@ -417,7 +458,9 @@ class HttpChannel implements DriverChannel {
         req.followRedirects = secrets.isEmpty;
         headers.forEach(req.headers.set);
         if (encoded != null) {
-          req.headers.contentType = ContentType.json;
+          req.headers.contentType = xmlBody == null
+              ? ContentType.json
+              : ContentType('text', 'xml', charset: 'utf-8');
           req.write(encoded);
         }
         _record(

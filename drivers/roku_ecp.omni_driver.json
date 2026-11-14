@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "roku_ecp",
+  "name": "Roku TV or streaming stick (local ECP over HTTP)",
+  "category": "media",
+  "icon": "tv",
+  "transport": { "type": "http", "port": 8060, "reply": "xml" },
+  "discovery": [{ "method": "ssdp", "st": "roku:ecp", "idHeader": "usn" }],
+  "statePoll": {
+    "intervalSeconds": 30,
+    "command": { "path": "/query/device-info" },
+    "also": [{ "command": { "path": "/query/active-app" } }]
+  },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power (Roku TVs, a stick has no power off)",
+      "onOff": ["PowerOn", "PowerOff"],
+      "alsoOff": ["DisplayOff", "Ready"],
+      "command": { "method": "POST", "path": "/keypress/{{value}}" },
+      "stateJsonPath": "$.power_mode"
+    },
+    {
+      "id": "press_key",
+      "type": "text_command",
+      "label": "Press a remote key",
+      "params": {
+        "value": {
+          "type": "enum",
+          "values": [
+            "Home", "Back", "Select", "Up", "Down", "Left", "Right", "Play", "Rev", "Fwd",
+            "InstantReplay", "Info", "Search", "Backspace", "Enter",
+            "VolumeUp", "VolumeDown", "VolumeMute", "ChannelUp", "ChannelDown",
+            "InputTuner", "InputHDMI1", "InputHDMI2", "InputHDMI3", "InputHDMI4", "InputAV1", "FindRemote"
+          ]
+        }
+      },
+      "command": { "method": "POST", "path": "/keypress/{{value}}" }
+    },
+    { "id": "play_pause", "type": "action", "label": "Play or pause", "command": { "method": "POST", "path": "/keypress/Play" } },
+    { "id": "home", "type": "action", "label": "Home", "command": { "method": "POST", "path": "/keypress/Home" } },
+    { "id": "volume_up", "type": "action", "label": "Volume up", "command": { "method": "POST", "path": "/keypress/VolumeUp" } },
+    { "id": "volume_down", "type": "action", "label": "Volume down", "command": { "method": "POST", "path": "/keypress/VolumeDown" } },
+    { "id": "mute", "type": "action", "label": "Mute or unmute", "command": { "method": "POST", "path": "/keypress/VolumeMute" } },
+    {
+      "id": "launch_app",
+      "type": "text_command",
+      "label": "Open an app by its Roku id (12 is Netflix, 837 is YouTube)",
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9_.-]{1,64}" } },
+      "command": { "method": "POST", "path": "/launch/{{value}}" }
+    },
+    { "id": "app", "type": "sensor", "label": "App on screen", "stateJsonPath": "$.app" },
+    { "id": "app_id", "type": "sensor", "label": "Id of the app on screen", "stateJsonPath": "$.app_id" }
+  ]
+}

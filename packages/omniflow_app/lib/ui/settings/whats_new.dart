@@ -8,11 +8,31 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.3.0';
+const appVersion = '0.4.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.4.0',
+    date: '12 Nov 2026',
+    notes: [
+      'Your home today: what your automations did, the taps they saved you, '
+          'your streak and achievements to earn, with a little confetti.',
+      'Tiles show the real thing: a light in its own colour and brightness, '
+          'a sensor reading, the app on the TV. Tap a tile to open it, tap '
+          'its icon to switch it.',
+      'A Surprise me tile runs a random scene, and Run tiles spring and tick.',
+      'Swipe an automation to turn it off or remove it, with Undo.',
+      'Pick the app for "An app opens" from your phone, and do one thing to '
+          'each device in a room.',
+      'Questions from automations pop up with their buttons showing.',
+      'A live mouse pointer on the TV with the new pointer helper.',
+      'New devices: Tuya lights and newer Tuya plugs, Hue colours, older '
+          'Shelly plugs, Roku and Sonos.',
+      'Appearance: teal, your wallpaper colours, or pure black.',
+    ],
+  ),
   (
     version: '0.3.0',
     date: '12 Nov 2026',

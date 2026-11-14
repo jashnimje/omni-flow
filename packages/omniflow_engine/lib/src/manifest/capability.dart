@@ -1,4 +1,5 @@
 import '../template/template_renderer.dart';
+import 'derivations.dart';
 import 'param_spec.dart';
 import 'validation.dart';
 
@@ -66,7 +67,9 @@ class CapabilitySpec {
     required this.command,
     this.stateJsonPath,
     this.onOff,
+    this.alsoOff = const [],
     this.values = const [],
+    this.derive = const [],
   });
 
   final String id;
@@ -86,12 +89,26 @@ class CapabilitySpec {
   /// on, asleep or off), so a check or trigger on it is a choice, not text.
   final List<Object> values;
 
+  /// Values computed from the params before rendering (a Hue `xy` from
+  /// `r`, `g`, `b`), which the command reads like params.
+  final List<ParamDerivation> derive;
+
+  /// The validated [params] plus every [derive] output, for rendering.
+  Map<String, Object?> withDerived(
+    Map<String, Object?> params,
+    Map<String, Object?> settings,
+  ) => {...params, for (final d in derive) ...d.derive(params, settings)};
+
   /// [value] as the device says it, for a toggle with [onOff].
   Object? toDevice(Object? value) =>
       onOff == null || value is! bool ? value : (value ? onOff!.$1 : onOff!.$2);
 
+  /// More device words read back as off, never sent: a Roku TV says
+  /// `DisplayOff` or `Ready` when it is in standby.
+  final List<Object> alsoOff;
+
   /// A device value read back as `true` or `false` when it is one of the
-  /// [onOff] words (case does not matter), unchanged otherwise.
+  /// [onOff] or [alsoOff] words (case does not matter), unchanged otherwise.
   Object? fromDevice(Object? value) {
     final words = onOff;
     if (words == null || value is bool) return value;
@@ -99,7 +116,7 @@ class CapabilitySpec {
         ? word.toLowerCase() == value.toLowerCase()
         : word == value;
     if (same(words.$1)) return true;
-    if (same(words.$2)) return false;
+    if (same(words.$2) || alsoOff.any(same)) return false;
     return value;
   }
 
@@ -154,8 +171,46 @@ class CapabilitySpec {
     if (type == CapabilityType.event && command != null) {
       issues.add('$path.command', 'an event has no command');
     }
+    final derive = <ParamDerivation>[];
+    final rawDerive = map['derive'];
+    if (rawDerive != null) {
+      final names = rawDerive is String ? [rawDerive] : rawDerive;
+      if (names is! List || names.isEmpty) {
+        issues.add('$path.derive', 'must be a name or a list of names');
+      } else {
+        for (final name in names) {
+          final d = ParamDerivation.fromWire(name);
+          if (d == null) {
+            issues.add(
+              '$path.derive',
+              '"$name" must be one of ${ParamDerivation.values.map((d) => d.wireName).join(', ')}',
+            );
+            continue;
+          }
+          final missing = d.inputs.where((i) => !params.containsKey(i));
+          if (missing.isNotEmpty) {
+            issues.add(
+              '$path.derive',
+              '${d.wireName} reads ${missing.join(', ')}, which are not declared params',
+            );
+            continue;
+          }
+          derive.add(d);
+        }
+      }
+    }
     if (command != null) {
-      _checkPlaceholders(command, params, '$path.command', issues);
+      _checkPlaceholders(
+        command,
+        {
+          ...params,
+          for (final d in derive)
+            for (final o in d.outputs)
+              o: const ParamSpec(type: ParamType.string),
+        },
+        '$path.command',
+        issues,
+      );
     }
     final stateJsonPath = issues.optionalString(map, 'stateJsonPath', path);
     if (type == CapabilityType.event && stateJsonPath != null) {
@@ -173,6 +228,18 @@ class CapabilitySpec {
         issues.add('$path.onOff', 'must be [on, off], two plain values');
       } else {
         onOff = (rawOnOff[0] as Object, rawOnOff[1] as Object);
+      }
+    }
+    final rawAlsoOff = map['alsoOff'];
+    var alsoOff = const <Object>[];
+    if (rawAlsoOff != null) {
+      if (rawOnOff == null) {
+        issues.add('$path.alsoOff', 'needs onOff');
+      } else if (rawAlsoOff is! List ||
+          rawAlsoOff.any((v) => v == null || v is Map || v is List)) {
+        issues.add('$path.alsoOff', 'must be a list of plain values');
+      } else {
+        alsoOff = List<Object>.unmodifiable(rawAlsoOff.cast<Object>());
       }
     }
     final rawValues = map['values'];
@@ -199,7 +266,9 @@ class CapabilitySpec {
       command: command,
       stateJsonPath: stateJsonPath,
       onOff: onOff,
+      alsoOff: alsoOff,
       values: values,
+      derive: List.unmodifiable(derive),
     );
   }
 

@@ -46,3 +46,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# The TV pointer helper APK, built by tool/tv_helper_asset.dart
+/assets/tv_helper/*
+!/assets/tv_helper/README.md

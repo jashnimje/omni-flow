@@ -45,6 +45,7 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
                     call.argument<List<String>>("chooser") ?: emptyList(),
                     call.argument<String>("link"),
                     (call.argument<Number>("timeoutMs"))?.toLong(),
+                    call.argument<String>("group"),
                 )
                 "cancel" -> manager.cancel(call.argument<Int>("id") ?: 0)
                 else -> return@setMethodCallHandler result.notImplemented()
@@ -71,13 +72,21 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
         chooser: List<String>,
         link: String?,
         timeoutMs: Long?,
+        group: String?,
     ) {
         if (Build.VERSION.SDK_INT >= 26) {
+            // The first asks went on a default-importance channel, and
+            // Android never raises a channel's importance, so it is replaced.
+            manager.deleteNotificationChannel(OLD_ASKS)
             manager.createNotificationChannel(
-                NotificationChannel(ASKS, "Questions from automations", NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(QUESTIONS, "Questions from automations", NotificationManager.IMPORTANCE_HIGH)
+                    .apply { description = "An automation waits for your answer" },
             )
         }
-        val builder = NotificationCompat.Builder(app, ASKS)
+        // A heads-up with the answers as buttons. Each ask is its own group
+        // so Android does not bundle it with others, which hides the buttons.
+        // No full-screen intent: a question never takes over the screen.
+        val builder = NotificationCompat.Builder(app, QUESTIONS)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(0xFF00F5D4.toInt())
             .setContentTitle(title)
@@ -85,6 +94,9 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setGroup(group ?: "ask/$askId")
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_ALL)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
         if (timeoutMs != null && timeoutMs > 0) builder.setTimeoutAfter(timeoutMs)
@@ -170,6 +182,7 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
         const val CHANNEL = "omniflow/notify"
         const val AUTOMATIONS = "automations"
         const val PROBLEMS = "problems"
-        const val ASKS = "asks"
+        const val QUESTIONS = "questions"
+        private const val OLD_ASKS = "asks"
     }
 }

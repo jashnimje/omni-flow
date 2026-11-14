@@ -7,6 +7,7 @@ import 'package:args/command_runner.dart';
 
 import '../api/local_client.dart';
 import 'omni_command_runner.dart';
+import 'one_shot.dart';
 
 const _tvUsage = '''
 omni tv ID remote KEY [--long] [--repeat N]
@@ -31,6 +32,9 @@ omni tv ID files rm PATH... [-r]
 omni tv ID files mkdir PATH
 omni tv ID files rename PATH NAME
 omni tv ID screenshot [--out FILE.png]
+omni tv ID helper status|install APK    (the pointer helper)
+omni tv ID pointer show|hide|click
+omni tv ID pointer to X Y|by DX DY      (fractions of the screen)
 omni tv ID tap X Y                     (fractions of the screen, 0 to 1)
 omni tv ID swipe X1 Y1 X2 Y2 [--ms N]
 omni tv ID record start [--seconds N] [--bit-rate MBPS]
@@ -243,6 +247,38 @@ class TvCommand extends Command<int> {
             return ('tv.files.rename', {'id': id, 'path': path, 'name': name});
           }(),
           _ => throw UsageException('unknown files verb $sub', usage),
+        };
+      case 'helper':
+        if (words.isEmpty) {
+          throw UsageException('needs status or install', usage);
+        }
+        final sub = words.removeAt(0);
+        return switch (sub) {
+          'status' => ('tv.helper.status', {'id': id}),
+          'install' => (
+            'tv.helper.install',
+            {'id': id, 'path': File(one('APK')).absolute.path},
+          ),
+          _ => throw UsageException('unknown helper verb $sub', usage),
+        };
+      case 'pointer':
+        if (words.isEmpty) throw UsageException('needs a pointer verb', usage);
+        final sub = words.removeAt(0);
+        return switch (sub) {
+          'show' => ('tv.pointer', {'id': id, 'show': true}),
+          'hide' => ('tv.pointer', {'id': id, 'hide': true}),
+          'click' => ('tv.pointer.click', {'id': id}),
+          'to' || 'by' => () {
+            final (x, y) = two('X', 'Y');
+            return (
+              'tv.pointer',
+              {
+                'id': id,
+                sub: [_number(x), _number(y)],
+              },
+            );
+          }(),
+          _ => throw UsageException('unknown pointer verb $sub', usage),
         };
       case 'screenshot':
         if (words.isNotEmpty) throw UsageException('takes no words', usage);
@@ -496,7 +532,7 @@ Future<int> _send(
     return result['ok'] == true ? 0 : 1;
   } finally {
     await sub?.cancel();
-    await engine.close();
+    await closeOneShot(engine);
   }
 }
 

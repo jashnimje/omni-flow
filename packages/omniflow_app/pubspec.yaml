@@ -1,7 +1,7 @@
 name: omniflow_app
 description: "OmniFlow automation studio"
 publish_to: 'none'
-version: 0.3.0+3
+version: 0.4.0+4
 
 environment:
   sdk: ^3.13.0
@@ -9,6 +9,7 @@ environment:
 resolution: workspace
 
 dependencies:
+  dynamic_color: ^2.1.0
   file_picker: ^13.3.2
   flutter:
     sdk: flutter
@@ -32,3 +33,4 @@ flutter:
   assets:
     - assets/brand/
     - assets/firmware/
+    - assets/tv_helper/

@@ -476,7 +476,8 @@ const builtInDriverSources = <String, String>{
   "pairing": { "method": "hue_bridge" },
   "settings": [
     { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
-    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true }
+    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true },
+    { "key": "gamut", "label": "Colour gamut the light reports as capabilities.control.colorgamuttype: A, B or C (the default)" }
   ],
   "setup": ["pair", "configure:lightId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },
@@ -504,6 +505,19 @@ const builtInDriverSources = <String, String>{
       "params": { "value": { "type": "number", "integer": true, "min": 153, "max": 500, "unit": "mired" } },
       "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": true, "ct": "{{value}}" } },
       "stateJsonPath": "$.ct"
+    },
+    {
+      "id": "rgb",
+      "type": "color_rgb",
+      "label": "Colour, sent as xy inside the light's gamut",
+      "params": { "brightness": { "type": "number", "integer": true, "min": 1, "max": 254, "optional": true } },
+      "derive": "hue_xy",
+      "command": {
+        "method": "PUT",
+        "path": "/api/:secret:username/lights/{{device.lightId}}/state",
+        "body": { "on": true, "xy": "{{xy}}", "bri": "{{brightness|state.bri|254}}" }
+      },
+      "stateJsonPath": "$.xy"
     }
   ]
 }
@@ -619,6 +633,65 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
+  'roku_ecp.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "roku_ecp",
+  "name": "Roku TV or streaming stick (local ECP over HTTP)",
+  "category": "media",
+  "icon": "tv",
+  "transport": { "type": "http", "port": 8060, "reply": "xml" },
+  "discovery": [{ "method": "ssdp", "st": "roku:ecp", "idHeader": "usn" }],
+  "statePoll": {
+    "intervalSeconds": 30,
+    "command": { "path": "/query/device-info" },
+    "also": [{ "command": { "path": "/query/active-app" } }]
+  },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power (Roku TVs, a stick has no power off)",
+      "onOff": ["PowerOn", "PowerOff"],
+      "alsoOff": ["DisplayOff", "Ready"],
+      "command": { "method": "POST", "path": "/keypress/{{value}}" },
+      "stateJsonPath": "$.power_mode"
+    },
+    {
+      "id": "press_key",
+      "type": "text_command",
+      "label": "Press a remote key",
+      "params": {
+        "value": {
+          "type": "enum",
+          "values": [
+            "Home", "Back", "Select", "Up", "Down", "Left", "Right", "Play", "Rev", "Fwd",
+            "InstantReplay", "Info", "Search", "Backspace", "Enter",
+            "VolumeUp", "VolumeDown", "VolumeMute", "ChannelUp", "ChannelDown",
+            "InputTuner", "InputHDMI1", "InputHDMI2", "InputHDMI3", "InputHDMI4", "InputAV1", "FindRemote"
+          ]
+        }
+      },
+      "command": { "method": "POST", "path": "/keypress/{{value}}" }
+    },
+    { "id": "play_pause", "type": "action", "label": "Play or pause", "command": { "method": "POST", "path": "/keypress/Play" } },
+    { "id": "home", "type": "action", "label": "Home", "command": { "method": "POST", "path": "/keypress/Home" } },
+    { "id": "volume_up", "type": "action", "label": "Volume up", "command": { "method": "POST", "path": "/keypress/VolumeUp" } },
+    { "id": "volume_down", "type": "action", "label": "Volume down", "command": { "method": "POST", "path": "/keypress/VolumeDown" } },
+    { "id": "mute", "type": "action", "label": "Mute or unmute", "command": { "method": "POST", "path": "/keypress/VolumeMute" } },
+    {
+      "id": "launch_app",
+      "type": "text_command",
+      "label": "Open an app by its Roku id (12 is Netflix, 837 is YouTube)",
+      "params": { "value": { "type": "string", "pattern": "[A-Za-z0-9_.-]{1,64}" } },
+      "command": { "method": "POST", "path": "/launch/{{value}}" }
+    },
+    { "id": "app", "type": "sensor", "label": "App on screen", "stateJsonPath": "$.app" },
+    { "id": "app_id", "type": "sensor", "label": "Id of the app on screen", "stateJsonPath": "$.app_id" }
+  ]
+}
+''',
   'samsung_tizen_tv.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -671,6 +744,28 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
+  'shelly_gen1_relay.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "shelly_gen1_relay",
+  "name": "Shelly Gen1 relay or plug (local HTTP API, relay 0)",
+  "category": "power",
+  "icon": "plug",
+  "transport": { "type": "http", "port": 80 },
+  "statePoll": { "intervalSeconds": 60, "command": { "path": "/status" }, "jsonPath": "$.relays[0]" },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "onOff": ["on", "off"],
+      "command": { "path": "/relay/0", "query": { "turn": "{{value}}" } },
+      "stateJsonPath": "$.ison"
+    }
+  ]
+}
+''',
   'shelly_plus_switch.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -689,6 +784,123 @@ const builtInDriverSources = <String, String>{
       "label": "Power",
       "command": { "path": "/rpc/Switch.Set", "query": { "id": 0, "on": "{{value}}" } },
       "stateJsonPath": "$.output"
+    }
+  ]
+}
+''',
+  'sonos_upnp.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "sonos_upnp",
+  "name": "Sonos speaker (local UPnP on port 1400)",
+  "category": "media",
+  "icon": "speaker",
+  "transport": { "type": "http", "port": 1400, "reply": "xml" },
+  "discovery": [{ "method": "ssdp", "st": "urn:schemas-upnp-org:device:ZonePlayer:1", "idHeader": "usn" }],
+  "statePoll": {
+    "intervalSeconds": 15,
+    "command": {
+      "method": "POST",
+      "path": "/MediaRenderer/AVTransport/Control",
+      "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "GetTransportInfo", "args": { "InstanceID": 0 } }
+    },
+    "also": [
+      {
+        "command": {
+          "method": "POST",
+          "path": "/MediaRenderer/RenderingControl/Control",
+          "soap": { "service": "urn:schemas-upnp-org:service:RenderingControl:1", "action": "GetVolume", "args": { "InstanceID": 0, "Channel": "Master" } }
+        }
+      },
+      {
+        "command": {
+          "method": "POST",
+          "path": "/MediaRenderer/RenderingControl/Control",
+          "soap": { "service": "urn:schemas-upnp-org:service:RenderingControl:1", "action": "GetMute", "args": { "InstanceID": 0, "Channel": "Master" } }
+        }
+      }
+    ]
+  },
+  "reliability": { "timeoutMs": 2000, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "play",
+      "type": "action",
+      "label": "Play",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Play", "args": { "InstanceID": 0, "Speed": 1 } }
+      }
+    },
+    {
+      "id": "pause",
+      "type": "action",
+      "label": "Pause",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Pause", "args": { "InstanceID": 0 } }
+      }
+    },
+    {
+      "id": "next",
+      "type": "action",
+      "label": "Next track",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Next", "args": { "InstanceID": 0 } }
+      }
+    },
+    {
+      "id": "previous",
+      "type": "action",
+      "label": "Previous track",
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/AVTransport/Control",
+        "soap": { "service": "urn:schemas-upnp-org:service:AVTransport:1", "action": "Previous", "args": { "InstanceID": 0 } }
+      }
+    },
+    {
+      "id": "volume",
+      "type": "level",
+      "label": "Volume",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 100 } },
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/RenderingControl/Control",
+        "soap": {
+          "service": "urn:schemas-upnp-org:service:RenderingControl:1",
+          "action": "SetVolume",
+          "args": { "InstanceID": 0, "Channel": "Master", "DesiredVolume": "{{value}}" }
+        }
+      },
+      "stateJsonPath": "$.CurrentVolume"
+    },
+    {
+      "id": "mute",
+      "type": "toggle",
+      "label": "Mute",
+      "onOff": [1, 0],
+      "command": {
+        "method": "POST",
+        "path": "/MediaRenderer/RenderingControl/Control",
+        "soap": {
+          "service": "urn:schemas-upnp-org:service:RenderingControl:1",
+          "action": "SetMute",
+          "args": { "InstanceID": 0, "Channel": "Master", "DesiredMute": "{{value}}" }
+        }
+      },
+      "stateJsonPath": "$.CurrentMute"
+    },
+    {
+      "id": "playback",
+      "type": "sensor",
+      "label": "Playback (PLAYING, PAUSED_PLAYBACK, STOPPED or TRANSITIONING)",
+      "stateJsonPath": "$.CurrentTransportState",
+      "values": ["PLAYING", "PAUSED_PLAYBACK", "STOPPED", "TRANSITIONING"]
     }
   ]
 }
@@ -736,6 +948,68 @@ const builtInDriverSources = <String, String>{
   ]
 }
 ''',
+  'tuya_light.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "tuya_light",
+  "name": "Tuya smart bulb (local, colour data points 20 to 24)",
+  "category": "lighting",
+  "icon": "lightbulb",
+  "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
+  "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
+  "settings": [
+    { "key": "devId", "label": "Device id" },
+    { "key": "localKey", "label": "Local key", "secret": true },
+    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5" }
+  ],
+  "setup": ["configure:devId", "secret:localKey", "configure:version?"],
+  "statePush": { "jsonPath": "$.dps" },
+  "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
+  "reliability": { "timeoutMs": 1500, "retries": 1 },
+  "capabilities": [
+    {
+      "id": "power",
+      "type": "toggle",
+      "label": "Power",
+      "command": { "cmd": "control", "dps": { "20": "{{value}}" } },
+      "stateJsonPath": "$['20']"
+    },
+    {
+      "id": "brightness",
+      "type": "level",
+      "label": "White brightness (10 dim to 1000 full)",
+      "params": { "value": { "type": "number", "integer": true, "min": 10, "max": 1000 } },
+      "command": { "cmd": "control", "dps": { "20": true, "22": "{{value}}" } },
+      "stateJsonPath": "$['22']"
+    },
+    {
+      "id": "color_temp",
+      "type": "level",
+      "label": "White temperature (0 warm to 1000 cool)",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 1000 } },
+      "command": { "cmd": "control", "dps": { "20": true, "21": "white", "23": "{{value}}" } },
+      "stateJsonPath": "$['23']"
+    },
+    {
+      "id": "rgb",
+      "type": "color_rgb",
+      "label": "Colour",
+      "params": { "brightness": { "type": "number", "integer": true, "min": 10, "max": 1000, "optional": true } },
+      "derive": "tuya_hsv",
+      "command": { "cmd": "control", "dps": { "20": true, "21": "colour", "24": "{{hsv}}" } },
+      "stateJsonPath": "$['24']"
+    },
+    {
+      "id": "mode",
+      "type": "text_command",
+      "label": "Mode (white, colour, the bulb's scene, or music)",
+      "params": { "value": { "type": "enum", "values": ["white", "colour", "scene", "music"] } },
+      "command": { "cmd": "control", "dps": { "20": true, "21": "{{value}}" } },
+      "stateJsonPath": "$['21']"
+    }
+  ]
+}
+''',
   'tuya_plug.omni_driver.json': r'''
 {
   "schemaVersion": 1,
@@ -747,9 +1021,10 @@ const builtInDriverSources = <String, String>{
   "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
   "settings": [
     { "key": "devId", "label": "Device id" },
-    { "key": "localKey", "label": "Local key", "secret": true }
+    { "key": "localKey", "label": "Local key", "secret": true },
+    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5" }
   ],
-  "setup": ["configure:devId", "secret:localKey"],
+  "setup": ["configure:devId", "secret:localKey", "configure:version?"],
   "statePush": { "jsonPath": "$.dps" },
   "statePoll": { "intervalSeconds": 60, "command": { "cmd": "query" }, "jsonPath": "$.dps" },
   "reliability": { "timeoutMs": 1500, "retries": 1 },

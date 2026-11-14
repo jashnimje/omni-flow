@@ -241,12 +241,9 @@ Future<RuleStep?> pickStep(
         t.name,
         t.icon,
         (c) => actionForm(c, t),
-        subtitle: t.hasHighRisk
-            ? '${t.actionsText}. Some steps run commands on it: Claude '
-                  'needs your approval to use them'
-            : t.actionsText,
+        // The approval warning sits on each risky step, not the device.
+        subtitle: t.actionsText,
         keywords: t.room ?? '',
-        warning: t.hasHighRisk,
       ),
     for (final t in devices) ..._actionChoices(t),
     for (final s in scenes)

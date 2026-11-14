@@ -169,6 +169,9 @@ Future<OnTrigger?> phoneAppTriggerForm(
   final app = TextEditingController(
     text: '${current?.match?['package'] ?? ''}',
   );
+  // Read once per sheet. Empty when Android does not answer, and then only
+  // the typed field shows.
+  final installed = const InstalledApps().list();
   return showFormSheet(
     context,
     owns: [app],
@@ -198,9 +201,29 @@ Future<OnTrigger?> phoneAppTriggerForm(
           onChanged: (v) => setState(() => event = v),
         ),
       const SizedBox(height: OmniSpace.sm),
+      FutureBuilder<List<InstalledApp>>(
+        future: installed,
+        builder: (context, snap) {
+          final apps = snap.data ?? const <InstalledApp>[];
+          if (apps.isEmpty) return const SizedBox.shrink();
+          final package = app.text.trim();
+          final chosen = apps.where((a) => a.package == package).firstOrNull;
+          return OmniListRow(
+            key: const ValueKey('phone-app-choose'),
+            icon: AutomationIcons.app,
+            title: package.isEmpty ? 'Any app' : chosen?.label ?? package,
+            subtitle: 'Choose from the apps on this phone',
+            chevron: true,
+            onTap: () async {
+              final picked = await pickPhoneApp(context, apps);
+              if (picked != null) setState(() => app.text = picked);
+            },
+          );
+        },
+      ),
       LabelledField(
         key: const ValueKey('phone-app'),
-        label: 'App (empty for any app)',
+        label: 'Or type its package name (empty for any app)',
         hint: 'com.netflix.mediaclient',
         controller: app,
         onChanged: (_) => setState(() {}),
@@ -208,6 +231,38 @@ Future<OnTrigger?> phoneAppTriggerForm(
     ],
   );
 }
+
+/// The phone's launchable [apps] by name, searchable. Gives the package of
+/// the one picked, or an empty package for Any app.
+Future<String?> pickPhoneApp(BuildContext context, List<InstalledApp> apps) =>
+    _push(
+      context,
+      _PickerPage(
+        title: 'Choose an app',
+        hint: 'Search apps',
+        sections: [
+          (
+            'Apps on this phone',
+            [
+              _Choice(
+                key: 'pick-phone-app-any',
+                title: 'Any app',
+                icon: AutomationIcons.app,
+                onTap: (c) async => Navigator.of(c).pop(''),
+              ),
+              for (final a in apps)
+                _Choice(
+                  key: 'pick-phone-app-${a.package}',
+                  title: a.label,
+                  subtitle: a.package,
+                  icon: AutomationIcons.app,
+                  onTap: (c) async => Navigator.of(c).pop(a.package),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
 
 /// A Bluetooth device connecting or disconnecting, by its name, or any.
 Future<OnTrigger?> phoneBluetoothTriggerForm(

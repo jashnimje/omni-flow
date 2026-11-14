@@ -192,18 +192,64 @@ class OfflineHelp extends ConsumerWidget {
             builder: (_) => _FindAgainSheet(device: d),
           ),
         ),
-        OmniListRow(
-          key: const ValueKey('device-packets'),
-          icon: OmniIcons.packets,
-          title: 'See what was sent',
-          subtitle: 'developer packets for this device',
-          chevron: true,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => DeveloperScreen(filter: d.host ?? d.id),
+      ],
+    );
+  }
+}
+
+/// What only someone debugging a device needs, folded away: its raw ids
+/// and the messages sent to it.
+class _Advanced extends StatefulWidget {
+  const _Advanced({required this.device});
+
+  final DeviceView device;
+
+  @override
+  State<_Advanced> createState() => _AdvancedState();
+}
+
+class _AdvancedState extends State<_Advanced> {
+  var _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.device;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          expanded: _open,
+          child: OmniListRow(
+            key: const ValueKey('device-advanced'),
+            title: 'Advanced',
+            subtitle: 'ids and the messages sent to it',
+            trailing: Icon(
+              _open ? Icons.expand_less : Icons.expand_more,
+              color: OmniColors.muted,
             ),
+            onTap: () => setState(() => _open = !_open),
           ),
         ),
+        if (_open) ...[
+          OmniListRow(title: 'Id', value: d.id, valueColor: OmniColors.muted),
+          if (d.json['stableId'] case final String stable)
+            OmniListRow(
+              title: 'Hardware id',
+              value: stable,
+              valueColor: OmniColors.muted,
+            ),
+          OmniListRow(
+            key: const ValueKey('device-packets'),
+            icon: OmniIcons.packets,
+            title: 'See what was sent',
+            chevron: true,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => DeveloperScreen(filter: d.host ?? d.id),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -340,10 +386,7 @@ class DeviceSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final d = device;
-    final address = [
-      if (d.host != null) d.host!,
-      if (d.json['stableId'] case final String id) id,
-    ].join(' · ');
+    final address = d.host ?? '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -370,6 +413,7 @@ class DeviceSection extends ConsumerWidget {
             chevron: true,
             onTap: () => showHostKeySheet(context, d),
           ),
+        _Advanced(device: d),
         const SizedBox(height: OmniSpace.lg),
         OmniButton.danger(
           key: ValueKey('device-remove-${d.id}'),
@@ -418,18 +462,10 @@ class DeviceSection extends ConsumerWidget {
                 if (sheet.mounted) Navigator.of(sheet).pop(false);
               },
             ),
-            const OmniSectionHeader('Address'),
-            OmniListRow(title: 'Id', value: d.id, valueColor: OmniColors.muted),
             if (d.host != null)
               OmniListRow(
                 title: 'Address',
                 value: d.host,
-                valueColor: OmniColors.muted,
-              ),
-            if (d.json['stableId'] case final String stable)
-              OmniListRow(
-                title: 'Hardware id',
-                value: stable,
                 valueColor: OmniColors.muted,
               ),
             const SizedBox(height: OmniSpace.md),

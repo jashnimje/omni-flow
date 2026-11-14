@@ -10,8 +10,12 @@ import java.net.SocketTimeoutException
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** A scene or an automation the person put on a widget, tile or shortcut. */
-data class RunTarget(val kind: String, val id: String, val name: String) {
+/**
+ * A scene or an automation the person put on a widget, tile or shortcut.
+ * [color] is the automation's `#RRGGBB` colour from the engine, shown in the
+ * share picker and never kept.
+ */
+data class RunTarget(val kind: String, val id: String, val name: String, val color: String? = null) {
     val isScene get() = kind == SCENE
 
     fun toJson(): JSONObject = JSONObject().put("kind", kind).put("id", id).put("name", name)
@@ -36,6 +40,7 @@ data class RunTarget(val kind: String, val id: String, val name: String) {
  */
 object RunTargets {
     private const val PREFS = "omniflow_run_from_anywhere"
+    private val COLOR = Regex("#[0-9A-Fa-f]{6}")
     const val TILE_SLOTS = 3
     const val MAX_SHORTCUTS = 4
 
@@ -98,7 +103,8 @@ object RunTargets {
                 if (a.optString("source") == RunTarget.SCENE) continue
                 val id = a.optString("id")
                 if (id.isEmpty()) continue
-                out += RunTarget(RunTarget.AUTOMATION, id, a.optString("name").ifEmpty { id })
+                val color = a.optString("color").takeIf { COLOR.matches(it) }
+                out += RunTarget(RunTarget.AUTOMATION, id, a.optString("name").ifEmpty { id }, color)
             }
         }
         return out

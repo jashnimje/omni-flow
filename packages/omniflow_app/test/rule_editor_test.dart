@@ -322,12 +322,13 @@ void main() {
       'approval', (tester) async {
     await pumpPushed(tester, engine, const RuleEditorPage());
     await tapText(tester, 'Add step');
+    // The device row stays plain; the warning sits on the risky step.
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('pick-device-living_tv')),
         matching: find.byIcon(OmniIcons.warning),
       ),
-      findsOneWidget,
+      findsNothing,
     );
     for (final kind in [
       'pick-wait',
@@ -341,6 +342,20 @@ void main() {
     ]) {
       expect(find.byKey(ValueKey(kind)), findsOneWidget, reason: kind);
     }
+    await tester.enterText(
+      find.byKey(const ValueKey('picker-search')),
+      'run a command',
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('pick-act-living_tv-shell')),
+        matching: find.byIcon(OmniIcons.warning),
+      ),
+      findsOneWidget,
+    );
+    await tester.enterText(find.byKey(const ValueKey('picker-search')), '');
+    await tester.pumpAndSettle();
     await tapKey(tester, 'pick-device-living_tv');
     expect(
       find.textContaining('High risk: runs commands on Living room TV'),

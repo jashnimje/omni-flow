@@ -131,8 +131,8 @@ class _AddPageState extends ConsumerState<AddPage> {
             if (_looking)
               OmniBanner.info(
                 key: const ValueKey('add-looking'),
-                'Looking on ${wifi ?? 'your Wi-Fi'}… (Wi-Fi, mDNS, Tuya, '
-                'boards)',
+                'Looking for lights, plugs, TVs and boards on '
+                '${wifi ?? 'your Wi-Fi'}…',
               )
             else if (_failure case final f?)
               OmniBanner.error(

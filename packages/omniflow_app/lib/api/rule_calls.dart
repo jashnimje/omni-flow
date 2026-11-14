@@ -1,4 +1,4 @@
-import 'engine_calls.dart' show Json;
+import 'engine_calls.dart' show EngineCalls, Json;
 import 'engine_client.dart';
 
 /// One value a rule field can use at a rule path, from the trigger or an
@@ -58,6 +58,30 @@ abstract final class RuleCalls {
       return r['ok'] == true ? tokensOf(r) : const [];
     } on Object {
       return const [];
+    }
+  }
+
+  /// The `automation.save` args that put back an automation as
+  /// `automation.get` read it before it was removed: the same form, spec
+  /// and id. It is trusted only when it had been approved, so an agent's
+  /// automation still waiting for review comes back waiting.
+  static Json restoreArgs(Json record) => {
+    'form': record['source'] ?? 'rule',
+    'spec': record['spec'],
+    'trusted': record['approved'] == true,
+    if (record['id'] case final String id) 'id': id,
+  };
+
+  /// Saves [record] again for Undo. False when the engine refused it.
+  static Future<bool> restore(EngineClient client, Json record) async {
+    try {
+      final r = await client.call(
+        EngineCalls.automationSave,
+        restoreArgs(record),
+      );
+      return r['ok'] == true;
+    } on Object {
+      return false;
     }
   }
 

@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../api/rule_calls.dart';
 import '../../state/providers.dart';
 import '../design/automation_look.dart';
 import '../design/design.dart';
@@ -29,6 +33,9 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
   var _filter = AutomationFilter.all;
   var _searching = false;
   var _query = '';
+
+  /// Rows swiped away to be removed, hidden until Undo brings them back.
+  final _removing = <String>{};
 
   bool _shows(AutomationSummary a) {
     final ok = switch (_filter) {
@@ -115,7 +122,10 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
         if (a.needsApproval) a,
     ];
     final needsYou = list.where((a) => a.needsYou).length;
-    final shown = list.where(_shows).toList();
+    final shown = [
+      for (final a in list)
+        if (!_removing.contains(a.id) && _shows(a)) a,
+    ];
     return RefreshIndicator(
       onRefresh: () => ref.read(automationsProvider.notifier).refresh(),
       child: ListView(
@@ -144,7 +154,7 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                     label: switch (f) {
                       AutomationFilter.all => 'All',
                       AutomationFilter.rules => 'Rules',
-                      AutomationFilter.links => 'Links',
+                      AutomationFilter.links => 'Quick links',
                       AutomationFilter.scenes => 'Scenes',
                       AutomationFilter.off => 'Off',
                       AutomationFilter.needsYou => 'Needs you',
@@ -221,7 +231,7 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                         AutomationFilter.needsYou =>
                           'Nothing needs you. Every automation is approved '
                               'and its last run worked.',
-                        AutomationFilter.links => 'No links yet.',
+                        AutomationFilter.links => 'No quick links yet.',
                         _ => 'No rules yet.',
                       },
                 key: const ValueKey('filter-empty'),
@@ -230,9 +240,12 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
               ),
             ),
           for (final a in shown)
-            AutomationCard(
-              automation: a,
-              onOpen: () => _push(AutomationPage(id: a.id, summary: a)),
+            _swipeable(
+              a,
+              AutomationCard(
+                automation: a,
+                onOpen: () => _push(AutomationPage(id: a.id, summary: a)),
+              ),
             ),
           // Clear of the New button.
           const SizedBox(height: 88),
@@ -243,6 +256,141 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
 
   Future<void> _push(Widget page) =>
       Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => page));
+
+  /// [card] with its swipes: right turns it off or on, left removes it.
+  /// Both offer Undo, and a screen reader gets the same two as actions.
+  Widget _swipeable(AutomationSummary a, Widget card) {
+    final on = a.enabled && !a.needsApproval;
+    final toggle = on ? 'Turn off' : 'Turn on';
+    return Semantics(
+      customSemanticsActions: {
+        if (!a.needsApproval)
+          CustomSemanticsAction(label: toggle): () => _setEnabled(a, !on),
+        const CustomSemanticsAction(label: 'Remove'): () => _remove(a),
+      },
+      child: Dismissible(
+        key: ValueKey('swipe-${a.id}'),
+        // Not loaded until approved, so there is nothing to turn on yet.
+        direction: a.needsApproval
+            ? DismissDirection.endToStart
+            : DismissDirection.horizontal,
+        background: _SwipeBackground(
+          icon: OmniIcons.power,
+          label: toggle,
+          color: OmniColors.accent,
+          start: true,
+        ),
+        secondaryBackground: const _SwipeBackground(
+          icon: OmniIcons.delete,
+          label: 'Remove',
+          color: OmniColors.bad,
+          start: false,
+        ),
+        confirmDismiss: (direction) async {
+          if (direction == DismissDirection.startToEnd) {
+            unawaited(_setEnabled(a, !on));
+            return false;
+          }
+          return true;
+        },
+        onDismissed: (_) => _remove(a),
+        child: card,
+      ),
+    );
+  }
+
+  Future<void> _setEnabled(
+    AutomationSummary a,
+    bool on, {
+    bool undo = true,
+  }) async {
+    final api = ref.read(engineApiProvider);
+    final automations = ref.read(automationsProvider.notifier);
+    final reply = await api.enableAutomation(a.id, on);
+    await automations.refresh();
+    if (!reply.ok || !undo) return;
+    showMessage(
+      'Turned ${a.name} ${on ? 'on' : 'off'}',
+      action: 'Undo',
+      onAction: () => _setEnabled(a, !on, undo: false),
+    );
+  }
+
+  /// Removes [a], keeping what it was so Undo can save it again as it was:
+  /// the same id and spec, trusted only if it was approved, and off if it
+  /// was off.
+  Future<void> _remove(AutomationSummary a) async {
+    setState(() => _removing.add(a.id));
+    final api = ref.read(engineApiProvider);
+    final client = ref.read(engineClientProvider);
+    final automations = ref.read(automationsProvider.notifier);
+    final saved = await api.automation(a.id);
+    final record = saved.value == null
+        ? null
+        : EngineCalls.automationOf(saved.value!);
+    final removed = record == null ? null : await api.removeAutomation(a.id);
+    if (record == null || !(removed?.ok ?? false)) {
+      await _show(a.id);
+      return;
+    }
+    await automations.refresh();
+    showMessage(
+      'Removed ${a.name}',
+      action: 'Undo',
+      onAction: () async {
+        if (await RuleCalls.restore(client, record)) {
+          if (record['enabled'] == false) {
+            await api.enableAutomation(a.id, false);
+          }
+        } else {
+          showMessage('${a.name} could not be put back');
+        }
+        await automations.refresh();
+        await _show(a.id);
+      },
+    );
+  }
+
+  /// Shows a swiped row again. A dismissed row must leave the tree for a
+  /// frame first, so it comes back as a new row.
+  Future<void> _show(String id) async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (mounted) setState(() => _removing.remove(id));
+  }
+}
+
+/// What shows under a row as it is swiped: the action's icon and words.
+class _SwipeBackground extends StatelessWidget {
+  const _SwipeBackground({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.start,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool start;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.symmetric(vertical: 4),
+    padding: const EdgeInsets.symmetric(horizontal: OmniSpace.lg),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.18),
+      borderRadius: BorderRadius.circular(OmniRadii.card),
+    ),
+    alignment: start ? Alignment.centerLeft : Alignment.centerRight,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: OmniSpace.sm),
+        Text(label, style: OmniText.bodyStrong.copyWith(color: color)),
+      ],
+    ),
+  );
 }
 
 /// One automation: name and switch, its sentence, and its last run (or
@@ -315,8 +463,18 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
               ),
               const SizedBox(width: OmniSpace.gap),
               Expanded(child: Text(a.name, style: OmniText.bodyStrong)),
+              ExcludeSemantics(
+                child: Text(
+                  enabled && !a.needsApproval ? 'On' : 'Off',
+                  key: ValueKey('enable-label-${a.id}'),
+                  style: OmniText.caption,
+                ),
+              ),
+              const SizedBox(width: 6),
               Semantics(
-                label: 'Run ${a.name} on its own',
+                label: enabled && !a.needsApproval
+                    ? 'Turn ${a.name} off'
+                    : 'Turn ${a.name} on',
                 child: Switch(
                   key: ValueKey('enable-${a.id}'),
                   // Not loaded until approved, so it shows off whatever it

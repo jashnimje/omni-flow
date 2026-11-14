@@ -17,6 +17,8 @@ import 'first_run.dart';
 import 'home_data.dart';
 import 'quick_sheet.dart';
 import 'run_section.dart';
+import 'tile_look.dart';
+import '../fun/home_today_card.dart';
 
 /// The things Home shows as tiles: not the phone, people or places.
 List<DeviceView> tileDevices(List<Json> devices) => [
@@ -37,8 +39,9 @@ bool homeShowsFirstRun(WidgetRef ref) =>
     homeIsEmpty(ref) && ref.watch(firstRunDoneProvider).value == false;
 
 /// 1.1: the daily overview. A greeting, what is on, status chips, what to
-/// run (scenes and manual automations), favourites and one tile grid per room. With nothing added it is the
-/// first run (8.1) or the empty home (8.2).
+/// run (scenes and manual automations), favourites, one tile grid per room,
+/// and one row for every device that is offline. With nothing added it is
+/// the first run (8.1) or the empty home (8.2).
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
@@ -104,59 +107,65 @@ class _Overview extends ConsumerWidget {
       if (on != null) '$on on',
       if (active != null) '$active automation${active == 1 ? '' : 's'} active',
     ].whereType<String>().join(' · ');
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: RefreshIndicator(
-          onRefresh: () => reloadHome(ref),
-          child: ListView(
-            key: const ValueKey('home-list'),
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 96),
-            children: [
-              OmniScreenTitle(
-                name == null ? greeting(now) : '${greeting(now)}, $name',
-                subtitle: status.isEmpty ? null : status,
-                actions: [
-                  OmniIconAction(
-                    key: const ValueKey('open-search'),
-                    icon: OmniIcons.search,
-                    label: 'Search and commands',
-                    onPressed: () => ref
-                        .read(shellControllerProvider)
-                        .open(const SearchLink()),
-                  ),
-                  OmniIconAction(
-                    key: const ValueKey('open-alerts'),
-                    icon: OmniIcons.notifications,
-                    label: 'What needs you',
-                    onPressed: () => showNeedsYou(context, ref),
-                  ),
-                ],
-              ),
-              if (tiles == null)
-                const _Loading()
-              else ...[
-                _StatusChips(tiles: tiles, presence: presence, person: person),
-                RunSection(items: runItems(scenes, summaries)),
-                ..._favourites(context, ref, tiles, drivers),
-                for (final g in _roomGroups(tiles, rooms)) ...[
-                  OmniSectionHeader(
-                    g.title,
-                    actionLabel: 'All',
-                    onAction: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => RoomDevicesPage(
-                          title: g.title,
-                          ids: [for (final d in g.devices) d.id],
-                        ),
+    final offline = tiles?.where((d) => !d.online).toList() ?? const [];
+    return OmniTabPage(
+      title: name == null ? greeting(now) : '${greeting(now)}, $name',
+      subtitle: status.isEmpty ? null : status,
+      padded: false,
+      actions: [
+        OmniIconAction(
+          key: const ValueKey('open-search'),
+          icon: OmniIcons.search,
+          label: 'Search and commands',
+          onPressed: () =>
+              ref.read(shellControllerProvider).open(const SearchLink()),
+        ),
+        OmniIconAction(
+          key: const ValueKey('open-alerts'),
+          icon: OmniIcons.notifications,
+          label: 'What needs you',
+          onPressed: () => showNeedsYou(context, ref),
+        ),
+      ],
+      body: RefreshIndicator(
+        onRefresh: () => reloadHome(ref),
+        child: ListView(
+          key: const ValueKey('home-list'),
+          padding: EdgeInsets.fromLTRB(
+            OmniSpace.screen,
+            0,
+            OmniSpace.screen,
+            OmniInsets.fabClearance(context),
+          ),
+          children: [
+            if (tiles == null)
+              const _Loading()
+            else ...[
+              const HomeTodayCard(),
+              _StatusChips(tiles: tiles, presence: presence, person: person),
+              RunSection(items: runItems(scenes, summaries)),
+              ..._favourites(context, ref, tiles, drivers),
+              for (final g in _roomGroups(
+                tiles.where((d) => d.online).toList(),
+                rooms,
+              )) ...[
+                OmniSectionHeader(
+                  g.title,
+                  actionLabel: 'All',
+                  onAction: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => RoomDevicesPage(
+                        title: g.title,
+                        ids: [for (final d in g.devices) d.id],
                       ),
                     ),
                   ),
-                  TileGrid(devices: g.devices, drivers: drivers),
-                ],
+                ),
+                TileGrid(devices: g.devices, drivers: drivers),
               ],
+              if (offline.isNotEmpty) OfflineRow(devices: offline),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -178,7 +187,7 @@ class _Overview extends ConsumerWidget {
       ),
       if (favourites.isEmpty)
         const Padding(
-          padding: EdgeInsets.fromLTRB(2, 0, 2, 4),
+          padding: EdgeInsets.fromLTRB(2, 0, 2, OmniSpace.xs),
           child: Text(
             'Star a device on its page, or tap Edit, to keep it here.',
             style: OmniText.caption,
@@ -222,37 +231,50 @@ class _Loading extends StatelessWidget {
   const _Loading();
 
   @override
-  Widget build(BuildContext context) => const Column(
-    children: [
-      SizedBox(height: OmniSpace.lg),
-      _Pair(OmniTileSkeleton(), OmniTileSkeleton()),
-      SizedBox(height: OmniSpace.gap),
-      _Pair(OmniTileSkeleton(), OmniTileSkeleton()),
-    ],
-  );
+  Widget build(BuildContext context) {
+    final columns = OmniWidth.of(context).tileColumns;
+    return Column(
+      children: [
+        const SizedBox(height: OmniSpace.lg),
+        for (var r = 0; r < 2; r++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+            child: _Row([
+              for (var c = 0; c < columns; c++) const OmniTileSkeleton(),
+            ], columns: columns),
+          ),
+      ],
+    );
+  }
 }
 
-class _Pair extends StatelessWidget {
-  const _Pair(this.left, [this.right]);
+/// One row of equal height tiles, [columns] wide, the last row padded out
+/// so its tiles keep the same width.
+class _Row extends StatelessWidget {
+  const _Row(this.children, {required this.columns});
 
-  final Widget left;
-  final Widget? right;
+  final List<Widget> children;
+  final int columns;
 
   @override
   Widget build(BuildContext context) => IntrinsicHeight(
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(child: left),
-        const SizedBox(width: OmniSpace.gap),
-        Expanded(child: right ?? const SizedBox()),
+        for (var i = 0; i < columns; i++) ...[
+          if (i > 0) const SizedBox(width: OmniSpace.gap),
+          Expanded(child: i < children.length ? children[i] : const SizedBox()),
+        ],
       ],
     ),
   );
 }
 
-/// Two tiles a row. A tap switches a device with power on or off, or
-/// opens one without. A long press opens the quick sheet.
+/// The tiles of a room, as many a row as the screen is wide (two on a
+/// phone, three on a foldable, four on a tablet). Tapping a tile opens
+/// its device, growing out of the tile. Tapping its icon switches a
+/// device with power, or wakes and sleeps a TV. A long press opens the
+/// quick sheet.
 class TileGrid extends ConsumerWidget {
   const TileGrid({super.key, required this.devices, required this.drivers});
 
@@ -260,39 +282,94 @@ class TileGrid extends ConsumerWidget {
   final Map<String, Json> drivers;
 
   Widget _tile(BuildContext context, WidgetRef ref, DeviceView d) {
-    final toggles = d.hasPower && d.online;
-    final lit = isLit(d);
-    return OmniTile(
-      key: ValueKey('tile-${d.id}'),
-      icon: iconOf(d, drivers),
-      name: d.name,
-      state: stateLine(d),
-      on: lit,
-      offline: !d.online,
-      level: tileLevel(d),
-      tapHint: toggles ? (lit ? 'Turns it off' : 'Turns it on') : 'Opens it',
-      onTap: () => toggles ? togglePower(ref, d) : openDevice(context, d.id),
-      onLongPress: () => showQuickSheet(context, d.id),
+    final tv = kindOf(d) == DeviceKind.tv;
+    final toggles = d.online && (d.hasPower || tv);
+    final lit = tv ? isLit(d) : shownOn(ref, d);
+    return Builder(
+      builder: (tileContext) => OmniTile(
+        key: ValueKey('tile-${d.id}'),
+        iconKey: ValueKey('tile-power-${d.id}'),
+        icon: iconOf(d, drivers),
+        name: d.name,
+        reading: tileReading(d),
+        state: tileState(d),
+        on: lit,
+        offline: !d.online,
+        pending: powerPending(ref, d),
+        level: tileLevel(d),
+        tint: tileTint(d),
+        tapHint: 'Opens it',
+        iconLabel: toggles ? '${lit ? 'Turn off' : 'Turn on'} ${d.name}' : null,
+        onIconTap: toggles
+            ? () => tv ? toggleTv(ref, d) : togglePower(ref, d)
+            : null,
+        onTap: () => openDevice(context, d.id, source: tileContext),
+        onLongPress: () => showQuickSheet(context, d.id),
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => Column(
-    children: [
-      for (var i = 0; i < devices.length; i += 2)
-        Padding(
-          padding: const EdgeInsets.only(bottom: OmniSpace.gap),
-          child: _Pair(
-            _tile(context, ref, devices[i]),
-            i + 1 < devices.length ? _tile(context, ref, devices[i + 1]) : null,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final columns = OmniWidth.of(context).tileColumns;
+    return Column(
+      children: [
+        for (var i = 0; i < devices.length; i += columns)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+            child: _Row([
+              for (final d in devices.skip(i).take(columns))
+                _tile(context, ref, d),
+            ], columns: columns),
           ),
-        ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
-/// Where you are, what the TV plays, and what is offline. Each chip opens
-/// what it names.
+/// Every device that is offline, as one row at the bottom of Home rather
+/// than a grid of grey tiles. It opens the device when there is one, and
+/// Devices' Problems list when there are more.
+class OfflineRow extends ConsumerWidget {
+  const OfflineRow({super.key, required this.devices});
+
+  final List<DeviceView> devices;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final one = devices.length == 1 ? devices.single : null;
+    return Padding(
+      padding: const EdgeInsets.only(top: OmniSpace.sm),
+      child: OmniCard(
+        key: const ValueKey('home-offline'),
+        padding: EdgeInsets.zero,
+        child: OmniListRow(
+          icon: AreaIcons.offline,
+          title: one == null
+              ? '${devices.length} offline'
+              : '${one.name} offline',
+          subtitle: one == null
+              ? devices.map((d) => d.name).join(', ')
+              : 'Tap to see what to try',
+          dot: StatusKind.warning,
+          chevron: true,
+          divider: false,
+          onTap: () {
+            if (one != null) {
+              openDevice(context, one.id);
+              return;
+            }
+            ref.read(devicesViewProvider.notifier).show(DevicesView.problems);
+            ref.read(shellControllerProvider).select(ShellTab.devices);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// Where you are and what the TV plays. Each chip opens what it names.
+/// Offline devices have their own row at the bottom.
 class _StatusChips extends ConsumerWidget {
   const _StatusChips({
     required this.tiles,
@@ -306,7 +383,6 @@ class _StatusChips extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final offline = tiles.where((d) => !d.online).toList();
     final playing = tiles.where(
       (d) => kindOf(d) == DeviceKind.tv && TvState.ofDevice(d.json).isOn,
     );
@@ -332,26 +408,13 @@ class _StatusChips extends ConsumerWidget {
           },
           onTap: () => openDevice(context, tv.id),
         ),
-      if (offline.length == 1)
-        OmniStatusChip(
-          key: const ValueKey('chip-offline'),
-          label: '${offline.single.name} offline',
-          dot: StatusKind.warning,
-          onTap: () => openDevice(context, offline.single.id),
-        )
-      else if (offline.length > 1)
-        OmniStatusChip(
-          key: const ValueKey('chip-offline'),
-          label: '${offline.length} devices offline',
-          dot: StatusKind.warning,
-          onTap: () {
-            ref.read(devicesViewProvider.notifier).show(DevicesView.problems);
-            ref.read(shellControllerProvider).select(ShellTab.devices);
-          },
-        ),
     ];
     if (chips.isEmpty) return const SizedBox(height: OmniSpace.xs);
-    return Wrap(spacing: 6, children: chips);
+    return Wrap(
+      spacing: OmniSpace.sm,
+      runSpacing: OmniSpace.xs,
+      children: chips,
+    );
   }
 }
 

@@ -8,6 +8,7 @@ import '../../api/engine_client.dart';
 import '../../api/tv_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../rules/things.dart';
+import '../../service/installed_apps.dart';
 import '../../service/permissions.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
@@ -52,7 +53,6 @@ class _Choice {
     required this.icon,
     required this.onTap,
     this.subtitle,
-    this.warning = false,
   });
 
   final String key;
@@ -60,7 +60,6 @@ class _Choice {
   final String? subtitle;
   final IconData icon;
   final Future<void> Function(BuildContext context)? onTap;
-  final bool warning;
 }
 
 class _PickerPageState extends State<_PickerPage> {
@@ -110,15 +109,6 @@ class _PickerPageState extends State<_PickerPage> {
                 subtitle: c.subtitle,
                 subtitleLines: 2,
                 chevron: c.onTap != null,
-                iconForeground: c.warning ? OmniColors.warn : null,
-                trailing: c.warning
-                    ? const Icon(
-                        OmniIcons.warning,
-                        color: OmniColors.warn,
-                        size: 20,
-                        semanticLabel: 'High risk',
-                      )
-                    : null,
                 onTap: c.onTap == null ? null : () => c.onTap!(context),
               ),
           ],
@@ -380,7 +370,6 @@ Future<Thing?> pickDevice(
                 title: t.name,
                 subtitle: t.actionsText,
                 icon: t.icon,
-                warning: t.hasHighRisk,
                 onTap: (c) async => Navigator.of(c).pop(t),
               ),
         ],

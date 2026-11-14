@@ -9,7 +9,8 @@
   "pairing": { "method": "hue_bridge" },
   "settings": [
     { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
-    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true }
+    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true },
+    { "key": "gamut", "label": "Colour gamut the light reports as capabilities.control.colorgamuttype: A, B or C (the default)" }
   ],
   "setup": ["pair", "configure:lightId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },
@@ -37,6 +38,19 @@
       "params": { "value": { "type": "number", "integer": true, "min": 153, "max": 500, "unit": "mired" } },
       "command": { "method": "PUT", "path": "/api/:secret:username/lights/{{device.lightId}}/state", "body": { "on": true, "ct": "{{value}}" } },
       "stateJsonPath": "$.ct"
+    },
+    {
+      "id": "rgb",
+      "type": "color_rgb",
+      "label": "Colour, sent as xy inside the light's gamut",
+      "params": { "brightness": { "type": "number", "integer": true, "min": 1, "max": 254, "optional": true } },
+      "derive": "hue_xy",
+      "command": {
+        "method": "PUT",
+        "path": "/api/:secret:username/lights/{{device.lightId}}/state",
+        "body": { "on": true, "xy": "{{xy}}", "bri": "{{brightness|state.bri|254}}" }
+      },
+      "stateJsonPath": "$.xy"
     }
   ]
 }

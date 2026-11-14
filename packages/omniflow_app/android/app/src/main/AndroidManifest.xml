@@ -270,7 +270,8 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
-        <!-- App names for "An app opens" triggers, and the home screen, which
+        <!-- App names for "An app opens" triggers and the app picker
+             (omniflow/apps in MainActivity), and the home screen, which
              counts as no app. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

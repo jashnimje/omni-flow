@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/engine_calls.dart';
+import '../state/appearance.dart' show paletteProvider;
 import '../state/providers.dart';
 import 'design/design.dart';
 import 'settings/whats_new.dart' show whatsNewOnStart;
@@ -52,7 +53,7 @@ class _OmniFlowAppState extends ConsumerState<OmniFlowApp>
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'OmniFlow',
-    theme: omniTheme(),
+    theme: omniTheme(palette: ref.watch(paletteProvider)),
     scaffoldMessengerKey: messengerKey,
     onGenerateInitialRoutes: (_) => [
       MaterialPageRoute<void>(

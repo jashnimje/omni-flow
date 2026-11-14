@@ -63,6 +63,7 @@ class OmniListRow extends StatelessWidget {
     this.iconForeground,
     this.semanticLabel,
     this.subtitleLines = 1,
+    this.selected = false,
   });
 
   final String title;
@@ -88,6 +89,9 @@ class OmniListRow extends StatelessWidget {
   final String? semanticLabel;
   final int subtitleLines;
 
+  /// The row shown beside the list (two panes on a wide screen).
+  final bool selected;
+
   @override
   Widget build(BuildContext context) {
     final right = <Widget>[
@@ -106,11 +110,13 @@ class OmniListRow extends StatelessWidget {
     final row = Container(
       constraints: const BoxConstraints(minHeight: OmniSpace.target + 4),
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
-      decoration: divider
-          ? const BoxDecoration(
-              border: Border(bottom: BorderSide(color: OmniColors.line)),
-            )
-          : null,
+      decoration: BoxDecoration(
+        color: selected ? OmniPalette.of(context).accentSoft : null,
+        borderRadius: selected ? BorderRadius.circular(OmniRadii.field) : null,
+        border: divider && !selected
+            ? Border(bottom: BorderSide(color: OmniPalette.of(context).line))
+            : null,
+      ),
       child: Row(
         children: [
           if (leading != null)
@@ -147,6 +153,7 @@ class OmniListRow extends StatelessWidget {
     return Semantics(
       container: true,
       button: tappable,
+      selected: selected ? true : null,
       label: semanticLabel,
       excludeSemantics: semanticLabel != null,
       onTap: semanticLabel != null ? onTap : null,

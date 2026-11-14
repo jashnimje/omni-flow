@@ -45,6 +45,7 @@ abstract final class OmniIcons {
   static const light = Symbols.lightbulb_rounded;
   static const plug = Symbols.outlet_rounded;
   static const tv = Symbols.tv_rounded;
+  static const speaker = Symbols.speaker_rounded;
   static const board = Symbols.developer_board_rounded;
   static const tag = Symbols.nfc_rounded;
   static const person = Symbols.person_rounded;
@@ -118,6 +119,7 @@ abstract final class OmniIcons {
     'lightbulb' => light,
     'plug' || 'power' => plug,
     'tv' => tv,
+    'speaker' => speaker,
     'cpu' => board,
     'nfc' => tag,
     'person' => person,
