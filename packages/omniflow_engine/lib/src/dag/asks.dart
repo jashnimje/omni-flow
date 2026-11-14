@@ -20,6 +20,10 @@ class AskBroker {
   AskBroker(this._emit);
 
   final void Function(Map<String, Object?> event) _emit;
+
+  /// The person a run started by a thing is for (a person, or a phone's
+  /// person), so its ask reaches that person's phone. The engine sets it.
+  Future<String?> Function(String thing)? personOf;
   final _open = <String, _OpenAsk>{};
   var _counter = 0;
 
@@ -35,7 +39,8 @@ class AskBroker {
 
   /// Asks the person and waits for the answer: the answer, or null when
   /// [timeout] passes first. Throws [RunCancelled] when [token] is
-  /// cancelled first.
+  /// cancelled first. The ask names [to], or else the person of the
+  /// [trigger] thing that started the run, when there is one.
   Future<String?> ask({
     required String flow,
     required AskKind kind,
@@ -46,12 +51,20 @@ class AskBroker {
     required Duration timeout,
     required CancelToken token,
     required FlowClock clock,
+    String? to,
+    Object? trigger,
   }) async {
     token.check();
+    var person = to;
+    if (person == null && trigger is String && personOf != null) {
+      person = await _personOf(trigger);
+      token.check();
+    }
     final id = 'ask-${DateTime.now().microsecondsSinceEpoch}-${++_counter}';
     final request = <String, Object?>{
       'askId': id,
       'flow': flow,
+      'person': ?person,
       'kind': kind.name,
       'title': title,
       'body': ?body,
@@ -72,6 +85,17 @@ class AskBroker {
       return await open.done.future;
     } finally {
       waiting.cancel();
+    }
+  }
+
+  Future<String?> _personOf(Object? thing) async {
+    final find = personOf;
+    if (thing is! String || find == null) return null;
+    try {
+      return await find(thing);
+    } catch (_) {
+      // An ask with no person still reaches every phone.
+      return null;
     }
   }
 

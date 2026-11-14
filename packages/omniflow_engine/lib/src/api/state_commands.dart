@@ -65,6 +65,7 @@ class StateCommands {
       stringArg(args, 'name'),
       rssi.toDouble(),
       optDateArg(args, 'at') ?? DateTime.now(),
+      phoneId: optStringArg(args, 'phone'),
     );
     return {'zones': _things.zoneStates};
   }

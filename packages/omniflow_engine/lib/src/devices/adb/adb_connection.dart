@@ -6,6 +6,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'adb_key.dart';
+import 'adb_tls.dart';
 import 'adb_protocol.dart';
 
 /// The connection ended. [acknowledged] says whether the device had already
@@ -41,6 +42,14 @@ class AdbKeyNotAllowedException implements Exception {
   String toString() => 'AdbKeyNotAllowedException';
 }
 
+/// The device switched to TLS and then refused this engine's key, which a
+/// Wireless Debugging device does until it is paired with its code.
+class AdbTlsRefusedException implements Exception {
+  @override
+  String toString() =>
+      'AdbTlsRefusedException: the device did not accept the key over TLS';
+}
+
 class AdbHandshakeTimeoutException implements Exception {
   @override
   String toString() => 'AdbHandshakeTimeoutException';
@@ -66,7 +75,11 @@ const _maxShellOutput = 256 * 1024;
 /// One authenticated ADB transport to a device, carrying any number of
 /// shell streams.
 class AdbConnection {
-  AdbConnection._(this._socket) {
+  AdbConnection._(this._socket, this.host, this.port) {
+    _listen();
+  }
+
+  void _listen() {
     _socket.listen(_onData, onError: (_) => _end(), onDone: _end);
     unawaited(_socket.done.then<void>((_) {}, onError: (_) {}));
   }
@@ -80,6 +93,12 @@ class AdbConnection {
   /// [offerKey] false the key is never offered, and a second TOKEN throws
   /// [AdbKeyNotAllowedException]. [onOpened] gets the connection as soon as
   /// the socket is up, before the handshake, so the caller can close it.
+  ///
+  /// A Wireless Debugging device answers the CNXN with STLS. The host
+  /// answers STLS, the socket becomes TLS 1.3 with [key]'s certificate as
+  /// the client certificate, and the device's CNXN follows inside it, with
+  /// no AUTH: the device knows the key from pairing or refuses the
+  /// handshake, which throws [AdbTlsRefusedException].
   static Future<AdbConnection> connect(
     String host,
     int port, {
@@ -93,7 +112,7 @@ class AdbConnection {
     bool offerKey = true,
   }) async {
     final socket = await Socket.connect(host, port, timeout: connectTimeout);
-    final connection = AdbConnection._(socket);
+    final connection = AdbConnection._(socket, host, port);
     onOpened?.call(connection);
     try {
       await connection._handshake(
@@ -111,7 +130,11 @@ class AdbConnection {
     }
   }
 
-  final Socket _socket;
+  Socket _socket;
+
+  /// Where the connection was opened.
+  final String host;
+  final int port;
   final _reader = AdbMessageReader();
   final _inbox = ListQueue<AdbMessage>();
   Completer<void>? _arrived;
@@ -128,6 +151,11 @@ class AdbConnection {
   String banner = '';
 
   bool get isClosed => _closed;
+
+  /// Whether the device switched the connection to TLS (Wireless
+  /// Debugging).
+  bool get isTls => _tls;
+  var _tls = false;
 
   Future<void> _handshake(
     AdbHostKey key,
@@ -160,6 +188,10 @@ class AdbConnection {
           );
         }
         throw AdbHandshakeTimeoutException();
+      }
+      if (message.command == AdbCommand.stls && !_tls) {
+        await _startTls(key, deadline);
+        continue;
       }
       if (message.command == AdbCommand.cnxn) {
         _deviceMaxData = message.arg1 == 0 ? adbMaxData : message.arg1;
@@ -205,9 +237,37 @@ class AdbConnection {
     }
   }
 
+  Future<void> _startTls(AdbHostKey key, DateTime deadline) async {
+    _send(AdbMessage(AdbCommand.stls, adbStlsVersion, 0));
+    await _socket.flush();
+    final left = deadline.difference(DateTime.now());
+    final SecureSocket secure;
+    try {
+      // The device sends nothing more until our ClientHello, so no bytes
+      // are left behind in the plain socket.
+      secure = await SecureSocket.secure(
+        _socket,
+        context: adbTlsContext(key),
+        onBadCertificate: (_) => true,
+      ).timeout(left > Duration.zero ? left : Duration.zero);
+    } on TimeoutException {
+      _end();
+      throw AdbHandshakeTimeoutException();
+    } on Exception {
+      _end();
+      throw AdbTlsRefusedException();
+    }
+    _tls = true;
+    _socket = secure;
+    _listen();
+  }
+
   Future<AdbMessage> _nextHandshakeMessage(DateTime deadline) async {
     while (_inbox.isEmpty) {
       if (_closed) {
+        // TLS 1.3 judges the client certificate after the client finished,
+        // so a key the device refuses shows as the connection closing.
+        if (_tls) throw AdbTlsRefusedException();
         throw AdbConnectionClosedException(
           'the device closed the connection during the handshake',
         );

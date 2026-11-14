@@ -159,7 +159,7 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
     final restart = action == TvPower.reboot;
     final ok = await confirm(
       context,
-      title: restart ? 'Restart the TV?' : 'Turn the TV off?',
+      title: restart ? 'Restart the ${tv.noun}?' : 'Turn the ${tv.noun} off?',
       body: restart
           ? 'Whatever is playing stops. It is back in about a minute.'
           : 'It switches off fully, so OmniFlow cannot wake it again until '
@@ -170,7 +170,11 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
     if (!ok || !mounted) return;
     final r = await tv.call(TvCalls.power, TvCalls.powerArgs(tv.id, action));
     if (r['ok'] == true) {
-      showMessage(restart ? 'The TV is restarting' : 'The TV is turning off');
+      showMessage(
+        restart
+            ? 'The ${tv.noun} is restarting'
+            : 'The ${tv.noun} is turning off',
+      );
     }
   }
 
@@ -298,7 +302,7 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
                 child: const Text('Stop'),
               ),
             ),
-        const OmniSectionHeader('The whole TV'),
+        OmniSectionHeader('The whole ${tv.noun}'),
         OmniListRow(
           key: const ValueKey('tv-trim-caches'),
           icon: OmniIcons.cleaning,
@@ -309,13 +313,13 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
         OmniListRow(
           key: const ValueKey('tv-reboot'),
           icon: OmniIcons.retry,
-          title: 'Restart the TV',
+          title: 'Restart the ${tv.noun}',
           onTap: () => _power(TvPower.reboot),
         ),
         OmniListRow(
           key: const ValueKey('tv-shutdown'),
           icon: OmniIcons.shutdown,
-          title: 'Turn the TV off',
+          title: 'Turn the ${tv.noun} off',
           subtitle: 'fully off: only its remote turns it on again',
           onTap: () => _power(TvPower.shutdown),
         ),

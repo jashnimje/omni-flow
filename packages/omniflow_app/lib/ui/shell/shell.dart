@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../state/appearance.dart';
 import '../add/add_page.dart';
 import '../theme.dart';
+import 'hub_banner.dart';
 import 'links.dart';
 import 'tabs.dart';
 
@@ -208,7 +209,7 @@ class _OmniShellState extends ConsumerState<OmniShell> {
           ),
       ],
     );
-    if (widget.banner case final banner?) {
+    if (hubBanner(ref) ?? widget.banner case final banner?) {
       tabs = Column(
         children: [
           SafeArea(

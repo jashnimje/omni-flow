@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'add_commands.dart';
 import 'agent_policy.dart';
+import 'android_pair_commands.dart';
 import 'api_error.dart';
 import 'automation_commands.dart';
 import 'backup_commands.dart';
@@ -50,6 +51,7 @@ import '../storage/database.dart';
 import '../storage/secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../transports/udp_transport.dart';
+import '../version.dart';
 
 export 'api_error.dart';
 
@@ -68,6 +70,7 @@ class OmniEngine {
       discovery = _core.discovery,
       serial = _core.serial {
     flows = _core.flows = FlowEngine(EngineFlowHost(_core));
+    flows.asks.personOf = _things.personOfThing;
     _inputs.addAll([
       serial.events.listen((e) => _boards.boardEvent(e.json, e.deviceId)),
       _core.mqtt.events.listen(
@@ -161,6 +164,10 @@ class OmniEngine {
           'deviceId': id,
           'message': 'Look at the TV and choose Allow',
         }),
+        locateTls: (guid) => locateAdbTlsConnect(discovery.mdns, guid),
+        onMoved: (id, host, port) async {
+          if (core case final c?) await recordAdbMove(c, id, host, port);
+        },
       );
       final devices = DeviceService(
         registry: registry,
@@ -542,6 +549,9 @@ class OmniEngine {
       };
     },
     'engine.status': (_) async => {
+      'version': omniflowEngineVersion,
+      'startedAt': _openedAt.toUtc().toIso8601String(),
+      'uptimeSeconds': DateTime.now().difference(_openedAt).inSeconds,
       'hubRunning': _hub.running,
       'flows': flows.loadedFlows.toList(),
       'loadIssues': loadIssues,
@@ -560,6 +570,8 @@ class OmniEngine {
       );
       return {'running': true, 'flows': flows.loadedFlows.toList()};
     },
+    'hub.clients': _hub.clientList,
+    'hub.discover': _hub.discover,
     'hub.stop': (_) async {
       await stopHub();
       return {'running': false};
@@ -631,9 +643,16 @@ class OmniEngine {
     'web.secret.set': _deviceCommands.webSecretSet,
     ..._tvCommands.commands,
     ...TvPointerCommands(_core, _tvCommands).commands,
+    ...AndroidPairCommands(_core).commands,
   };
 
+  /// When this engine opened, for the uptime `engine.status` reports.
+  final _openedAt = DateTime.now();
+
   Iterable<String> get commandNames => _commands.keys;
+
+  /// Who is connected to the hub's control socket.
+  HubClients get hubClients => _hub.clients;
 
   /// Runs [command] with [args]. Never throws: every failure becomes an error result.
   Future<Map<String, Object?>> handle(

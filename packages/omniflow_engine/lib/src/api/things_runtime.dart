@@ -47,10 +47,29 @@ Map<String, Object?> initialThingState(String driverId) => switch (driverId) {
   _ => const {},
 };
 
+/// Where one person's phone readings put them: which places they are in,
+/// and the last Wi-Fi reading, to check an edited place against.
+class _Presence {
+  _Presence(this.tracker);
+
+  final ZoneTracker tracker;
+
+  /// Places the person is inside, oldest entry first, so their `place` is
+  /// the one they reached last.
+  final entered = <String>[];
+
+  ({String? ssid, String? bssid, DateTime at})? lastWifi;
+}
+
 /// The phone, the people, the places and the NFC tags. Their state comes
-/// from the phone's inputs: Wi-Fi and BLE readings place the household
-/// person in places, and an NFC scan raises events on the phone and the
-/// tag. A place is today's zone, so `$Zone_<id>` and `zone.changed` stay.
+/// from the phones' inputs: Wi-Fi and BLE readings place a person in
+/// places, and an NFC scan raises events on the phone and the tag. A place
+/// is today's zone, so `$Zone_<id>` and `zone.changed` stay.
+///
+/// A reading that names no phone, or a phone of the household person, moves
+/// the household person, as with one phone. A reading from another phone
+/// whose `person` is someone else moves that person, so several phones can
+/// feed one hub. A place is inside while anyone is in it.
 class ThingsRuntime {
   ThingsRuntime(this._core);
 
@@ -59,11 +78,20 @@ class ThingsRuntime {
   /// Whether the household person is inside each place, by place id.
   final zones = ZoneTracker(const []);
 
+  late final _household = _Presence(zones);
+
+  /// The other people with a phone of their own, by person id.
+  final _others = <String, _Presence>{};
+
+  var _specs = <ZoneSpec>[];
+
   var _places = <String, Device>{};
 
-  /// Places the household person is inside, oldest entry first, so their
-  /// `place` is the one they reached last.
-  final _entered = <String>[];
+  Iterable<_Presence> get _everyone => [_household, ..._others.values];
+
+  /// Whether anyone is inside [placeId].
+  bool _anyInside(String placeId) =>
+      _everyone.any((p) => p.tracker.isInside(placeId));
 
   DriftDeviceStore get _store => DriftDeviceStore(_core.db);
 
@@ -147,20 +175,31 @@ class ThingsRuntime {
         issues.add(loadIssue('place', p.id, e));
       }
     }
-    final before = {for (final id in _places.keys) id: zones.isInside(id)};
+    final before = {for (final id in _places.keys) id: _anyInside(id)};
     _places = {for (final p in places) p.id: p};
-    zones.update(specs);
+    _specs = specs;
+    for (final presence in _everyone) {
+      presence.tracker.update(specs);
+    }
     if (restore) {
       zones.restore({
         for (final p in places) p.id: p.state['inside'] == true,
       }, DateTime.now());
     }
-    if (_lastWifi case final w?) zones.wifi(w.ssid, w.bssid, w.at);
-    _entered.removeWhere((id) => !zones.isInside(id));
+    for (final presence in _everyone) {
+      final tracker = presence.tracker;
+      if (presence.lastWifi case final w?) tracker.wifi(w.ssid, w.bssid, w.at);
+      presence.entered.removeWhere((id) => !tracker.isInside(id));
+      for (final place in _places.values) {
+        if (tracker.isInside(place.id) &&
+            !presence.entered.contains(place.id)) {
+          presence.entered.add(place.id);
+        }
+      }
+    }
     final edited = <String>{};
     for (final place in _places.values) {
-      final inside = zones.isInside(place.id);
-      if (inside && !_entered.contains(place.id)) _entered.add(place.id);
+      final inside = _anyInside(place.id);
       if ((before[place.id] ?? false) == inside) continue;
       edited.add(place.id);
       await _core.flows.setGlobal('Zone_${zoneIdOf(place)}', inside);
@@ -177,18 +216,20 @@ class ThingsRuntime {
     'wifi': ?place.settings['wifi'],
   }, requireInput: false);
 
-  ({String? ssid, String? bssid, DateTime at})? _lastWifi;
-
   /// The input behind the readings being applied now, one of
   /// [presenceSources].
   String? _source;
 
   /// The person whose phone this engine reads: the one a phone names in
-  /// its `person` setting, or the only person when there is one.
+  /// its `person` setting, the default phone (the one inputs with no phone
+  /// id feed) first, or the only person when there is one.
   Future<String?> householdPerson() async {
     final people = {for (final p in await _ofDriver(personDriverId)) p.id};
+    int rank(Device d) => d.id == defaultPhoneId ? 0 : 1;
     final phones = await _ofDriver(phoneDriverId)
-      ..sort((a, b) => a.id.compareTo(b.id));
+      ..sort(
+        (a, b) => rank(a) != rank(b) ? rank(a) - rank(b) : a.id.compareTo(b.id),
+      );
     for (final phone in phones) {
       final person = phone.settings['person'];
       if (person is String && people.contains(person)) return person;
@@ -203,15 +244,29 @@ class ThingsRuntime {
     Set<String> quietPlaces = const {},
   }) async {
     final person = await householdPerson();
+    _others.remove(person);
+    final who = {?person: _household, ..._others};
     for (final place in _places.values) {
-      final inside = zones.isInside(place.id);
       await _merge(place.id, {
-        'inside': inside,
-        'people': [if (inside && person != null) person],
+        'inside': _anyInside(place.id),
+        'people': [
+          for (final MapEntry(:key, :value) in who.entries)
+            if (value.tracker.isInside(place.id)) key,
+        ],
       }, quiet: quiet || quietPlaces.contains(place.id));
     }
-    if (person == null) return;
-    final device = await _store.get(person);
+    for (final MapEntry(:key, :value) in who.entries) {
+      await _syncPerson(key, value, quiet: quiet || quietPlaces.isNotEmpty);
+    }
+  }
+
+  /// Writes [id]'s `home` and `place` from where [presence] puts them.
+  Future<void> _syncPerson(
+    String id,
+    _Presence presence, {
+    required bool quiet,
+  }) async {
+    final device = await _store.get(id);
     if (device == null) return;
     final home = device.settings['homePlace'];
     final homeZone = home is String && home.isNotEmpty
@@ -220,12 +275,46 @@ class ThingsRuntime {
     final homePlace = _places.values
         .where((p) => p.id == homeZone || zoneIdOf(p) == homeZone)
         .firstOrNull;
-    final isHome = homePlace != null && zones.isInside(homePlace.id);
-    await _merge(person, {
+    final isHome = homePlace != null && presence.tracker.isInside(homePlace.id);
+    await _merge(id, {
       'home': isHome,
-      'place': _entered.lastOrNull,
+      'place': presence.entered.lastOrNull,
       ..._presenceChange(device, isHome),
-    }, quiet: quiet || quietPlaces.isNotEmpty);
+    }, quiet: quiet);
+  }
+
+  /// Whose presence a reading from [phoneId] moves: the household person's
+  /// for no phone, a phone with no person or the household person's phone,
+  /// else the person that phone names. Throws `invalid` for a phone id
+  /// that is not a phone thing.
+  Future<(_Presence, String?)> _presenceFor(String? phoneId) async {
+    if (phoneId == null) return (_household, null);
+    final device = await phone(phoneId);
+    final person = device.settings['person'];
+    if (person is! String || person == await householdPerson()) {
+      return (_household, null);
+    }
+    final thing = await _store.get(person);
+    if (thing == null || thing.driverId != personDriverId) {
+      return (_household, null);
+    }
+    return (
+      _others.putIfAbsent(person, () => _Presence(ZoneTracker(_specs))),
+      person,
+    );
+  }
+
+  /// The person a run started by [thing] is for: the person itself, or the
+  /// person a phone names in its `person` setting. Null for anything else.
+  Future<String?> personOfThing(String thing) async {
+    final device = await _store.get(thing);
+    if (device == null) return null;
+    if (device.driverId == personDriverId) return device.id;
+    if (device.driverId != phoneDriverId) return null;
+    final person = device.settings['person'];
+    if (person is! String) return null;
+    final named = await _store.get(person);
+    return named?.driverId == personDriverId ? person : null;
   }
 
   /// `homeSource` and `homeSince` when [home] is a change for [person].
@@ -278,19 +367,28 @@ class ThingsRuntime {
     }
   }
 
-  Future<void> _apply(List<ZoneChange> changes) async {
+  /// Applies [changes] to [presence]. `$Zone_<id>` says whether anyone is
+  /// inside, and `zone.changed` names the [person] when it is not the
+  /// household person.
+  Future<void> _apply(
+    List<ZoneChange> changes, [
+    _Presence? presence,
+    String? person,
+  ]) async {
+    final who = presence ?? _household;
     for (final c in changes) {
       final place = _places[c.zoneId];
       final zone = place == null ? c.zoneId : zoneIdOf(place);
       final inside = c.transition == ZoneTransition.entered;
-      _entered.remove(c.zoneId);
-      if (inside) _entered.add(c.zoneId);
-      await _core.flows.setGlobal('Zone_$zone', inside);
+      who.entered.remove(c.zoneId);
+      if (inside) who.entered.add(c.zoneId);
+      await _core.flows.setGlobal('Zone_$zone', _anyInside(c.zoneId));
       _core.emit({
         'event': 'zone.changed',
         ...c.toJson(),
         'zone': zone,
         'place': c.zoneId,
+        'person': ?person,
       });
     }
     if (changes.isNotEmpty) await _sync();
@@ -307,7 +405,10 @@ class ThingsRuntime {
       return existing;
     }
     if (id != null && id != defaultPhoneId) {
-      throw ApiError('not_found', 'no phone $id');
+      throw ApiError(
+        'invalid',
+        'no phone $id: add it first, or leave phone out',
+      );
     }
     final made = const Device(
       id: defaultPhoneId,
@@ -328,23 +429,39 @@ class ThingsRuntime {
     String? phoneId,
   }) async {
     final device = await phone(phoneId);
-    final homes = _core.flows.globals['HomeSsids'];
-    await _core.flows.setGlobal('WifiSsid', ssid);
-    await _core.flows.setGlobal(
-      'HomeWifiConnected',
-      ssid != null && homes is List && homes.contains(ssid),
-    );
-    _core.emit({'event': 'wifi.changed', 'ssid': ssid, 'bssid': bssid});
+    final (presence, person) = await _presenceFor(phoneId);
+    // The Wi-Fi globals are the household phone's, as with one phone.
+    if (person == null) {
+      final homes = _core.flows.globals['HomeSsids'];
+      await _core.flows.setGlobal('WifiSsid', ssid);
+      await _core.flows.setGlobal(
+        'HomeWifiConnected',
+        ssid != null && homes is List && homes.contains(ssid),
+      );
+    }
+    _core.emit({
+      'event': 'wifi.changed',
+      'ssid': ssid,
+      'bssid': bssid,
+      'phone': ?phoneId,
+    });
     await _merge(device.id, {'wifi_ssid': ssid, 'wifi_bssid': bssid});
-    _lastWifi = (ssid: ssid, bssid: bssid, at: at);
+    presence.lastWifi = (ssid: ssid, bssid: bssid, at: at);
     _source = 'wifi';
-    await _apply(zones.wifi(ssid, bssid, at));
+    await _apply(presence.tracker.wifi(ssid, bssid, at), presence, person);
   }
 
-  /// One BLE reading from the phone's scan.
-  Future<void> ble(String name, double rssi, DateTime at) {
+  /// One BLE reading from a phone's scan, the household phone's when
+  /// [phoneId] is null.
+  Future<void> ble(
+    String name,
+    double rssi,
+    DateTime at, {
+    String? phoneId,
+  }) async {
+    final (presence, person) = await _presenceFor(phoneId);
     _source = 'ble';
-    return _apply(zones.bleReading(name, rssi, at));
+    await _apply(presence.tracker.bleReading(name, rssi, at), presence, person);
   }
 
   /// About once a second, so a beacon that went quiet ends in an exit.
@@ -355,6 +472,12 @@ class ThingsRuntime {
     final changes = zones.tick(at);
     if (changes.isNotEmpty) _source = 'ble';
     await _apply(changes);
+    for (final MapEntry(:key, :value) in _others.entries.toList()) {
+      final theirs = value.tracker.tick(at);
+      if (theirs.isEmpty) continue;
+      _source = 'ble';
+      await _apply(theirs, value, key);
+    }
   }
 
   /// The phone's battery level (0 to 100) and whether it is charging.

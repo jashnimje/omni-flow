@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'android_names.dart';
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
@@ -17,11 +18,101 @@ import '../devices/adb/tv_system.dart';
 import '../devices/channels.dart' show CommandFailedException;
 import '../devices/device.dart';
 import '../devices/board.dart' show manifestFor;
+import '../devices/discovery/mdns_discovery.dart'
+    show AdbWirelessFind, browseAdbWireless;
 import '../manifest/driver_manifest.dart';
+import '../storage/database.dart' show DriftDeviceStore;
 import '../transports/udp_transport.dart' show TransportTimeoutException;
 
 /// The state keys the hub keeps for a TV, so rules can start on them.
 const tvStateKeys = ['power', 'app', 'playing', 'volume'];
+
+/// What the hub keeps for a phone: its screen too, `on` or `off`.
+const androidPhoneStateKeys = [...tvStateKeys, 'screen'];
+
+/// An ADB device whose driver is in the phone category, such as
+/// `android_phone_adb`, rather than a TV.
+bool isAndroidPhone(DriverManifest manifest) =>
+    manifest.transport.type == TransportType.adb &&
+    manifest.category == 'phone';
+
+/// The remote keys a phone has, by group, with the label a phone uses. A
+/// phone answers `invalid` for TV-only keys such as HDMI inputs, channels or
+/// the d-pad, and still takes any key code.
+const androidPhoneKeyGroups = <({String group, List<(String, String)> keys})>[
+  (
+    group: 'power',
+    keys: [('power', 'Power'), ('sleep', 'Lock'), ('wakeup', 'Wake')],
+  ),
+  (
+    group: 'navigation',
+    keys: [
+      ('back', 'Back'),
+      ('home', 'Home'),
+      ('app_switch', 'Recents'),
+      ('enter', 'Enter'),
+      ('delete', 'Delete'),
+      ('tab', 'Tab'),
+    ],
+  ),
+  (
+    group: 'volume',
+    keys: [
+      ('volume_up', 'Volume up'),
+      ('volume_down', 'Volume down'),
+      ('mute', 'Mute'),
+    ],
+  ),
+  (
+    group: 'media',
+    keys: [
+      ('play_pause', 'Play or pause'),
+      ('play', 'Play'),
+      ('pause', 'Pause'),
+      ('stop', 'Stop'),
+      ('next', 'Next'),
+      ('previous', 'Previous'),
+      ('rewind', 'Rewind'),
+      ('fast_forward', 'Fast forward'),
+    ],
+  ),
+  (
+    group: 'numbers',
+    keys: [
+      ('0', '0'),
+      ('1', '1'),
+      ('2', '2'),
+      ('3', '3'),
+      ('4', '4'),
+      ('5', '5'),
+      ('6', '6'),
+      ('7', '7'),
+      ('8', '8'),
+      ('9', '9'),
+      ('star', '*'),
+      ('pound', '#'),
+    ],
+  ),
+  (
+    group: 'system',
+    keys: [
+      ('notification', 'Notifications'),
+      ('search', 'Search'),
+      ('assistant', 'Assistant'),
+      ('settings', 'Settings'),
+      ('brightness_up', 'Brightness up'),
+      ('brightness_down', 'Brightness down'),
+    ],
+  ),
+];
+
+final _phoneKeyNames = {
+  for (final g in androidPhoneKeyGroups)
+    for (final k in g.keys) k.$1,
+};
+
+/// The settings categories that only a TV has.
+const _tvOnlySettingCategories = {'HDMI-CEC'};
 
 const _maxPath = adbSyncMaxPath;
 const _maxShellTimeout = Duration(minutes: 10);
@@ -53,7 +144,8 @@ class TvCommands {
   final _screenSizes = Expando<(int, int)>();
   final _recordings = <String, ({String file, DateTime startedAt})>{};
 
-  Map<String, CommandHandler> get commands => {
+  /// Every command under its `tv.*` name and its `android.*` one.
+  Map<String, CommandHandler> get commands => withAndroidNames({
     'tv.state': state,
     'tv.keys': keys,
     'tv.key': key,
@@ -91,7 +183,9 @@ class TvCommands {
     'tv.app.backup': appBackup,
     'tv.cache.trim': cacheTrim,
     'tv.power': power,
-  };
+    'tv.notifications': notifications,
+    'android.find': find,
+  });
 
   // Devices ------------------------------------------------------------
 
@@ -99,7 +193,10 @@ class TvCommands {
     final device = await _core.device(stringArg(args, 'id'));
     final manifest = manifestFor(_core.registry, device);
     if (manifest == null || manifest.transport.type != TransportType.adb) {
-      throw ApiError('invalid', '${device.id} is not an Android TV over ADB');
+      throw ApiError(
+        'invalid',
+        '${device.id} is not an Android TV or phone over ADB',
+      );
     }
     // Only a user at the TV can allow a new key, so an agent or a poll
     // passes allowPairing false and gets needs_user instead of a prompt.
@@ -241,6 +338,7 @@ class TvCommands {
   /// The TV's power, app, playback and volume. A TV that does not answer
   /// at all is off: Android TVs drop off the network in deep standby.
   Future<Map<String, Object?>> _readState(_Tv tv) async {
+    if (tv.isPhone) return _readPhoneState(tv);
     try {
       final output = await _run(tv, tvSections(tvStateCommands));
       return parseTvState(splitTvSections(output));
@@ -256,6 +354,36 @@ class TvCommands {
     }
   }
 
+  /// A phone's state, with its screen `on` or `off`. A phone that does not
+  /// answer is not off: Wireless debugging went off, usually on a restart.
+  Future<Map<String, Object?>> _readPhoneState(_Tv tv) async {
+    try {
+      final output = await _run(tv, tvSections(tvStateCommands));
+      final state = parseTvState(splitTvSections(output));
+      return {
+        ...state,
+        'kind': 'phone',
+        'screen': state['power'] == 'on' ? 'on' : 'off',
+        'reachable': true,
+      };
+    } on TransportTimeoutException {
+      return {
+        'kind': 'phone',
+        'power': null,
+        'screen': null,
+        'app': null,
+        'activity': null,
+        'playing': null,
+        'volume': null,
+        'volumeMax': null,
+        'reachable': false,
+        'message':
+            '${tv.device.id} did not answer. Wireless debugging turns off '
+            'when the phone restarts, so turn it on again on that phone',
+      };
+    }
+  }
+
   /// One hub poll: reads the TV state into the device state, and only
   /// saves it when a key changed, so rules see changes and not heartbeats.
   Future<void> poll(String deviceId) async {
@@ -266,16 +394,98 @@ class TvCommands {
   Future<void> _record(String deviceId, Map<String, Object?> state) async {
     final device = await _core.devices.device(deviceId);
     if (device == null) return;
-    final values = {for (final k in tvStateKeys) k: state[k]};
+    final keys = state['kind'] == 'phone' ? androidPhoneStateKeys : tvStateKeys;
+    final values = {for (final k in keys) k: state[k]};
     final changed = values.entries.any((e) => device.state[e.key] != e.value);
-    if (changed || !tvStateKeys.every(device.state.containsKey)) {
+    if (changed || !keys.every(device.state.containsKey)) {
       await _core.devices.mergeState(deviceId, values);
     }
   }
 
   Future<Map<String, Object?>> keys(Map<String, Object?> args) async {
     final tv = await _tv(args);
-    return {'id': tv.device.id, 'groups': tvKeyCatalogJson()};
+    return {
+      'id': tv.device.id,
+      'groups': tv.isPhone ? _phoneKeyCatalogJson() : tvKeyCatalogJson(),
+    };
+  }
+
+  static List<Map<String, Object?>> _phoneKeyCatalogJson() => [
+    for (final g in androidPhoneKeyGroups)
+      {
+        'group': g.group,
+        'keys': [
+          for (final (key, label) in g.keys)
+            {
+              'key': key,
+              'label': label,
+              'keycode': tvKeyCodes[key],
+              'group': g.group,
+            },
+        ],
+      },
+  ];
+
+  /// Opens or closes the notification shade, as a swipe down from the top
+  /// does.
+  Future<Map<String, Object?>> notifications(Map<String, Object?> args) async {
+    final tv = await _tv(args);
+    final action = args['action'] ?? 'expand';
+    final command = switch (action) {
+      'expand' => 'cmd statusbar expand-notifications',
+      'settings' => 'cmd statusbar expand-settings',
+      'collapse' => 'cmd statusbar collapse',
+      _ => throw ApiError('invalid', 'action is expand, settings or collapse'),
+    };
+    await _check(tv, command, 'opening the notifications');
+    return {'id': tv.device.id, 'action': action};
+  }
+
+  /// `{windowMs?}` -> `{phones}`: the devices on this network with Wireless
+  /// debugging on, from mDNS, one per guid. Each has its `guid`, `name`,
+  /// `host`, the `pairingPort` while "Pair device with pairing code" is
+  /// open, the `connectPort`, and `knownAs` when it is a thing already.
+  /// This device is left out.
+  Future<Map<String, Object?>> find(Map<String, Object?> args) async {
+    final ms = optIntArg(args, 'windowMs') ?? 3000;
+    if (ms < 100 || ms > 30000) {
+      throw ApiError('invalid', 'windowMs is 100 to 30000');
+    }
+    final List<AdbWirelessFind> found;
+    try {
+      found = await browseAdbWireless(
+        _core.discovery.mdns,
+        window: Duration(milliseconds: ms),
+      );
+    } on SocketException catch (e) {
+      throw ApiError('unavailable', 'mDNS cannot open its socket: $e');
+    }
+    Set<String> own;
+    try {
+      own = await _core.discovery.ownAddresses();
+    } on SocketException {
+      own = const {};
+    }
+    final known = <String, String>{
+      for (final d in await DriftDeviceStore(_core.db).all())
+        if (d.stableId case final id?) id.toLowerCase(): d.id,
+    };
+    final phones = <String, Map<String, Object?>>{};
+    for (final f in found) {
+      if (own.contains(f.host)) continue;
+      final guid = f.guid.toLowerCase();
+      final phone = phones.putIfAbsent(
+        guid,
+        () => {
+          'guid': f.guid,
+          'name': f.name,
+          'host': f.host,
+          'knownAs': ?known[guid],
+        },
+      );
+      phone[f.pairing ? 'pairingPort' : 'connectPort'] = f.port;
+    }
+    return {'phones': phones.values.toList()};
   }
 
   Future<Map<String, Object?>> key(Map<String, Object?> args) async {
@@ -290,14 +500,24 @@ class TvCommands {
       String name => AdbAction.keycodeOf(name, null),
       _ => throw ApiError('invalid', 'key is a key name or a key code'),
     };
+    if (tv.isPhone &&
+        given is String &&
+        int.tryParse(given) == null &&
+        !_phoneKeyNames.contains(given)) {
+      throw ApiError(
+        'invalid',
+        '$given is a TV remote key, and ${tv.device.id} is a phone. Its keys '
+            'are in android.keys',
+      );
+    }
     final longPress = AdbAction.flagOf(args['longPress'], r'$.longPress');
     final repeat = AdbAction.repeatOf(args['repeat']);
     // Wake up, and the power key, are how the app turns a TV on: a TV in
-    // deep standby gets Wake-on-LAN first.
+    // deep standby gets Wake-on-LAN first. A phone has no Wake-on-LAN.
     await _run(
       tv,
       TvShell.key(keycode, longPress: longPress, repeat: repeat),
-      wake: keycode == 224 || keycode == 26,
+      wake: !tv.isPhone && (keycode == 224 || keycode == 26),
     );
     return {
       'id': tv.device.id,
@@ -484,7 +704,7 @@ class TvCommands {
     if (!output.contains(_appSuccess[action]!)) {
       throw ApiError(
         'device_error',
-        'the TV could not $action $package: ${_firstLines(output.trim())}',
+        'the ${tv.noun} could not $action $package: ${_firstLines(output.trim())}',
       );
     }
     return {
@@ -521,7 +741,7 @@ class TvCommands {
       if (!output.contains('Success')) {
         throw ApiError(
           'device_error',
-          'the TV did not install ${file.uri.pathSegments.last}: '
+          'the ${tv.noun} did not install ${file.uri.pathSegments.last}: '
               '${_firstLines(output.trim())}',
         );
       }
@@ -565,12 +785,13 @@ class TvCommands {
       'id': tv.device.id,
       'categories': [
         for (final c in tvSettingCatalog)
-          {
-            'category': c.category,
-            'settings': [
-              for (final s in c.settings) s.toJson(all[s.namespace]![s.key]),
-            ],
-          },
+          if (!tv.isPhone || !_tvOnlySettingCategories.contains(c.category))
+            {
+              'category': c.category,
+              'settings': [
+                for (final s in c.settings) s.toJson(all[s.namespace]![s.key]),
+              ],
+            },
       ],
     };
   }
@@ -638,8 +859,8 @@ class TvCommands {
     if (adbProtectedSettings.contains('$namespace/$key')) {
       throw ApiError(
         'invalid',
-        '$namespace $key would cut this engine off from the TV. Change it '
-            'on the TV',
+        '$namespace $key would cut this engine off from the device. Change it '
+            'on the device itself',
       );
     }
   }
@@ -710,7 +931,7 @@ class TvCommands {
         value.contains(RegExp('[\x00\r\n]'))) {
       throw ApiError(
         'invalid',
-        '$key is an absolute path on the TV, at most $_maxPath bytes, '
+        '$key is an absolute path on the device, at most $_maxPath bytes, '
             'on one line',
       );
     }
@@ -904,7 +1125,7 @@ class TvCommands {
           ) ??
           (throw ApiError(
             'invalid',
-            'the TV listed $remote, which would be saved outside $target, so '
+            'the ${tv.noun} listed $remote, which would be saved outside $target, so '
                 'the download stopped',
           ));
       for (final d in walk.dirs) {
@@ -1140,7 +1361,7 @@ class TvCommands {
           .trim();
       throw ApiError(
         'device_error',
-        'the TV did not send a screenshot'
+        'the ${tv.noun} did not send a screenshot'
             '${said.isEmpty ? '' : ': ${_firstLines(said)}'}',
       );
     }
@@ -1460,7 +1681,7 @@ class TvCommands {
     if (result.exitCode != 0 || TvShell.failure.hasMatch(said)) {
       throw ApiError(
         'device_error',
-        'the TV could not $verb $permission for $package'
+        'the ${tv.noun} could not $verb $permission for $package'
             '${said.isEmpty ? '' : ': ${_firstLines(said)}'}',
       );
     }
@@ -1493,7 +1714,7 @@ class TvCommands {
           remote.contains(RegExp('[\x00\r\n]'))) {
         throw ApiError(
           'device_error',
-          'the TV listed $remote as an APK of $package, which is not an APK '
+          'the ${tv.noun} listed $remote as an APK of $package, which is not an APK '
               'path',
         );
       }
@@ -1502,7 +1723,7 @@ class TvCommands {
           pathInside(to, [name]) ??
           (throw ApiError(
             'invalid',
-            'the TV listed $remote, which would be saved outside $to, so the '
+            'the ${tv.noun} listed $remote, which would be saved outside $to, so the '
                 'backup stopped',
           ));
       if (!overwrite &&
@@ -1550,7 +1771,7 @@ class TvCommands {
     if (TvShell.failure.hasMatch(said)) {
       throw ApiError(
         'device_error',
-        'the TV could not trim its caches: ${_firstLines(said)}',
+        'the ${tv.noun} could not trim its caches: ${_firstLines(said)}',
       );
     }
     int? free(String? df) => parseDf(df ?? '').firstOrNull?.availableKb;
@@ -1581,7 +1802,7 @@ class TvCommands {
         final said = result.output.trim();
         throw ApiError(
           'device_error',
-          'the TV did not $action'
+          'the ${tv.noun} did not $action'
               '${said.isEmpty ? '' : ': ${_firstLines(said)}'}',
         );
       }
@@ -1663,11 +1884,16 @@ class TvCommands {
 /// A TV device resolved for one command. [device] follows a new address
 /// when healing moves it.
 class _Tv {
-  _Tv(this.device, this.manifest, {required this.offerKey});
+  _Tv(this.device, this.manifest, {required this.offerKey})
+    : isPhone = isAndroidPhone(manifest);
 
   Device device;
   final DriverManifest manifest;
   final bool offerKey;
+  final bool isPhone;
+
+  /// What messages call the device.
+  String get noun => isPhone ? 'phone' : 'TV';
 }
 
 String _firstLines(String text) {

@@ -304,6 +304,7 @@ class FlowEngine implements FlowEffects {
         timeout: const Duration(milliseconds: askDefaultTimeoutMs),
         token: _closing,
         clock: _clock,
+        trigger: msg['thing'],
       );
     } on RunCancelled {
       return;

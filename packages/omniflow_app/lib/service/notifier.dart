@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 import '../api/engine_client.dart';
+import '../api/engine_client_hub.dart';
 import '../api/plain_error.dart';
 import '../ui/shell/links.dart';
 
@@ -102,10 +103,17 @@ class AutomationNotifier {
     PostAsk? postAsk,
     CancelNotification? cancel,
     DateTime Function()? now,
+    this._shows,
   }) : _post = post ?? _platformPost,
        _postAsk = postAsk ?? _platformAsk,
        _cancel = cancel ?? _platformCancel,
        _now = now ?? DateTime.now;
+
+  /// Whether an ask or a notify step is for this phone. In hub mode only
+  /// those for this phone's person, or for no one in particular, show.
+  final bool Function(Map<String, Object?> event)? _shows;
+
+  bool _forHere(Map<String, Object?> e) => _shows?.call(e) ?? true;
 
   static const askPending = 'ask.pending';
 
@@ -168,6 +176,10 @@ class AutomationNotifier {
   Future<void> start() async {
     if (_sub != null) return;
     _sub = _engine.events.listen(_onEvent);
+    await _showPending();
+  }
+
+  Future<void> _showPending() async {
     final Map<String, Object?> pending;
     try {
       pending = await _engine.call(askPending);
@@ -247,6 +259,7 @@ class AutomationNotifier {
   }
 
   Future<void> _ask(Map<String, Object?> e) async {
+    if (!_forHere(e)) return;
     final notice = noticeFor(e);
     if (notice == null || !_asks.add(notice.askId)) return;
     await _postAsk(notice);
@@ -259,6 +272,9 @@ class AutomationNotifier {
 
   Future<void> _onEvent(Map<String, Object?> e) async {
     switch (e['event']) {
+      case HubLink.event when e['state'] == 'connected':
+        // Asks made while the hub was out of reach.
+        await _showPending();
       case 'ask.request':
         await _ask(e);
       case 'ask.closed':
@@ -268,7 +284,7 @@ class AutomationNotifier {
         await _cancel(askNotificationId(askId));
       case 'flow.announce':
         final title = '${e['title'] ?? ''}'.trim();
-        if (title.isEmpty) return;
+        if (title.isEmpty || !_forHere(e)) return;
         // One notification per automation and title, updated in place, so
         // a rule that fires often does not stack up to Android's limit.
         final flow = e['flow'];

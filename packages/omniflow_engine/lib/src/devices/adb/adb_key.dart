@@ -80,6 +80,14 @@ class AdbHostKey {
     return engine.process(block);
   }
 
+  /// An RSA PKCS#1 v1.5 SHA-256 signature over [data], which signs the
+  /// key's own X.509 certificate for Wireless Debugging.
+  Uint8List signSha256(List<int> data) {
+    final signer = RSASigner(SHA256Digest(), '0609608648016503040201')
+      ..init(true, PrivateKeyParameter<RSAPrivateKey>(_key));
+    return signer.generateSignature(Uint8List.fromList(data)).bytes;
+  }
+
   /// The public key in Android's mincrypt `RSAPublicKey` layout, all
   /// little-endian: word count, n0inv, n, rr = 2^4096 mod n, exponent.
   Uint8List mincryptPublicKey() {

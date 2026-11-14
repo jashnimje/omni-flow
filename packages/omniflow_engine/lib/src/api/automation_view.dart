@@ -32,6 +32,10 @@ class SentenceContext {
       ? 'each device'
       : names[thing] ?? thing.replaceAll('_', ' ');
 
+  /// `Jade ` for a step sent `to` a person, else nothing.
+  String _toWhom(Map<Object?, Object?> step) =>
+      step['to'] is String ? '${name(step['to'] as String)} ' : '';
+
   CapabilitySpec? _capability(String thing, String key) {
     final manifest = drivers[thing];
     if (manifest == null) return null;
@@ -246,7 +250,8 @@ class SentenceContext {
       return 'repeat ${how.join(', ')}: $body';
     }
     if (s['notify'] is Map) {
-      return 'notify "${spoken('${(s['notify'] as Map)['title']}')}"';
+      final n = s['notify'] as Map;
+      return 'notify ${_toWhom(n)}"${spoken('${n['title']}')}"';
     }
     if (s['http'] is Map) {
       final h = s['http'] as Map;
@@ -264,8 +269,8 @@ class SentenceContext {
       final a = s['ask'] as Map;
       final choices = a['choices'];
       return choices is List && choices.isNotEmpty
-          ? 'ask "${spoken('${a['title']}')}" (${choices.join(' or ')})'
-          : 'ask "${spoken('${a['title']}')}" for an answer';
+          ? 'ask ${_toWhom(a)}"${spoken('${a['title']}')}" (${choices.join(' or ')})'
+          : 'ask ${_toWhom(a)}"${spoken('${a['title']}')}" for an answer';
     }
     if (s['get'] is Map) {
       final g = s['get'] as Map;

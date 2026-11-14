@@ -2,9 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'hub_runtime.dart' show HubClient;
 import 'local_client.dart';
 import 'omni_engine.dart';
 import '../transports/ndjson.dart';
+import '../version.dart';
+
+/// The first message a client may send to name itself in `hub.clients`.
+const helloCommand = 'hello';
 
 /// Unix domain socket paths are capped by `sun_path`: 104 bytes on macOS,
 /// 108 on Linux, each counting the closing NUL. A bind past the cap fails
@@ -135,8 +140,10 @@ class LocalServer {
       socket.destroy();
       return;
     }
+    final client = _engine.hubClients.connect();
     late final _Connection connection;
-    connection = _Connection(socket, _engine, () {
+    connection = _Connection(socket, _engine, client, () {
+      _engine.hubClients.disconnect(client);
       _connections.remove(connection);
     });
     _connections.add(connection);
@@ -163,7 +170,7 @@ class LocalServer {
 }
 
 class _Connection {
-  _Connection(this._socket, this._engine, this._onClosed) {
+  _Connection(this._socket, this._engine, this._client, this._onClosed) {
     _socket.done.catchError((Object _) {});
     _lines = _socket
         .cast<List<int>>()
@@ -182,6 +189,7 @@ class _Connection {
 
   final Socket _socket;
   final OmniEngine _engine;
+  final HubClient _client;
   final void Function() _onClosed;
   late final StreamSubscription<NdjsonLine> _lines;
   final _subscriptions = <StreamSubscription<Map<String, Object?>>>[];
@@ -213,11 +221,28 @@ class _Connection {
       });
       return;
     }
+    if (command == helloCommand) {
+      _send({'id': id, 'result': _hello(Map<String, Object?>.from(args))});
+      return;
+    }
+    _client.lastCommandAt = DateTime.now();
     final result = await _engine.handle(
       command,
       Map<String, Object?>.from(args),
     );
     _send({'id': id, 'result': result});
+  }
+
+  /// `hello {client, phone?}` names this connection in `hub.clients`. It is
+  /// the socket's own, not an engine command, and answers with the engine
+  /// version so a client can check it before anything else.
+  Map<String, Object?> _hello(Map<String, Object?> args) {
+    try {
+      _engine.hubClients.hello(_client, args);
+    } on ApiError catch (e) {
+      return {'ok': false, 'error': e.toJson()};
+    }
+    return {'ok': true, 'version': omniflowEngineVersion, 'id': _client.id};
   }
 
   void _subscribe(int id, Map<String, Object?> json) {
@@ -226,6 +251,7 @@ class _Connection {
       return;
     }
     final packets = json['packets'] == true;
+    _client.subscribed = true;
     _subscriptions.add(
       _engine.events
           .where((e) => packets || e['event'] != 'packet.captured')

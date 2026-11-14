@@ -864,6 +864,7 @@ class _Normalizer {
     final a = _inner(map, path, 'ask', {
       'title',
       'body',
+      'to',
       'choices',
       'input',
       'default',

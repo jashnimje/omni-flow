@@ -17,13 +17,38 @@ import 'wake_on_lan.dart';
 
 const adbDefaultPort = 5555;
 
+/// Finds the TLS connect port a Wireless Debugging device with [guid]
+/// announces now, or null.
+typedef AdbTlsLocator = Future<({String host, int port})?> Function(
+  String guid,
+);
+
+/// Records that [deviceId] answers at [host]:[port] now.
+typedef AdbMovedCallback = Future<void> Function(
+  String deviceId,
+  String host,
+  int port,
+);
+
+/// The guid a Wireless Debugging device announces as its
+/// `_adb-tls-connect._tcp` instance, `adb-<serial>-<six letters>`, which
+/// android.pair stores as the device's stable id. A TV's `_adb._tcp` id,
+/// `adb-<serial>`, has no suffix.
+final adbTlsGuidPattern = RegExp(r'^adb-[A-Za-z0-9]+-[A-Za-z0-9]{6}$');
+
+/// How often a Wireless Debugging device that stopped answering is looked
+/// for on mDNS, so one that is off is not searched for on every command.
+const _followEvery = Duration(minutes: 1);
+
 /// The TV has not accepted this engine's ADB key. The message says what to
 /// do on the TV.
 class AdbPairingException extends CommandFailedException {
   AdbPairingException(super.message);
 }
 
-/// Android TV and Fire TV over legacy ADB (TCP 5555, RSA auth, no TLS).
+/// Android TVs, Fire TV and phones over ADB: legacy TCP 5555 with RSA auth,
+/// or a Wireless Debugging connect port, which switches to TLS 1.3 when
+/// the device answers STLS.
 ///
 /// The command renders to `{"op": ...}` (see [AdbAction]). The channel
 /// builds the shell line itself, so the reply is
@@ -44,6 +69,8 @@ class AdbChannel implements DriverChannel {
     this._wakeRetry = const Duration(seconds: 3),
     this._generateKey = AdbHostKey.generate,
     this._onPairingPrompt,
+    this._locateTls,
+    this._onMoved,
   }) : _keyName = keyName ?? 'omniflow@${_safeHostName()}';
 
   final SecretStore _secrets;
@@ -61,6 +88,19 @@ class AdbChannel implements DriverChannel {
 
   /// Runs with the device id when its TV is showing "Allow USB debugging?".
   final void Function(String deviceId)? _onPairingPrompt;
+
+  /// Follows a Wireless Debugging device to the port it picked when it was
+  /// turned on again, by the guid in its stable id.
+  final AdbTlsLocator? _locateTls;
+  final AdbMovedCallback? _onMoved;
+  final _lastFollow = <String, DateTime>{};
+
+  /// The engine's ADB key, read or made on first use. Pairing presents the
+  /// same key the connections use.
+  Future<AdbHostKey> hostKey() => _hostKey();
+
+  /// The name the device lists this engine's key under.
+  String get keyName => _keyName;
 
   Future<AdbHostKey>? _key;
   final _connections = <String, _Held>{};
@@ -433,6 +473,9 @@ class AdbChannel implements DriverChannel {
         '${device.id} moved while its ADB connection was opening',
       );
     }
+    entry
+      ..host = connection.host
+      ..port = connection.port;
     return entry.connection = connection;
   }
 
@@ -446,11 +489,47 @@ class AdbChannel implements DriverChannel {
     Duration timeout, {
     required bool offerKey,
   }) async {
+    try {
+      return await _openAt(device, device.host, port, timeout, offerKey);
+    } on TransportTimeoutException {
+      final moved = await _follow(device, port);
+      if (moved == null) rethrow;
+      return _openAt(device, moved.host, moved.port, timeout, offerKey);
+    }
+  }
+
+  /// Where a Wireless Debugging device that stopped answering at [port]
+  /// announces its connect port now, recorded through [_onMoved], or null.
+  Future<({String host, int port})?> _follow(Device device, int port) async {
+    final locate = _locateTls;
+    final guid = device.stableId;
+    if (locate == null || guid == null || !adbTlsGuidPattern.hasMatch(guid)) {
+      return null;
+    }
+    final now = DateTime.now();
+    final last = _lastFollow[device.id];
+    if (last != null && now.difference(last) < _followEvery) return null;
+    _lastFollow[device.id] = now;
+    final found = await locate(guid);
+    if (found == null || (found.host == device.host && found.port == port)) {
+      return null;
+    }
+    await _onMoved?.call(device.id, found.host, found.port);
+    return found;
+  }
+
+  Future<AdbConnection> _openAt(
+    Device device,
+    String host,
+    int port,
+    Duration timeout,
+    bool offerKey,
+  ) async {
     final key = await _hostKey();
     AdbConnection? opened;
     try {
       return await AdbConnection.connect(
-        device.host,
+        host,
         port,
         key: key,
         keyName: _keyName,
@@ -468,16 +547,22 @@ class AdbChannel implements DriverChannel {
         },
         offerKey: offerKey,
       );
+    } on AdbTlsRefusedException {
+      throw AdbPairingException(
+        '${device.id} did not accept this engine\'s key over wireless '
+        'debugging. On the phone open Developer options, Wireless debugging, '
+        'Pair device with pairing code, then pair with android.pair',
+      );
     } on AdbKeyNotAllowedException {
       throw PairingRequiredException(device.id, name: device.name);
     } on SocketException catch (e) {
       throw TransportTimeoutException(
-        'cannot reach ${device.id} at ${device.host}:$port (${e.message}). '
+        'cannot reach ${device.id} at $host:$port (${e.message}). '
         'Turn on network or ADB debugging in the TV developer options',
       );
     } on AdbHandshakeTimeoutException {
       throw TransportTimeoutException(
-        'no ADB handshake from ${device.id} at ${device.host}:$port',
+        'no ADB handshake from ${device.id} at $host:$port',
       );
     } on AdbAuthException catch (e) {
       throw AdbPairingException(
@@ -534,8 +619,8 @@ class AdbChannel implements DriverChannel {
 class _Held {
   _Held(this.host, this.port, this.pending);
 
-  final String host;
-  final int port;
+  String host;
+  int port;
   final Future<AdbConnection> pending;
   AdbConnection? connection;
 }

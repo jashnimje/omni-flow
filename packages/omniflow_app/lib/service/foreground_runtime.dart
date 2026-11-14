@@ -12,7 +12,12 @@ import '../startup.dart';
 import 'engine_host.dart';
 import 'engine_owner.dart';
 import 'engine_link.dart';
+import 'hub_bridge.dart';
+import 'hub_engine_client.dart';
+import 'hub_handback.dart';
+import 'hub_settings.dart';
 import 'multicast_lock.dart';
+import 'ssh_hub_connection.dart';
 import 'notifier.dart';
 import 'phone_inputs.dart';
 import 'service_engine_client.dart';
@@ -227,20 +232,48 @@ void startOmniService() => FlutterForegroundTask.setTaskHandler(
   ),
 );
 
-/// The engine's control socket, which the app's agent bridge (adb only)
-/// hands commands to. Private to the app: a 0600 socket in its own files.
+/// The engine's control socket, which the app's agent bridge (adb only),
+/// widgets, tiles and ask answers hand commands to. Private to the app: a
+/// 0600 socket in its own files. In hub mode it forwards to the hub.
 LocalServer? _agentBridge;
+HubBridge? _hubBridge;
+
+/// What the service runs, by the home mode the user chose: the phone's own
+/// engine, or a client of the Mac mini hub with no engine on the phone.
+Future<Started> openServiceHome({
+  required Future<HomeMode> Function() mode,
+  required Future<Started> Function() openPhone,
+  required Future<Started> Function() openHub,
+}) async => switch (await mode()) {
+  HomeMode.phone => openPhone(),
+  HomeMode.hub => openHub(),
+};
+
+/// The service's entry point for [OmniTaskHandler.open].
+Future<Started> openServiceEngine() {
+  final store = HubSettingsStore(SecureStorageSecretStore());
+  return openServiceHome(
+    mode: store.mode,
+    openPhone: _openPhoneEngine,
+    openHub: () => _openHubClient(store),
+  );
+}
+
+Future<Directory> _serviceHome() async {
+  final support = await getApplicationSupportDirectory();
+  return Directory('${support.path}/omniflow');
+}
 
 /// The engine the service owns: the only one that opens the database.
-Future<Started> openServiceEngine() async {
-  final support = await getApplicationSupportDirectory();
-  final home = Directory('${support.path}/omniflow');
+Future<Started> _openPhoneEngine() async {
+  final home = await _serviceHome();
   final started = await startEngine(
     home: home,
     secrets: SecureStorageSecretStore(),
     tap: PacketTap(),
     serialLinks: UsbLinks(),
   );
+  await takeBackHubHome(started.client, home);
   if (started.client case final InProcessEngineClient client) {
     try {
       _agentBridge = await LocalServer.start(client.engine, home: home);
@@ -250,6 +283,36 @@ Future<Started> openServiceEngine() async {
     }
   }
   return started;
+}
+
+/// Hub mode: no engine and no database on the phone. Every command goes
+/// to the hub over SSH.
+Future<Started> _openHubClient(HubSettingsStore store) async {
+  final settings = await store.settings();
+  if (settings == null) {
+    throw StateError(
+      'Hub mode is on but no hub is set. Open Settings, Home runs on.',
+    );
+  }
+  final home = await _serviceHome();
+  final lastKnown = HubLastKnown(home);
+  final client = HubEngineClient(
+    settings: settings,
+    connect: () => sshHubSession(
+      settings: settings,
+      secrets: SecureStorageSecretStore(),
+      privateKeySecret: HubSettingsStore.privateKeyKey,
+    ),
+    lastKnown: await lastKnown.read(),
+    remember: lastKnown.write,
+  );
+  unawaited(client.start());
+  try {
+    _hubBridge = await HubBridge.start(client, home: home);
+  } on Object catch (e) {
+    debugPrint('OmniFlow hub bridge not started: $e');
+  }
+  return (client: client as EngineClient, hubError: null);
 }
 
 /// Owns the engine for as long as the service runs: holds the multicast
@@ -291,7 +354,11 @@ class OmniTaskHandler extends TaskHandler {
       _engine = started.client;
       _host.attach(started.client, hubError: started.hubError);
       _inputs = inputs?.call(started.client)?..start();
-      final notifier = _notifier = AutomationNotifier(started.client);
+      final client = started.client;
+      final notifier = _notifier = AutomationNotifier(
+        client,
+        shows: client is HubEngineClient ? client.showsOnThisPhone : null,
+      );
       unawaited(notifier.start());
     } on Object catch (e) {
       _host.fail('$e');
@@ -323,8 +390,13 @@ class OmniTaskHandler extends TaskHandler {
       );
       await _agentBridge?.close();
       _agentBridge = null;
-      if (_engine case final InProcessEngineClient client) {
-        await client.engine.close();
+      await _hubBridge?.close();
+      _hubBridge = null;
+      switch (_engine) {
+        case final InProcessEngineClient client:
+          await client.engine.close();
+        case final HubEngineClient client:
+          await client.close();
       }
       await _lock.release();
     } finally {

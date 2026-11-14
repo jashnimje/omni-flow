@@ -17,7 +17,9 @@ import '../storage/database.dart' show DatabaseInUseException;
 import '../storage/keychain_secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../version.dart';
+import '../api/ssh_hub_client.dart';
 import 'add_cli.dart';
+import 'hub_cli.dart';
 import 'one_shot.dart';
 import 'organize_cli.dart';
 import 'rule_cli.dart';
@@ -55,9 +57,11 @@ class OmniCommandRunner extends CommandRunner<int> {
     Stream<List<int>>? input,
     EngineFactory? engineFactory,
     this._socketPath,
+    HubEnvironment? hubEnvironment,
   }) : out = out ?? stdout,
        input = input ?? stdin,
        engineFactory = engineFactory ?? defaultEngine,
+       hubEnvironment = hubEnvironment ?? HubEnvironment(),
        super('omni', 'OmniFlow local-first automation engine.') {
     argParser
       ..addFlag('version', negatable: false, help: 'Print the engine version.')
@@ -70,6 +74,17 @@ class OmniCommandRunner extends CommandRunner<int> {
         help:
             'Use the engine of the OmniFlow app on a phone, through adb. '
             'Takes the adb serial, or "usb" for the only phone attached.',
+      )
+      ..addOption(
+        'hub',
+        valueHelp: 'user@host[:port]',
+        help: 'Drive the OmniFlow hub on another Mac over SSH.',
+      )
+      ..addOption(
+        'hub-key',
+        valueHelp: 'FILE',
+        help:
+            'The SSH private key for --hub, allowed there with omni hub allow.',
       );
     addCommand(
       _Group('agent', 'What AI agents may do through MCP.', [
@@ -245,7 +260,9 @@ class OmniCommandRunner extends CommandRunner<int> {
       ]),
     );
     addCommand(_Watch());
-    addCommand(_Hub());
+    addCommand(
+      HubCommand(_Hub(), addOptions: (c) => _Hub.addOptions(c.argParser)),
+    );
     addCommand(_Mcp());
     addCommand(RuleCommand());
     addCommand(AddCommand());
@@ -649,6 +666,9 @@ class OmniCommandRunner extends CommandRunner<int> {
   final EngineFactory engineFactory;
   final String? _socketPath;
 
+  /// The home, launchd, SSH keys and keychain the hub commands use.
+  final HubEnvironment hubEnvironment;
+
   ArgResults? _globals;
 
   Directory get home {
@@ -658,19 +678,64 @@ class OmniCommandRunner extends CommandRunner<int> {
 
   String get socketPath => _socketPath ?? localSocketPath(home);
 
+  /// The --home given on the command line, or null for the default.
+  String? get homeOption => _globals?.option('home');
+
   /// The running hub when one answers on [socketPath], else the engine
   /// opened here (with [tap], for commands that show packets).
   Future<EngineConnection> connect({PacketTap? tap}) async {
     if (_globals?['phone'] case final String phone) {
       return AdbPhoneConnection(serial: phone == 'usb' ? null : phone);
     }
+    if (await _remoteHub() case final hub?) return hub;
     return await LocalClient.connect(socketPath) ??
         InProcessConnection(await engineFactory(home, tap: tap));
   }
 
+  /// The hub on another Mac that `--hub` and `--hub-key` name, or null.
+  Future<EngineConnection?> _remoteHub() async {
+    final target = _globals?.option('hub');
+    final keyFile = _globals?.option('hub-key');
+    if (target == null && keyFile == null) return null;
+    if (target == null || keyFile == null) {
+      throw UsageException('--hub and --hub-key go together', usage);
+    }
+    final SshHubTarget hub;
+    try {
+      hub = SshHubTarget.parse(target);
+    } on FormatException catch (e) {
+      throw UsageException(e.message, usage);
+    }
+    return connectSshHub(
+      target: hub,
+      privateKeyPem: await File(keyFile).readAsString(),
+      secrets: hubEnvironment.secrets,
+    );
+  }
+
+  /// The running hub, here or with `--hub` on another Mac. Throws when no
+  /// hub runs, rather than opening the engine.
+  Future<EngineConnection> connectToHub() async {
+    if (await _remoteHub() case final hub?) return hub;
+    return await LocalClient.connect(socketPath) ??
+        (throw LocalSocketException('no omni hub is running', exitCode: 69));
+  }
+
+  /// `omni hub` with no subcommand runs the hub, as before it had any.
+  List<String> _hubRunsByDefault(List<String> args) {
+    final results = parse(args);
+    final hub = results.command;
+    if (hub?.name != 'hub' || hub!.command != null || hub.rest.isNotEmpty) {
+      return args;
+    }
+    if (hub.options.contains('help') && hub.flag('help')) return args;
+    final at = args.length - hub.arguments.length;
+    return [...args.take(at), 'run', ...args.skip(at)];
+  }
+
   @override
   Future<int> run(Iterable<String> args) async {
-    final results = parse(args);
+    final results = parse(_hubRunsByDefault(args.toList()));
     _globals = results;
     if (results.flag('version')) {
       out.writeln('omni $omniflowEngineVersion');
@@ -710,6 +775,9 @@ Future<int> runOmni(
   } on LocalSocketException catch (e) {
     errors.writeln('omni: ${e.message}');
     return e.exitCode;
+  } on HubLinkException catch (e) {
+    errors.writeln('omni: ${e.message}');
+    return e.type == 'host_key' ? 77 : 69;
   } on FileSystemException catch (e) {
     final path = e.path == null ? '' : '${e.path}: ';
     errors.writeln('omni: $path${e.osError?.message ?? e.message}');
@@ -1380,7 +1448,18 @@ Future<void> _untilStopped(Duration? duration, {Future<void>? orWhen}) async {
 /// work while it runs.
 class _Hub extends Command<int> {
   _Hub() {
-    argParser
+    addOptions(argParser);
+  }
+
+  /// The hub's options, on `omni hub run` and on `omni hub` itself, which
+  /// runs it.
+  static void addOptions(ArgParser parser) {
+    parser
+      ..addFlag(
+        'quiet',
+        negatable: false,
+        help: 'Print only that the hub started, not every event (for its log).',
+      )
       ..addOption(
         'seconds',
         help: 'Stop after this many seconds. Default: until Ctrl-C.',
@@ -1398,11 +1477,12 @@ class _Hub extends Command<int> {
   }
 
   @override
-  String get name => 'hub';
+  String get name => 'run';
 
   @override
   String get description =>
-      'Run flows headless on this machine (the optional always-on hub).';
+      'Run flows headless on this machine (the always-on hub). The same as '
+      'omni hub on its own.';
 
   @override
   Future<int> run() async {
@@ -1415,8 +1495,9 @@ class _Hub extends Command<int> {
     // The tap is for socket clients (omni watch --packets, the MCP packet
     // sniffer). The hub's own output leaves packets out.
     final engine = await omni.engineFactory(omni.home, tap: PacketTap());
+    final quiet = a.flag('quiet');
     final subscription = engine.events
-        .where((e) => e['event'] != 'packet.captured')
+        .where((e) => !quiet && e['event'] != 'packet.captured')
         .listen((e) => omni.out.writeln(jsonEncode(e)));
     LocalServer? server;
     try {

@@ -1,0 +1,662 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:dartssh2/dartssh2.dart';
+
+import 'local_client.dart';
+import 'local_server.dart' show helloCommand;
+import '../storage/secret_store.dart';
+import '../transports/ndjson.dart';
+import '../transports/ssh_executor.dart';
+import '../version.dart';
+
+/// The command a phone's key may run on the hub. The `authorized_keys`
+/// line forces it anyway, so this is only what the client asks for.
+const hubAttachCommand = 'omni hub attach';
+
+/// A reply line longer than this is dropped rather than buffered, so a
+/// broken hub cannot grow the client's memory without bound.
+const maxHubReplyBytes = 64 << 20;
+
+/// Why a hub could not be reached or used. [type] is one of the core API
+/// error types: `host_key`, `version_mismatch`, `unavailable` or `invalid`.
+class HubLinkException implements Exception {
+  HubLinkException(this.type, this.message, {this.details = const {}});
+
+  final String type;
+  final String message;
+  final Map<String, Object?> details;
+
+  Map<String, Object?> toJson() => {
+    'type': type,
+    'message': message,
+    ...details,
+  };
+
+  @override
+  String toString() => 'HubLinkException($type): $message';
+}
+
+/// A byte channel to a hub's control socket: an SSH exec channel running
+/// `omni hub attach`, or the socket itself.
+abstract interface class HubChannel {
+  /// What the hub sends. Ends when the channel is lost.
+  Stream<List<int>> get input;
+
+  void add(List<int> bytes);
+
+  /// What the far end said when it refused, such as "no omni hub is
+  /// running" from `omni hub attach`. Empty when it said nothing.
+  String get errors;
+
+  Future<void> close();
+}
+
+/// Opens one new channel to the hub.
+typedef HubChannelOpener = Future<HubChannel> Function();
+
+/// [HubChannel] over a connected socket, for the hub's own Unix socket.
+class SocketHubChannel implements HubChannel {
+  SocketHubChannel(this._socket) {
+    _socket.done.catchError((Object _) {});
+  }
+
+  final Socket _socket;
+
+  @override
+  Stream<List<int>> get input => _socket;
+
+  @override
+  String get errors => '';
+
+  @override
+  void add(List<int> bytes) => _socket.add(bytes);
+
+  @override
+  Future<void> close() async => _socket.destroy();
+}
+
+/// `user@host[:port]`, the hub an `omni --hub` command drives.
+class SshHubTarget {
+  const SshHubTarget(this.user, this.host, [this.port = 22]);
+
+  final String user;
+  final String host;
+  final int port;
+
+  static final _user = RegExp(r'^[A-Za-z0-9._-]{1,32}$');
+  static final _host = RegExp(r'^[A-Za-z0-9.-]{1,253}$');
+
+  /// Parses `user@host`, `user@host:2222` or `user@[fd00::1]:22`. Throws
+  /// [FormatException] with a plain reason.
+  static SshHubTarget parse(String text) {
+    final at = text.indexOf('@');
+    if (at <= 0) {
+      throw const FormatException('the hub is user@host or user@host:port');
+    }
+    final user = text.substring(0, at);
+    var rest = text.substring(at + 1);
+    var port = 22;
+    String host;
+    if (rest.startsWith('[')) {
+      final close = rest.indexOf(']');
+      if (close < 0) throw const FormatException('an IPv6 hub needs [ and ]');
+      host = rest.substring(1, close);
+      rest = rest.substring(close + 1);
+      if (InternetAddress.tryParse(host)?.type != InternetAddressType.IPv6) {
+        throw FormatException('$host is not an IPv6 address');
+      }
+    } else {
+      final colon = rest.lastIndexOf(':');
+      host = colon < 0 ? rest : rest.substring(0, colon);
+      rest = colon < 0 ? '' : rest.substring(colon);
+      if (!_host.hasMatch(host)) {
+        throw FormatException('$host is not a host name or IPv4 address');
+      }
+    }
+    if (rest.isNotEmpty) {
+      final parsed = rest.startsWith(':')
+          ? int.tryParse(rest.substring(1))
+          : null;
+      if (parsed == null || parsed < 1 || parsed > 65535) {
+        throw const FormatException('the hub port is 1 to 65535');
+      }
+      port = parsed;
+    }
+    if (!_user.hasMatch(user)) {
+      throw FormatException('$user is not a user name');
+    }
+    return SshHubTarget(user, host, port);
+  }
+
+  @override
+  String toString() => '$user@$host${port == 22 ? '' : ':$port'}';
+}
+
+/// Opens an SSH exec channel to [target] that runs [command], which the
+/// hub's `authorized_keys` line forces to `omni hub attach`.
+///
+/// The host key is pinned on first use in [secrets], with the same key and
+/// fingerprint format as device SSH (`ssh/hostkey/<host>:<port>`,
+/// `<type> SHA256:<base64>`). A different key fails with `host_key` and both
+/// fingerprints until the user reviews it (`omni device hostkey`).
+Future<HubChannel> openSshHubChannel({
+  required SshHubTarget target,
+  required String privateKeyPem,
+  required SecretStore secrets,
+  String command = hubAttachCommand,
+  Duration timeout = const Duration(seconds: 8),
+  Future<SSHSocket> Function(String host, int port, Duration timeout)? socket,
+}) async {
+  final List<SSHKeyPair> identities;
+  try {
+    identities = SSHKeyPair.fromPem(privateKeyPem);
+  } catch (e) {
+    throw HubLinkException('invalid', 'the hub key is not a private key');
+  }
+  final where = '${target.host}:${target.port}';
+  final SSHSocket ssh;
+  try {
+    ssh = await (socket ?? _connect)(target.host, target.port, timeout);
+  } on Exception catch (e) {
+    throw HubLinkException(
+      'unavailable',
+      'cannot reach the hub at $where ($e)',
+    );
+  }
+  final pins = HostKeyPins(secrets);
+  HostKeyMismatchException? mismatch;
+  final client = SSHClient(
+    ssh,
+    username: target.user,
+    identities: identities,
+    onVerifyHostKey: (type, fingerprint) async {
+      try {
+        await pins.verify(
+          target.host,
+          target.port,
+          type,
+          utf8.decode(fingerprint),
+        );
+        return true;
+      } on HostKeyMismatchException catch (e) {
+        mismatch = e;
+        return false;
+      }
+    },
+  );
+  try {
+    final session = await client.execute(command).timeout(timeout);
+    return _SshHubChannel(client, session);
+  } catch (e) {
+    client.close();
+    if (mismatch case final m?) {
+      throw HubLinkException(
+        'host_key',
+        'the hub at $where offered a different host key than the one pinned. '
+            'If the Mac was reinstalled, check the new fingerprint with '
+            'omni hub fingerprint on it, then accept it',
+        details: {'pinned': m.pinned, 'offered': m.offered},
+      );
+    }
+    if (e is SSHAuthError) {
+      throw HubLinkException(
+        'unavailable',
+        'the hub at $where refused this key. Run omni hub allow on the hub',
+      );
+    }
+    if (e is TimeoutException) {
+      throw HubLinkException('unavailable', 'the hub at $where did not answer');
+    }
+    throw HubLinkException(
+      'unavailable',
+      'cannot reach the hub at $where ($e)',
+    );
+  }
+}
+
+Future<SSHSocket> _connect(String host, int port, Duration timeout) =>
+    SSHSocket.connect(host, port, timeout: timeout);
+
+class _SshHubChannel implements HubChannel {
+  _SshHubChannel(this._client, this._session) {
+    _client.done.catchError((Object _) {});
+    _session.done.catchError((Object _) {});
+    // The input ends only once stderr is read too, so a refusal such as
+    // "no omni hub is running" is in [errors] when the reader sees the end.
+    final stderrDone = Completer<void>();
+    _session.stderr.listen(
+      _errors.addAll,
+      onError: (Object _) {},
+      onDone: stderrDone.complete,
+    );
+    _session.stdout.listen(
+      _input.add,
+      onError: (Object _) {},
+      onDone: () async {
+        await stderrDone.future.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {},
+        );
+        await _input.close();
+      },
+    );
+  }
+
+  final SSHClient _client;
+  final SSHSession _session;
+  final _errors = <int>[];
+  final _input = StreamController<List<int>>();
+
+  @override
+  Stream<List<int>> get input => _input.stream;
+
+  @override
+  String get errors => utf8.decode(_errors, allowMalformed: true).trim();
+
+  @override
+  void add(List<int> bytes) =>
+      _session.write(bytes is Uint8List ? bytes : Uint8List.fromList(bytes));
+
+  @override
+  Future<void> close() async {
+    _session.close();
+    _client.close();
+  }
+}
+
+/// The two numbers that must match between a client and its hub.
+String majorMinor(String version) => version.split('.').take(2).join('.');
+
+/// Throws `version_mismatch` unless [hubVersion] has the same major and
+/// minor version as [localVersion], so command shapes never drift.
+void checkHubVersion(Object? hubVersion, String localVersion) {
+  final hub = hubVersion is String ? hubVersion : 'an unknown version';
+  if (hubVersion is String &&
+      majorMinor(hubVersion) == majorMinor(localVersion)) {
+    return;
+  }
+  final hubOlder = hubVersion is! String || _older(hubVersion, localVersion);
+  throw HubLinkException(
+    'version_mismatch',
+    'the hub runs $hub and this is $localVersion. '
+        '${hubOlder ? 'Update the hub' : 'Update the app'}',
+    details: {'hubVersion': hubVersion, 'localVersion': localVersion},
+  );
+}
+
+bool _older(String a, String b) {
+  List<int> parts(String v) => [
+    for (final p in v.split('.').take(2)) int.tryParse(p) ?? 0,
+  ];
+  final x = parts(a);
+  final y = parts(b);
+  for (var i = 0; i < 2; i++) {
+    final l = i < x.length ? x[i] : 0;
+    final r = i < y.length ? y[i] : 0;
+    if (l != r) return l < r;
+  }
+  return false;
+}
+
+/// The core API of a hub reached over a [HubChannel]: the same newline
+/// JSON as [LocalClient]. Commands share one channel, and each event
+/// subscription has its own, as on the local socket.
+///
+/// A lost command channel is opened again on the next command. When that
+/// fails the command answers `unavailable`, and so do commands that were
+/// waiting when it was lost. An event stream that loses its channel emits
+/// `hub.connection {state: lost}`, keeps trying with [retryDelays], and
+/// emits `hub.connection {state: restored}` once it subscribed again.
+class HubConnection implements EngineConnection {
+  HubConnection._(this._open, this.name, this._hello, this.retryDelays);
+
+  /// Opens the first channel, sends the hello, and checks the hub's version
+  /// with `engine.status`. Throws [HubLinkException] when the hub cannot be
+  /// reached or runs another major or minor version.
+  static Future<HubConnection> connect(
+    HubChannelOpener open, {
+    String name = 'the hub',
+    Map<String, Object?> hello = const {'client': 'omni'},
+    String localVersion = omniflowEngineVersion,
+    List<Duration> retryDelays = defaultRetryDelays,
+  }) async {
+    final hub = HubConnection._(open, name, hello, retryDelays);
+    await hub._channel();
+    final status = await hub.handle('engine.status', const {});
+    if (status['ok'] != true) {
+      await hub.close();
+      final error = status['error'];
+      throw HubLinkException(
+        'unavailable',
+        error is Map ? '${error['message']}' : '$name did not answer',
+      );
+    }
+    try {
+      checkHubVersion(status['version'], localVersion);
+    } catch (_) {
+      await hub.close();
+      rethrow;
+    }
+    hub.hubVersion = status['version'] as String;
+    return hub;
+  }
+
+  static const defaultRetryDelays = [
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 5),
+    Duration(seconds: 10),
+    Duration(seconds: 30),
+  ];
+
+  final HubChannelOpener _open;
+  final String name;
+  final Map<String, Object?> _hello;
+
+  /// How long an event stream waits between tries after a loss. The last
+  /// delay repeats.
+  final List<Duration> retryDelays;
+
+  /// The hub's engine version, read on connect.
+  String? hubVersion;
+
+  _Link? _link;
+  Future<_Link>? _opening;
+  var _closed = false;
+  final _streams = <StreamController<Map<String, Object?>>>{};
+
+  Future<_Link> _channel() async {
+    if (_link case final l? when !l.lost) return l;
+    return _opening ??= () async {
+      try {
+        final link = _Link(await _open());
+        link.send({
+          'id': link.nextId(),
+          'command': helloCommand,
+          'args': _hello,
+        });
+        return _link = link;
+      } finally {
+        _opening = null;
+      }
+    }();
+  }
+
+  static Map<String, Object?> _unavailable(String message) => {
+    'ok': false,
+    'error': {'type': 'unavailable', 'message': message},
+  };
+
+  @override
+  Future<Map<String, Object?>> handle(
+    String command,
+    Map<String, Object?> args,
+  ) async {
+    if (_closed) return _unavailable('the connection to $name is closed');
+    final _Link link;
+    try {
+      link = await _channel();
+    } on HubLinkException catch (e) {
+      return {'ok': false, 'error': e.toJson()};
+    } catch (e) {
+      return _unavailable('$name is not reachable ($e)');
+    }
+    final id = link.nextId();
+    final List<int> request;
+    try {
+      request = utf8.encode(
+        '${jsonEncode({'id': id, 'command': command, 'args': args})}\n',
+      );
+    } on JsonUnsupportedObjectError catch (e) {
+      return {
+        'ok': false,
+        'error': {'type': 'invalid', 'message': 'args are not JSON: $e'},
+      };
+    }
+    if (request.length - 1 > maxLocalRequestBytes) {
+      return {
+        'ok': false,
+        'error': {
+          'type': 'invalid',
+          'message':
+              'the $command request is ${request.length} bytes, over the '
+              'omni hub limit of $maxLocalRequestBytes',
+        },
+      };
+    }
+    return link.request(
+      id,
+      request,
+      () => _unavailable(
+        link.channel.errors.isEmpty
+            ? '$name was lost before it replied'
+            : '$name: ${link.channel.errors}',
+      ),
+    );
+  }
+
+  @override
+  Future<Stream<Map<String, Object?>>> events({bool packets = false}) async {
+    if (_closed) {
+      throw HubLinkException(
+        'unavailable',
+        'the connection to $name is closed',
+      );
+    }
+    final out = StreamController<Map<String, Object?>>();
+    _streams.add(out);
+    var cancelled = false;
+    HubChannel? current;
+    StreamSubscription<NdjsonLine>? lines;
+
+    Future<void> drop() async {
+      // Not awaited: the line decoder is an async* generator parked on the
+      // channel, and its cancel would wait for a line that never comes.
+      lines?.cancel().ignore();
+      lines = null;
+      await current?.close();
+      current = null;
+    }
+
+    Future<void> subscribe() async {
+      final subscribed = Completer<void>();
+      final channel = current = await _open();
+      final request = {'id': 1, 'subscribe': 'events', 'packets': packets};
+      lines = channel.input
+          .cast<List<int>>()
+          .transform(const NdjsonDecoder(maxLineLength: maxHubReplyBytes))
+          .listen(
+            (line) {
+              final json = line.json;
+              if (json == null || json['id'] != 1) return;
+              final event = json['event'];
+              final result = json['result'];
+              if (event is Map) {
+                if (!cancelled) out.add(Map<String, Object?>.from(event));
+              } else if (result is Map && !subscribed.isCompleted) {
+                if (result['ok'] == true) {
+                  subscribed.complete();
+                } else {
+                  subscribed.completeError(
+                    HubLinkException(
+                      'unavailable',
+                      '$name refused the subscription',
+                    ),
+                  );
+                }
+              }
+            },
+            onError: (Object _) {},
+            onDone: () {
+              if (!subscribed.isCompleted) {
+                subscribed.completeError(
+                  HubLinkException('unavailable', '$name closed the channel'),
+                );
+                return;
+              }
+              if (cancelled || _closed) return;
+              out.add({'event': 'hub.connection', 'state': 'lost'});
+              unawaited(
+                _resubscribe(() => cancelled || _closed, drop, () async {
+                  await subscribe();
+                  if (!cancelled) {
+                    out.add({'event': 'hub.connection', 'state': 'restored'});
+                  }
+                }),
+              );
+            },
+          );
+      channel
+        ..add(encodeNdjson({'id': 0, 'command': helloCommand, 'args': _hello}))
+        ..add(encodeNdjson(request));
+      try {
+        await subscribed.future.timeout(LocalClient.connectTimeout * 4);
+      } catch (e) {
+        await drop();
+        if (e is HubLinkException) rethrow;
+        throw HubLinkException(
+          'unavailable',
+          '$name did not answer the subscription',
+        );
+      }
+    }
+
+    out.onCancel = () async {
+      cancelled = true;
+      _streams.remove(out);
+      await drop();
+    };
+    try {
+      await subscribe();
+    } catch (_) {
+      _streams.remove(out);
+      await out.close();
+      rethrow;
+    }
+    return out.stream;
+  }
+
+  Future<void> _resubscribe(
+    bool Function() stopped,
+    Future<void> Function() drop,
+    Future<void> Function() again,
+  ) async {
+    await drop();
+    for (var attempt = 0; !stopped(); attempt++) {
+      final delay = retryDelays.isEmpty
+          ? Duration.zero
+          : retryDelays[attempt < retryDelays.length
+                ? attempt
+                : retryDelays.length - 1];
+      await Future<void>.delayed(delay);
+      if (stopped()) return;
+      try {
+        await again();
+        return;
+      } catch (_) {
+        // Tries again after the next delay.
+      }
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    final link = _link;
+    _link = null;
+    link?.lose('the connection to $name was closed');
+    await link?.channel.close();
+    for (final s in _streams.toList()) {
+      await s.close();
+    }
+    _streams.clear();
+  }
+}
+
+/// One command channel and the replies it is waiting for.
+class _Link {
+  _Link(this.channel) {
+    _lines = channel.input
+        .cast<List<int>>()
+        .transform(const NdjsonDecoder(maxLineLength: maxHubReplyBytes))
+        .listen(
+          _onLine,
+          onError: (Object _) => lose('the channel failed'),
+          onDone: () => lose('the channel closed'),
+        );
+  }
+
+  final HubChannel channel;
+  late final StreamSubscription<NdjsonLine> _lines;
+  final _pending =
+      <
+        int,
+        (Completer<Map<String, Object?>>, Map<String, Object?> Function())
+      >{};
+  var _id = 0;
+  var lost = false;
+
+  int nextId() => ++_id;
+
+  void send(Map<String, Object?> message) => channel.add(encodeNdjson(message));
+
+  Future<Map<String, Object?>> request(
+    int id,
+    List<int> bytes,
+    Map<String, Object?> Function() whenLost,
+  ) {
+    if (lost) return Future.value(whenLost());
+    final reply = Completer<Map<String, Object?>>();
+    _pending[id] = (reply, whenLost);
+    channel.add(bytes);
+    return reply.future;
+  }
+
+  void _onLine(NdjsonLine line) {
+    final json = line.json;
+    final id = json?['id'];
+    final result = json?['result'];
+    if (id is int && result is Map) {
+      _pending.remove(id)?.$1.complete(Map<String, Object?>.from(result));
+    }
+  }
+
+  void lose(String why) {
+    if (lost) return;
+    lost = true;
+    for (final (reply, whenLost) in _pending.values) {
+      reply.complete(whenLost());
+    }
+    _pending.clear();
+    _lines.cancel().ignore();
+    channel.close().ignore();
+  }
+}
+
+/// Connects to the hub at [target] over SSH with [privateKeyPem], pinning
+/// its host key in [secrets], and checks its version. The CLI's
+/// `omni --hub user@host --hub-key FILE` and the app's hub mode use it.
+Future<HubConnection> connectSshHub({
+  required SshHubTarget target,
+  required String privateKeyPem,
+  required SecretStore secrets,
+  Map<String, Object?> hello = const {'client': 'omni'},
+  String localVersion = omniflowEngineVersion,
+  Duration timeout = const Duration(seconds: 8),
+  List<Duration> retryDelays = HubConnection.defaultRetryDelays,
+}) => HubConnection.connect(
+  () => openSshHubChannel(
+    target: target,
+    privateKeyPem: privateKeyPem,
+    secrets: secrets,
+    timeout: timeout,
+  ),
+  name: 'the hub at $target',
+  hello: hello,
+  localVersion: localVersion,
+  retryDelays: retryDelays,
+);

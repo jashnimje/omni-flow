@@ -119,10 +119,11 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
             ..._results(categories, query)
           else ...[
             if (categories.isEmpty)
-              const OmniEmptyState(
+              OmniEmptyState(
                 icon: OmniIcons.settings,
                 title: 'No curated settings',
-                message: 'All settings below lists every key the TV has.',
+                message:
+                    'All settings below lists every key the ${tv.noun} has.',
               ),
             for (final c in categories) ...[
               OmniSectionHeader(c.category),
@@ -251,8 +252,8 @@ class _SettingCardState extends State<SettingCard> {
         context,
         title: 'Change ${_s.label}?',
         body:
-            'A wrong network setting can cut the TV off the internet, and '
-            'OmniFlow off the TV.',
+            'A wrong network setting can cut the ${widget.tv.noun} off the internet, and '
+            'OmniFlow off the ${widget.tv.noun}.',
         action: 'Change',
         destructive: true,
       );
@@ -547,8 +548,8 @@ class _NamespaceListState extends State<_NamespaceList> {
       context,
       title: 'Write $ns/$settingKey?',
       body:
-          'This writes "$newValue" straight to the TV with no checks. A wrong '
-          'value can change how the TV behaves until it is set back.',
+          'This writes "$newValue" straight to the ${tv.noun} with no checks. A wrong '
+          'value can change how the ${tv.noun} behaves until it is set back.',
       action: 'Write',
       destructive: true,
     );
@@ -573,7 +574,7 @@ class _NamespaceListState extends State<_NamespaceList> {
       context,
       title: 'Delete $ns/$key?',
       body:
-          'The TV goes back to its built-in default for it, which may not be '
+          'The ${tv.noun} goes back to its built-in default for it, which may not be '
           'what it had before.',
       action: 'Delete',
       destructive: true,

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'api_error.dart';
+import 'command_args.dart';
 import 'error_of.dart';
 import 'board_runtime.dart';
 import 'engine_core.dart';
@@ -13,6 +14,83 @@ import '../devices/wiz_push.dart';
 import '../manifest/driver_manifest.dart';
 import '../storage/database.dart';
 import '../transports/udp_transport.dart';
+
+/// The service macOS Remote Login advertises, which the app browses to
+/// find a Mac mini hub.
+const sshMdnsService = '_ssh._tcp';
+
+/// The longest name a client may give itself in its `hello`.
+const maxHubClientName = 64;
+
+/// One connection to the hub's control socket, named by its `hello`.
+class HubClient {
+  HubClient._(this.id, this.connectedAt);
+
+  final int id;
+  final DateTime connectedAt;
+  String? client;
+  String? phone;
+
+  /// Whether the connection streams events rather than sends commands.
+  var subscribed = false;
+  DateTime? lastCommandAt;
+
+  Map<String, Object?> toJson(DateTime now) => {
+    'id': id,
+    'client': ?client,
+    'phone': ?phone,
+    'connectedAt': connectedAt.toUtc().toIso8601String(),
+    'connectedSeconds': now.difference(connectedAt).inSeconds,
+    'events': subscribed,
+    if (lastCommandAt case final at?)
+      'lastCommandAt': at.toUtc().toIso8601String(),
+  };
+}
+
+/// The connections the hub's control socket serves now. The socket adds and
+/// drops them, and `hub.clients` lists them.
+class HubClients {
+  HubClients({DateTime Function()? now}) : _now = now ?? DateTime.now;
+
+  final DateTime Function() _now;
+  final _open = <int, HubClient>{};
+  var _next = 0;
+
+  HubClient connect() {
+    final c = HubClient._(++_next, _now());
+    _open[c.id] = c;
+    return c;
+  }
+
+  void disconnect(HubClient c) => _open.remove(c.id);
+
+  /// Names [c] from a `hello {client, phone?}`.
+  void hello(HubClient c, Map<String, Object?> args) {
+    String? name(String key, {required bool required}) {
+      final value = args[key];
+      if (value == null && !required) return null;
+      if (value is! String ||
+          value.trim().isEmpty ||
+          value.length > maxHubClientName ||
+          value.contains(RegExp(r'[\x00-\x1f]'))) {
+        throw ApiError(
+          'invalid',
+          '$key is a name of 1 to $maxHubClientName characters',
+        );
+      }
+      return value.trim();
+    }
+
+    c
+      ..client = name('client', required: true)
+      ..phone = name('phone', required: false);
+  }
+
+  List<Map<String, Object?>> list() {
+    final now = _now();
+    return [for (final c in _open.values) c.toJson(now)];
+  }
+}
 
 /// The hub: what runs flows on their own and keeps device state live, from
 /// WiZ pushes, board hellos, MQTT watches, state polls and flow timers.
@@ -25,6 +103,33 @@ class HubRuntime {
   final EngineCore _core;
   final BoardRuntime _boards;
   final ThingsRuntime _things;
+
+  /// Who is connected to the hub's control socket.
+  final clients = HubClients();
+
+  /// `hub.clients`: the control socket's connections, named by their hello.
+  Future<Map<String, Object?>> clientList(Map<String, Object?> _) async => {
+    'clients': clients.list(),
+  };
+
+  /// `hub.discover {windowMs?}`: Macs on the network that offer Remote
+  /// Login, browsed over mDNS for one window.
+  Future<Map<String, Object?>> discover(Map<String, Object?> args) async {
+    final ms = optIntArg(args, 'windowMs') ?? 3000;
+    if (ms < 200 || ms > 15000) {
+      throw ApiError('invalid', 'windowMs must be 200 to 15000');
+    }
+    final found = await _core.discovery.mdns.browse(
+      sshMdnsService,
+      window: Duration(milliseconds: ms),
+    );
+    return {
+      'hosts': [
+        for (final s in found)
+          {'name': s.instance, 'host': s.host, 'port': s.port},
+      ],
+    };
+  }
 
   void _emit(Map<String, Object?> event) => _core.emit(event);
   void _track(Future<void> work) => _core.track(work);

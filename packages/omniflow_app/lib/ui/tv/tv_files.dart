@@ -205,7 +205,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
       body: dirs
           ? 'Folders are deleted with everything in them. This cannot be '
                 'undone.'
-          : 'They are deleted from the TV. This cannot be undone.',
+          : 'They are deleted from the ${tv.noun}. This cannot be undone.',
       action: 'Delete',
       destructive: true,
     );
@@ -242,7 +242,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
   Future<void> _newFolder() async {
     final name = await askText(
       context,
-      title: 'New folder in ${_crumbLabel(_path)}',
+      title: 'New folder in ${_crumbLabel(_path, phone: tv.isPhone)}',
       label: 'Folder name',
       action: 'Create',
       validate: fileNameError,
@@ -435,7 +435,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
     final choice = await showOmniSheet<String>(
       context,
       builder: (context) => OmniSheet(
-        title: 'Add to ${_crumbLabel(_path)}',
+        title: 'Add to ${_crumbLabel(_path, phone: tv.isPhone)}',
         children: [
           OmniListRow(
             key: const ValueKey('files-new-folder'),
@@ -485,6 +485,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
                 children: [
                   Expanded(
                     child: _Breadcrumbs(
+                      phone: tv.isPhone,
                       path: _path,
                       onOpen: _busy ? null : _open,
                     ),
@@ -569,7 +570,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
     ),
     child: OmniButton(
       key: const ValueKey('files-paste'),
-      label: 'Paste in ${_crumbLabel(_path)}',
+      label: 'Paste in ${_crumbLabel(_path, phone: tv.isPhone)}',
       icon: TvIcons.paste,
       onPressed: _busy ? null : _paste,
     ),
@@ -737,15 +738,21 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
 }
 
 /// What a folder is called in the breadcrumb: the shared storage reads
-/// "Storage", the TV's root "TV".
-String _crumbLabel(String path) => switch (path) {
-  '/' => 'TV',
+/// "Storage", the device's root "TV" or "Phone".
+String _crumbLabel(String path, {bool phone = false}) => switch (path) {
+  '/' => phone ? 'Phone' : 'TV',
   filesRoot => 'Storage',
   _ => baseName(path),
 };
 
 class _Breadcrumbs extends StatelessWidget {
-  const _Breadcrumbs({required this.path, required this.onOpen});
+  const _Breadcrumbs({
+    required this.path,
+    required this.onOpen,
+    this.phone = false,
+  });
+
+  final bool phone;
 
   final String path;
   final void Function(String path)? onOpen;
@@ -814,7 +821,7 @@ class _Breadcrumbs extends StatelessWidget {
                     onPressed: onOpen == null || i == crumbs.length - 1
                         ? null
                         : () => onOpen!(target),
-                    child: Text(_crumbLabel(target)),
+                    child: Text(_crumbLabel(target, phone: phone)),
                   ),
                 ],
               ),

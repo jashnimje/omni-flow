@@ -97,6 +97,11 @@ class LocalClient implements EngineConnection {
     return socket == null ? null : LocalClient._(path, socket);
   }
 
+  /// The raw socket of a hub serving [path], after the same checks as
+  /// [connect], for `omni hub attach` to copy bytes through. Null when no
+  /// hub answers there.
+  static Future<Socket?> openSocket(String path) => _open(path);
+
   static Future<Socket?> _open(String path) async {
     final type = await FileSystemEntity.type(path, followLinks: false);
     if (type != FileSystemEntityType.unixDomainSock) return null;
@@ -122,7 +127,14 @@ class LocalClient implements EngineConnection {
     // Others cannot write the directory, so the file cannot be swapped
     // after this check. With no group or other bits on it, only its owner
     // (or root) could connect, which proves the hub runs as this user.
-    final socketMode = (await FileStat.stat(path)).mode;
+    // A hub binds the socket and then sets it to 0600, so a client that
+    // connects in between sees the umask's bits for a moment. It looks
+    // again briefly before refusing.
+    var socketMode = (await FileStat.stat(path)).mode;
+    for (var i = 0; i < 10 && socketMode & groupOrOtherAny != 0; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      socketMode = (await FileStat.stat(path)).mode;
+    }
     if (socketMode & groupOrOtherAny != 0) {
       socket.destroy();
       throw LocalSocketException(

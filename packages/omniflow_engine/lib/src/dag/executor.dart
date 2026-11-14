@@ -850,6 +850,7 @@ class FlowRunner {
           c,
           context,
           clock,
+          trigger: msg['thing'],
         );
         return msg;
       case 'get_value':
@@ -895,8 +896,9 @@ class FlowRunner {
     _Run run,
     Map<String, Object?> c,
     TemplateContext context,
-    FlowClock clock,
-  ) async {
+    FlowClock clock, {
+    Object? trigger,
+  }) async {
     const renderer = TemplateRenderer();
     final choices = c['choices'] == null
         ? null
@@ -926,6 +928,8 @@ class FlowRunner {
       ),
       token: run.token,
       clock: clock,
+      to: c['to'] is String ? c['to'] as String : null,
+      trigger: trigger,
     );
     if (answer != null) return answer;
     if (fallback != null) return fallback;

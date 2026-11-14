@@ -9,13 +9,17 @@ export 'src/api/local_client.dart'
         LocalClient,
         LocalSocketException,
         localSocketPath;
-export 'src/api/local_server.dart' show LocalServer, preparePrivateHome;
+export 'src/api/hub_runtime.dart' show HubClient, HubClients, sshMdnsService;
+export 'src/api/local_server.dart'
+    show LocalServer, helloCommand, preparePrivateHome;
+export 'src/api/ssh_hub_client.dart';
 export 'src/api/nfc_tags.dart' show normalizeUid, nfcTagDriverId;
 export 'src/api/adb_phone_connection.dart';
 export 'src/api/agent_policy.dart';
 export 'src/api/omni_engine.dart';
 export 'src/api/thing_setup.dart'
     show nextSetupStep, pairingProofSecret, settingPresent;
+export 'src/cli/hub_cli.dart';
 export 'src/cli/omni_command_runner.dart';
 export 'src/codecs/crc32.dart';
 export 'src/codecs/tuya_codec.dart';

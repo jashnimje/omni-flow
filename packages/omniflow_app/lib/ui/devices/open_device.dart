@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../api/tv_calls.dart';
 import '../../state/providers.dart';
 import '../boards/board_page.dart' show BoardPage;
 import '../design/design.dart';
@@ -25,9 +26,9 @@ Future<void> openDevice(
   builder: (_) => DeviceRoute(id: id),
 );
 
-/// The page a device gets: the TV control centre for a TV, the board page
-/// for a board, the tag page for an NFC tag, the sensor page for a thing
-/// that only reports, the device page otherwise.
+/// The page a device gets: the Android device page for a TV or another
+/// phone, the board page for a board, the tag page for an NFC tag, the
+/// sensor page for a thing that only reports, the device page otherwise.
 class DeviceRoute extends ConsumerWidget {
   const DeviceRoute({super.key, required this.id});
 
@@ -52,6 +53,7 @@ class DeviceRoute extends ConsumerWidget {
       );
     }
     final d = DeviceView(json);
+    if (TvCalls.isPhone(json)) return TvPage(id: id, name: d.name, phone: true);
     return switch (kindOf(d)) {
       DeviceKind.tv => TvPage(id: id, name: d.name),
       DeviceKind.board => BoardPage(id: id),

@@ -15,6 +15,7 @@ import 'agent_access.dart';
 import 'appearance_page.dart';
 import 'backup_page.dart';
 import 'developer_page.dart';
+import 'hub_page.dart';
 import 'hubs_page.dart';
 import 'phone_access.dart';
 import 'places_page.dart';
@@ -44,6 +45,7 @@ final settingsPlaces = [
   SettingsPlace('Appearance', OmniIcons.color, AppearancePage.new),
   SettingsPlace('Permissions', OmniIcons.permissions, PhoneAccessPage.new),
   SettingsPlace('Hubs', OmniIcons.hub, HubsPage.new),
+  SettingsPlace('Home runs on', OmniIcons.server, HubPage.new),
   SettingsPlace('Backup and restore', OmniIcons.backup, BackupPage.new),
   SettingsPlace('Variables', OmniIcons.level, VariablesPage.new),
   SettingsPlace('Developer', OmniIcons.developer, DeveloperScreen.new),
@@ -128,6 +130,7 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _push(context, const VariablesPage()),
           ),
           const OmniSectionHeader('This phone'),
+          const HomeRunsOnRow(),
           OmniListRow(
             key: const ValueKey('settings-background'),
             icon: OmniIcons.settings,

@@ -13,9 +13,11 @@ import '../settings/backup_page.dart' show shareFileProvider;
 import 'tv_controller.dart';
 
 /// Where the TV's screenshots and recordings land on the phone.
-Future<String> tvSaveDir(WidgetRef ref) async {
+Future<String> tvSaveDir(WidgetRef ref, {bool phone = false}) async {
   final base = await ref.read(phoneFilesProvider).downloadsDir();
-  final dir = Directory('${base ?? Directory.systemTemp.path}/TV');
+  final dir = Directory(
+    '${base ?? Directory.systemTemp.path}/${phone ? 'Phone' : 'TV'}',
+  );
   await dir.create(recursive: true);
   return dir.path;
 }
@@ -158,7 +160,7 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
   Future<void> _saveScreenshot() async {
     final frame = _frame;
     if (frame == null) return;
-    final dir = await tvSaveDir(ref);
+    final dir = await tvSaveDir(ref, phone: tv.isPhone);
     final file = File('$dir/screenshot-${_stamp(DateTime.now())}.png');
     await file.writeAsBytes(frame, flush: true);
     if (!mounted) return;
@@ -236,7 +238,7 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
   Future<void> _download() async {
     final file = _recordFile;
     if (file == null) return;
-    final dir = await tvSaveDir(ref);
+    final dir = await tvSaveDir(ref, phone: tv.isPhone);
     if (!mounted) return;
     final r = await tv.transfer(
       TvCalls.filesDownload,
@@ -252,7 +254,7 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
     if (file == null) return;
     final ok = await confirm(
       context,
-      title: 'Delete the recording from the TV?',
+      title: 'Delete the recording from the ${tv.noun}?',
       body: _saved == null
           ? 'It is not saved on this phone yet, so it is gone for good.'
           : 'The copy on this phone stays.',
@@ -271,7 +273,8 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
   @override
   Widget build(BuildContext context) {
     final frame = _frame;
-    final size = _size ?? const Size(1920, 1080);
+    final size =
+        _size ?? (tv.isPhone ? const Size(1080, 2400) : const Size(1920, 1080));
     final since = _since;
     final elapsed = since == null
         ? 0
@@ -280,53 +283,56 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
       key: const ValueKey('tv-screen'),
       padding: OmniSpace.screenPadding,
       children: [
-        AspectRatio(
-          aspectRatio: size.width / size.height,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: ColoredBox(
-              color: Colors.black,
-              child: frame == null
-                  ? Center(
-                      child: _error == null
-                          ? const CircularProgressIndicator()
-                          : Padding(
-                              padding: const EdgeInsets.all(OmniSpace.md),
-                              child: Text(
-                                _error!,
-                                textAlign: TextAlign.center,
-                                style: OmniText.caption,
+        ScreenFit(
+          portrait: size.height > size.width,
+          child: AspectRatio(
+            aspectRatio: size.width / size.height,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: ColoredBox(
+                color: Colors.black,
+                child: frame == null
+                    ? Center(
+                        child: _error == null
+                            ? const CircularProgressIndicator()
+                            : Padding(
+                                padding: const EdgeInsets.all(OmniSpace.md),
+                                child: Text(
+                                  _error!,
+                                  textAlign: TextAlign.center,
+                                  style: OmniText.caption,
+                                ),
                               ),
-                            ),
-                    )
-                  : LayoutBuilder(
-                      builder: (context, box) => GestureDetector(
-                        key: const ValueKey('tv-screen-touch'),
-                        onTapUp: (d) => _tap(d.localPosition, box.biggest),
-                        onPanStart: (d) {
-                          _dragFrom = d.localPosition;
-                          _dragAt = DateTime.now();
-                        },
-                        onPanEnd: (d) {
-                          final from = _dragFrom;
-                          final at = _dragAt;
-                          if (from == null || at == null) return;
-                          final to = from + d.velocity.pixelsPerSecond * 0.15;
-                          _swipe(
-                            from,
-                            to,
-                            box.biggest,
-                            DateTime.now().difference(at),
-                          );
-                        },
-                        child: Image.memory(
-                          frame,
-                          gaplessPlayback: true,
-                          fit: BoxFit.contain,
-                          filterQuality: FilterQuality.medium,
+                      )
+                    : LayoutBuilder(
+                        builder: (context, box) => GestureDetector(
+                          key: const ValueKey('tv-screen-touch'),
+                          onTapUp: (d) => _tap(d.localPosition, box.biggest),
+                          onPanStart: (d) {
+                            _dragFrom = d.localPosition;
+                            _dragAt = DateTime.now();
+                          },
+                          onPanEnd: (d) {
+                            final from = _dragFrom;
+                            final at = _dragAt;
+                            if (from == null || at == null) return;
+                            final to = from + d.velocity.pixelsPerSecond * 0.15;
+                            _swipe(
+                              from,
+                              to,
+                              box.biggest,
+                              DateTime.now().difference(at),
+                            );
+                          },
+                          child: Image.memory(
+                            frame,
+                            gaplessPlayback: true,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.medium,
+                          ),
                         ),
                       ),
-                    ),
+              ),
             ),
           ),
         ),
@@ -339,8 +345,8 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
                 icon: OmniIcons.play,
                 title: 'Live view',
                 subtitle: _live
-                    ? 'Tap or swipe on the picture to touch the TV'
-                    : 'A new picture as fast as the TV makes them',
+                    ? 'Tap or swipe on the picture to touch the ${tv.noun}'
+                    : 'A new picture as fast as the ${tv.noun} makes them',
                 trailing: Switch(
                   key: const ValueKey('tv-screen-live-switch'),
                   value: _live,
@@ -361,7 +367,8 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
           key: const ValueKey('tv-screen-save'),
           icon: OmniIcons.download,
           title: 'Save a screenshot',
-          subtitle: 'to Download, OmniFlow, TV on this phone',
+          subtitle:
+              'to Download, OmniFlow, ${tv.isPhone ? 'Phone' : 'TV'} on this phone',
           onTap: frame == null ? null : _saveScreenshot,
         ),
         const OmniSectionHeader('Record the screen'),
@@ -395,9 +402,12 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
             label: 'Start recording',
             onPressed: _busy || _recording == null ? null : _record,
           ),
-          const Text(
-            'The TV records at most 3 minutes at a time, and some TVs have no '
-            'video encoder for it.',
+          Text(
+            tv.isPhone
+                ? 'The phone records at most 3 minutes at a time. Banking and '
+                      'video apps show black, which is Android protecting them.'
+                : 'The TV records at most 3 minutes at a time, and some TVs have no '
+                      'video encoder for it.',
             style: OmniText.caption,
           ),
         ],
@@ -407,7 +417,7 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
             key: const ValueKey('tv-record-file'),
             icon: OmniIcons.video,
             title: _recordFile!.split('/').last,
-            subtitle: _saved == null ? 'on the TV' : 'saved to $_saved',
+            subtitle: _saved == null ? 'on the ${tv.noun}' : 'saved to $_saved',
           ),
           if (_saved == null)
             OmniButton(
@@ -423,7 +433,7 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
             ),
           OmniButton.ghost(
             key: const ValueKey('tv-record-delete'),
-            label: 'Delete it from the TV',
+            label: 'Delete it from the ${tv.noun}',
             onPressed: _deleteFromTv,
           ),
         ],
@@ -431,4 +441,27 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
       ],
     );
   }
+}
+
+/// A portrait screen (a phone) is held to most of the page height and
+/// centred, so it fits on one screen. Its [child] keeps the picture's
+/// aspect, so a tap lands at the same fraction of the phone's screen.
+class ScreenFit extends StatelessWidget {
+  const ScreenFit({super.key, required this.portrait, required this.child});
+
+  final bool portrait;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => portrait
+      ? Center(
+          child: ConstrainedBox(
+            key: const ValueKey('tv-screen-portrait'),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.62,
+            ),
+            child: child,
+          ),
+        )
+      : child;
 }

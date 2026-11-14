@@ -262,13 +262,16 @@ class StoredFlows {
       for (final d in await DriftDeviceStore(_db).all())
         d.id: manifestFor(_registry, d),
     };
-    final states = {
-      for (final d in await DriftDeviceStore(_db).all()) d.id: d.state,
-    };
+    final all = await DriftDeviceStore(_db).all();
+    final states = {for (final d in all) d.id: d.state};
     final (_, specs, _) = await stored();
     return FlowReferences(
       homeLocationSet: homeLocationSet ?? _flows.homeLocation != null,
       devices: devices.keys.toSet(),
+      people: {
+        for (final d in all)
+          if (d.driverId == personDriverId) d.id,
+      },
       flows: {
         for (final f in await DriftFlowStore(_db).all()) f.json['id'] as String,
       },

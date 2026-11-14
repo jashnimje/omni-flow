@@ -11,6 +11,10 @@ abstract final class AdbCommand {
   static const clse = 0x45534c43;
   static const wrte = 0x45545257;
 
+  /// A Wireless Debugging device answers CNXN with STLS, and the host
+  /// answers STLS before both switch the socket to TLS 1.3.
+  static const stls = 0x534c5453;
+
   static String name(int command) => switch (command) {
     sync => 'SYNC',
     cnxn => 'CNXN',
@@ -19,6 +23,7 @@ abstract final class AdbCommand {
     okay => 'OKAY',
     clse => 'CLSE',
     wrte => 'WRTE',
+    stls => 'STLS',
     _ => '0x${command.toRadixString(16)}',
   };
 }
@@ -33,6 +38,9 @@ abstract final class AdbAuthType {
 /// The protocol version that still carries a data checksum. Newer versions
 /// drop it, and a device answering a host at this version keeps it.
 const adbVersion = 0x01000000;
+
+/// The `arg0` of STLS (adb.h, A_STLS_VERSION).
+const adbStlsVersion = 0x01000000;
 
 /// The largest payload this host sends in a shell OPEN.
 const adbMaxData = 4096;

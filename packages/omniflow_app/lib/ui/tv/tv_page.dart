@@ -7,6 +7,7 @@ import '../../state/providers.dart';
 import '../add/pair_sheet.dart';
 import '../design/design.dart';
 import '../devices/device_sections.dart';
+import 'phone_remote.dart';
 import 'tv_apps.dart';
 import 'tv_console.dart';
 import 'tv_controller.dart';
@@ -23,10 +24,13 @@ Future<void> openTv(BuildContext context, Json device) =>
         builder: (_) => TvPage(
           id: '${device['id']}',
           name: '${device['name'] ?? device['id']}',
+          phone: TvCalls.isPhone(device),
         ),
       ),
     );
 
+/// The Android device page's tabs. A TV and a phone show different ones
+/// as chips, and the rest under More.
 enum TvTab {
   remote('Remote'),
   screen('Screen'),
@@ -44,23 +48,54 @@ enum TvTab {
   /// More.
   static const main = [remote, screen, apps];
 
+  /// A phone is looked at and touched rather than pointed at, so its chips
+  /// are Screen, Apps and Files, and its keys sit under More, Remote.
+  static const phoneMain = [screen, apps, files];
+
+  /// What a phone shows under More, in order.
+  static const phoneMore = [system, settings, remote, console];
+
   bool get isMain => main.contains(this);
+
+  bool isMainFor({required bool phone}) =>
+      phone ? phoneMain.contains(this) : isMain;
+
+  static List<TvTab> mainFor({required bool phone}) => phone ? phoneMain : main;
+
+  static List<TvTab> moreFor({required bool phone}) => phone
+      ? phoneMore
+      : [
+          for (final t in values)
+            if (!t.isMain) t,
+        ];
 }
 
-/// The TV control centre (4.1 to 4.5): the live header on every tab, then
-/// Remote, Screen and Apps as tabs, with System, Files, Settings and Console
-/// under More. A tab is built the first time it is opened and kept after, so its list and scroll survive a switch.
+/// The Android device page, picked by driver. For a TV (4.1 to 4.5) the
+/// live header on every tab, then Remote, Screen and Apps as tabs, with
+/// System, Files, Settings and Console under More. For another phone
+/// Screen, Apps and Files, with System, Settings, Remote and Console under
+/// More. A tab is built the first time it is opened and kept after, so its
+/// list and scroll survive a switch.
 class TvPage extends ConsumerStatefulWidget {
   const TvPage({
     super.key,
     required this.id,
     required this.name,
-    this.tab = TvTab.remote,
+    this.phone = false,
+    this.openOn,
   });
 
   final String id;
   final String name;
-  final TvTab tab;
+
+  /// Another Android phone rather than a TV.
+  final bool phone;
+
+  /// The tab to open on, when not the usual one.
+  final TvTab? openOn;
+
+  /// The tab it opens on: Remote on a TV, Screen on a phone.
+  TvTab get tab => openOn ?? (phone ? TvTab.screen : TvTab.remote);
 
   @override
   ConsumerState<TvPage> createState() => _TvPageState();
@@ -71,7 +106,10 @@ class _TvPageState extends ConsumerState<TvPage> {
     client: ref.read(engineClientProvider),
     id: widget.id,
     poll: ref.read(tvPollProvider),
+    isPhone: widget.phone,
   )..start();
+
+  bool get _phone => widget.phone;
 
   late var _tab = widget.tab;
   late final _opened = {widget.tab};
@@ -94,29 +132,32 @@ class _TvPageState extends ConsumerState<TvPage> {
       builder: (sheet) => OmniSheet(
         title: 'More',
         children: [
-          for (final t in TvTab.values)
-            if (!t.isMain)
-              OmniListRow(
-                key: ValueKey('tv-more-${t.name}'),
-                icon: switch (t) {
-                  TvTab.system => OmniIcons.system,
-                  TvTab.files => OmniIcons.storage,
-                  TvTab.settings => OmniIcons.settings,
-                  _ => OmniIcons.terminal,
-                },
-                title: t.label,
-                subtitle: switch (t) {
-                  TvTab.system => 'how it is doing, what runs on it, restart',
-                  TvTab.files => 'the files on the TV, to and from this phone',
-                  TvTab.settings => 'change settings on the TV',
-                  _ => 'run commands on the TV, for experts',
-                },
-                trailing: _tab == t
-                    ? const Icon(OmniIcons.check, color: OmniColors.accent)
-                    : null,
-                chevron: _tab != t,
-                onTap: () => Navigator.of(sheet).pop(t),
-              ),
+          for (final t in TvTab.moreFor(phone: _phone))
+            OmniListRow(
+              key: ValueKey('tv-more-${t.name}'),
+              icon: switch (t) {
+                TvTab.system => OmniIcons.system,
+                TvTab.files => OmniIcons.storage,
+                TvTab.settings => OmniIcons.settings,
+                TvTab.remote => OmniIcons.phone,
+                _ => OmniIcons.terminal,
+              },
+              title: t.label,
+              subtitle: switch (t) {
+                TvTab.system => 'how it is doing, what runs on it, restart',
+                TvTab.files =>
+                  'the files on the ${tv.noun}, to and from this phone',
+                TvTab.settings => 'change settings on the ${tv.noun}',
+                TvTab.remote =>
+                  'Back, Home, Recents, volume, notifications and lock',
+                _ => 'run commands on the ${tv.noun}, for experts',
+              },
+              trailing: _tab == t
+                  ? const Icon(OmniIcons.check, color: OmniColors.accent)
+                  : null,
+              chevron: _tab != t,
+              onTap: () => Navigator.of(sheet).pop(t),
+            ),
         ],
       ),
     );
@@ -124,6 +165,7 @@ class _TvPageState extends ConsumerState<TvPage> {
   }
 
   Widget _body(TvTab tab) => switch (tab) {
+    TvTab.remote when _phone => PhoneRemoteTab(tv: tv),
     TvTab.remote => TvRemoteTab(tv: tv, active: _tab == TvTab.remote),
     TvTab.screen => TvScreenTab(tv: tv, active: _tab == TvTab.screen),
     TvTab.apps => TvAppsTab(tv: tv),
@@ -151,7 +193,9 @@ class _TvPageState extends ConsumerState<TvPage> {
           OmniIconAction(
             key: const ValueKey('tv-header-power'),
             icon: OmniIcons.power,
-            label: on ? 'Put the TV to sleep' : 'Wake the TV',
+            label: _phone
+                ? (on ? 'Lock the phone' : 'Wake the phone')
+                : (on ? 'Put the TV to sleep' : 'Wake the TV'),
             color: on ? OmniColors.accent : OmniColors.muted,
             onPressed: () => tv.key(on ? Keycodes.sleep : Keycodes.wakeup),
           ),
@@ -185,13 +229,19 @@ class _TvPageState extends ConsumerState<TvPage> {
                       key: const ValueKey('tv-offline'),
                       tv.needsPairing
                           ? reason
+                          : _phone
+                          ? '$reason Wireless debugging turns off when the '
+                                'phone restarts or changes Wi-Fi, so turn it '
+                                'on again on that phone.'
                           : '$reason It may be asleep, switched off at the '
                                 'wall, or on another Wi-Fi.',
                       actionLabel: 'Retry',
                       onAction: tv.refresh,
                     ),
                   if (_device case final device?
-                      when tv.offline != null && pairsInApp(device))
+                      when tv.offline != null &&
+                          pairsInApp(device) &&
+                          !TvCalls.pairsWithCode(device))
                     Padding(
                       padding: const EdgeInsets.only(bottom: OmniSpace.sm),
                       child: OmniButton.ghost(
@@ -207,7 +257,7 @@ class _TvPageState extends ConsumerState<TvPage> {
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        for (final t in TvTab.main) ...[
+                        for (final t in TvTab.mainFor(phone: _phone)) ...[
                           OmniFilterChip(
                             key: ValueKey('tv-tab-${t.name}'),
                             label: t.label,
@@ -220,9 +270,11 @@ class _TvPageState extends ConsumerState<TvPage> {
                         // where you are.
                         OmniFilterChip(
                           key: const ValueKey('tv-tab-more'),
-                          label: _tab.isMain ? 'More' : 'More: ${_tab.label}',
+                          label: _tab.isMainFor(phone: _phone)
+                              ? 'More'
+                              : 'More: ${_tab.label}',
                           icon: OmniIcons.more,
-                          selected: !_tab.isMain,
+                          selected: !_tab.isMainFor(phone: _phone),
                           onTap: _more,
                         ),
                       ],
@@ -270,7 +322,10 @@ class TvHeader extends StatelessWidget {
             if (app != null && name != null && s.isOn)
               AppBadge(package: app, name: name, size: 40)
             else
-              const OmniIconBox(icon: OmniIcons.tv, size: 40),
+              OmniIconBox(
+                icon: tv.isPhone ? OmniIcons.phone : OmniIcons.tv,
+                size: 40,
+              ),
             const SizedBox(width: OmniSpace.gap),
             Expanded(
               child: Column(
@@ -306,7 +361,7 @@ class TvHeader extends StatelessWidget {
                     )
                   else
                     Text(
-                      powerLabel(s.power, loaded: tv.loaded),
+                      powerLabel(s.power, loaded: tv.loaded, phone: tv.isPhone),
                       key: const ValueKey('tv-power-state'),
                       style: OmniText.bodyStrong,
                     ),
@@ -350,12 +405,16 @@ class TvHeader extends StatelessWidget {
   );
 }
 
-String powerLabel(String? power, {bool loaded = true}) => switch (power) {
-  'on' => 'On',
-  'asleep' => 'Asleep',
-  'off' => 'Off',
-  _ => loaded ? 'Power unknown' : 'Reading the TV...',
-};
+String powerLabel(String? power, {bool loaded = true, bool phone = false}) =>
+    switch (power) {
+      'on' when phone => 'Screen on',
+      'asleep' when phone => 'Screen off',
+      'on' => 'On',
+      'asleep' => 'Asleep',
+      'off' => 'Off',
+      _ when phone => loaded ? 'Not answering' : 'Reading the phone...',
+      _ => loaded ? 'Power unknown' : 'Reading the TV...',
+    };
 
 String playingLabel(String? playing) => switch (playing) {
   'playing' => 'Playing',

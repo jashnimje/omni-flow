@@ -8,6 +8,19 @@ import 'engine_calls.dart' show Json;
 abstract final class TvCalls {
   static const driver = 'android_tv_adb';
 
+  /// Another Android phone over ADB. It takes every `tv.*` call too, which
+  /// the engine also answers under its `android.*` name.
+  static const phoneDriver = 'android_phone_adb';
+
+  /// Opens or closes a phone's notification shade.
+  static const notifications = 'tv.notifications';
+
+  /// Phones with Wireless debugging on, found on mDNS.
+  static const find = 'android.find';
+
+  /// Pairs with a phone's six-digit Wireless debugging code. User only.
+  static const pair = 'android.pair';
+
   static const state = 'tv.state';
   static const keys = 'tv.keys';
   static const key = 'tv.key';
@@ -67,6 +80,57 @@ abstract final class TvCalls {
   static const maxRepeat = 20;
 
   static bool isTv(Json device) => device['driver'] == driver;
+
+  static bool isPhone(Json device) => device['driver'] == phoneDriver;
+
+  /// Whether [device] gets the Android device page: a TV or a phone.
+  static bool isAndroid(Json device) => isTv(device) || isPhone(device);
+
+  static Json notificationsArgs(String id, {String action = 'expand'}) => {
+    'id': id,
+    'action': action,
+  };
+
+  static Json findArgs({int windowMs = 3000}) => {'windowMs': windowMs};
+
+  static List<FoundPhone> phonesOf(Json result) => [
+    for (final p in result['phones'] as List? ?? const [])
+      if (p is Map) FoundPhone.fromJson(Map<String, Object?>.from(p)),
+  ];
+
+  /// The six-digit code only ever travels in this call.
+  static Json pairArgs(String host, int port, String code) => {
+    'host': host,
+    'port': port,
+    'code': code,
+  };
+
+  /// `thing.add` for a phone at [host] and [port]. A phone paired with a
+  /// code carries its [guid] as its stable id, so the engine can follow it
+  /// to a new connect port. The engine switches to TLS when the phone asks.
+  static Json addPhoneArgs({
+    required String host,
+    required int port,
+    String? guid,
+    String? name,
+  }) => {
+    'driver': phoneDriver,
+    'host': host,
+    'port': port,
+    'name': ?name,
+    'stableId': ?guid,
+  };
+
+  /// The engine has no such command yet: it needs an update.
+  static bool isMissingCommand(Json result) =>
+      (result['error'] as Map?)?['type'] == 'unknown_command';
+
+  /// A phone paired with a Wireless debugging code: its stable id is the
+  /// guid `android.pair` returned, `adb-<serial>-<six letters>`.
+  static bool pairsWithCode(Json device) =>
+      isPhone(device) && _tlsGuid.hasMatch('${device['stableId'] ?? ''}');
+
+  static final _tlsGuid = RegExp(r'^adb-[A-Za-z0-9]+-[A-Za-z0-9]{6}$');
 
   static Json idArgs(String id) => {'id': id};
 
@@ -665,4 +729,35 @@ abstract final class TvPointerCalls {
 
   static bool isRunning(Json status) =>
       status['ok'] == true && status['running'] == true;
+}
+
+/// A phone `android.find` saw on mDNS. [pairingPort] is there only while
+/// "Pair device with pairing code" is open on it.
+class FoundPhone {
+  const FoundPhone({
+    required this.name,
+    required this.host,
+    this.guid,
+    this.pairingPort,
+    this.connectPort,
+    this.knownAs,
+  });
+
+  factory FoundPhone.fromJson(Json json) => FoundPhone(
+    name: '${json['name'] ?? json['host']}',
+    host: '${json['host']}',
+    guid: json['guid'] as String?,
+    pairingPort: (json['pairingPort'] as num?)?.toInt(),
+    connectPort: (json['connectPort'] as num?)?.toInt(),
+    knownAs: json['knownAs'] as String?,
+  );
+
+  final String name;
+  final String host;
+  final String? guid;
+  final int? pairingPort;
+  final int? connectPort;
+
+  /// The thing it already is, when it was added before.
+  final String? knownAs;
 }

@@ -338,7 +338,7 @@ class _AppSheetState extends State<AppSheet> {
                 AppAction.clearData,
                 ask: 'Clear all data of $_name?',
                 body:
-                    'Its accounts, sign-ins, downloads and settings on the TV '
+                    'Its accounts, sign-ins, downloads and settings on the ${widget.tv.noun} '
                     'are deleted. This cannot be undone.',
                 done: 'Cleared the data of $_name',
                 reload: true,
@@ -353,7 +353,7 @@ class _AppSheetState extends State<AppSheet> {
                   AppAction.disable,
                   ask: 'Disable $_name?',
                   body: app.system
-                      ? 'It is a system app. The TV can stop working properly '
+                      ? 'It is a system app. The ${widget.tv.noun} can stop working properly '
                             'until it is enabled again.'
                       : 'It stops running and leaves the home screen until '
                             'it is enabled again. Its data stays.',

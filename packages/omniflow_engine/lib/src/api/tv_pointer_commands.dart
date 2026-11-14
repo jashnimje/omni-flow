@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'android_names.dart';
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
@@ -44,12 +45,12 @@ class TvPointerCommands {
   final _positions = <String, (double, double)>{};
   final _queues = <String, Future<void>>{};
 
-  Map<String, CommandHandler> get commands => {
+  Map<String, CommandHandler> get commands => withAndroidNames({
     'tv.helper.status': status,
     'tv.helper.install': install,
     'tv.pointer': pointer,
     'tv.pointer.click': click,
-  };
+  });
 
   Future<({Device device, DriverManifest manifest, bool offerKey})> _device(
     Map<String, Object?> args,

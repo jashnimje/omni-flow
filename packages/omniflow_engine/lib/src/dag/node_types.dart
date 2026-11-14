@@ -17,7 +17,12 @@ class FlowReferences {
     this.stateKeysOf = _unknown,
     this.eventsOf = _unknown,
     this.homeLocationSet,
+    this.people,
   });
+
+  /// The person things, for a notify or ask step's `to`. Null when the
+  /// caller does not know, and then only the shape is checked.
+  final Set<String>? people;
 
   /// Whether the user said where home is, which sun triggers need. Null
   /// when the caller does not know, and then it is not checked.
@@ -219,8 +224,9 @@ final Map<String, NodeType> builtInNodeTypes = {
       'out',
       'error',
     ], (c, p, i, r) => _ref(c, 'flowId', r.flows, 'flow', p, i)),
-    NodeType('notify', NodeCategory.action, ['out', 'error'], (c, p, i, _) {
+    NodeType('notify', NodeCategory.action, ['out', 'error'], (c, p, i, r) {
       _string(c, 'title', p, i);
+      _to(c, p, i, r);
       _templates(c, p, i);
     }),
     NodeType('http_request', NodeCategory.action, ['out', 'error'], (
@@ -249,8 +255,9 @@ final Map<String, NodeType> builtInNodeTypes = {
       _templates(c, p, i);
     }),
     // Asks the person, and waits for the answer or the time limit.
-    NodeType('ask', NodeCategory.action, ['out', 'error'], (c, p, i, _) {
+    NodeType('ask', NodeCategory.action, ['out', 'error'], (c, p, i, r) {
       _string(c, 'title', p, i);
+      _to(c, p, i, r);
       final choices = c['choices'];
       if (choices != null &&
           (choices is! List || choices.any((x) => x is! String))) {
@@ -661,6 +668,20 @@ void _oneOf(
 ) {
   if (!options.contains(c[key])) {
     i.add('$p.$key', 'must be one of ${options.join(', ')}');
+  }
+}
+
+/// A notify or ask step's `to`: the person whose phone it goes to.
+void _to(Map<String, Object?> c, String p, IssueCollector i, FlowReferences r) {
+  final to = c['to'];
+  if (to == null) return;
+  if (to is! String || to.isEmpty) {
+    i.add('$p.to', 'must be the id of a person');
+    return;
+  }
+  final people = r.people;
+  if (people != null && !people.contains(to)) {
+    i.add('$p.to', 'no person $to');
   }
 }
 

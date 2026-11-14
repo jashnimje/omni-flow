@@ -10,6 +10,7 @@ import '../boards/usb_board.dart';
 import '../design/design.dart';
 import '../tags/tags_page.dart' show showAddTagSheet;
 import 'add_by_hand_page.dart';
+import 'add_phone_page.dart';
 import 'guided_steps_page.dart';
 
 Future<void> openAddThing(BuildContext context) =>
@@ -212,6 +213,14 @@ class _AddPageState extends ConsumerState<AddPage> {
               title: 'A place (home, office)',
               chevron: true,
               onTap: () => _byHand(driver: '${place?['driver'] ?? 'place'}'),
+            ),
+            OmniListRow(
+              key: const ValueKey('add-another-phone'),
+              icon: OmniIcons.phone,
+              title: 'Another phone',
+              subtitle: 'See and control an Android phone over Wi-Fi',
+              chevron: true,
+              onTap: () => openAddPhone(context),
             ),
             OmniListRow(
               key: const ValueKey('manual-usb-board'),

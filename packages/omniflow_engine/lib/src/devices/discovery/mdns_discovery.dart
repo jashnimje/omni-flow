@@ -13,13 +13,22 @@ export '../../manifest/driver_manifest.dart' show mdnsServicePattern;
 /// the TXT key that carries a stable id.
 const mdnsMethod = 'mdns';
 
-/// Service types OmniFlow browses for: its own boards, Shelly, Hue bridges
-/// and Home Assistant.
+/// Android Wireless Debugging: the port a phone shows its pairing code
+/// for, and the port it takes TLS connections on. Both instances are named
+/// by the phone's guid, and the connect port changes each time Wireless
+/// debugging is turned on.
+const adbTlsPairingService = '_adb-tls-pairing._tcp';
+const adbTlsConnectService = '_adb-tls-connect._tcp';
+
+/// Service types OmniFlow browses for: its own boards, Shelly, Hue bridges,
+/// Home Assistant and Android Wireless Debugging.
 const knownMdnsServices = [
   '_omniflow._udp',
   '_shelly._tcp',
   '_hue._tcp',
   '_home-assistant._tcp',
+  adbTlsPairingService,
+  adbTlsConnectService,
 ];
 
 /// One resolved service instance.
@@ -220,4 +229,84 @@ Map<String, String> parseTxt(String text) {
     );
   }
   return entries;
+}
+
+/// One Android device with Wireless debugging on, as mDNS announces it.
+class AdbWirelessFind {
+  const AdbWirelessFind({
+    required this.pairing,
+    required this.guid,
+    required this.name,
+    required this.host,
+    required this.port,
+  });
+
+  /// True for the pairing port, which is up only while the phone shows its
+  /// pairing code, false for the TLS connect port.
+  final bool pairing;
+
+  /// The phone's guid, `adb-<serial>-<suffix>`: the instance name of both
+  /// services, and what pairing returns.
+  final String guid;
+
+  /// The device name the phone announces, or its guid when it names none.
+  final String name;
+  final String host;
+  final int port;
+
+  Map<String, Object?> toJson() => {
+    'service': pairing ? adbTlsPairingService : adbTlsConnectService,
+    'guid': guid,
+    'name': name,
+    'host': host,
+    'port': port,
+  };
+}
+
+/// Browses both Wireless Debugging services at once. [connectOnly] skips
+/// the pairing one, for following a paired device to its new port.
+Future<List<AdbWirelessFind>> browseAdbWireless(
+  MdnsDiscovery mdns, {
+  Duration window = const Duration(seconds: 3),
+  bool connectOnly = false,
+}) async {
+  final services = [
+    if (!connectOnly) adbTlsPairingService,
+    adbTlsConnectService,
+  ];
+  final browsed = await Future.wait([
+    for (final service in services) mdns.browse(service, window: window),
+  ]);
+  return [
+    for (final found in browsed)
+      for (final s in found)
+        AdbWirelessFind(
+          pairing: s.service == adbTlsPairingService,
+          guid: s.instance,
+          name: switch (s.txt['name'] ?? s.txt['given_name']) {
+            final String n when n.isNotEmpty => n,
+            _ => s.instance,
+          },
+          host: s.host,
+          port: s.port,
+        ),
+  ];
+}
+
+/// Where the paired device with [guid] takes TLS connections now, or null.
+Future<({String host, int port})?> locateAdbTlsConnect(
+  MdnsDiscovery mdns,
+  String guid, {
+  Duration window = const Duration(seconds: 3),
+}) async {
+  for (final find in await browseAdbWireless(
+    mdns,
+    window: window,
+    connectOnly: true,
+  )) {
+    if (find.guid.toLowerCase() == guid.toLowerCase()) {
+      return (host: find.host, port: find.port);
+    }
+  }
+  return null;
 }

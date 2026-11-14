@@ -8,11 +8,25 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.4.0';
+const appVersion = '0.5.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.5.0',
+    date: '12 Nov 2026',
+    notes: [
+      'Control another Android phone: see and record its screen, tap on it, '
+          'manage its apps and permissions, and move files both ways. Pair '
+          'it with the code from Wireless debugging under Add, Another phone.',
+      'Run your home on a Mac mini hub: every phone that connects sees the '
+          'same devices and automations, and each phone still tells the hub '
+          'where its person is.',
+      'Questions and notifications can go to one person, and each phone '
+          'shows only its own.',
+    ],
+  ),
   (
     version: '0.4.0',
     date: '12 Nov 2026',

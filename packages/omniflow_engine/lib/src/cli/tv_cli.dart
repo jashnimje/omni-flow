@@ -77,6 +77,9 @@ class TvCommand extends Command<int> {
   String get name => 'tv';
 
   @override
+  List<String> get aliases => const ['android'];
+
+  @override
   String get description =>
       'Control an Android TV: remote, text, volume, state, apps, settings, files, '
       'shell, screen, recording, system, permissions, backup and power.';

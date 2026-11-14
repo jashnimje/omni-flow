@@ -13,11 +13,23 @@ import 'tv_widgets.dart' show appNameOf;
 /// the progress of whatever transfer runs, shared by the header and every
 /// tab. Engine errors from user actions show as snackbars.
 class TvController extends ChangeNotifier {
-  TvController({required this.client, required this.id, required this.poll});
+  TvController({
+    required this.client,
+    required this.id,
+    required this.poll,
+    this.isPhone = false,
+  });
 
   final EngineClient client;
   final String id;
   final Duration poll;
+
+  /// Whether this is another phone rather than a TV, which changes the
+  /// words, the keys and the tabs.
+  final bool isPhone;
+
+  /// What the page calls the device in its messages.
+  String get noun => isPhone ? 'phone' : 'TV';
 
   TvState state = const TvState();
 
@@ -117,12 +129,16 @@ class TvController extends ChangeNotifier {
     needsPairing = false;
     if (result['ok'] == true) {
       state = TvCalls.stateOf(result);
-      offline = null;
+      offline = result['reachable'] == false
+          ? '${result['message'] ?? 'The $noun did not answer.'}'
+          : null;
     } else if ((result['error'] as Map?)?['type'] == 'needs_user') {
       needsPairing = true;
-      offline =
-          'The TV has not let OmniFlow in yet. Tap Pair again, then choose '
-          'Allow on the TV.';
+      offline = isPhone
+          ? 'The phone has not let OmniFlow in yet. Add it again from Add, '
+                'Another phone, with a new pairing code.'
+          : 'The TV has not let OmniFlow in yet. Tap Pair again, then '
+                'choose Allow on the TV.';
     } else {
       offline = errorMessage(result);
     }

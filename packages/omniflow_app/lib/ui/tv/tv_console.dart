@@ -96,8 +96,8 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const OmniBanner.warning(
-            'Commands run directly on the TV. Only you can use this, '
+          OmniBanner.warning(
+            'Commands run directly on the ${tv.noun}. Only you can use this, '
             'never Claude.',
           ),
           Expanded(
@@ -225,10 +225,10 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
       OmniEmptyState(
         key: const ValueKey('console-warning'),
         icon: OmniIcons.warning,
-        title: 'The console runs any command on the TV',
+        title: 'The console runs any command on the ${tv.noun}',
         message:
             'OmniFlow does not check what you type. A command can delete '
-            'files, remove apps, change settings or make the TV unusable '
+            'files, remove apps, change settings or make the ${tv.noun} unusable '
             'until it is reset. Only you can use it, never Claude.',
         action: OmniButton(
           key: const ValueKey('console-accept'),

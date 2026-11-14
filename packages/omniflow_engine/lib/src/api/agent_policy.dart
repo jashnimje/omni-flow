@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'android_names.dart';
+
 /// How much an AI agent may do through MCP. The user picks it in the app or
 /// with `omni agent access`, and no agent can change it.
 enum AgentAccess {
@@ -19,9 +21,10 @@ enum AgentAccess {
 
 /// The commands an agent may send at [AgentAccess.read]: they only read or
 /// simulate.
-const agentReadCommands = {
+const _readCommands = {
   'agent.access',
   'agent.describe',
+  'android.find',
   'ask.pending',
   'automation.dry_run',
   'automation.get',
@@ -44,6 +47,8 @@ const agentReadCommands = {
   'flow.log',
   'flow.validate',
   'home.stats',
+  'hub.clients',
+  'hub.discover',
   'link.list',
   'link.options',
   'room.list',
@@ -70,7 +75,7 @@ const agentReadCommands = {
 
 /// What [AgentAccess.setup] adds: setting the home up. Automations an agent
 /// saves are still untrusted, so a high-risk one waits for the user.
-const agentSetupCommands = {
+const _setupCommands = {
   'automation.enable',
   'automation.remove',
   'automation.run',
@@ -102,6 +107,7 @@ const agentSetupCommands = {
   'tv.input.swipe',
   'tv.input.tap',
   'tv.key',
+  'tv.notifications',
   'tv.pointer',
   'tv.pointer.click',
   'tv.record.start',
@@ -118,11 +124,14 @@ const agentSetupCommands = {
 };
 
 /// Why each command no agent may send is the user's alone.
-const agentUserOnly = {
+const _userOnly = {
   'agent.access.set': 'only the user decides what an agent may do',
   'automation.approve': 'approving a high-risk automation is the user check',
   'flow.approve': 'approving a high-risk automation is the user check',
   'device.pair': 'pairing needs someone at the device',
+  'android.pair':
+      'pairing needs someone at the phone, and the code never passes '
+      'through an agent',
   'device.hostkey': 'trusting a host key is a security decision',
   'device.remove': 'removing a thing deletes its secrets and history',
   'secret.set': 'keys and passwords never pass through an agent',
@@ -154,6 +163,12 @@ const agentUserOnly = {
       'restoring a backup replaces the home, and only you choose to',
 };
 
+/// Each `tv.*` command is also an `android.*` one, and both names get the
+/// same entry here.
+final agentReadCommands = withAndroidCommandNames(_readCommands);
+final agentSetupCommands = withAndroidCommandNames(_setupCommands);
+final agentUserOnly = withAndroidNames(_userOnly);
+
 /// Globals the engine keeps for itself (presence and Wi-Fi, which rules
 /// trigger on), which no agent may set or remove. Names come without `$`.
 bool reservedVariable(Object? name) {
@@ -178,11 +193,11 @@ String? agentRefusal(
   if (agentUserOnly[command] case final why?) {
     return '$command is for the user only: $why';
   }
-  if (command == 'tv.app') {
+  if (tvNameOf(command) == 'tv.app') {
     if (level != AgentAccess.setup) return _needsSetup(command);
     return _agentTvAppActions.contains(args['action'])
         ? null
-        : 'tv.app ${args['action']} is for the user only: it changes or '
+        : '$command ${args['action']} is for the user only: it changes or '
               'removes the app';
   }
   if ((command == 'var.set' || command == 'var.remove') &&
@@ -215,10 +230,10 @@ Map<String, Object?> agentArgs(String command, Map<String, Object?> args) =>
       'scene.save' ||
       'link.create' => {...args, 'trusted': false},
       'device.invoke' => {...args, 'allowPairing': false},
-      _ when command.startsWith('tv.') || command == 'device.refresh' => {
-        ...args,
-        'allowPairing': false,
-      },
+      _
+          when tvNameOf(command).startsWith(tvCommandPrefix) ||
+              command == 'device.refresh' =>
+        {...args, 'allowPairing': false},
       // Opening a USB port resets an ESP32 or an Uno, so an agent looks on
       // the network only.
       'device.discover' => {...args, 'serial': false},
