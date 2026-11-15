@@ -12,6 +12,7 @@ import '../tags/tags_page.dart' show showAddTagSheet;
 import 'add_by_hand_page.dart';
 import 'add_phone_page.dart';
 import 'guided_steps_page.dart';
+import '../devices/weather_page.dart' show AddWeatherRow;
 
 Future<void> openAddThing(BuildContext context) =>
     Navigator.of(context)
@@ -207,6 +208,7 @@ class _AddPageState extends ConsumerState<AddPage> {
               chevron: true,
               onTap: () => showAddTagSheet(context),
             ),
+            const AddWeatherRow(),
             OmniListRow(
               key: const ValueKey('manual-place'),
               icon: OmniIcons.place,

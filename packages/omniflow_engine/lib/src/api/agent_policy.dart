@@ -31,6 +31,11 @@ const _readCommands = {
   'automation.list',
   'automation.log',
   'automation.templates',
+  // Why an automation did not run, which ones fight over a device, and
+  // its earlier versions.
+  'automation.conflicts',
+  'automation.skips',
+  'automation.versions',
   'board.describe',
   'board.ports',
   'device.discover',
@@ -39,6 +44,9 @@ const _readCommands = {
   'device.list',
   'driver.list',
   'driver.validate',
+  // Energy use per plug and its price.
+  'energy.price',
+  'energy.summary',
   'engine.status',
   'flow.cards',
   'flow.dryRun',
@@ -52,7 +60,11 @@ const _readCommands = {
   'link.list',
   'link.options',
   'room.list',
+  'room.state',
   'rule.tokens',
+  // A sentence read into a rule, never saved, and habits offered as rules.
+  'rule.parse',
+  'suggest.list',
   'scene.list',
   'tag.list',
   'thing.next',
@@ -89,6 +101,17 @@ const _setupCommands = {
   'device.invoke',
   'device.organize',
   'device.refresh',
+  // The sun curve and away plan follow home's location and when people are
+  // out, so like home.location they need setup, reads included.
+  'awaylight.get',
+  'awaylight.preview',
+  'awaylight.set',
+  'energy.price.set',
+  'sunlight.apply',
+  'sunlight.get',
+  'sunlight.set',
+  'weather.add',
+  'weather.refresh',
   'flow.save',
   'home.location',
   'home.location.set',
@@ -100,6 +123,8 @@ const _setupCommands = {
   'scene.remove',
   'scene.run',
   'scene.save',
+  // Hiding a suggestion changes what the person is offered.
+  'suggest.dismiss',
   'tag.remove',
   'tag.save',
   'thing.add',
@@ -121,12 +146,29 @@ const _setupCommands = {
   'var.remove',
   'var.set',
   'zone.save',
+  // The home helpers: the house mode, named timers, the built-in alerts, a
+  // room as one light (high-risk capabilities are never sent to a room)
+  // and a scene of how things are now, saved untrusted.
+  'alerts.get',
+  'alerts.set',
+  'home.mode',
+  'home.mode.set',
+  'room.invoke',
+  'scene.capture',
+  'timer.cancel',
+  'timer.list',
+  'timer.pause',
+  'timer.resume',
+  'timer.start',
 };
 
 /// Why each command no agent may send is the user's alone.
 const _userOnly = {
   'agent.access.set': 'only the user decides what an agent may do',
   'automation.approve': 'approving a high-risk automation is the user check',
+  'automation.restore':
+      'going back to an earlier version replaces the automation, and only '
+      'you choose to',
   'flow.approve': 'approving a high-risk automation is the user check',
   'device.pair': 'pairing needs someone at the device',
   'android.pair':
@@ -157,6 +199,17 @@ const _userOnly = {
   'phone.bluetooth': 'what the phone reports would fire automations falsely',
   'phone.screen': 'what the phone reports would fire automations falsely',
   'phone.dnd': 'what the phone reports would fire automations falsely',
+  'phone.actionDone': 'only the phone that was asked answers for itself',
+  'phone.ready': 'only the phone itself says it is connected',
+  'phone.alarm': 'what the phone reports would fire automations falsely',
+  'phone.call': 'what the phone reports would fire automations falsely',
+  'phone.media': 'what the phone reports would fire automations falsely',
+  'phone.calendar': 'what the phone reports would fire automations falsely',
+  'phone.shake': 'what the phone reports would fire automations falsely',
+  'phone.faceDown': 'what the phone reports would fire automations falsely',
+  'phone.headphones': 'what the phone reports would fire automations falsely',
+  'phone.boot': 'what the phone reports would fire automations falsely',
+  'phone.package': 'what the phone reports would fire automations falsely',
   'zone.remove': 'removing a place deletes it with its history',
   'board.flash': 'writing firmware replaces what a board runs',
   'config.import':
@@ -228,6 +281,7 @@ Map<String, Object?> agentArgs(String command, Map<String, Object?> args) =>
       'automation.save' ||
       'flow.save' ||
       'scene.save' ||
+      'scene.capture' ||
       'link.create' => {...args, 'trusted': false},
       'device.invoke' => {...args, 'allowPairing': false},
       _

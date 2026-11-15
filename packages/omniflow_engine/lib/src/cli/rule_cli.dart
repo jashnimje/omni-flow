@@ -59,6 +59,78 @@ class RuleCommand extends Command<int> {
         usage: 'FILE PATH',
       ),
     );
+    addSubcommand(
+      _RuleApiCommand(
+        'parse',
+        'Read a sentence as a rule, without saving it: '
+            'omni rule parse "turn off the lights when I leave"',
+        'rule.parse',
+        (rest) {
+          if (rest.isEmpty) throw UsageException('needs TEXT', '');
+          return {'text': rest.join(' ')};
+        },
+        usage: 'TEXT',
+      ),
+    );
+    addSubcommand(
+      _RuleApiCommand(
+        'suggestions',
+        'Rules offered from your habits in device history.',
+        'suggest.list',
+        (_) => {},
+      ),
+    );
+    addSubcommand(
+      _RuleApiCommand(
+        'dismiss-suggestion',
+        'Stop offering one suggestion.',
+        'suggest.dismiss',
+        (rest) => {'id': _one(rest)},
+        usage: 'ID',
+      ),
+    );
+    // Why an automation did not run, which ones fight over a device, and
+    // its earlier versions. Any automation, not only rules.
+    addSubcommand(
+      _RuleApiCommand(
+        'why-not',
+        'The triggers that fired lately without a run, and why.',
+        'automation.skips',
+        (rest) => {'id': _one(rest)},
+        usage: 'ID',
+      ),
+    );
+    addSubcommand(
+      _RuleApiCommand(
+        'conflicts',
+        'Automations that set one device two ways on the same trigger.',
+        'automation.conflicts',
+        (rest) => {if (rest.isNotEmpty) 'id': _one(rest)},
+        usage: '[ID]',
+      ),
+    );
+    addSubcommand(
+      _RuleApiCommand(
+        'versions',
+        'The last 10 saved versions of an automation.',
+        'automation.versions',
+        (rest) => {'id': _one(rest)},
+        usage: 'ID',
+      ),
+    );
+    addSubcommand(
+      _RuleApiCommand(
+        'restore',
+        'Go back to a saved version.',
+        'automation.restore',
+        (rest) {
+          final version = rest.length == 2 ? int.tryParse(rest[1]) : null;
+          if (version == null) throw UsageException('needs ID VERSION', '');
+          return {'id': rest[0], 'version': version, 'trusted': true};
+        },
+        usage: 'ID VERSION',
+      ),
+    );
   }
 
   @override

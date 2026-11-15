@@ -6,14 +6,18 @@
 .packages
 .pub-cache/
 .pub/
-build/
+# No trailing slash: tool/link_build_dirs.sh turns these into links outside
+# OneDrive, and a link is a file to git.
+build
 .flutter-plugins
 .flutter-plugins-dependencies
 **/ios/Flutter/ephemeral/
 **/macos/Flutter/ephemeral/
 **/linux/flutter/ephemeral/
 **/windows/flutter/ephemeral/
-**/android/.gradle/
+**/android/.gradle
+.gradle
+.kotlin
 **/android/local.properties
 **/ios/Pods/
 **/macos/Pods/

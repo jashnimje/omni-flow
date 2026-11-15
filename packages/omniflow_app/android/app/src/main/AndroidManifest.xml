@@ -46,6 +46,22 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- Phone actions (PhoneActionsBridge). Vibrate and set alarm are granted
+         at install. Do Not Disturb and the ringer need Do Not Disturb
+         access, which a notification asks for the first time a step needs
+         it. Full-screen intents show a "Show a message" step over a locked
+         phone; Android 14 and later let the person turn that off. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- "A call rings" triggers read only the call state, never the number,
+         and the app asks for it only when such a trigger is picked. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- "A calendar event starts" triggers read the next 24 hours of event
+         titles on the phone; only a matching title is sent on. Asked when
+         such a trigger is picked. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- No backup: secrets are keystore-bound, so a restored copy on another
          phone cannot be decrypted. -->
     <application
@@ -148,6 +164,16 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:theme="@style/PickerTheme" />
+        <!-- A "Show a message" step: full screen until tapped away. -->
+        <activity
+            android:name=".MessageActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop" />
         <activity
             android:name=".RunShortcutActivity"
             android:exported="false"
@@ -280,6 +306,21 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
+        </intent>
+        <!-- Phone actions: the text to speech engine, links and the clock
+             app's alarms and timers. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_TIMER" />
         </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>

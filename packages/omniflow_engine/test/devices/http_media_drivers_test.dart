@@ -185,10 +185,10 @@ void main() {
             200,
             jsonEncode({
               'relays': [
-                {'ison': on, 'has_timer': false},
+                {'ison': on, 'has_timer': false, 'overpower': false},
               ],
               'meters': [
-                {'power': 12.5},
+                {'power': 12.5, 'total': 340, 'overpower': 3500.0},
               ],
             }),
             ContentType.json,
@@ -210,6 +210,16 @@ void main() {
         final polled = await service.refreshState('it');
         expect(fake!.seen.last.uri.path, '/status');
         expect(polled.state['ison'], false);
+      },
+    );
+
+    test(
+      'the meter read adds power and total but keeps the relay flag',
+      () async {
+        final polled = await service.refreshState('it');
+        expect(polled.state['power'], 12.5);
+        expect(polled.state['total'], 340);
+        expect(polled.state['overpower'], false);
       },
     );
 

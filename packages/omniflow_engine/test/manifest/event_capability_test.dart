@@ -99,6 +99,11 @@ void main() {
       'bluetooth_devices',
       'screen_on',
       'dnd_on',
+      'next_alarm',
+      'call',
+      'media_playing',
+      'headphones',
+      'face_down',
     });
     expect(ids('phone', CapabilityType.event), {
       'nfc_scanned',
@@ -107,7 +112,33 @@ void main() {
       'notification',
       'bluetooth_connected',
       'bluetooth_disconnected',
+      'alarm_soon',
+      'call_ringing',
+      'call_answered',
+      'call_ended',
+      'media_started',
+      'media_stopped',
+      'calendar_started',
+      'calendar_ended',
+      'shaken',
+      'started_up',
+      'app_installed',
+      'app_updated',
     });
+    expect(ids('phone', CapabilityType.action), {
+      'speak',
+      'vibrate',
+      'play_sound',
+      'ringer',
+      'media_volume',
+      'media',
+      'open_app',
+      'open_link',
+      'set_alarm',
+      'set_timer',
+      'show_message',
+    });
+    expect(ids('phone', CapabilityType.toggle), {'torch', 'set_dnd'});
     expect(ids('person', CapabilityType.sensor), {
       'home',
       'place',

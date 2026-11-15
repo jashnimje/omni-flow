@@ -27,6 +27,16 @@ Future<RuleCondition?> pickCondition(BuildContext context, RuleWords words) {
           category: me,
           onTap: _then((c) => presenceConditionForm(c, words)),
         ),
+      if (words.people.isNotEmpty)
+        LibraryChoice(
+          key: 'pick-people',
+          title: 'Everyone is away, or anyone is home',
+          subtitle: 'everyone in the home, each by their own phone',
+          icon: OmniIcons.person,
+          category: me,
+          keywords: 'everyone family household',
+          onTap: _then(peopleConditionForm),
+        ),
       LibraryChoice(
         key: 'pick-between',
         title: 'Between two times',
@@ -52,6 +62,15 @@ Future<RuleCondition?> pickCondition(BuildContext context, RuleWords words) {
           keywords: t.room ?? '',
           onTap: _then((c) => thingConditionForm(c, t)),
         ),
+      LibraryChoice(
+        key: 'pick-house-mode',
+        title: 'The house mode is',
+        subtitle: 'Home, Away, Night, Vacation or your own',
+        icon: OmniIcons.home,
+        category: me,
+        keywords: 'mode away night vacation',
+        onTap: _then(modeConditionForm),
+      ),
       LibraryChoice(
         key: 'pick-variable',
         title: 'A variable has a value',
@@ -79,6 +98,9 @@ Future<RuleCondition?> editCondition(
 ) async {
   switch (c) {
     case CompareCondition(source: 'state'):
+      if (isHouseThing(splitRef(c.ref).$1)) {
+        return modeConditionForm(context, c);
+      }
       final thing = words.thing(splitRef(c.ref).$1);
       if (thing == null) return null;
       return thing.isPerson
@@ -90,6 +112,8 @@ Future<RuleCondition?> editCondition(
       return betweenForm(context, c);
     case DaysCondition():
       return daysForm(context, c);
+    case PeopleCondition():
+      return peopleConditionForm(context, c);
     default:
       return null;
   }

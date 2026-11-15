@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'api_error.dart';
 import 'engine_core.dart';
+import 'house_things.dart' show builtInThings;
 import 'things_runtime.dart';
 import '../dag/canonical.dart';
 import '../dag/flow.dart';
@@ -262,6 +263,9 @@ class StoredFlows {
       for (final d in await DriftDeviceStore(_db).all())
         d.id: manifestFor(_registry, d),
     };
+    for (final id in _core.builtInThings.keys) {
+      devices.putIfAbsent(id, () => builtInThings[id]);
+    }
     final all = await DriftDeviceStore(_db).all();
     final states = {for (final d in all) d.id: d.state};
     final (_, specs, _) = await stored();

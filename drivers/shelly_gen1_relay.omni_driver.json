@@ -5,7 +5,12 @@
   "category": "power",
   "icon": "plug",
   "transport": { "type": "http", "port": 80 },
-  "statePoll": { "intervalSeconds": 60, "command": { "path": "/status" }, "jsonPath": "$.relays[0]" },
+  "statePoll": {
+    "intervalSeconds": 60,
+    "command": { "path": "/status" },
+    "jsonPath": "$.relays[0]",
+    "also": [{ "command": { "path": "/status" }, "jsonPath": "$.meters[0]", "keys": ["power", "total"] }]
+  },
   "reliability": { "timeoutMs": 2000, "retries": 1 },
   "capabilities": [
     {
@@ -15,6 +20,8 @@
       "onOff": ["on", "off"],
       "command": { "path": "/relay/0", "query": { "turn": "{{value}}" } },
       "stateJsonPath": "$.ison"
-    }
+    },
+    { "id": "power_use", "type": "sensor", "label": "Power use (W)", "stateJsonPath": "$.power" },
+    { "id": "energy_total", "type": "sensor", "label": "Energy counted by the plug (watt-minutes)", "stateJsonPath": "$.total" }
   ]
 }

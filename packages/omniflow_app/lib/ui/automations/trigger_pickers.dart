@@ -38,7 +38,13 @@ Future<RuleTrigger?> pickTrigger(
     context,
     title: thingsOnly ? 'Wait until…' : 'When…',
     hint: 'Search devices, places, tags',
-    categories: [me, onPhone, inThings, if (!thingsOnly) time],
+    categories: [
+      me,
+      onPhone,
+      inThings,
+      if (!thingsOnly) time,
+      phoneMoreCategory,
+    ],
     choices: [
       if (words.people.isNotEmpty)
         choice(
@@ -50,6 +56,16 @@ Future<RuleTrigger?> pickTrigger(
           OmniIcons.home,
           (c) => presenceTriggerForm(c, words),
           subtitle: 'Wi-Fi, Bluetooth or a hub that sees my phone',
+        ),
+      if (words.people.isNotEmpty)
+        choice(
+          me,
+          'pick-people',
+          'The first person gets home or the last leaves',
+          OmniIcons.home,
+          peopleTriggerForm,
+          subtitle: 'everyone in the home, each by their own phone',
+          keywords: 'everyone family household away',
         ),
       choice(
         me,
@@ -109,6 +125,25 @@ Future<RuleTrigger?> pickTrigger(
         (c) => phoneSwitchTriggerForm(c, phone, PhoneKeys.charging),
         keywords: 'charger battery',
       ),
+      ...phoneMoreTriggerChoices(phoneMoreCategory, phone),
+      choice(
+        me,
+        'pick-house-mode',
+        'The house mode changes',
+        OmniIcons.home,
+        modeTriggerForm,
+        subtitle: 'to Home, Away, Night, Vacation or your own',
+        keywords: 'mode away night vacation',
+      ),
+      choice(
+        me,
+        'pick-timer-ends',
+        'A timer ends',
+        OmniIcons.wait,
+        timerTriggerForm,
+        subtitle: 'a named timer, like Pasta',
+        keywords: 'timer countdown',
+      ),
       for (final t in things)
         choice(
           t.isPhone ? onPhone : inThings,
@@ -150,6 +185,15 @@ Future<RuleTrigger?> pickTrigger(
           icon: OmniIcons.action,
           category: time,
           onTap: (c) async => Navigator.of(c).pop(const ManualTrigger()),
+        ),
+        LibraryChoice(
+          key: 'pick-engine-start',
+          title: 'When OmniFlow starts',
+          subtitle: 'once, after the phone restarts or OmniFlow opens',
+          icon: engineStartIcon,
+          category: time,
+          keywords: 'startup boot restart',
+          onTap: (c) async => Navigator.of(c).pop(const EngineStartTrigger()),
         ),
       ],
     ],
@@ -372,6 +416,7 @@ Future<RuleTrigger?> editTrigger(
   RuleTrigger t,
 ) async {
   if (t is OnTrigger) {
+    if (editHouseTrigger(context, t) case final form?) return form;
     final thing = words.thing(t.thing);
     if (thing == null) return null;
     if (thing.isPerson) return presenceTriggerForm(context, words, t);
@@ -387,6 +432,9 @@ Future<RuleTrigger?> editTrigger(
         case PhoneKeys.screenOn || PhoneKeys.dndOn || PhoneKeys.charging:
           return phoneSwitchTriggerForm(context, thing.id, t.key, t);
       }
+      if (editPhoneMoreTrigger(context, thing.id, t) case final form?) {
+        return form;
+      }
     }
     return thingTriggerForm(context, words, thing, t);
   }
@@ -394,6 +442,7 @@ Future<RuleTrigger?> editTrigger(
     TimeTrigger() => timeTriggerForm(context, t),
     SunTrigger() => sunTriggerForm(context, t),
     IntervalTrigger() => intervalTriggerForm(context, t),
+    PeopleTrigger() => peopleTriggerForm(context, t),
     _ => null,
   };
 }
@@ -405,12 +454,20 @@ Future<OnTrigger?> presenceTriggerForm(
 ]) {
   var person = current?.thing ?? words.me ?? words.people.firstOrNull?.id;
   var arriving = !(current?.hasTo == true && current?.to == false);
+  // "I have been away for 10 min": held like any state.
+  var holdMs = current?.forMs;
   return showFormSheet(
     context,
     title: 'When…',
     result: () => person == null
         ? null
-        : OnTrigger(thing: person!, key: 'home', to: arriving, hasTo: true),
+        : OnTrigger(
+            thing: person!,
+            key: 'home',
+            to: arriving,
+            hasTo: true,
+            forMs: holdMs,
+          ),
     build: (context, setState) => [
       if (words.people.length > 1)
         for (final p in words.people)
@@ -435,6 +492,7 @@ Future<OnTrigger?> presenceTriggerForm(
         'that sees your phone.',
         style: OmniText.caption,
       ),
+      HoldField(ms: holdMs, onChanged: (v) => setState(() => holdMs = v)),
     ],
   );
 }
@@ -581,6 +639,11 @@ Future<OnTrigger?> thingTriggerForm(
     ),
   };
   final unit = [for (final k in numbers) ?thing.unitOf(k.key)].firstOrNull;
+  // A state it turns to, or a number it goes past, can be held for a time.
+  var holdMs = current?.forMs;
+  bool holds(String? picked) =>
+      picked != null &&
+      RegExp(r'^(on|off|above|below|changeto)-').hasMatch(picked);
   return _optionsForm(
     context,
     title: 'When ${thing.name}…',
@@ -588,6 +651,11 @@ Future<OnTrigger?> thingTriggerForm(
     selected: selected,
     initialInput: input,
     unit: unit,
+    extra: (picked, setState) => [
+      if (holds(picked))
+        HoldField(ms: holdMs, onChanged: (v) => setState(() => holdMs = v)),
+    ],
+    finish: (t) => t..forMs = t.canHold ? holdMs : null,
   );
 }
 
@@ -783,15 +851,46 @@ Future<IntervalTrigger?> intervalTriggerForm(
   IntervalTrigger? current,
 ]) {
   var ms = (current?.seconds ?? 600) * 1000;
+  // Lined up on the clock: minutes in, and a window of the day.
+  final offset = TextEditingController(
+    text: (current?.offsetSeconds ?? 0) > 0
+        ? '${current!.offsetSeconds ~/ 60}'
+        : '',
+  );
+  var between = current?.between;
+  int? offsetSeconds() {
+    final text = offset.text.trim();
+    if (text.isEmpty) return 0;
+    final m = int.tryParse(text);
+    return m == null || m < 0 || m * 60 >= ms ~/ 1000 ? null : m * 60;
+  }
+
   return showFormSheet(
     context,
+    owns: [offset],
     title: 'Every few minutes',
-    result: () => ms >= 1000 ? IntervalTrigger(ms ~/ 1000) : null,
+    result: () {
+      final o = offsetSeconds();
+      if (ms < 1000 || o == null) return null;
+      if (between != null && between![0] == between![1]) return null;
+      return IntervalTrigger(ms ~/ 1000, offsetSeconds: o, between: between);
+    },
+    whyNot: () => offsetSeconds() == null
+        ? 'Minutes in must be less than the time between runs'
+        : between != null && between![0] == between![1]
+        ? 'Pick two different times'
+        : null,
     build: (context, setState) => [
       DurationInput(
         label: 'Every',
         ms: ms,
         onChanged: (v) => setState(() => ms = v),
+      ),
+      AlignedFields(
+        offsetMinutes: offset,
+        between: between,
+        onOffset: () => setState(() {}),
+        onBetween: (v) => setState(() => between = v),
       ),
     ],
   );

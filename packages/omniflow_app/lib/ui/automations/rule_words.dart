@@ -2,10 +2,15 @@ import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../api/engine_calls.dart' show Json;
+import '../../rules/house_words.dart';
 import '../../rules/rule_spec.dart';
 import '../../rules/things.dart';
 import '../design/design.dart';
 import '../devices/device_text.dart' show appName;
+import 'phone_words.dart';
+import 'rules_core_words.dart';
+
+export 'rules_core_words.dart';
 
 /// The icons the automation screens use beyond [OmniIcons], all Material
 /// Symbols rounded.
@@ -327,15 +332,47 @@ class RuleWords {
   // Triggers.
 
   String trigger(RuleTrigger t) => switch (t) {
+    OnTrigger(forMs: final int ms) when t.canHold => _held(t, ms),
     OnTrigger() => _on(t),
     TimeTrigger() =>
       'At ${t.at}${t.days.isEmpty ? '' : ' ${daysText(t.days)}'}',
     SunTrigger() => sunText(t),
-    IntervalTrigger() => 'Every ${durationText(t.seconds * 1000)}',
+    IntervalTrigger() => intervalText(t),
     ManualTrigger() => 'Only when I run it',
+    PeopleTrigger() => peopleTriggerText(t),
+    EngineStartTrigger() => 'When OmniFlow starts',
   };
 
+  /// A state that has held for [ms]: "Front door has been on for 5 min",
+  /// "I have been away for 10 min", "Room temperature has been above 28 °C
+  /// for 15 min".
+  String _held(OnTrigger t, int ms) {
+    final how = durationText(ms);
+    final th = thing(t.thing);
+    if (th?.isPerson == true && t.key == 'home' && t.to is bool) {
+      final who = _who(t.thing);
+      final where = t.to == true ? 'home' : 'away';
+      return who == 'I'
+          ? 'I have been $where for $how'
+          : '$who has been $where for $how';
+    }
+    final name = '${_name(t.thing)}${_keyWords(t.thing, t.key)}';
+    final unit = th?.unitOf(t.key);
+    if (t.mode == OnMode.crosses) {
+      return t.above != null
+          ? '$name has been above ${valueText(t.above, unit: unit)} for $how'
+          : '$name has been below ${valueText(t.below, unit: unit)} for $how';
+    }
+    // An on or off reads as the thing itself, as "Desk lamp turns on" does.
+    if (th?.isOnOff(t.key) == true && t.to is bool) {
+      return '${_name(t.thing)} has been ${t.to == true ? 'on' : 'off'} '
+          'for $how';
+    }
+    return '$name has been ${valueText(t.to, unit: unit)} for $how';
+  }
+
   String _on(OnTrigger t) {
+    if (houseTriggerText(t) case final words?) return words;
     final th = thing(t.thing);
     if (th?.isPerson == true && t.key == 'home' && t.mode == OnMode.change) {
       final who = _who(t.thing);
@@ -406,7 +443,7 @@ class RuleWords {
         false => 'The phone stops charging',
         _ => 'The phone starts or stops charging',
       },
-      _ => null,
+      _ => phoneMoreTriggerText(t),
     };
   }
 
@@ -418,7 +455,7 @@ class RuleWords {
     PhoneKeys.screenOn => AutomationIcons.screen,
     PhoneKeys.dndOn => AutomationIcons.dnd,
     PhoneKeys.charging => AutomationIcons.charging,
-    _ => AutomationIcons.phone,
+    _ => phoneMoreTriggerIcon(key) ?? AutomationIcons.phone,
   };
 
   /// The phone thing, when the engine lists one.
@@ -426,6 +463,8 @@ class RuleWords {
 
   IconData triggerIcon(RuleTrigger t) => switch (t) {
     OnTrigger() when thing(t.thing)?.isPhone == true => _phoneIcon(t.key),
+    OnTrigger() when isHouseThing(t.thing) =>
+      t.thing == 'timers' ? OmniIcons.wait : OmniIcons.home,
     OnTrigger() when thing(t.thing)?.isPerson == true => OmniIcons.home,
     OnTrigger() when thing(t.thing)?.isTag == true => OmniIcons.tag,
     OnTrigger() => thing(t.thing)?.icon ?? OmniIcons.device,
@@ -433,6 +472,8 @@ class RuleWords {
     SunTrigger() => OmniIcons.sun,
     IntervalTrigger() => OmniIcons.repeat,
     ManualTrigger() => OmniIcons.action,
+    PeopleTrigger() => OmniIcons.home,
+    EngineStartTrigger() => engineStartIcon,
   };
 
   // Conditions.
@@ -445,10 +486,12 @@ class RuleWords {
       'The trigger\'s ${c.ref} ${_op(c.op)} ${_value(c.value)}',
     BetweenCondition() => 'Between ${c.start} and ${c.end}',
     DaysCondition() => _capital(daysText(c.days)),
+    PeopleCondition() => peopleConditionText(c),
     UnknownCondition() => 'A condition made outside this app',
   };
 
   String _state(CompareCondition c) {
+    if (houseConditionText(c) case final words?) return words;
     final (id, key) = splitRef(c.ref);
     final th = thing(id);
     if (th?.isPerson == true && key == 'home' && c.value is bool) {
@@ -498,6 +541,7 @@ class RuleWords {
     CompareCondition() => AutomationIcons.variable,
     BetweenCondition() => OmniIcons.time,
     DaysCondition() => AutomationIcons.days,
+    PeopleCondition() => OmniIcons.person,
     UnknownCondition() => OmniIcons.info,
   };
 
@@ -579,6 +623,9 @@ class RuleWords {
   /// A step as words, with the parts a tap edits on their own: the device,
   /// what it does, how long, the text. [step] is these parts joined.
   List<WordPart> stepParts(RuleStep s) => switch (s) {
+    DoStep() when houseStepText(s) != null => [
+      WordPart(houseStepText(s)!, blank: Blank.form),
+    ],
     DoStep() when isEachDevice(s.thing) => [
       WordPart(eachDo(s.capability, s.params)),
     ],
@@ -786,6 +833,9 @@ class RuleWords {
   /// "power on", "brightness 70%": what a do step tells the device.
   String _doWhat(String id, String capability, Json params) {
     final th = thing(id);
+    if (th?.isPhone == true) {
+      if (phoneStepWhat(capability, params) case final words?) return words;
+    }
     final cap = th?.capability(capability);
     final label = '${cap?['label'] ?? capability}'.toLowerCase();
     final shown = [

@@ -123,6 +123,86 @@ class PhoneInputs {
         if (on is! bool || on == _dndOn) return;
         _dndOn = on;
         await _send(phoneDnd, {'on': on});
+      default:
+        await _more(reading);
+    }
+  }
+
+  static const phoneAlarm = 'phone.alarm';
+  static const phoneCall = 'phone.call';
+  static const phoneMedia = 'phone.media';
+  static const phoneShake = 'phone.shake';
+  static const phoneFaceDown = 'phone.faceDown';
+  static const phoneHeadphones = 'phone.headphones';
+  static const phoneBoot = 'phone.boot';
+  static const phonePackage = 'phone.package';
+
+  int? _alarmMs = -1;
+  bool? _faceDown;
+  bool? _headphones;
+  bool? _playing;
+
+  /// The readings PhoneActionsBridge.kt adds, each only while an
+  /// automation uses it:
+  ///
+  /// - `{"kind": "alarm", "atMs"?: int}`, the next alarm, none when absent
+  /// - `{"kind": "call", "state": "ringing" | "answered" | "ended"}`, with
+  ///   no number
+  /// - `{"kind": "media", "playing": bool, "package"?, "label"?, "title"?}`
+  /// - `{"kind": "shake"}` and `{"kind": "face_down", "on": bool}`
+  /// - `{"kind": "headphones", "plugged": bool}`
+  /// - `{"kind": "boot"}` once after the phone started up
+  /// - `{"kind": "package", "package", "label"?, "updated": bool}`
+  Future<void> _more(Map reading) async {
+    switch (reading['kind']) {
+      case 'alarm':
+        final at = reading['atMs'];
+        final ms = at is int && at > 0 ? at : null;
+        if (ms == _alarmMs) return;
+        _alarmMs = ms;
+        await _send(phoneAlarm, {
+          if (ms != null)
+            'at': DateTime.fromMillisecondsSinceEpoch(
+              ms,
+              isUtc: true,
+            ).toIso8601String(),
+        });
+      case 'call':
+        final state = reading['state'];
+        if (!const {'ringing', 'answered', 'ended'}.contains(state)) return;
+        await _send(phoneCall, {'state': state});
+      case 'media':
+        final playing = reading['playing'];
+        if (playing is! bool || playing == _playing) return;
+        _playing = playing;
+        await _send(phoneMedia, {
+          'playing': playing,
+          'package': ?_text(reading['package']),
+          'label': ?_text(reading['label']),
+          'title': ?_text(reading['title']),
+        });
+      case 'shake':
+        await _send(phoneShake, const {});
+      case 'face_down':
+        final on = reading['on'];
+        if (on is! bool || on == _faceDown) return;
+        _faceDown = on;
+        await _send(phoneFaceDown, {'on': on});
+      case 'headphones':
+        final plugged = reading['plugged'];
+        if (plugged is! bool || plugged == _headphones) return;
+        _headphones = plugged;
+        await _send(phoneHeadphones, {'plugged': plugged});
+      case 'boot':
+        await _send(phoneBoot, const {});
+      case 'package':
+        final package = _text(reading['package']);
+        if (package == null) return;
+        await _send(phonePackage, {
+          'package': package,
+          'label': ?_text(reading['label']),
+          'updated': reading['updated'] == true,
+        });
     }
   }
 

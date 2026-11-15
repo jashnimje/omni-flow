@@ -478,7 +478,7 @@ class DriverManifest {
       if (also is! List || also.any((e) => e is! Map || e['command'] == null)) {
         issues.add(
           '$root.statePoll.also',
-          'must be a list of {command, jsonPath} reads',
+          'must be a list of {command, jsonPath, keys?} reads',
         );
       } else {
         for (var i = 0; i < also.length; i++) {
@@ -486,6 +486,16 @@ class DriverManifest {
             (also[i] as Map)['jsonPath'],
             '$root.statePoll.also[$i].jsonPath',
           );
+          final keys = (also[i] as Map)['keys'];
+          if (keys != null &&
+              (keys is! List ||
+                  keys.isEmpty ||
+                  keys.any((k) => k is! String || k.isEmpty))) {
+            issues.add(
+              '$root.statePoll.also[$i].keys',
+              'must be a list of the state keys to keep from this read',
+            );
+          }
         }
       }
     }

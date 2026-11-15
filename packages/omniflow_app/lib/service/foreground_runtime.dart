@@ -19,6 +19,7 @@ import 'hub_settings.dart';
 import 'multicast_lock.dart';
 import 'ssh_hub_connection.dart';
 import 'notifier.dart';
+import 'phone_actions.dart';
 import 'phone_inputs.dart';
 import 'service_engine_client.dart';
 import 'usb_links.dart';
@@ -228,6 +229,7 @@ void startOmniService() => FlutterForegroundTask.setTaskHandler(
     send: FlutterForegroundTask.sendDataToMain,
     stopService: FlutterForegroundTask.stopService,
     inputs: PhoneInputs.new,
+    actions: PhoneActionRunner.new,
     owner: EngineOwner(),
   ),
 );
@@ -325,6 +327,7 @@ class OmniTaskHandler extends TaskHandler {
     required this.stopService,
     MulticastLock? lock,
     this.inputs,
+    this.actions,
     this.owner,
   }) : _host = EngineHost(send: send),
        _lock = lock ?? MulticastLock();
@@ -333,6 +336,11 @@ class OmniTaskHandler extends TaskHandler {
   /// open. Null leaves the phone thing to the CLI.
   final PhoneInputs Function(EngineClient engine)? inputs;
   PhoneInputs? _inputs;
+
+  /// Runs the phone's actions the engine asks for, and says the phone is
+  /// ready. Null leaves the phone without actions (tests).
+  final PhoneActionRunner Function(EngineClient engine)? actions;
+  PhoneActionRunner? _actions;
   AutomationNotifier? _notifier;
 
   /// Holds off opening while a task this one replaced still has the
@@ -354,6 +362,7 @@ class OmniTaskHandler extends TaskHandler {
       _engine = started.client;
       _host.attach(started.client, hubError: started.hubError);
       _inputs = inputs?.call(started.client)?..start();
+      _actions = actions?.call(started.client)?..start();
       final client = started.client;
       final notifier = _notifier = AutomationNotifier(
         client,
@@ -382,6 +391,7 @@ class OmniTaskHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     try {
       await _inputs?.stop();
+      await _actions?.stop();
       await _notifier?.stop();
       await _host.stop(
         isTimeout

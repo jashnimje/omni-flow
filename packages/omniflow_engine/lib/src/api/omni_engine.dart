@@ -17,6 +17,7 @@ import 'engine_flow_host.dart';
 import 'error_of.dart';
 import 'flow_commands.dart';
 import 'home_commands.dart';
+import 'house_helpers.dart';
 import 'home_stats_commands.dart';
 import 'host_key_commands.dart';
 import 'hub_runtime.dart';
@@ -24,6 +25,11 @@ import 'link_commands.dart';
 import 'nfc_tags.dart';
 import 'organize_commands.dart';
 import 'pairing_commands.dart';
+import 'rule_parse.dart';
+import 'suggestions.dart';
+import 'rules_core_commands.dart';
+import 'phone_actions.dart';
+import 'smart_home.dart';
 import 'state_commands.dart';
 import 'stored_flows.dart';
 import 'things_runtime.dart';
@@ -43,7 +49,6 @@ import '../devices/mqtt_channel.dart';
 import '../devices/serial_channel.dart';
 import '../devices/tuya_channel.dart';
 import '../devices/tv/tv_channel.dart';
-import '../devices/virtual_channel.dart';
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../manifest/validation.dart' show ValidationIssue;
@@ -157,6 +162,7 @@ class OmniEngine {
       final http = HttpChannel(tap: tap, secrets: secrets);
       final tv = TvWebSocketChannel(secrets, tap: tap);
       EngineCore? core;
+      final phone = PhoneActions();
       final adb = AdbChannel(
         secrets,
         onPairingPrompt: (id) => core?.emit({
@@ -183,7 +189,7 @@ class OmniEngine {
           TransportType.mqtt: mqtt,
           TransportType.websocket: tv,
           TransportType.adb: adb,
-          TransportType.virtual: const VirtualChannel(),
+          TransportType.virtual: PhoneChannel(phone),
         },
       );
       final socket = udp;
@@ -213,11 +219,27 @@ class OmniEngine {
           tv.close,
           adb.close,
           devices.close,
+          phone.close,
         ],
+      );
+      engine._phone = phone;
+      phone.attach(
+        engine._core,
+        engine._things,
+        runScene: (id) => engine!.handle('scene.run', {'id': id}),
       );
       engine._agentAccess = AgentAccessStore(home);
       engine._homeLocation = HomeLocationStore(home);
       engine.flows.homeLocation = await engine._homeLocation.read();
+      final built = engine;
+      built._smartHome = SmartHome(
+        built._core,
+        home,
+        hubRunning: () => built._hub.running,
+        call: built.handle,
+      );
+      await built._smartHome.load();
+      built._closers.add(built._smartHome.close);
       engine._core.issues['driver'] = driverIssues;
       engine._core.agentDrivers.addAll(await DriftManifestStore(db).byAgent());
       await engine._core.loadRooms();
@@ -228,6 +250,13 @@ class OmniEngine {
       await engine._things.reload(quiet: true, restore: true);
       await engine._stored.migrateStored();
       await engine._stored.loadState();
+      engine._house = await HouseHelpers.open(
+        engine._core,
+        home,
+        engine._stored,
+        engine._automationCommands,
+      );
+      engine._closers.add(engine._house.close);
       return engine;
     } catch (_) {
       if (engine != null) {
@@ -326,7 +355,9 @@ class OmniEngine {
   late final _addCommands = AddCommands(_core, _deviceCommands);
   late final _tagCommands = TagCommands(_core, _things, _deviceCommands);
   late final _organizeCommands = OrganizeCommands(_core);
+  late final HouseHelpers _house;
   late final HomeLocationStore _homeLocation;
+  late final SmartHome _smartHome;
   late final _homeCommands = HomeCommands(_core, _stored, _homeLocation);
   late final _backupCommands = BackupCommands(
     _core,
@@ -342,6 +373,7 @@ class OmniEngine {
       _core.tv.forget(id);
       _core.adb.forget(id);
     },
+    house: _house,
   );
 
   /// Stored records that could not be loaded, by kind (driver, zone, flow).
@@ -379,6 +411,7 @@ class OmniEngine {
       _hub.startWizPush(listenPort: listenPort);
 
   late final AgentAccessStore _agentAccess;
+  late final PhoneActions _phone;
 
   /// A capability that would make a flow wait for approval (a host
   /// command, a TV setting or an app's data) is the user's to run.
@@ -624,6 +657,7 @@ class OmniEngine {
     'phone.bluetooth': _stateCommands.phoneBluetooth,
     'phone.screen': _stateCommands.phoneScreen,
     'phone.dnd': _stateCommands.phoneDnd,
+    ..._phone.commands,
     ..._tagCommands.commands,
     'device.discover': _deviceCommands.discover,
     'device.list': _deviceCommands.list,
@@ -635,15 +669,27 @@ class OmniEngine {
     'device.hostkey': _hostKeyCommands.hostKey,
     'device.history': _core.history.history,
     ..._organizeCommands.commands,
+    ..._house.commands,
     'presence.set': _stateCommands.presenceSet,
     ..._homeCommands.commands,
     ...HomeStatsCommands(_core).commands,
+    ...SuggestionCommands(_core, _automationCommands).commands,
+    ...RuleParseCommands(_core, _automationCommands).commands,
+    ..._smartHome.commands,
     ..._backupCommands.commands,
     'secret.set': _deviceCommands.secretSet,
     'web.secret.set': _deviceCommands.webSecretSet,
     ..._tvCommands.commands,
     ...TvPointerCommands(_core, _tvCommands).commands,
     ...AndroidPairCommands(_core).commands,
+    // Last: it keeps a version on every save, so it takes over the save
+    // commands above and passes each one on.
+    ...RulesCoreCommands(
+      _core,
+      _automationCommands,
+      _flowCommands,
+      _linkCommands,
+    ).commands,
   };
 
   /// When this engine opened, for the uptime `engine.status` reports.

@@ -175,13 +175,45 @@ sealed class RuleTrigger {
       );
     }
     if (json['interval'] case final num seconds) {
-      return IntervalTrigger(seconds.toInt());
+      return IntervalTrigger(
+        seconds.toInt(),
+        offsetSeconds: (json['offset'] as num?)?.toInt() ?? 0,
+        between: (json['between'] as List?)?.cast<String>(),
+      );
     }
     if (json['manual'] == true) return const ManualTrigger();
+    if (json['people'] case final String kind) return PeopleTrigger(kind);
+    if (json['on'] == null && json['event'] == EngineStartTrigger.event) {
+      return const EngineStartTrigger();
+    }
     return OnTrigger.fromJson(json);
   }
 
   Json toJson();
+}
+
+/// The household as one: `first_arrives` (the first person gets home) or
+/// `last_leaves` (the last person leaves).
+class PeopleTrigger extends RuleTrigger {
+  PeopleTrigger(this.kind);
+
+  static const firstArrives = 'first_arrives';
+  static const lastLeaves = 'last_leaves';
+
+  String kind;
+
+  @override
+  Json toJson() => {'people': kind};
+}
+
+/// Once, when OmniFlow starts running automations.
+class EngineStartTrigger extends RuleTrigger {
+  const EngineStartTrigger();
+
+  static const event = 'engine_started';
+
+  @override
+  Json toJson() => {'event': event};
 }
 
 class OnTrigger extends RuleTrigger {
@@ -194,6 +226,7 @@ class OnTrigger extends RuleTrigger {
     this.match,
     this.above,
     this.below,
+    this.forMs,
   });
 
   factory OnTrigger.fromJson(Json json) {
@@ -213,6 +246,7 @@ class OnTrigger extends RuleTrigger {
         mode: OnMode.crosses,
         above: crosses['above'] as num?,
         below: crosses['below'] as num?,
+        forMs: (json['for'] as num?)?.toInt(),
       );
     }
     final change = json['change'] is Map ? json['change'] as Map : const {};
@@ -221,8 +255,17 @@ class OnTrigger extends RuleTrigger {
       key: key,
       to: change['to'],
       hasTo: change.containsKey('to'),
+      forMs: (json['for'] as num?)?.toInt(),
     );
   }
+
+  /// How long the state must hold before it fires, or null for at once.
+  /// Only a change to a value or a crossing has a state to hold.
+  int? forMs;
+
+  /// Whether this trigger has a state that can be held for a time.
+  bool get canHold =>
+      mode == OnMode.crosses || (mode == OnMode.change && hasTo);
 
   String thing;
   String key;
@@ -250,6 +293,7 @@ class OnTrigger extends RuleTrigger {
         'crosses': above != null ? {'above': above} : {'below': below},
       },
     },
+    if (canHold) 'for': ?forMs,
   };
 }
 
@@ -282,13 +326,23 @@ class SunTrigger extends RuleTrigger {
   };
 }
 
+/// Every [seconds]. With [offsetSeconds] or [between] it is lined up on
+/// the clock: "every hour at :05", "every 15 min from 09:00 to 18:00".
 class IntervalTrigger extends RuleTrigger {
-  IntervalTrigger(this.seconds);
+  IntervalTrigger(this.seconds, {this.offsetSeconds = 0, this.between});
 
   int seconds;
+  int offsetSeconds;
+
+  /// `[start, end]` as `HH:MM`, or null for all day.
+  List<String>? between;
 
   @override
-  Json toJson() => {'interval': seconds};
+  Json toJson() => {
+    'interval': seconds,
+    if (offsetSeconds > 0) 'offset': offsetSeconds,
+    'between': ?between,
+  };
 }
 
 class ManualTrigger extends RuleTrigger {
@@ -316,6 +370,7 @@ sealed class RuleCondition {
     if (json['days'] case final List days) {
       return DaysCondition(days.cast());
     }
+    if (json['people'] case final String kind) return PeopleCondition(kind);
     for (final source in CompareCondition.sources) {
       if (json[source] case final String ref) {
         return CompareCondition(
@@ -366,6 +421,19 @@ class DaysCondition extends RuleCondition {
 
   @override
   Json toJson() => {'days': days};
+}
+
+/// The household: `all_away` (everyone is away) or `anyone_home`.
+class PeopleCondition extends RuleCondition {
+  PeopleCondition(this.kind);
+
+  static const allAway = 'all_away';
+  static const anyoneHome = 'anyone_home';
+
+  String kind;
+
+  @override
+  Json toJson() => {'people': kind};
 }
 
 /// A condition the builder shows but does not edit (`not`, `anyOf`,

@@ -90,9 +90,11 @@ void main() {
     ((await ok('device.get', {'id': id}))['device'] as Map)['state'] as Map,
   );
 
+  /// What automations announced. The built-in alerts are left out.
   List<String> announced() => [
     for (final e in events)
-      if (e['event'] == 'flow.announce') e['title'] as String,
+      if (e['event'] == 'flow.announce' && e['alert'] == null)
+        e['title'] as String,
   ];
 
   List<(Object?, Object?)> thingEvents() => [

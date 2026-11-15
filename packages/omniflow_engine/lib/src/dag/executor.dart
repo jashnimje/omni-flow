@@ -11,6 +11,8 @@ import 'expression.dart';
 import 'flow.dart';
 import 'flow_engine.dart' show payloadMatches, stateTriggerFires;
 import 'node_types.dart';
+import 'people_triggers.dart' show PeopleSource;
+import 'skips.dart' show failingPart;
 import 'transformers.dart';
 import 'web_request.dart';
 
@@ -214,6 +216,11 @@ class RunTrace {
   /// Why a run was dropped (running, cooldown, queue_full) or what failed.
   String? reason;
   DateTime? finishedAt;
+
+  /// The condition that said no before any step ran, with nothing after
+  /// its false: `{node, rule, actual?}`. Only kept while the engine runs,
+  /// for the skips it explains.
+  Map<String, Object?>? stoppedBy;
 
   Map<String, Object?> toJson() => {
     'run': runId,
@@ -449,9 +456,15 @@ class FlowRunner {
           throw StateError('a trigger cannot be a target');
         case NodeCategory.condition:
           final ctx = _context(run, msg, clock);
-          port = evaluateRule({...node.config, 'type': node.type}, ctx)
-              ? 'true'
-              : 'false';
+          final rule = {...node.config, 'type': node.type};
+          port = evaluateRule(rule, ctx) ? 'true' : 'false';
+          if (port == 'false' &&
+              !run.dryRun &&
+              !run.reachedAction &&
+              run.trace.stoppedBy == null &&
+              flow.edgesFrom(node.id, 'false').isEmpty) {
+            run.trace.stoppedBy = {'node': node.id, ...?failingPart(rule, ctx)};
+          }
         case NodeCategory.gate:
           port = await _gate(run, node, clock);
         case NodeCategory.transformer:
@@ -1030,6 +1043,10 @@ class FlowRunner {
         flowVars: run.flowVars,
         msg: msg,
         deviceStates: _effects.deviceStates,
+        people: switch (_effects) {
+          final PeopleSource s => s.people,
+          _ => null,
+        },
       );
 
   static String _message(Object e) =>

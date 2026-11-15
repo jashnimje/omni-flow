@@ -30,10 +30,21 @@ class HomeLocationStore {
     return null;
   }
 
+  /// Keeps the other keys `home.json` holds (the house mode, the alerts).
   Future<void> write(HomeLocation? location) async {
     final temp = File('${_file.path}.tmp');
+    Map<String, Object?> others = {};
+    try {
+      final json = jsonDecode(await _file.readAsString());
+      if (json is Map) others = Map<String, Object?>.from(json);
+    } on FileSystemException {
+      // Never written.
+    } on FormatException {
+      // Damaged: replaced whole.
+    }
+    others.remove('location');
     await temp.writeAsString(
-      jsonEncode({'location': ?homeLocationJson(location)}),
+      jsonEncode({...others, 'location': ?homeLocationJson(location)}),
       flush: true,
     );
     await temp.rename(_file.path);

@@ -5,6 +5,7 @@ import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'home_commands.dart';
+import 'house_helpers.dart';
 import 'stored_flows.dart';
 import 'thing_setup.dart';
 import 'things_runtime.dart';
@@ -44,7 +45,12 @@ class BackupCommands {
     this._home, {
     required this.removeThing,
     required this.resetThing,
+    this.house,
   });
+
+  /// The house mode and alert switches, kept under `home` beside the
+  /// location.
+  final HouseHelpers? house;
 
   final EngineCore _core;
   final StoredFlows _stored;
@@ -91,7 +97,10 @@ class BackupCommands {
           for (final r in await DriftFlowStore(_db).all()) _automationJson(r),
         ],
         'variables': await _userVariables(),
-        'home': {'location': ?homeLocationJson(_core.flows.homeLocation)},
+        'home': {
+          'location': ?homeLocationJson(_core.flows.homeLocation),
+          ...?house?.backupJson(),
+        },
       },
       if (skipped.isNotEmpty) 'skipped': skipped,
     };
@@ -188,6 +197,7 @@ class BackupCommands {
     final result = report!;
     final held = _Held(result);
     if (!dryRun) await _settle(plan, held, replace: replace);
+    if (!dryRun) await house?.restore(backup['home']);
     return {'dryRun': dryRun, 'mode': mode, 'applied': !dryRun, ...result};
   }
 

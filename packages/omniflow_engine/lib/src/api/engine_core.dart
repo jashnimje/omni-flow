@@ -70,6 +70,18 @@ class EngineCore {
   /// everything they drive is high risk.
   final agentDrivers = <String>{};
 
+  /// The things the engine itself is (the house mode, the timers), by id:
+  /// what runs a flow step sent to one, since no device row holds them.
+  final builtInThings =
+      <
+        String,
+        Future<Map<String, Object?>?> Function(
+          String capability,
+          Map<String, Object?> params, {
+          String? by,
+        })
+      >{};
+
   final _events = StreamController<Map<String, Object?>>.broadcast();
 
   /// Everything the engine reports as it happens, as JSON messages.
@@ -149,6 +161,10 @@ class EngineCore {
         ? Duration(seconds: 3 * seconds)
         : null;
   }
+
+  /// How long [d] may go unseen and still count as online, or null when
+  /// nothing reports it regularly.
+  Duration? onlineWindowOf(Device d) => _onlineWindow(registry[d.driverId]);
 
   /// Every device's state changes. The engine feeds it device events.
   late final history = DeviceHistoryLog(this);

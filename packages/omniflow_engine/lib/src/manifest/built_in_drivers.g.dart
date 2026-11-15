@@ -700,7 +700,10 @@ const builtInDriverSources = <String, String>{
   "category": "phone",
   "icon": "smartphone",
   "transport": { "type": "virtual" },
-  "settings": [{ "key": "person", "label": "Person who carries this phone" }],
+  "settings": [
+    { "key": "person", "label": "Person who carries this phone" },
+    { "key": "shake_scene", "label": "Scene to run when this phone is shaken (empty for none)" }
+  ],
   "capabilities": [
     { "id": "wifi_ssid", "type": "sensor", "label": "Wi-Fi network", "stateJsonPath": "$.wifi_ssid" },
     { "id": "wifi_bssid", "type": "sensor", "label": "Wi-Fi access point", "stateJsonPath": "$.wifi_bssid" },
@@ -710,12 +713,126 @@ const builtInDriverSources = <String, String>{
     { "id": "bluetooth_devices", "type": "sensor", "label": "Bluetooth devices connected", "stateJsonPath": "$.bluetooth_devices" },
     { "id": "screen_on", "type": "sensor", "label": "Screen on", "stateJsonPath": "$.screen_on" },
     { "id": "dnd_on", "type": "sensor", "label": "Do Not Disturb", "stateJsonPath": "$.dnd_on" },
+    { "id": "next_alarm", "type": "sensor", "label": "Next alarm", "stateJsonPath": "$.next_alarm" },
+    { "id": "call", "type": "sensor", "label": "Call (ringing, in a call or none)", "stateJsonPath": "$.call", "values": ["ringing", "in_call", "none"] },
+    { "id": "media_playing", "type": "sensor", "label": "Media playing", "stateJsonPath": "$.media_playing" },
+    { "id": "headphones", "type": "sensor", "label": "Wired headphones plugged in", "stateJsonPath": "$.headphones" },
+    { "id": "face_down", "type": "sensor", "label": "Face down", "stateJsonPath": "$.face_down" },
     { "id": "nfc_scanned", "type": "event", "label": "NFC tag scanned" },
     { "id": "app_opened", "type": "event", "label": "An app opens" },
     { "id": "app_closed", "type": "event", "label": "An app closes" },
     { "id": "notification", "type": "event", "label": "A notification arrives" },
     { "id": "bluetooth_connected", "type": "event", "label": "A Bluetooth device connects" },
-    { "id": "bluetooth_disconnected", "type": "event", "label": "A Bluetooth device disconnects" }
+    { "id": "bluetooth_disconnected", "type": "event", "label": "A Bluetooth device disconnects" },
+    {
+      "id": "alarm_soon",
+      "type": "event",
+      "label": "Before the next alarm",
+      "params": { "minutes": { "type": "number", "integer": true, "min": 1, "max": 720, "unit": "min" } }
+    },
+    { "id": "call_ringing", "type": "event", "label": "A call rings" },
+    { "id": "call_answered", "type": "event", "label": "A call is answered" },
+    { "id": "call_ended", "type": "event", "label": "A call ends" },
+    { "id": "media_started", "type": "event", "label": "Media starts playing" },
+    { "id": "media_stopped", "type": "event", "label": "Media stops playing" },
+    {
+      "id": "calendar_started",
+      "type": "event",
+      "label": "A calendar event starts",
+      "params": { "words": { "type": "string", "pattern": "[^\\n]{1,60}" } }
+    },
+    {
+      "id": "calendar_ended",
+      "type": "event",
+      "label": "A calendar event ends",
+      "params": { "words": { "type": "string", "pattern": "[^\\n]{1,60}" } }
+    },
+    { "id": "shaken", "type": "event", "label": "The phone is shaken" },
+    { "id": "started_up", "type": "event", "label": "The phone starts up" },
+    { "id": "app_installed", "type": "event", "label": "An app is installed" },
+    { "id": "app_updated", "type": "event", "label": "An app is updated" },
+    {
+      "id": "speak",
+      "type": "action",
+      "label": "Say out loud",
+      "params": { "text": { "type": "string", "pattern": "[^\\u0000]{1,500}" } },
+      "command": { "phoneAction": "speak" }
+    },
+    {
+      "id": "vibrate",
+      "type": "action",
+      "label": "Vibrate",
+      "params": { "pattern": { "type": "enum", "values": ["short", "long"], "optional": true } },
+      "command": { "phoneAction": "vibrate" }
+    },
+    { "id": "torch", "type": "toggle", "label": "Torch", "command": { "phoneAction": "torch" }, "stateJsonPath": "$.torch" },
+    { "id": "play_sound", "type": "action", "label": "Play a short sound", "command": { "phoneAction": "play_sound" } },
+    {
+      "id": "ringer",
+      "type": "action",
+      "label": "Set the ringer",
+      "params": { "mode": { "type": "enum", "values": ["silent", "vibrate", "normal"] } },
+      "command": { "phoneAction": "ringer" }
+    },
+    { "id": "set_dnd", "type": "toggle", "label": "Do Not Disturb", "command": { "phoneAction": "dnd" } },
+    {
+      "id": "media_volume",
+      "type": "action",
+      "label": "Set the media volume",
+      "params": { "value": { "type": "number", "integer": true, "min": 0, "max": 100, "unit": "%" } },
+      "command": { "phoneAction": "media_volume" }
+    },
+    {
+      "id": "media",
+      "type": "action",
+      "label": "Control what is playing",
+      "params": { "key": { "type": "enum", "values": ["play", "pause", "play_pause", "next", "previous"] } },
+      "command": { "phoneAction": "media" }
+    },
+    {
+      "id": "open_app",
+      "type": "action",
+      "label": "Open an app",
+      "params": { "package": { "type": "string", "pattern": "[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+" } },
+      "command": { "phoneAction": "open_app" }
+    },
+    {
+      "id": "open_link",
+      "type": "action",
+      "label": "Open a link",
+      "params": { "url": { "type": "string", "pattern": "https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!$&()*+,;=%]{1,2000}" } },
+      "command": { "phoneAction": "open_link" }
+    },
+    {
+      "id": "set_alarm",
+      "type": "action",
+      "label": "Set an alarm",
+      "params": {
+        "time": { "type": "string", "pattern": "([01][0-9]|2[0-3]):[0-5][0-9]" },
+        "label": { "type": "string", "pattern": "[^\\n]{1,60}", "optional": true }
+      },
+      "command": { "phoneAction": "set_alarm" }
+    },
+    {
+      "id": "set_timer",
+      "type": "action",
+      "label": "Set a timer",
+      "params": {
+        "minutes": { "type": "number", "integer": true, "min": 1, "max": 1440, "unit": "min" },
+        "label": { "type": "string", "pattern": "[^\\n]{1,60}", "optional": true }
+      },
+      "command": { "phoneAction": "set_timer" }
+    },
+    {
+      "id": "show_message",
+      "type": "action",
+      "label": "Show a message on screen",
+      "params": {
+        "title": { "type": "string", "pattern": "[^\\n]{1,100}" },
+        "text": { "type": "string", "pattern": "[^\\u0000]{1,1000}", "optional": true }
+      },
+      "command": { "phoneAction": "show_message" }
+    }
   ]
 }
 ''',
@@ -857,7 +974,12 @@ const builtInDriverSources = <String, String>{
   "category": "power",
   "icon": "plug",
   "transport": { "type": "http", "port": 80 },
-  "statePoll": { "intervalSeconds": 60, "command": { "path": "/status" }, "jsonPath": "$.relays[0]" },
+  "statePoll": {
+    "intervalSeconds": 60,
+    "command": { "path": "/status" },
+    "jsonPath": "$.relays[0]",
+    "also": [{ "command": { "path": "/status" }, "jsonPath": "$.meters[0]", "keys": ["power", "total"] }]
+  },
   "reliability": { "timeoutMs": 2000, "retries": 1 },
   "capabilities": [
     {
@@ -867,7 +989,9 @@ const builtInDriverSources = <String, String>{
       "onOff": ["on", "off"],
       "command": { "path": "/relay/0", "query": { "turn": "{{value}}" } },
       "stateJsonPath": "$.ison"
-    }
+    },
+    { "id": "power_use", "type": "sensor", "label": "Power use (W)", "stateJsonPath": "$.power" },
+    { "id": "energy_total", "type": "sensor", "label": "Energy counted by the plug (watt-minutes)", "stateJsonPath": "$.total" }
   ]
 }
 ''',
@@ -889,7 +1013,10 @@ const builtInDriverSources = <String, String>{
       "label": "Power",
       "command": { "path": "/rpc/Switch.Set", "query": { "id": 0, "on": "{{value}}" } },
       "stateJsonPath": "$.output"
-    }
+    },
+    { "id": "power_use", "type": "sensor", "label": "Power use (W)", "stateJsonPath": "$.apower" },
+    { "id": "voltage", "type": "sensor", "label": "Voltage (V)", "stateJsonPath": "$.voltage" },
+    { "id": "current", "type": "sensor", "label": "Current (A)", "stateJsonPath": "$.current" }
   ]
 }
 ''',
@@ -1140,7 +1267,35 @@ const builtInDriverSources = <String, String>{
       "label": "Power",
       "command": { "cmd": "control", "dps": { "1": "{{value}}" } },
       "stateJsonPath": "$['1']"
-    }
+    },
+    { "id": "power_use", "type": "sensor", "label": "Power use (tenths of a watt, on plugs that measure it)", "stateJsonPath": "$['19']" },
+    { "id": "current", "type": "sensor", "label": "Current (mA)", "stateJsonPath": "$['18']" },
+    { "id": "voltage", "type": "sensor", "label": "Voltage (tenths of a volt)", "stateJsonPath": "$['20']" }
+  ]
+}
+''',
+  'weather.omni_driver.json': r'''
+{
+  "schemaVersion": 1,
+  "id": "weather",
+  "name": "Weather at home (Open-Meteo)",
+  "category": "weather",
+  "icon": "weather",
+  "transport": { "type": "virtual" },
+  "capabilities": [
+    { "id": "temperature", "type": "sensor", "label": "Outside temperature (°C)", "stateJsonPath": "$.temperature" },
+    { "id": "feels_like", "type": "sensor", "label": "Feels like (°C)", "stateJsonPath": "$.feels_like" },
+    { "id": "humidity", "type": "sensor", "label": "Humidity (%)", "stateJsonPath": "$.humidity" },
+    { "id": "wind_speed", "type": "sensor", "label": "Wind (km/h)", "stateJsonPath": "$.wind_speed" },
+    { "id": "uv_index", "type": "sensor", "label": "UV index", "stateJsonPath": "$.uv_index" },
+    { "id": "condition", "type": "sensor", "label": "Sky (clear, cloudy, rain and so on)", "stateJsonPath": "$.condition" },
+    { "id": "weather_code", "type": "sensor", "label": "Weather code (WMO)", "stateJsonPath": "$.weather_code" },
+    { "id": "rain_expected", "type": "sensor", "label": "Rain expected in the next hour", "stateJsonPath": "$.rain_expected" },
+    { "id": "rain_next_hour", "type": "sensor", "label": "Rain in the next hour (mm)", "stateJsonPath": "$.rain_next_hour" },
+    { "id": "rain_chance_next_hour", "type": "sensor", "label": "Chance of rain in the next hour (%)", "stateJsonPath": "$.rain_chance_next_hour" },
+    { "id": "high_today", "type": "sensor", "label": "Today's high (°C)", "stateJsonPath": "$.high_today" },
+    { "id": "low_today", "type": "sensor", "label": "Today's low (°C)", "stateJsonPath": "$.low_today" },
+    { "id": "updated_at", "type": "sensor", "label": "Last updated", "stateJsonPath": "$.updated_at" }
   ]
 }
 ''',

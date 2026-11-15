@@ -198,7 +198,10 @@ class DeviceService {
         );
         var polled = _extractObject(reply.json, poll['jsonPath'] as String?);
         // `also` lists more reads whose objects merge into the first, for
-        // a device that spreads its state over several requests.
+        // a device that spreads its state over several requests. Its
+        // `keys` keep only those keys, so a second read cannot overwrite
+        // a key of the first that means something else (a Shelly meter's
+        // overpower watts against its relay's overpower flag).
         for (final extra in (poll['also'] as List?) ?? const []) {
           final (moved, more) = await _sendHealing(
             current,
@@ -208,7 +211,14 @@ class DeviceService {
             allowPairing: allowPairing,
           );
           current = moved;
-          final part = _extractObject(more.json, extra['jsonPath'] as String?);
+          var part = _extractObject(more.json, extra['jsonPath'] as String?);
+          if (part != null && extra['keys'] is List) {
+            final keep = {...(extra['keys'] as List).cast<String>()};
+            part = {
+              for (final e in part.entries)
+                if (keep.contains(e.key)) e.key: e.value,
+            };
+          }
           if (part != null) polled = {...?polled, ...part};
         }
         final keys = {

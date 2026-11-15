@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../automations/sun_lighting_page.dart' show RoomFollowSunSwitch;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
@@ -15,10 +18,13 @@ import '../shell/shell.dart';
 import 'empty_home.dart';
 import 'first_run.dart';
 import 'home_data.dart';
+import 'home_helpers.dart';
 import 'quick_sheet.dart';
 import 'run_section.dart';
+import 'suggestion_card.dart';
 import 'tile_look.dart';
 import '../fun/home_today_card.dart';
+import 'energy_card.dart' show SmartHomeCards;
 
 /// The things Home shows as tiles: not the phone, people or places.
 List<DeviceView> tileDevices(List<Json> devices) => [
@@ -105,6 +111,8 @@ class _Overview extends ConsumerWidget {
         null => null,
       },
       if (on != null) '$on on',
+      if (ref.watch(houseModeProvider).value?.name case final mode?)
+        '$mode mode',
       if (active != null) '$active automation${active == 1 ? '' : 's'} active',
     ].whereType<String>().join(' · ');
     final offline = tiles?.where((d) => !d.online).toList() ?? const [];
@@ -141,7 +149,10 @@ class _Overview extends ConsumerWidget {
             if (tiles == null)
               const _Loading()
             else ...[
+              const HomeHelpers(),
               const HomeTodayCard(),
+              const SuggestionCard(),
+              const SmartHomeCards(),
               _StatusChips(tiles: tiles, presence: presence, person: person),
               RunSection(items: runItems(scenes, summaries)),
               ..._favourites(context, ref, tiles, drivers),
@@ -549,6 +560,7 @@ class RoomDevicesPage extends ConsumerWidget {
               onTap: () => openDevice(context, d.id),
               onLongPress: () => showQuickSheet(context, d.id),
             ),
+          RoomFollowSunSwitch(ids: ids),
         ],
       ),
     );

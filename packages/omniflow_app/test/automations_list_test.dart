@@ -167,6 +167,10 @@ void main() {
     engine.answers['automation.list'] = {'ok': true, 'automations': []};
     await pumpPage(tester, engine, const AutomationsScreen());
     expect(find.byKey(const ValueKey('automations-empty')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('automations-empty-type-it')),
+      findsOneWidget,
+    );
     expect(find.text('No automations yet'), findsOneWidget);
   });
 

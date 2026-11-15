@@ -9,6 +9,7 @@ Future<RuleStep?> editStep(
   required List<AutomationSummary> automations,
   TokenSource? tokens,
 }) async => switch (step) {
+  DoStep() when isHouseThing(step.thing) => editHouseStep(context, step),
   DoStep(:final thing) || ToggleStep(:final thing) => switch (words.thing(
     thing,
   )) {
@@ -207,6 +208,7 @@ Future<RuleStep?> actionForm(
               choices: {
                 if (thing.driver == TvCalls.driver)
                   'package': () => tvAppChoices(context, thing.id),
+                if (thing.isPhone) 'package': phoneAppChoices,
               },
             ),
             const SizedBox(height: OmniSpace.md),

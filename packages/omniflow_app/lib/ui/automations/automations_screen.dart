@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'type_it_page.dart' show openTypeIt;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,12 +11,14 @@ import '../../api/rule_calls.dart';
 import '../../state/providers.dart';
 import '../design/automation_look.dart';
 import '../design/design.dart';
+import 'automation_insights.dart' show AutomationConflictChip;
 import 'automation_page.dart';
 import 'automations_state.dart';
 import 'dialogs.dart';
 import 'new_automation.dart';
 import 'review_page.dart';
 import 'scenes.dart' show SceneRow, automationIconFor, openSceneEditor;
+import 'suggestions_page.dart';
 import 'test_run.dart';
 
 enum AutomationFilter { all, rules, links, scenes, off, needsYou }
@@ -109,11 +113,24 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
         message:
             'Make one from a template, like arrive home or bedtime, or link a '
             'button to a light.',
-        action: OmniButton(
-          label: 'New automation',
-          icon: OmniIcons.add,
-          expand: false,
-          onPressed: () => openNewAutomation(context),
+        action: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            OmniButton(
+              label: 'New automation',
+              icon: OmniIcons.add,
+              expand: false,
+              onPressed: () => openNewAutomation(context),
+            ),
+            const SizedBox(height: OmniSpace.sm),
+            OmniButton(
+              key: const ValueKey('automations-empty-type-it'),
+              label: 'Type what you want',
+              kind: OmniButtonKind.ghost,
+              expand: false,
+              onPressed: () => openTypeIt(context),
+            ),
+          ],
         ),
       );
     }
@@ -178,6 +195,8 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
             ),
           ),
           const SizedBox(height: OmniSpace.sm),
+          if (_filter == AutomationFilter.all && !_searching)
+            const AutomationHelpers(),
           if (waiting.length == 1)
             OmniBanner.warning(
               'Claude made "${waiting.single.name}". Review before it can run.',
@@ -509,6 +528,8 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
                 ],
               ),
             ),
+          // Sets a device the other way from another automation.
+          AutomationConflictChip(id: a.id, conflicts: a.conflicts),
           if (a.needsApproval)
             Padding(
               padding: const EdgeInsets.only(top: 6),

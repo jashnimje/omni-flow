@@ -720,6 +720,39 @@ A link's id is `link_` plus the first 12 hex digits of a SHA-256 over the canoni
 
 A `toggle` is refused for a target that is not an on/off toggle, and from a numeric source unless `onValue` says which value counts as on. A `threshold` from an on/off source is refused in favour of a toggle or follow. A `follow` between an on/off end and a numeric end is refused in favour of a threshold. A source key the device does not have is refused with the keys it does have. `link.options {from}` returns the modes a source allows and, for each target, the modes it accepts, which is what the app's link sheet is built from. `omni link list` and `omni link remove` manage links, and agents use the `link_devices` tool. A follow into an integer param (WiZ brightness, the Tasmota dimmer) rounds the mapped value, so the param check never sees a fraction.
 
+### Held triggers, people and aligned times
+
+- **Held for a time.** A state trigger with `for: ms` (`{on, change: {to}, for}`, or `crosses` with `for`) fires only when the state has held for the whole time, and a change back cancels it. After a restart the countdown resumes from the last change in device history. When that is unknown, or the time ran out while the engine was closed, it does not fire, so it never fires twice. "When Lamp has been on for 5 min".
+- **People.** Triggers `{people: first_arrives | last_leaves}` and conditions `{people: all_away | anyone_home}`, read from each person's `home`.
+- **Aligned times.** The interval trigger takes `offset` and `between`, scheduled on the wall clock ("every hour at :05", "every 15 min from 09:00 to 18:00"). The window includes its start and excludes its end, as a `between` condition does.
+- **Engine start.** `{event: engine_started}` fires once, when the hub's timers first start, so one-shot CLI commands never fire it.
+
+### Why it did not run, try as if, conflicts and versions
+
+- **Skips.** When a trigger fires but a condition, the cooldown, the run mode, Ask first, or the automation being off or waiting for approval stops the run, the engine records the reason in words, with the failing part and the value it saw. The last 20 per automation are kept in memory. `automation.skips {id}` (read).
+- **Try as if.** Each trigger row starts `automation.dry_run` from that trigger with an event made up for it, and opens the test run.
+- **Conflicts.** `automation.conflicts {id?}` finds enabled automations that set the same capability to different values on overlapping triggers. `automation.list` rows carry `conflicts`.
+- **Versions.** Every save through `automation.save`, `scene.save`, `flow.save` and `link.create` keeps the version it replaced, the last 10 per automation with the time and who saved it, in the `automation_versions` table. `automation.versions {id}` is read level and `automation.restore {id, version}` user-only. A restored version an agent wrote stays untrusted.
+
+### Suggestions and typed rules
+
+- **Habits.** `suggest.list` (read) looks at 28 days of device history for manual changes: `by` is `user`, or empty on a key a command can set. A time habit is the same device set to the same value within 15 minutes either side, on at least 4 days in at least 2 weeks, and becomes a weekday rule when nine in ten of those days are weekdays. An after habit is a change within 5 minutes of the same trigger, at least 5 times and at least half of the times that trigger fired. Each suggestion carries its words, a confidence, a ready rule spec and the sentence. A suggestion an enabled automation already covers is left out. `suggest.dismiss {id}` (setup) is kept in `suggestions.json`.
+- **Type what you want.** `rule.parse {text}` (read, never saves) reads a sentence with an offline grammar over the home's names, allowing a plural, a letter or two off, or part of a longer name, and returns `{spec, sentence, unknown, alternatives?, notes?, problem?}`. The spec goes through the same normalising as a saved rule. It sits behind a `RuleParser` interface, so an AI parser can return the same shape. "After sunset" next to another trigger becomes a window from today's sunset to sunrise, with a note that it does not move with the seasons.
+
+## Home helpers
+
+Mode and timers are built-in things, `house_mode` and `timers`, so rules name them like any thing and no new rule kinds were needed. A real device with the same id wins.
+
+- **House modes.** Home, Away, Night and Vacation, plus names the person adds. `home.mode` and `home.mode.set {mode?, modes?, followPresence?}`, kept in `home.json` and the backup, raising `home.modeChanged`. "Mode changes to Night" is `{on: house_mode.changed, event: true, match: {mode: night}}`. Following presence is off by default.
+- **Timers.** `timer.list`, `timer.start {name, ms}`, `timer.cancel`, `timer.pause` and `timer.resume`. The end time is kept in `timers.json`, so a timer outlives a restart, and one that ended while the engine was closed ends when it opens. "When timer Pasta ends" is `{on: timers.ended, event: true, match: {timer: pasta}}`.
+- **A room as one light.** `room.invoke {room, capability, params, only?: lights}` sends to every device in the room with that capability and never sends a high-risk one. `room.state {room}` gives the lights, how many are on and the average brightness.
+- **Scene capture.** `scene.capture {name, devices | room}` keeps power, toggles, levels, white and colour. A device that is off keeps power only.
+- **Alerts.** A device offline for 10 minutes past its online window, once and again when it is back, and a battery under 15%, reset at 20%. Both go out as notifications. `alerts.get` and `alerts.set`.
+- **Weather.** The `weather` driver reads Open-Meteo at the home location rounded to two decimals, hourly while the hub runs, through the web request guard. Its state is temperature, feels like, humidity, wind, UV, condition words, rain in the next hour and its chance, the day's high and low and `rain_expected`. `weather.add` and `weather.refresh`.
+- **Lights that follow the sun.** `sunlight.set`, `sunlight.get` and `sunlight.apply`, per light or room, with minimum and maximum white and brightness. The curve follows the sun's height at home. Every 5 minutes it updates the lights that are on, and a change the engine did not send pauses that light for an hour.
+- **Away lighting.** `awaylight.set`, `awaylight.get` and `awaylight.preview {date}`. It replays last week's same-weekday on and off changes of the chosen lights, shifted by up to 20 minutes with a shift fixed per date and light, while everyone is away or the mode is Vacation, and stops when someone is home.
+- **Energy.** Shelly Plus reports `apower` and `aenergy.total`, Shelly Gen1 its first meter's `power` and `total`, and Tuya plugs DP 19, 18 and 20. `energy.summary {days?}` gives today's and the week's kWh per plug and in total, from the plug's own counter when it has one, and `energy.price` and `energy.price.set` the price.
+
 ## Places and presence
 
 A zone is a `place` thing. Stored zone rows are moved into place things when the engine opens (a zone whose id a device already has becomes `<id>_place` and answers to the zone id, and `zone.save` with a new zone id another thing has does the same). `zone.save`, `zone.list` and `zone.remove` stay as aliases that work on places, and `zone.remove` disables the flows that name the place, as `device.remove` does. The phone's inputs place the household person (the one a phone names as its `person`, or the only person) in places: each place reports `inside` and `people`, and the person reports `home` and `place`, the place reached last. `$Zone_<id>` and `zone.changed` stay. A place starts outside when the engine opens, without a state change. Whenever `home` changes the person also gets `homeSource` (`wifi` from `phone.wifi`, `ble` from `phone.ble` or a beacon going quiet, `manual`) and `homeSince`, so the app can say "since 19:01, seen by Wi-Fi". `presence.set {home, person?}` sets it by hand with `homeSource: manual`, and the next reading decides again. `hub` is a declared source that nothing produces yet. MCP has no tool for it.
@@ -752,6 +785,14 @@ Beacons are matched by advertised name, service UUID or manufacturer data, never
 Combining inputs: a zone is entered when its BLE input says entered, or, when the zone has no BLE input, when its Wi-Fi input matches. A Wi-Fi or geofence input set as `required` must also hold. This rule covers desk-level zones (BLE) and home-level zones (Wi-Fi) without a weighting model. A weighted vote was in the spec and is dropped until a real case needs it.
 
 Saving or removing one zone leaves the others alone: a zone whose spec did not change keeps its inside state, its BLE filter and the last Wi-Fi reading, so saving an unrelated zone does not fire a spurious exit or entry. Renaming a place changes nothing about where anyone is. A new or edited place is checked against the last Wi-Fi reading at once. Where the edit moves it in or out, the place's state, the household person's state and `$Zone_<id>` are written quietly, with no state change and no `zone.changed`, because the person did not move, so editing a place never fires an exit or entry trigger. A place whose BLE or Wi-Fi input was edited starts outside for its beacon until the beacon is heard again.
+
+### Phone actions and more phone triggers
+
+A step on a phone thing never goes over the network. The engine emits `phone.action {phone, requestId, action, params}` and waits 10 s for `phone.actionDone`. The phone's service runs only requests that name its own id, which works the same through a hub. The service sends `phone.ready` every 30 s, and a phone not heard from in 75 s answers `unavailable`. The reply to `phone.ready` lists the readings enabled rules use, so the phone turns on only those sensors. Phone actions are user-only for agents.
+
+- **Actions:** speak, vibrate, torch, a short sound, ringer and Do Not Disturb (with notification policy access), media volume and keys, open an app or a link, set an alarm or a timer, and a full-screen message. Android does not let an app open things from the background, so opening an app, a link, an alarm or a timer works at once only while OmniFlow is on screen and otherwise becomes a notification to tap.
+- **Triggers:** before the next alarm by 1 to 720 minutes (timed by the engine from the alarm the phone reports, once per alarm), a call ringing, answered or ending (no number is read), media starting or stopping, a calendar event starting or ending with given words (only the matched title leaves the phone), shake, face down, wired headphones, the phone starting up, and an app installed or updated. Calls and the calendar ask for their permission when first picked.
+- **Shake to run a scene:** the phone's `shake_scene` setting, off by default.
 
 ### NFC tags
 
@@ -972,6 +1013,11 @@ Planned, by milestone:
 
 ## Open items
 
+- Skips are kept in memory, so they are lost on a restart, and an automation that is off records skips only for state, event and people triggers.
+- Backups carry neither automation versions nor `stats.json`.
+- Tuya plugs keep DP 19 in tenths of a watt in their state. Energy figures convert it, but the device page shows the raw number.
+- Timers count down on Home only, not in a notification.
+- A sun condition for rules, so "after sunset" next to another trigger moves with the seasons.
 - Accounts and sync: deferred, with the choices recorded above.
 - Tuya v3.4 and v3.5 are proven against tinytuya's frames and a loopback device, not a real bulb or plug.
 - Google Cast is not built. It needs a TLS client on port 8009 that accepts the device's self-signed certificate, 4-byte length-prefixed protobuf `CastMessage` frames (small enough to encode by hand, no protobuf dependency), and JSON payloads on the connection, heartbeat, receiver and media namespaces, with a ping every 5 seconds and a session per app. mDNS finds it as `_googlecast._tcp`. That is a channel of its own, about the size of the TV WebSocket one, and a candidate for a later round.

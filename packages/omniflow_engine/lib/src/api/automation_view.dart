@@ -4,6 +4,9 @@ import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../storage/database.dart';
 import '../devices/device_service.dart' show stateKeyOf;
+import 'house_things.dart';
+import 'phone_words.dart';
+import 'rules_core_words.dart';
 
 /// One piece of an automation's sentence: `when`, `if` and `then` are the
 /// coloured chips, `text` the words between them.
@@ -91,6 +94,7 @@ class SentenceContext {
   bool _isMe(String thing) => thing == person;
 
   String trigger(Map<String, Object?> t) {
+    if (rulesCoreTriggerWords(this, t) case final words?) return words;
     if (t['on'] is String) return 'When ${_on(t)}';
     if (t['time'] != null) {
       final days = t['days'];
@@ -106,8 +110,13 @@ class SentenceContext {
 
   /// What an `on` trigger or a waitFor waits for, after "when".
   String _on(Map<String, Object?> t) {
+    if (houseTriggerWords(t) case final words?) return words;
     final (thing, key) = _split(t['on'] as String);
     if (t['event'] == true) {
+      if (drivers[thing]?.id == 'phone') {
+        final words = phoneTriggerWords(name(thing), key, t['match']);
+        if (words != null) return words;
+      }
       if (key == 'scanned') return '${name(thing)} is scanned';
       return '${name(thing)} ${_key(thing, key)}';
     }
@@ -138,6 +147,8 @@ class SentenceContext {
   };
 
   String condition(Map<String, Object?> c) {
+    if (houseConditionWords(c) case final words?) return words;
+    if (rulesCoreConditionWords(c) case final words?) return words;
     if (c['between'] case [final start, final end]) {
       return 'between $start and $end';
     }
@@ -181,6 +192,9 @@ class SentenceContext {
     final (thing, key) = _split(ref);
     final capability = _capability(thing, key);
     final who = name(thing);
+    if (drivers[thing]?.id == 'phone') {
+      if (phoneStepWords(who, key, params) case final words?) return words;
+    }
     if (params == null || params.isEmpty) return '$who ${_key(thing, key)}';
     if (params.length == 1 && params.containsKey('value')) {
       final v = params['value'];
@@ -196,6 +210,7 @@ class SentenceContext {
   }
 
   String step(Map<String, Object?> s) {
+    if (houseStepWords(s) case final words?) return words;
     if (s['do'] is String) {
       return action(s['do'] as String, s['params'] as Map?);
     }

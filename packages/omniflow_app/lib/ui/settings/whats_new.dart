@@ -8,11 +8,29 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.5.0';
+const appVersion = '0.6.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.6.0',
+    date: '12 Nov 2026',
+    notes: [
+      'Rules that wait: "when the door has been open for 5 minutes", the '
+          'first person home, the last person out, and "every hour at :05".',
+      'Your phone can act: speak, vibrate, torch, ringer, media keys, open '
+          'an app, set an alarm or timer. And react: before your alarm, calls, '
+          'music, your calendar, a shake.',
+      'House modes, timers, a room as one light, and "Save how things are '
+          'now" as a scene.',
+      'Weather at home, lights that follow the sun, away lighting, and '
+          'energy use for plugs that measure it.',
+      'Type what you want, and suggestions from your habits.',
+      'Why did it not run, Try as if, conflict warnings and History with '
+          'Restore on every automation.',
+    ],
+  ),
   (
     version: '0.5.0',
     date: '12 Nov 2026',

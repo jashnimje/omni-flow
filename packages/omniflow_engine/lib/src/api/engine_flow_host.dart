@@ -1,4 +1,5 @@
 import 'engine_core.dart';
+import 'rules_host.dart';
 import '../dag/flow_engine.dart';
 import '../dag/web_request.dart';
 import '../storage/database.dart';
@@ -9,10 +10,13 @@ import '../storage/database.dart';
 /// A flow runs unattended and may be deployed by an agent, so it never
 /// starts a pairing: an unpaired TV fails the node with needs_user instead
 /// of showing a prompt on every run.
-class EngineFlowHost implements FlowHost {
+class EngineFlowHost with EngineRulesHost implements FlowHost {
   EngineFlowHost(this._core);
 
   final EngineCore _core;
+
+  @override
+  EngineCore get rulesCore => _core;
 
   @override
   Future<Map<String, Object?>?> invokeDevice(
@@ -20,13 +24,20 @@ class EngineFlowHost implements FlowHost {
     String capabilityId,
     Map<String, Object?> params, {
     String? flowId,
-  }) async => (await _core.devices.invoke(
-    deviceId,
-    capabilityId,
-    params,
-    allowPairing: false,
-    by: flowId,
-  )).reply.json;
+  }) async {
+    final builtIn = _core.builtInThings[deviceId];
+    if (builtIn != null &&
+        await DriftDeviceStore(_core.db).get(deviceId) == null) {
+      return builtIn(capabilityId, params, by: flowId);
+    }
+    return (await _core.devices.invoke(
+      deviceId,
+      capabilityId,
+      params,
+      allowPairing: false,
+      by: flowId,
+    )).reply.json;
+  }
 
   @override
   Future<Map<String, Object?>?> toggleDevice(

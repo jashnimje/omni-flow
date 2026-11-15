@@ -22,6 +22,9 @@
       "label": "Power",
       "command": { "cmd": "control", "dps": { "1": "{{value}}" } },
       "stateJsonPath": "$['1']"
-    }
+    },
+    { "id": "power_use", "type": "sensor", "label": "Power use (tenths of a watt, on plugs that measure it)", "stateJsonPath": "$['19']" },
+    { "id": "current", "type": "sensor", "label": "Current (mA)", "stateJsonPath": "$['18']" },
+    { "id": "voltage", "type": "sensor", "label": "Voltage (tenths of a volt)", "stateJsonPath": "$['20']" }
   ]
 }

@@ -23,6 +23,8 @@ export 'src/cli/hub_cli.dart';
 export 'src/cli/omni_command_runner.dart';
 export 'src/codecs/crc32.dart';
 export 'src/codecs/tuya_codec.dart';
+export 'src/dag/aligned_times.dart' show alignedWords, nextAlignedTime;
+export 'src/dag/as_if.dart';
 export 'src/dag/asks.dart';
 export 'src/dag/cards.dart';
 export 'src/dag/conditions.dart';

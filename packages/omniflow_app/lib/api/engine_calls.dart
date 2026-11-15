@@ -574,6 +574,7 @@ class AutomationSummary {
     this.notifyOnRun = false,
     this.manualOnly = false,
     this.revision,
+    this.conflicts = const [],
   });
 
   factory AutomationSummary.fromJson(Json json) => AutomationSummary(
@@ -600,6 +601,7 @@ class AutomationSummary {
     notifyOnRun: json['notifyOnRun'] == true,
     manualOnly: json['manualOnly'] == true,
     revision: json['revision'] as String?,
+    conflicts: [for (final c in (json['conflicts'] as List? ?? const [])) '$c'],
   );
 
   final String id;
@@ -639,6 +641,10 @@ class AutomationSummary {
   /// Its only trigger is manual, so it runs by hand (a Home tile).
   final bool manualOnly;
   final String? revision;
+
+  /// Why it clashes with other automations: each sets a device the other
+  /// way on the same trigger. Empty when it clashes with none.
+  final List<String> conflicts;
 
   bool get isLink => source == 'link';
   bool get isScene => source == 'scene';

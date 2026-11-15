@@ -8,6 +8,7 @@ import '../../state/providers.dart';
 import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automations_state.dart';
+import 'capture_scene.dart';
 import 'pickers.dart';
 import 'review_page.dart';
 import 'rule_words.dart';
@@ -77,6 +78,7 @@ class ScenesPage extends ConsumerWidget {
     final async = ref.watch(automationsProvider);
     return OmniPage(
       title: 'Scenes',
+      actions: const [CaptureSceneAction()],
       body: switch (async) {
         AsyncData(:final value) => _list(context, ref, [
           for (final a in value)

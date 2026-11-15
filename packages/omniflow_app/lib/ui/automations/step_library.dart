@@ -232,6 +232,24 @@ Future<RuleStep?> pickStep(
       automations.isEmpty ? null : (c) => runForm(c, automations),
       subtitle: automations.isEmpty ? 'Make another automation first' : null,
     ),
+    'houseMode': form(
+      r,
+      'pick-house-mode',
+      'Set the house mode',
+      OmniIcons.home,
+      modeStepForm,
+      subtitle: 'Home, Away, Night, Vacation or your own',
+      keywords: 'mode away night vacation',
+    ),
+    'timer': form(
+      w,
+      'pick-timer',
+      'A timer',
+      OmniIcons.wait,
+      timerStepForm,
+      subtitle: 'start one with a name, or pause, resume or cancel it',
+      keywords: 'timer countdown',
+    ),
   };
   final choices = [
     for (final t in devices)

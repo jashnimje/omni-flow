@@ -8,7 +8,15 @@ class EvalContext {
     this.flowVars = const {},
     this.msg = const {},
     this.deviceStates = const {},
+    this.people,
   });
+
+  /// The person things, for a `people` rule. Null reads every state that
+  /// looks like a person's (`home` true or false, and a `place`).
+  final Set<String>? people;
+
+  /// Whether any person is home.
+  bool get anyoneHome => peopleHome(deviceStates, people).isNotEmpty;
 
   /// Local wall-clock time.
   final DateTime now;
@@ -84,9 +92,28 @@ bool evaluateRule(Map<String, Object?> rule, EvalContext ctx) {
         rule['op'] as String,
         ctx.value(rule['right']),
       );
+    case 'people':
+      return switch (rule['is']) {
+        'anyone_home' => ctx.anyoneHome,
+        'all_away' => !ctx.anyoneHome,
+        _ => throw ArgumentError('unknown people rule ${rule['is']}'),
+      };
   }
   throw ArgumentError('unknown rule type ${rule['type']}');
 }
+
+/// The people [states] say are home: of [people] when given, else of every
+/// state shaped like a person's.
+Set<String> peopleHome(
+  Map<String, Map<String, Object?>> states,
+  Set<String>? people,
+) => {
+  for (final e in states.entries)
+    if ((people?.contains(e.key) ??
+            (e.value['home'] is bool && e.value.containsKey('place'))) &&
+        e.value['home'] == true)
+      e.key,
+};
 
 const _weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 

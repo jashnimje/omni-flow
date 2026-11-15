@@ -1,10 +1,15 @@
 import 'dart:async';
 
+import 'aligned_times.dart';
 import 'asks.dart';
 import 'canonical.dart';
 import 'conditions.dart';
 import 'executor.dart';
 import 'flow.dart';
+import 'hold_triggers.dart';
+import 'node_types.dart';
+import 'people_triggers.dart';
+import 'skips.dart';
 import 'sun.dart';
 import 'web_request.dart';
 
@@ -48,7 +53,7 @@ abstract interface class FlowHost {
 
 /// Runs enabled flows: turns engine events and timers into trigger firings,
 /// and gives each FlowRunner its effects.
-class FlowEngine implements FlowEffects {
+class FlowEngine implements FlowEffects, PeopleSource {
   FlowEngine(
     this._host, {
     this._clock = const SystemFlowClock(),
@@ -96,6 +101,30 @@ class FlowEngine implements FlowEffects {
 
   Iterable<String> get loadedFlows => _runners.keys;
 
+  /// The triggers that fired without a run, per automation.
+  final skips = SkipLog();
+
+  /// Held state triggers counting down, by `flow/node`.
+  final _holds = <String, Timer>{};
+
+  /// The person things, from the host and from the person states seen.
+  Set<String>? _people;
+
+  @override
+  Set<String>? get people => _people;
+
+  /// Stored automations that do not run (off, waiting for approval), whose
+  /// triggers only record a skip. Empty on a host that does not say.
+  final _idle = <String, (FlowSpec, String)>{};
+
+  /// Whether `engine_started` triggers have fired: once per engine.
+  var _engineStarted = false;
+
+  RulesHost? get _rulesHost {
+    final host = _host;
+    return host is RulesHost ? host as RulesHost : null;
+  }
+
   /// Makes [flows] the running set. Disabled flows are not loaded. A flow
   /// whose spec is unchanged keeps its runner, so its in-flight runs, gate
   /// and cooldown state and timer countdowns carry on. Returns the flows
@@ -111,6 +140,7 @@ class FlowEngine implements FlowEffects {
       }
       _runners.remove(id)!.cancelAll();
       _cancelTimers(id);
+      _cancelHolds(id);
     }
     final failures = <String, String>{};
     for (final f in wanted.values) {
@@ -133,7 +163,28 @@ class FlowEngine implements FlowEffects {
         failures[f.id] = e is ArgumentError ? '${e.message}' : '$e';
       }
     }
+    _track(_refreshFromHost());
     return failures;
+  }
+
+  /// Reads the people and the automations that do not run from a host
+  /// that tells them.
+  Future<void> _refreshFromHost() async {
+    final rules = _rulesHost;
+    if (rules == null) return;
+    try {
+      _people = await rules.people();
+      final idle = await rules.idleFlows();
+      _idle
+        ..clear()
+        ..addAll({
+          for (final (f, why) in idle)
+            if (!_runners.containsKey(f.id)) f.id: (f, why),
+        });
+    } catch (_) {
+      // The engine is closing, or a stored row is damaged: the people and
+      // the skips of idle automations wait for the next load.
+    }
   }
 
   HomeLocation? _home;
@@ -151,12 +202,20 @@ class FlowEngine implements FlowEffects {
     }
   }
 
-  /// Starts time_of_day, sun and interval triggers (the hub calls this).
+  /// Starts time_of_day, sun and interval triggers (the hub calls this),
+  /// resumes held state triggers, and the first time, fires the
+  /// `engine_started` triggers: once the engine runs automations on its
+  /// own, not for each one-shot CLI command that opens it.
   void startTimers() {
     if (_timersOn) return;
     _timersOn = true;
     for (final r in _runners.values) {
       _startTimers(r);
+    }
+    if (_engineStarted) return;
+    _engineStarted = true;
+    for (final (r, n) in _triggers('engine_started').toList()) {
+      _fire(r, n, {});
     }
   }
 
@@ -355,36 +414,27 @@ class FlowEngine implements FlowEffects {
           final c = n.config;
           if (c['thing'] != id || c['event'] == true) continue;
           final key = c['key'] as String?;
-          if (key == null) {
-            // Heartbeats and polls save the device with nothing changed.
-            if (canonicalJson(before) == canonicalJson(state)) continue;
-          } else if (!stateTriggerFires(c, before[key], state[key])) {
+          final msg = _stateMsg(id, key, before, state);
+          if (key != null && holdOf(c) != null) {
+            _onHeld(r, n, state[key], before[key], msg);
             continue;
           }
-          _fire(r, n, {
-            'payload': state,
-            'thing': id,
-            'deviceId': id,
-            'device': id,
-            if (key != null) ...{
-              'key': key,
-              'value': state[key],
-              'previous': before[key],
-            },
-          });
+          if (_stateFires(c, before, state)) _fire(r, n, msg);
         }
+        for (final (f, why, n) in _idleTriggers('on')) {
+          final c = n.config;
+          if (c['thing'] != id || c['event'] == true || holdOf(c) != null) {
+            continue;
+          }
+          if (_stateFires(c, before, state)) _skipIdle(f, n, why);
+        }
+        if (device['driver'] == personDriver) _onPerson(id, before, state);
       case 'thing.event':
         final payload = e['payload'] is Map
             ? Map<String, Object?>.from(e['payload'] as Map)
             : const <String, Object?>{};
         for (final (r, n) in _triggers('on')) {
-          final c = n.config;
-          if (c['event'] != true ||
-              c['thing'] != e['thing'] ||
-              c['key'] != e['key'] ||
-              !payloadMatches(c['match'], payload)) {
-            continue;
-          }
+          if (!_eventFires(n.config, e, payload)) continue;
           _fire(r, n, {
             'payload': payload,
             'thing': e['thing'],
@@ -393,10 +443,229 @@ class FlowEngine implements FlowEffects {
             'key': e['key'],
           });
         }
+        for (final (f, why, n) in _idleTriggers('on')) {
+          if (_eventFires(n.config, e, payload)) _skipIdle(f, n, why);
+        }
     }
   }
 
+  static Map<String, Object?> _stateMsg(
+    String id,
+    String? key,
+    Map<String, Object?> before,
+    Map<String, Object?> state,
+  ) => {
+    'payload': state,
+    'thing': id,
+    'deviceId': id,
+    'device': id,
+    if (key != null) ...{
+      'key': key,
+      'value': state[key],
+      'previous': before[key],
+    },
+  };
+
+  /// Whether the state `on` trigger [c] fires for [before] becoming
+  /// [state]: its key changed as it asks, or with no key, anything changed.
+  static bool _stateFires(
+    Map<String, Object?> c,
+    Map<String, Object?> before,
+    Map<String, Object?> state,
+  ) {
+    final key = c['key'] as String?;
+    // Heartbeats and polls save the device with nothing changed.
+    if (key == null) return canonicalJson(before) != canonicalJson(state);
+    return stateTriggerFires(c, before[key], state[key]);
+  }
+
+  static bool _eventFires(
+    Map<String, Object?> c,
+    Map<String, Object?> e,
+    Map<String, Object?> payload,
+  ) =>
+      c['event'] == true &&
+      c['thing'] == e['thing'] &&
+      c['key'] == e['key'] &&
+      payloadMatches(c['match'], payload);
+
+  // Held state triggers -------------------------------------------------------
+
+  static String _holdKey(FlowRunner r, NodeSpec n) => '${r.flow.id}/${n.id}';
+
+  /// A held trigger [n] seeing its key go from [previous] to [value]: the
+  /// state it waits for starts the countdown, anything else stops it.
+  void _onHeld(
+    FlowRunner r,
+    NodeSpec n,
+    Object? value,
+    Object? previous,
+    Map<String, Object?> msg,
+  ) {
+    final key = _holdKey(r, n);
+    if (holdsNow(n.config, value) != true) {
+      _holds.remove(key)?.cancel();
+      return;
+    }
+    // Still holding (a heartbeat), or it already held before this change.
+    if (_holds.containsKey(key) ||
+        !stateTriggerFires(n.config, previous, value)) {
+      return;
+    }
+    _startHold(r, n, holdOf(n.config)!, msg);
+  }
+
+  /// Fires [n] after [wait] if its state still holds then.
+  void _startHold(
+    FlowRunner r,
+    NodeSpec n,
+    Duration wait,
+    Map<String, Object?> msg,
+  ) {
+    final key = _holdKey(r, n);
+    _holds.remove(key)?.cancel();
+    _holds[key] = Timer(wait, () {
+      _holds.remove(key);
+      if (!identical(_runners[r.flow.id], r)) return;
+      final c = n.config;
+      final now = deviceStates[c['thing']]?[c['key']];
+      if (holdsNow(c, now) != true) return;
+      _fire(r, n, {...msg, 'value': now, 'heldMs': holdOf(c)!.inMilliseconds});
+    });
+  }
+
+  /// After a restart or a reload, carries on each held trigger of [r]
+  /// whose state holds now: the countdown goes on from when the state
+  /// last changed, in the device history. When that is not known, or its
+  /// time already passed while the engine was down (it ran then, or the
+  /// moment is gone), it waits for the next change, so it never runs twice.
+  void _resumeHolds(FlowRunner r) {
+    final rules = _rulesHost;
+    if (rules == null) return;
+    for (final n in r.flow.nodes) {
+      final c = n.config;
+      final hold = holdOf(c);
+      final thing = c['thing'];
+      final key = c['key'];
+      if (n.type != 'on' ||
+          hold == null ||
+          thing is! String ||
+          key is! String) {
+        continue;
+      }
+      if (_holds.containsKey(_holdKey(r, n)) ||
+          holdsNow(c, deviceStates[thing]?[key]) != true) {
+        continue;
+      }
+      _track(() async {
+        final DateTime? since;
+        try {
+          since = heldSince(c, await rules.stateHistory(thing, key));
+        } catch (_) {
+          return;
+        }
+        if (since == null ||
+            _holds.containsKey(_holdKey(r, n)) ||
+            !identical(_runners[r.flow.id], r)) {
+          return;
+        }
+        final left = hold - _clock.now().difference(since);
+        if (left <= Duration.zero) return;
+        final state = deviceStates[thing] ?? const {};
+        _startHold(r, n, left, {
+          ..._stateMsg(thing, key, const {}, state),
+          'previous': null,
+          'resumed': true,
+        });
+      }());
+    }
+  }
+
+  void _cancelHolds([String? flowId]) {
+    for (final key in _holds.keys.toList()) {
+      if (flowId == null || key.startsWith('$flowId/')) {
+        _holds.remove(key)!.cancel();
+      }
+    }
+  }
+
+  // People triggers -----------------------------------------------------------
+
+  /// A person's state changed: the first of the household to get home or
+  /// the last to leave fires the people triggers that wait for it.
+  void _onPerson(
+    String id,
+    Map<String, Object?> before,
+    Map<String, Object?> state,
+  ) {
+    _people?.add(id);
+    final kind = peopleTriggerFor(
+      before['home'],
+      state['home'],
+      othersHome(deviceStates, _people, id),
+    );
+    if (kind == null) return;
+    for (final (r, n) in _triggers('people_change')) {
+      if (n.config['when'] == kind) {
+        _fire(r, n, {'person': id, 'thing': id, 'payload': state});
+      }
+    }
+    for (final (f, why, n) in _idleTriggers('people_change')) {
+      if (n.config['when'] == kind) _skipIdle(f, n, why);
+    }
+  }
+
+  // Skips ---------------------------------------------------------------------
+
+  Iterable<(FlowSpec, String, NodeSpec)> _idleTriggers(String type) sync* {
+    for (final (f, why) in _idle.values) {
+      for (final n in f.nodes) {
+        if (n.type == type) yield (f, why, n);
+      }
+    }
+  }
+
+  void _skipIdle(FlowSpec f, NodeSpec n, String why) => skips.add(
+    SkipEntry(
+      at: _clock.now(),
+      flowId: f.id,
+      trigger: n.id,
+      triggerLabel: n.label,
+      kind: why,
+    ),
+  );
+
+  /// Keeps a skip for a dropped run, or a run a condition stopped before it
+  /// did anything.
+  void _recordSkip(RunTrace trace) {
+    if (trace.dryRun) return;
+    final String kind;
+    if (trace.outcome == RunOutcome.dropped) {
+      kind = SkipKind.ofDropReason(trace.reason);
+    } else if (trace.outcome == RunOutcome.completed &&
+        trace.stoppedBy != null &&
+        !trace.nodes.any(
+          (n) => builtInNodeTypes[n.type]?.category == NodeCategory.action,
+        )) {
+      kind = SkipKind.condition;
+    } else {
+      return;
+    }
+    final flow = _runners[trace.flowId]?.flow;
+    skips.add(
+      SkipEntry(
+        at: trace.startedAt,
+        flowId: trace.flowId,
+        trigger: trace.trigger,
+        triggerLabel: flow?.node(trace.trigger)?.label,
+        kind: kind,
+        stop: kind == SkipKind.condition ? trace.stoppedBy : null,
+      ),
+    );
+  }
+
   void _onTrace(RunTrace trace) {
+    _recordSkip(trace);
     // A busy trigger on a single-mode flow would otherwise push real runs
     // out of the bounded log.
     if (trace.outcome == RunOutcome.dropped) {
@@ -427,7 +696,10 @@ class FlowEngine implements FlowEffects {
   void _startTimers(FlowRunner r) {
     _cancelTimers(r.flow.id);
     for (final n in r.flow.nodes) {
-      if (n.type == 'interval') {
+      if (n.type == 'interval' &&
+          (n.config['offsetSeconds'] != null || n.config['between'] != null)) {
+        _scheduleAligned(r, n);
+      } else if (n.type == 'interval') {
         final every = Duration(seconds: n.config['seconds'] as int);
         _timers
             .putIfAbsent(r.flow.id, () => [])
@@ -436,6 +708,33 @@ class FlowEngine implements FlowEffects {
         _scheduleDaily(r, n);
       }
     }
+    _resumeHolds(r);
+  }
+
+  /// An interval lined up on the clock ("every hour at :05"): each pass is
+  /// timed to the next wall-clock time, so it does not drift.
+  void _scheduleAligned(FlowRunner r, NodeSpec n) {
+    final DateTime next;
+    try {
+      next = nextAlignedTime(
+        _clock.now(),
+        seconds: n.config['seconds'] as int,
+        offsetSeconds: n.config['offsetSeconds'] as int? ?? 0,
+        between: (n.config['between'] as List?)?.cast<String>(),
+      );
+    } on StateError {
+      return;
+    }
+    final timer = Timer(next.difference(_clock.now()), () {
+      // As for daily times: a wall clock put back sets it off early.
+      if (_clock.now().isBefore(next)) {
+        _scheduleAligned(r, n);
+        return;
+      }
+      _fire(r, n, {'scheduled': next.toIso8601String()});
+      _scheduleAligned(r, n);
+    });
+    _timers.putIfAbsent(r.flow.id, () => []).add(timer);
   }
 
   /// When the daily trigger [n] fires next after [now], or with [previous]
@@ -553,6 +852,7 @@ class FlowEngine implements FlowEffects {
 
   Future<void> close() async {
     _cancelTimers();
+    _cancelHolds();
     _timersOn = false;
     for (final r in _runners.values) {
       r.cancelAll();

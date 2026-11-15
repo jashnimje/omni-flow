@@ -9,6 +9,9 @@ import 'rule_shorthand.dart';
 import 'web_request.dart'
     show webAddressProblem, webHeaderProblems, webMethods, webShownAddress;
 import 'sun.dart';
+import 'aligned_times.dart' show alignedProblem, alignedWords;
+import 'hold_triggers.dart' show holdLimitMs, holdsNow, holdWords;
+import 'people_triggers.dart';
 
 export 'rule_shorthand.dart' show RuleContext;
 
@@ -96,8 +99,22 @@ abstract final class RuleKeys {
   /// The most items a forEach goes through, and how many when it says not.
   static const forEachMax = 1000;
   static const forEachDefault = 100;
-  static const triggers = ['on', 'time', 'sun', 'interval', 'manual'];
+  static const triggers = [
+    'on',
+    'time',
+    'sun',
+    'interval',
+    'manual',
+    // The household: {people: first_arrives | last_leaves}.
+    'people',
+    // The engine: {event: engine_started}. An on trigger's `event: true`
+    // is its mode, not this.
+    'event',
+  ];
   static const onModes = ['event', 'change', 'crosses'];
+
+  /// The engine events a `{event}` trigger takes.
+  static const engineEvents = ['engine_started'];
   static const conditions = [
     'state',
     'var',
@@ -107,6 +124,8 @@ abstract final class RuleKeys {
     'not',
     'anyOf',
     'allOf',
+    // {people: all_away | anyone_home}.
+    'people',
   ];
   static const steps = [
     'do',
@@ -418,11 +437,36 @@ class _Normalizer {
       item,
       path,
       (s) => expandTrigger(s, context),
-      RuleKeys.triggers,
+      item is Map && item.containsKey('on')
+          ? [
+              for (final k in RuleKeys.triggers)
+                if (k != 'event') k,
+            ]
+          : RuleKeys.triggers,
       'trigger',
     );
     if (map == null) return null;
-    if (map.containsKey('on')) return on(map, path, const {}, 'an on trigger');
+    if (map.containsKey('on')) return heldOn(map, path);
+    if (map.containsKey('people')) {
+      _only(map, path, {'people'}, 'a people trigger');
+      if (!peopleTriggerKinds.contains(map['people'])) {
+        issues.add(
+          '$path.people',
+          'must be one of ${peopleTriggerKinds.join(', ')}',
+        );
+      }
+      return {'people': map['people']};
+    }
+    if (map.containsKey('event')) {
+      _only(map, path, {'event'}, 'an engine trigger');
+      if (!RuleKeys.engineEvents.contains(map['event'])) {
+        issues.add(
+          '$path.event',
+          'must be one of ${RuleKeys.engineEvents.join(', ')}',
+        );
+      }
+      return {'event': map['event']};
+    }
     if (map.containsKey('time')) {
       _only(map, path, {'time', 'days'}, 'a time trigger');
       final time = map['time'];
@@ -452,12 +496,28 @@ class _Normalizer {
       return {'sun': map['sun'], 'offset': ?offset, 'days': ?map['days']};
     }
     if (map.containsKey('interval')) {
-      _only(map, path, {'interval'}, 'an interval trigger');
+      _only(map, path, {
+        'interval',
+        'offset',
+        'between',
+      }, 'an interval trigger');
       final seconds = map['interval'];
       if (seconds is! int || seconds < 1) {
         issues.add('$path.interval', 'must be whole seconds, at least 1');
+      } else {
+        final problem = alignedProblem(seconds, map['offset'], map['between']);
+        if (problem != null) {
+          issues.add(
+            problem.startsWith('between') ? '$path.between' : '$path.offset',
+            problem,
+          );
+        }
       }
-      return {'interval': seconds};
+      return {
+        'interval': seconds,
+        if (map['offset'] case final int o when o > 0) 'offset': o,
+        'between': ?map['between'],
+      };
     }
     _only(map, path, {'manual'}, 'a manual trigger');
     if (map['manual'] != true) issues.add('$path.manual', 'must be true');
@@ -523,6 +583,26 @@ class _Normalizer {
     return out;
   }
 
+  /// An `on` trigger with its `for`: how long its state must hold first, in
+  /// ms. Only a change to a value or crossing a number has a state to hold.
+  Map<String, Object?>? heldOn(Map<String, Object?> map, String path) {
+    final out = on(map, path, const {'for'}, 'an on trigger');
+    final ms = map['for'];
+    if (out == null || ms == null) return out;
+    if (ms is! int || ms < 1000 || ms > holdLimitMs) {
+      issues.add(
+        '$path.for',
+        'must be whole milliseconds from 1000 to $holdLimitMs (a week)',
+      );
+    } else if (holdsNow(out, null) == null) {
+      issues.add(
+        '$path.for',
+        'needs a state to hold: change to a value, or crosses a number',
+      );
+    }
+    return {...out, 'for': ms};
+  }
+
   Map<String, Object?>? condition(Object? item, String path) {
     final map = _object(
       item,
@@ -568,6 +648,15 @@ class _Normalizer {
         _only(map, path, {'not'}, 'a not');
         final inner = condition(map['not'], '$path.not');
         return inner == null ? null : {'not': inner};
+      case 'people':
+        _only(map, path, {'people'}, 'a people condition');
+        if (!peopleConditionKinds.contains(map['people'])) {
+          issues.add(
+            '$path.people',
+            'must be one of ${peopleConditionKinds.join(', ')}',
+          );
+        }
+        return {'people': map['people']};
       default:
         _only(map, path, {kind}, 'an $kind');
         final rules = list(map[kind], '$path.$kind', condition, required: true);
@@ -1173,6 +1262,7 @@ class _Compiler {
         'match': ?t['match'],
         'change': ?t['change'],
         'crosses': ?t['crosses'],
+        'forMs': ?t['for'],
       },
       {
         '': path,
@@ -1182,6 +1272,7 @@ class _Compiler {
         'match': '$path.match',
         'change': '$path.change',
         'crosses': '$path.crosses',
+        'forMs': '$path.for',
       },
     );
   }
@@ -1197,8 +1288,33 @@ class _Compiler {
           : (t['change'] as Map).containsKey('to')
           ? 'turns ${(t['change'] as Map)['to']}'
           : 'changes';
-      final label = _words?.trigger(t) ?? '${t['on']} $how';
+      final held = t['for'] is int ? ' for ${holdWords(t['for'] as int)}' : '';
+      final label = _words?.trigger(t) ?? '${t['on']} $how$held';
       return add(id, 'on', label, config, origin, col: 0, row: row);
+    }
+    if (t.containsKey('people')) {
+      return add(
+        id,
+        'people_change',
+        t['people'] == 'first_arrives'
+            ? 'the first person gets home'
+            : 'the last person leaves',
+        {'when': t['people']},
+        {'': path, 'when': '$path.people'},
+        col: 0,
+        row: row,
+      );
+    }
+    if (t.containsKey('event')) {
+      return add(
+        id,
+        'engine_started',
+        'OmniFlow starts',
+        {},
+        {'': path},
+        col: 0,
+        row: row,
+      );
     }
     if (t.containsKey('time')) {
       return add(
@@ -1236,9 +1352,26 @@ class _Compiler {
       return add(
         id,
         'interval',
-        'every ${t['interval']} s',
-        {'seconds': t['interval']},
-        {'': path, 'seconds': '$path.interval'},
+        [
+          'every ${t['interval']} s',
+          if (t['offset'] != null || t['between'] != null)
+            alignedWords(
+              t['interval'] as int,
+              t['offset'] as int? ?? 0,
+              (t['between'] as List?)?.cast<String>(),
+            ),
+        ].join(' '),
+        {
+          'seconds': t['interval'],
+          'offsetSeconds': ?t['offset'],
+          'between': ?t['between'],
+        },
+        {
+          '': path,
+          'seconds': '$path.interval',
+          'offsetSeconds': '$path.offset',
+          'between': '$path.between',
+        },
         col: 0,
         row: row,
       );
@@ -1325,6 +1458,10 @@ class _Compiler {
       origin[_join(at, 'days')] = '$path.days';
       return {'type': 'days', 'days': cond['days']};
     }
+    if (cond.containsKey('people')) {
+      origin[_join(at, 'is')] = '$path.people';
+      return {'type': 'people', 'is': cond['people']};
+    }
     if (cond.containsKey('not')) {
       return {
         'type': 'not',
@@ -1378,6 +1515,11 @@ class _Compiler {
     }
     if (cond.containsKey('days')) {
       return 'on ${(cond['days'] as List).join(', ')}';
+    }
+    if (cond.containsKey('people')) {
+      return cond['people'] == 'all_away'
+          ? 'everyone is away'
+          : 'anyone is home';
     }
     if (cond.containsKey('not')) {
       return 'not ${describe(cond['not'] as Map<String, Object?>)}';

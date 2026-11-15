@@ -8,6 +8,7 @@ import 'capability_control.dart' show CapabilityControl, isHighRiskCapability;
 import 'device_controls.dart';
 import 'device_sections.dart';
 import 'device_text.dart';
+import 'smart_home_sections.dart';
 
 /// 3.2: one layout for every simple device. A hero with its main state and
 /// the power button, the controls its capabilities need, the automations
@@ -106,6 +107,7 @@ class DevicePage extends ConsumerWidget {
                 CapabilityControl(device: d.json, capability: c),
             ],
           ],
+          if (d.online) DeviceSmartSections(device: d),
           UsedInSection(device: d),
           if (d.online) RecentSection(device: d),
           DeviceSection(device: d),

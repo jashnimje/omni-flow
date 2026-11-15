@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "weather",
+  "name": "Weather at home (Open-Meteo)",
+  "category": "weather",
+  "icon": "weather",
+  "transport": { "type": "virtual" },
+  "capabilities": [
+    { "id": "temperature", "type": "sensor", "label": "Outside temperature (°C)", "stateJsonPath": "$.temperature" },
+    { "id": "feels_like", "type": "sensor", "label": "Feels like (°C)", "stateJsonPath": "$.feels_like" },
+    { "id": "humidity", "type": "sensor", "label": "Humidity (%)", "stateJsonPath": "$.humidity" },
+    { "id": "wind_speed", "type": "sensor", "label": "Wind (km/h)", "stateJsonPath": "$.wind_speed" },
+    { "id": "uv_index", "type": "sensor", "label": "UV index", "stateJsonPath": "$.uv_index" },
+    { "id": "condition", "type": "sensor", "label": "Sky (clear, cloudy, rain and so on)", "stateJsonPath": "$.condition" },
+    { "id": "weather_code", "type": "sensor", "label": "Weather code (WMO)", "stateJsonPath": "$.weather_code" },
+    { "id": "rain_expected", "type": "sensor", "label": "Rain expected in the next hour", "stateJsonPath": "$.rain_expected" },
+    { "id": "rain_next_hour", "type": "sensor", "label": "Rain in the next hour (mm)", "stateJsonPath": "$.rain_next_hour" },
+    { "id": "rain_chance_next_hour", "type": "sensor", "label": "Chance of rain in the next hour (%)", "stateJsonPath": "$.rain_chance_next_hour" },
+    { "id": "high_today", "type": "sensor", "label": "Today's high (°C)", "stateJsonPath": "$.high_today" },
+    { "id": "low_today", "type": "sensor", "label": "Today's low (°C)", "stateJsonPath": "$.low_today" },
+    { "id": "updated_at", "type": "sensor", "label": "Last updated", "stateJsonPath": "$.updated_at" }
+  ]
+}

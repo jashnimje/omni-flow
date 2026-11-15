@@ -92,6 +92,10 @@ class MainActivity : FlutterActivity() {
                 "localNetwork" -> askForLocalNetwork(result)
                 "lastLocation" -> result.success(lastLocation())
                 "bluetooth" -> askForBluetooth(result)
+                "phoneState" -> askFor(Manifest.permission.READ_PHONE_STATE, PHONE_STATE_REQUEST, result)
+                "calendar" -> askFor(Manifest.permission.READ_CALENDAR, CALENDAR_REQUEST, result)
+                "dndAccess" -> openSettings(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS), result)
+                "fullScreen" -> openSettings(fullScreenIntent(), result)
                 "usageAccess" -> openSettings(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS), result)
                 "notificationAccess" -> openSettings(notificationAccessIntent(), result)
                 "pickTiles" -> openSettings(Intent(this, TilePickerActivity::class.java), result)
@@ -107,6 +111,11 @@ class MainActivity : FlutterActivity() {
                             .contains(packageName),
                         "bluetooth" to bluetoothAllowed(),
                         "bluetoothNeeded" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S),
+                        "phoneState" to granted(Manifest.permission.READ_PHONE_STATE),
+                        "calendar" to granted(Manifest.permission.READ_CALENDAR),
+                        "dndAccess" to (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager)
+                            .isNotificationPolicyAccessGranted,
+                        "fullScreen" to fullScreenAllowed(),
                     ),
                 )
                 "appSettings" -> {
@@ -147,6 +156,24 @@ class MainActivity : FlutterActivity() {
     /** Before Android 12, Bluetooth connections need no runtime grant. */
     private fun bluetoothAllowed() = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
         granted(Manifest.permission.BLUETOOTH_CONNECT)
+
+    /** One runtime permission a phone trigger needs, asked when the
+     * person picks that trigger. True when it is granted. */
+    private fun askFor(permission: String, requestCode: Int, result: MethodChannel.Result) {
+        if (granted(permission)) return result.success(true)
+        ask(arrayOf(permission), requestCode, result)
+    }
+
+    /** Android 14 and later let the person turn full-screen messages off
+     * for an app. Before that they are always allowed. */
+    private fun fullScreenAllowed(): Boolean = Build.VERSION.SDK_INT < 34 ||
+        (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager).canUseFullScreenIntent()
+
+    private fun fullScreenIntent(): Intent = if (Build.VERSION.SDK_INT >= 34) {
+        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.fromParts("package", packageName, null))
+    } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+    }
 
     private fun askForBluetooth(result: MethodChannel.Result) {
         if (bluetoothAllowed()) return result.success(true)
@@ -353,6 +380,8 @@ class MainActivity : FlutterActivity() {
                 LOCATION_REQUEST -> granted(Manifest.permission.ACCESS_FINE_LOCATION)
                 LOCATION_ALWAYS_REQUEST -> locationAlways()
                 BLUETOOTH_REQUEST -> bluetoothAllowed()
+                PHONE_STATE_REQUEST -> granted(Manifest.permission.READ_PHONE_STATE)
+                CALENDAR_REQUEST -> granted(Manifest.permission.READ_CALENDAR)
                 else -> granted(LOCAL_NETWORK)
             },
         )
@@ -371,6 +400,8 @@ class MainActivity : FlutterActivity() {
         private const val LOCAL_NETWORK_REQUEST = 7103
         private const val LOCATION_ALWAYS_REQUEST = 7104
         private const val BLUETOOTH_REQUEST = 7105
+        private const val PHONE_STATE_REQUEST = 7106
+        private const val CALENDAR_REQUEST = 7107
         private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 }

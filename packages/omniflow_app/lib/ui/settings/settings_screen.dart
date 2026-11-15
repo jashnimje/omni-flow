@@ -12,6 +12,7 @@ import '../home/home_data.dart';
 import '../shell/shell.dart';
 import '../tags/tags_page.dart' show TagsPage;
 import 'agent_access.dart';
+import 'alerts_page.dart';
 import 'appearance_page.dart';
 import 'backup_page.dart';
 import 'developer_page.dart';
@@ -20,8 +21,10 @@ import 'hubs_page.dart';
 import 'phone_access.dart';
 import 'places_page.dart';
 import 'rooms_page.dart';
+import 'shake_scene.dart';
 import 'variables_page.dart';
 import 'whats_new.dart';
+import 'away_lighting_page.dart' show SmartHomeSettingsRows;
 
 /// A place in Settings that search can open.
 class SettingsPlace {
@@ -129,8 +132,11 @@ class SettingsScreen extends ConsumerWidget {
             chevron: true,
             onTap: () => _push(context, const VariablesPage()),
           ),
+          const AlertsSettingsRow(),
+          const SmartHomeSettingsRows(),
           const OmniSectionHeader('This phone'),
           const HomeRunsOnRow(),
+          const ShakeSceneRow(),
           OmniListRow(
             key: const ValueKey('settings-background'),
             icon: OmniIcons.settings,

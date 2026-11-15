@@ -10,6 +10,7 @@ import '../api/adb_phone_connection.dart';
 import '../api/local_client.dart';
 import '../api/local_server.dart';
 import '../api/omni_engine.dart';
+import '../api/phone_actions.dart' show phoneReadingVerbs;
 import '../devices/board.dart' show boardPeriphTypes, isSerialHost;
 import '../devices/nfc/ndef.dart' show tagUriPrefix, uriRecord;
 import '../mcp/omni_mcp.dart';
@@ -21,6 +22,7 @@ import '../api/ssh_hub_client.dart';
 import 'add_cli.dart';
 import 'hub_cli.dart';
 import 'one_shot.dart';
+import 'house_cli.dart';
 import 'organize_cli.dart';
 import 'rule_cli.dart';
 import 'tv_cli.dart';
@@ -269,6 +271,9 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(TvCommand());
     addCommand(roomCommand());
     addCommand(sceneCommand());
+    addCommand(modeCommand());
+    addCommand(timerCommand());
+    addCommand(alertsCommand());
     addCommand(automationCommand());
     addCommand(presenceCommand());
     String id(List<String> rest) => _one(rest, 'ID');
@@ -517,6 +522,19 @@ class OmniCommandRunner extends CommandRunner<int> {
             }
             return {'on': rest[0] == 'on'};
           }, usage: 'on|off'),
+        for (final v in phoneReadingVerbs)
+          _ApiCommand(
+            v.verb,
+            v.help,
+            v.command,
+            (rest, _) async =>
+                v.args(rest) ??
+                (throw UsageException(
+                  v.usage.isEmpty ? 'takes no words' : 'needs ${v.usage}',
+                  '',
+                )),
+            usage: v.usage,
+          ),
         _ApiCommand(
           'nfc',
           'An NFC scan, as omni tag scan UID: omni phone nfc 04:A2:2B:1C [TAG_ID]',

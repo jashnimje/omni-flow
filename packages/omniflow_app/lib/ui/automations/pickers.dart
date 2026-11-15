@@ -14,13 +14,17 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 import 'form_parts.dart';
 import 'library_sheet.dart';
+import 'phone_words.dart';
 import 'rule_words.dart';
+import 'rules_core_forms.dart';
+import 'timer_forms.dart';
 import 'token_field.dart';
 
 part 'trigger_pickers.dart';
 part 'condition_pickers.dart';
 part 'step_library.dart';
 part 'step_forms.dart';
+part 'phone_pickers.dart';
 
 /// 2.3: the trigger, condition and step pickers and their short forms in
 /// plain words. The library sheets live in the part files; each choice
@@ -166,6 +170,10 @@ Future<T?> _optionsForm<T>(
   Object? initialInput,
   String? unit,
   String doneLabel = 'Done',
+  // More fields under the picked option (a state trigger's "for"), and
+  // what they add to its result.
+  List<Widget> Function(String? picked, StateSetter setState)? extra,
+  T Function(T made)? finish,
 }) {
   var picked = selected ?? (options.length == 1 ? options.single.id : null);
   // A chip keeps its value as it is (true, 3, "on"), not as typed text.
@@ -205,7 +213,8 @@ Future<T?> _optionsForm<T>(
       final option = options.where((o) => o.id == picked).firstOrNull;
       final value = input();
       if (option == null || value == null) return null;
-      return option.make(value);
+      final made = option.make(value);
+      return finish == null ? made : finish(made);
     },
     build: (context, setState) {
       final option = options.where((o) => o.id == picked).firstOrNull;
@@ -276,6 +285,7 @@ Future<T?> _optionsForm<T>(
             onChanged: (_) => setState(() {}),
           ),
         ],
+        ...?extra?.call(picked, setState),
       ];
     },
   );

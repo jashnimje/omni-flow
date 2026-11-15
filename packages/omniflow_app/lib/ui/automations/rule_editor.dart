@@ -9,6 +9,7 @@ import '../../api/rule_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import 'automation_insights.dart';
 import 'automations_state.dart';
 import 'dialogs.dart';
 import 'review_page.dart';
@@ -448,6 +449,9 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                       style: OmniText.caption,
                     ),
                   ),
+                // A saved rule: clashes, why it did not run, and History.
+                if (widget.id != null)
+                  AutomationInsights(id: widget.id!, onRestored: _load),
                 const SizedBox(height: OmniSpace.lg),
               ],
             ),

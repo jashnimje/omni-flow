@@ -1,0 +1,154 @@
+import 'dart:async';
+
+import 'api_error.dart';
+import 'command_args.dart';
+import 'engine_core.dart';
+import 'mode_commands.dart' show HomeFile;
+import '../devices/device.dart';
+import '../storage/database.dart';
+
+/// The built-in alerts, on until the user turns them off in Settings: a
+/// device that has been offline for [offlineAfter] (once, and once more
+/// when it is back), and a battery under [lowBattery] percent. They go out
+/// as `flow.announce` notifications, as a notify step's do, with `alert`
+/// saying which.
+class HouseAlerts {
+  HouseAlerts(
+    this._core,
+    this._file, {
+    this.every = const Duration(minutes: 1),
+  });
+
+  final EngineCore _core;
+  final HomeFile _file;
+
+  /// How often devices are checked for being offline.
+  final Duration every;
+
+  static const offlineAfter = Duration(minutes: 10);
+  static const lowBattery = 15;
+
+  /// A battery counts as charged again from here, so one hovering at the
+  /// line does not alert on every reading.
+  static const _batteryBack = 20;
+
+  var offline = true;
+  var battery = true;
+  final _offline = <String>{};
+  final _low = <String>{};
+  Timer? _timer;
+  StreamSubscription<Map<String, Object?>>? _sub;
+
+  Map<String, CommandHandler> get commands => {
+    'alerts.get': get,
+    'alerts.set': set,
+  };
+
+  Future<void> open() async {
+    final saved = (await _file.read())['alerts'];
+    if (saved is Map) {
+      offline = saved['offline'] != false;
+      battery = saved['battery'] != false;
+    }
+    _sub = _core.events.listen(_observe);
+    _timer = Timer.periodic(every, (_) => _core.track(check()));
+  }
+
+  Future<void> close() async {
+    _timer?.cancel();
+    _timer = null;
+    await _sub?.cancel();
+    _sub = null;
+  }
+
+  Map<String, Object?> _json() => {
+    'offline': offline,
+    'battery': battery,
+    'offlineMinutes': offlineAfter.inMinutes,
+    'lowBatteryPercent': lowBattery,
+  };
+
+  Future<Map<String, Object?>> get(Map<String, Object?> _) async => _json();
+
+  /// `{offline?, battery?}`: turns each alert on or off.
+  Future<Map<String, Object?>> set(Map<String, Object?> args) async {
+    for (final key in const ['offline', 'battery']) {
+      if (args[key] != null && args[key] is! bool) {
+        throw ApiError('invalid', '$key must be true or false');
+      }
+    }
+    if (args['offline'] case final bool on) {
+      offline = on;
+      if (!on) _offline.clear();
+    }
+    if (args['battery'] case final bool on) {
+      battery = on;
+      if (!on) _low.clear();
+    }
+    await _file.update({
+      'alerts': {'offline': offline, 'battery': battery},
+    });
+    return _json();
+  }
+
+  void _notify(String kind, Device d, String title, String body) => _core.emit({
+    'event': 'flow.announce',
+    'type': 'notify',
+    'title': title,
+    'body': body,
+    'alert': kind,
+    'thing': d.id,
+  });
+
+  /// Looks at every device that reports in regularly, as at [at]. One
+  /// offline (unseen for its online window) for [offlineAfter] alerts once.
+  Future<void> check({DateTime? at}) async {
+    if (!offline) return;
+    final now = at ?? DateTime.now();
+    for (final d in await DriftDeviceStore(_core.db).all()) {
+      final window = _core.onlineWindowOf(d);
+      if (window == null) continue;
+      final seen = d.lastSeen;
+      if (d.isOnline(now, window)) {
+        if (_offline.remove(d.id)) {
+          _notify('online', d, '${d.name} is back online', 'It answers again');
+        }
+        continue;
+      }
+      if (seen == null || now.difference(seen) < window + offlineAfter) {
+        continue;
+      }
+      if (_offline.add(d.id)) {
+        _notify(
+          'offline',
+          d,
+          '${d.name} is offline',
+          'Not heard from for ${offlineAfter.inMinutes} minutes',
+        );
+      }
+    }
+  }
+
+  void _observe(Map<String, Object?> e) {
+    if (!battery || e['event'] != 'device.stateChanged') return;
+    final device = e['device'];
+    if (device is! Map) return;
+    final id = device['id'];
+    final state = device['state'];
+    if (id is! String || state is! Map) return;
+    final level = state['battery'];
+    if (level is! num) return;
+    if (level >= _batteryBack) {
+      _low.remove(id);
+    } else if (level < lowBattery && _low.add(id)) {
+      _core.emit({
+        'event': 'flow.announce',
+        'type': 'notify',
+        'title': '${device['name'] ?? id} battery is low',
+        'body': '${level.round()}% left',
+        'alert': 'battery',
+        'thing': id,
+      });
+    }
+  }
+}

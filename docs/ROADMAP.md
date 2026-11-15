@@ -330,3 +330,12 @@ What the code and design assume, checked on 2026-11-06 against primary sources. 
   - The app: Home runs on this phone or the hub, setup with a key per phone and a fingerprint check, no local engine in hub mode, readings tagged with the phone id, asks shown per person, and a read-only Hub not reachable state.
   - Results: engine 1244 tests (3 live skipped), app 555, analyze and format clean, each commit analyzed alone.
   - Not proven: launchd, Remote Login and the firewall on the real Mac mini, Tailscale, the app against a real hub, and pairing a real phone on the LAN. Not built: the list of phones not seen for 7 days.
+- 2026-11-12: Version 0.6.0, the feature round from `docs/feature-gap-analysis.md` (SMS, clipboard, webhooks, GPS places and driving left out).
+  - Rules: held-for state triggers, first person home and last person out, aligned intervals, an engine-start trigger, Why didn't it run, Try as if, conflict warnings, and version history with Restore.
+  - Home helpers: house modes, timers, a room as one light, scene capture, offline and low-battery alerts, weather on Open-Meteo, lights that follow the sun, away lighting, and energy from Shelly and Tuya plugs.
+  - The phone acts and reacts: speak, vibrate, torch, sound, ringer and Do Not Disturb, media keys and volume, open an app or link, alarms and timers, a full-screen message; and triggers before the next alarm, calls, media, calendar words, shake, face down, headphones, startup and app installs, plus shake to run a scene.
+  - Easier: habit suggestions on Home and Type what you want, both offline.
+  - Build output now sits outside OneDrive through `tool/link_build_dirs.sh`, after 4.1 GB of Gradle files with too-long paths stopped OneDrive.
+  - Proven on the emulator: speak, vibrate, torch, open link, a timer that rang, a fake call ringing, answered and ended, media from Chrome, a shake, and the full-screen message over the lock screen. A Shelly Gen1 test fails with its meter-key fix reverted.
+  - Results: engine 1392 tests (4 skipped), app 604, analyze and format clean, each commit analyzed alone. The full engine run has timing-sensitive tests (a Tuya 3.4 session, MQTT reconnect, a board reboot) that fail now and then under load and pass alone.
+  - Not proven: calendar, the real alarm clock, headphones, startup, app installs, face down, ringer, Do Not Disturb and media volume on a device; weather against the live API; energy on a real plug.

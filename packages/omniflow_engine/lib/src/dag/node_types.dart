@@ -2,6 +2,10 @@ import '../devices/device_service.dart' show stateKeyOf;
 import '../manifest/capability.dart';
 import '../manifest/validation.dart';
 import '../template/template_renderer.dart';
+import 'aligned_times.dart' show checkAlignedInterval;
+import 'event_match.dart';
+import 'hold_triggers.dart' show checkHeldOn;
+import 'people_triggers.dart';
 import 'sun.dart' show sunOffsetLimit;
 import 'web_request.dart' show webAddressProblem, webHeaderProblems, webMethods;
 
@@ -100,10 +104,25 @@ final Map<String, NodeType> builtInNodeTypes = {
       _dayList(c, 'days', p, i);
       if (r.homeLocationSet == false) i.add(p, homeLocationMissing);
     }),
-    NodeType('interval', NodeCategory.trigger, [
-      'out',
-    ], (c, p, i, _) => _int(c, 'seconds', p, i, min: 1)),
-    NodeType('on', NodeCategory.trigger, ['out'], _checkOn),
+    NodeType('interval', NodeCategory.trigger, ['out'], (c, p, i, _) {
+      _int(c, 'seconds', p, i, min: 1);
+      checkAlignedInterval(c, p, i);
+    }),
+    NodeType('on', NodeCategory.trigger, ['out'], (c, p, i, r) {
+      _checkOn(c, p, i, r);
+      checkHeldOn(c, p, i);
+    }),
+    // The first person to get home or the last to leave, from each
+    // person's `home`.
+    NodeType('people_change', NodeCategory.trigger, ['out'], (c, p, i, _) {
+      _oneOf(c, 'when', peopleTriggerKinds, p, i);
+    }),
+    // Once, when the engine starts running automations.
+    NodeType('engine_started', NodeCategory.trigger, ['out'], (_, _, _, _) {}),
+    NodeType('people', NodeCategory.condition, [
+      'true',
+      'false',
+    ], (c, p, i, r) => checkRule({...c, 'type': 'people'}, p, i, r)),
     // Conditions.
     for (final composite in ['all_of', 'any_of', 'xor'])
       NodeType(composite, NodeCategory.condition, [
@@ -467,6 +486,8 @@ void checkRule(Object? rule, String p, IssueCollector i, FlowReferences r) {
       _time(c, 'end', p, i);
     case 'days':
       _dayList(c, 'days', p, i, required: true);
+    case 'people':
+      _oneOf(c, 'is', peopleConditionKinds, p, i);
     case 'compare':
       _oneOf(c, 'op', compareOps, p, i);
       _value(c['left'], '$p.left', i, r);
@@ -613,6 +634,9 @@ void _checkOn(
     i.add('$p.thing', 'no thing $thing');
   } else if (key != null) {
     _thingKey(thing, key as String, '$p.key', i, r, event: mode == 'event');
+    if (mode == 'event') {
+      checkEventMatch(c['match'], '$p.match', i, r.capabilityOf(thing, key));
+    }
   }
 }
 

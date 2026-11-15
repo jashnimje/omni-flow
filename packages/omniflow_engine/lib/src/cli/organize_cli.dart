@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 
+import 'house_cli.dart';
 import 'omni_command_runner.dart';
 
 typedef _Build = Map<String, Object?> Function(ArgResults a);
@@ -121,12 +122,14 @@ Command<int> roomCommand() => _Group('room', 'Rooms and their order.', [
     },
     usageLine: 'ID...',
   ),
+  ...roomHelperVerbs(),
 ]);
 
 /// `omni scene`: named sets of device actions run together.
 Command<int> sceneCommand() =>
     _Group('scene', 'Scenes: device actions run together in one tap.', [
       _Verb('list', 'List scenes.', 'scene.list', (_) => {}),
+      sceneCaptureVerb(),
       _Verb(
         'save',
         'Save a scene: omni scene save "Movie night" --do lamp.power=false '

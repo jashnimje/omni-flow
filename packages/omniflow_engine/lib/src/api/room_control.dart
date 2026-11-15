@@ -1,0 +1,187 @@
+import 'api_error.dart';
+import 'command_args.dart';
+import 'device_history.dart' show changedByUser;
+import 'engine_core.dart';
+import 'error_of.dart';
+import 'stored_flows.dart';
+import '../devices/board.dart' show manifestFor;
+import '../devices/device.dart';
+import '../devices/device_service.dart' show stateKeyOf;
+import '../manifest/capability.dart';
+import '../manifest/driver_manifest.dart';
+import '../storage/database.dart';
+
+/// The category a light's driver has.
+const lightingCategory = 'lighting';
+
+/// The room [room] names, by id or by name in any case, with its devices
+/// in the user's order.
+Future<(Room, List<Device>)> roomWithDevices(
+  EngineCore core,
+  String room,
+) async {
+  final wanted = room.trim().toLowerCase();
+  final match = (await DriftRoomStore(core.db).all())
+      .where((r) => r.id == room || r.name.trim().toLowerCase() == wanted)
+      .firstOrNull;
+  if (match == null) throw ApiError('not_found', 'there is no room $room');
+  final devices = [
+    for (final d in await DriftDeviceStore(core.db).all())
+      if (d.room == match.id) d,
+  ]..sort((a, b) => (a.order ?? 1 << 30).compareTo(b.order ?? 1 << 30));
+  return (match, devices);
+}
+
+/// Whether a toggle's reported [raw] state is on, in the device's own
+/// words for on and off when it has them.
+bool? toggleIsOn(CapabilitySpec toggle, Object? raw) {
+  final words = toggle.onOff;
+  if (words == null) return raw is bool ? raw : null;
+  if (raw == words.$1) return true;
+  if (raw == words.$2 || toggle.alsoOff.contains(raw)) return false;
+  return null;
+}
+
+/// A room as one light: `room.invoke {room, capability, params?, only?}`
+/// sends to every device in it that has the capability, and `room.state
+/// {room}` sums the room up.
+class RoomControl {
+  RoomControl(this._core, this._stored);
+
+  final EngineCore _core;
+  final StoredFlows _stored;
+
+  Map<String, CommandHandler> get commands => {
+    'room.invoke': invoke,
+    'room.state': state,
+  };
+
+  DriverManifest? _manifest(Device d) => manifestFor(_core.registry, d);
+
+  static bool _isLight(DriverManifest? m) => m?.category == lightingCategory;
+
+  /// `{room, capability, params?, only?: "lights"}`. Every device that has
+  /// the capability gets it, one failing does not stop the rest, and the
+  /// reply says how each went. A high-risk capability is never sent here:
+  /// it goes through `device.invoke`.
+  Future<Map<String, Object?>> invoke(Map<String, Object?> args) async {
+    final (room, devices) = await roomWithDevices(
+      _core,
+      stringArg(args, 'room'),
+    );
+    final capability = stringArg(args, 'capability');
+    final params = args['params'] == null
+        ? const <String, Object?>{}
+        : objectArg(args, 'params');
+    final only = optStringArg(args, 'only');
+    if (only != null && only != 'lights') {
+      throw ApiError('invalid', 'only must be lights');
+    }
+    final results = <Map<String, Object?>>[];
+    for (final d in devices) {
+      final manifest = _manifest(d);
+      final spec = manifest?.capability(capability);
+      if (manifest == null || spec == null) continue;
+      if (only == 'lights' && !_isLight(manifest)) continue;
+      if (_stored.capabilityIsHighRisk(manifest, spec)) {
+        results.add({
+          'id': d.id,
+          'name': d.name,
+          'ok': false,
+          'error': {
+            'type': 'needs_user',
+            'message':
+                '$capability on ${d.name} is high risk, so it is sent '
+                'to the device on its own',
+          },
+        });
+        continue;
+      }
+      try {
+        final result = await _core.devices.invoke(
+          d.id,
+          capability,
+          params,
+          allowPairing: false,
+          by: changedByUser,
+        );
+        results.add({
+          'id': d.id,
+          'name': d.name,
+          'ok': true,
+          'state': result.device.state,
+        });
+      } catch (e) {
+        results.add({
+          'id': d.id,
+          'name': d.name,
+          'ok': false,
+          'error': apiErrorOf(e).toJson(),
+        });
+      }
+    }
+    if (results.isEmpty) {
+      throw ApiError('not_found', 'nothing in ${room.name} can do $capability');
+    }
+    return {
+      'room': {'id': room.id, 'name': room.name},
+      'results': results,
+      'sent': results.where((r) => r['ok'] == true).length,
+    };
+  }
+
+  /// `{room}`: its lights, how many are on, and their average brightness.
+  /// A light that is offline counts in `offline`, not as on, since its
+  /// stored state is only what it last said.
+  Future<Map<String, Object?>> state(Map<String, Object?> args) async {
+    final (room, devices) = await roomWithDevices(
+      _core,
+      stringArg(args, 'room'),
+    );
+    var lights = 0;
+    var on = 0;
+    var offline = 0;
+    final now = DateTime.now();
+    final levels = <num>[];
+    final things = <Map<String, Object?>>[];
+    for (final d in devices) {
+      final manifest = _manifest(d);
+      if (!_isLight(manifest)) continue;
+      lights++;
+      final window = _core.onlineWindowOf(d);
+      final reachable = window == null || d.isOnline(now, window);
+      if (!reachable) {
+        offline++;
+        things.add({'id': d.id, 'name': d.name, 'online': false});
+        continue;
+      }
+      final power = manifest!.capability('power');
+      final isOn = power == null
+          ? null
+          : toggleIsOn(power, d.state[stateKeyOf(power.stateJsonPath)]);
+      if (isOn == true) on++;
+      final level = manifest.capability('brightness');
+      final value = level == null
+          ? null
+          : d.state[stateKeyOf(level.stateJsonPath)];
+      if (isOn == true && value is num) levels.add(value);
+      things.add({
+        'id': d.id,
+        'name': d.name,
+        'on': ?isOn,
+        if (value is num) 'brightness': value,
+      });
+    }
+    return {
+      'room': {'id': room.id, 'name': room.name},
+      'devices': devices.length,
+      'lights': lights,
+      'lightsOn': on,
+      'offline': offline,
+      'anyOn': on > 0,
+      if (levels.isNotEmpty)
+        'brightness': (levels.reduce((a, b) => a + b) / levels.length).round(),
+      'things': things,
+    };
+  }
+}

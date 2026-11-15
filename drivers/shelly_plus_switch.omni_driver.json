@@ -15,6 +15,9 @@
       "label": "Power",
       "command": { "path": "/rpc/Switch.Set", "query": { "id": 0, "on": "{{value}}" } },
       "stateJsonPath": "$.output"
-    }
+    },
+    { "id": "power_use", "type": "sensor", "label": "Power use (W)", "stateJsonPath": "$.apower" },
+    { "id": "voltage", "type": "sensor", "label": "Voltage (V)", "stateJsonPath": "$.voltage" },
+    { "id": "current", "type": "sensor", "label": "Current (A)", "stateJsonPath": "$.current" }
   ]
 }

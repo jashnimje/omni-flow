@@ -10,6 +10,7 @@ import '../../rules/rule_spec.dart';
 import '../../state/providers.dart'
     show engineClientProvider, messengerKey, showMessage;
 import '../design/design.dart';
+import 'automation_insights.dart' show TryAsIfButton;
 import 'form_parts.dart' show TimeRow;
 import 'pickers.dart';
 import 'rule_words.dart';
@@ -194,7 +195,7 @@ class TriggerBlock extends StatelessWidget {
           },
           row: (i) {
             final t = when[i];
-            return SentenceRow(
+            final sentence = SentenceRow(
               key: ValueKey('row-when[$i]'),
               reorderIndex: i,
               icon: draft.words.triggerIcon(t),
@@ -223,6 +224,15 @@ class TriggerBlock extends StatelessWidget {
                       draft.changed();
                     },
               onRemove: () => _removeWithUndo(draft, when, i, 'Trigger'),
+            );
+            // Each trigger can start a dry run as if it had just happened.
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                sentence,
+                TryAsIfButton(draft: draft, index: i),
+              ],
             );
           },
         ),
