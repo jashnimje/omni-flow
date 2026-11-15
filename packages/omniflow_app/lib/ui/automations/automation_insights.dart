@@ -232,6 +232,7 @@ class _TryAsIfButtonState extends ConsumerState<TryAsIfButton> {
         builder: (_) => TestRunPage(
           name: name.isEmpty ? 'New rule' : name,
           dryRun: run,
+          rule: draft.spec.toJson(),
           unsaved: true,
         ),
       ),

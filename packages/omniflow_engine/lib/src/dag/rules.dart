@@ -1176,6 +1176,10 @@ RuleCompilation compileRule(
   }, c.origins);
 }
 
+/// The id [compileRule] gives the node of the rule part at [path]
+/// (`then[2].if`-style), so a run's nodes can be told at rule paths.
+String compiledNodeId(String path) => _Compiler.idOf(path);
+
 class _Compiler {
   _Compiler(this._rows, this._refs, this._ruleId, this._words);
 

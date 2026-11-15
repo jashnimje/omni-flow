@@ -660,6 +660,7 @@ class RunNode {
     this.duration,
     this.port,
     this.output,
+    this.seen,
   });
 
   factory RunNode.fromJson(Json json) => RunNode(
@@ -674,6 +675,7 @@ class RunNode {
     output: json['output'] is Map
         ? Map<String, Object?>.from(json['output'] as Map)
         : null,
+    seen: json['seen'],
   );
 
   RunNode withLabel(String? label) => RunNode(
@@ -684,6 +686,7 @@ class RunNode {
     duration: duration,
     port: port,
     output: output,
+    seen: seen,
   );
 
   final String node;
@@ -699,6 +702,9 @@ class RunNode {
   /// What it passed on. In a dry run an action's `result` says what it
   /// would have sent.
   final Json? output;
+
+  /// The value a condition compared, as the engine's trace keeps it.
+  final Object? seen;
 
   bool get ok => error == null;
 }

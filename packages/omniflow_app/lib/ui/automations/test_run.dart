@@ -7,6 +7,7 @@ import '../../api/engine_calls.dart';
 import '../../api/plain_error.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import 'diagram/run_view.dart' show DryRunDiagram;
 import 'dialogs.dart';
 import 'rule_words.dart';
 
@@ -202,7 +203,16 @@ class TestRunPage extends ConsumerStatefulWidget {
     this.dryRun,
     this.actions = const [],
     this.unsaved = false,
+    this.rule,
+    this.header,
   });
+
+  /// The rule the dry run tested, when it is not saved, so its diagram
+  /// draws the rule as it stands.
+  final Json? rule;
+
+  /// Shown above the test (a graph's last run).
+  final Widget? header;
 
   /// The dry run is of edits not saved yet, so a real run would run the
   /// saved version instead: it asks to save first.
@@ -296,6 +306,7 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
       actions: widget.actions,
       body: ListView(
         children: [
+          ?widget.header,
           if (_dryFailure != null)
             OmniBanner.error(
               'The test could not run: ${_dryFailure!.message}',
@@ -324,8 +335,11 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
                 title: 'Nothing would run',
                 message: 'Its trigger did not lead to any step.',
               )
-            else
+            else ...[
+              // The same run twice: on the diagram, then step by step.
+              DryRunDiagram(run: dry, rule: widget.rule, id: widget.id),
               RunNodeRows(key: const ValueKey('dry-run'), run: dry),
+            ],
             const SizedBox(height: OmniSpace.md),
             if (widget.id == null || widget.unsaved)
               Text(
@@ -485,6 +499,7 @@ class _RunPageState extends ConsumerState<RunPage> {
                 'Steps after a failed one still run unless the rule stops at '
                 'the first failure.',
               ),
+            DryRunDiagram(run: run, id: widget.automationId),
             RunNodeRows(run: run, labels: _labels),
           ],
           const SizedBox(height: OmniSpace.xl),

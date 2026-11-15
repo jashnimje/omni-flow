@@ -8,11 +8,25 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.6.0';
+const appVersion = '0.7.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.7.0',
+    date: '13 Nov 2026',
+    notes: [
+      'See any automation as a diagram: checks are decisions with a yes and a '
+          'no, steps that run together sit side by side. Switch between '
+          'Sentence and Diagram at the top of the editor.',
+      'Change it right there: tap a box to edit it, + on a line to add a step '
+          'or a check, long press to move, copy or remove.',
+      'Watch it run: the last run lights the path it took and what each '
+          'check saw, and a running automation lights up step by step.',
+      'Changes made from the computer, an agent or another phone show at once.',
+    ],
+  ),
   (
     version: '0.6.0',
     date: '12 Nov 2026',

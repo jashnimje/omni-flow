@@ -132,6 +132,11 @@ class NodeTrace {
   String? error;
   Duration? duration;
 
+  /// What a condition saw, or the answer a choice ask got, for the diagram:
+  /// set only when [hasSeen].
+  Object? seen;
+  bool hasSeen = false;
+
   Map<String, Object?> toJson() => {
     'node': nodeId,
     'type': type,
@@ -140,6 +145,7 @@ class NodeTrace {
     if (duration != null) 'ms': duration!.inMilliseconds,
     if (port != null) 'port': port,
     if (error != null) 'error': error,
+    if (hasSeen) 'seen': seen,
     'input': _traced(input),
     if (output != null) 'output': _traced(output!),
   };
@@ -258,6 +264,7 @@ class FlowRunner {
     this.web = const IoWebRequester(),
     this.webSecret,
     this.asks,
+    this.onNode,
   }) {
     for (final n in flow.nodes) {
       final type = builtInNodeTypes[n.type];
@@ -281,6 +288,10 @@ class FlowRunner {
 
   /// Asks the person for ask steps. Without one an ask step fails.
   final AskBroker? asks;
+
+  /// Told as each node starts waiting and as it finishes, with its status:
+  /// `waiting`, `ran`, `failed` or `skipped`.
+  final void Function(RunTrace run, NodeTrace node, String status)? onNode;
   final _types = <String, NodeType>{};
   final _active = <_Run>[];
   Future<void> _queueTail = Future.value();
@@ -397,6 +408,7 @@ class FlowRunner {
             ..port = 'out'
             ..duration = Duration.zero;
       run.trace.nodes.add(triggerTrace);
+      onNode?.call(run.trace, triggerTrace, 'ran');
       await _follow(run, trigger.id, 'out', msg, clock);
       if (run.trace.nodes.any((n) => n.error != null) &&
           run.trace.outcome == RunOutcome.completed) {
@@ -444,6 +456,9 @@ class FlowRunner {
       label: _ownLabel(node),
     );
     run.trace.nodes.add(trace);
+    if (_waitingTypes.contains(node.type)) {
+      onNode?.call(run.trace, trace, 'waiting');
+    }
     final watch = Stopwatch()..start();
     String? port;
     // A failed step of a flow that carries on after errors records the
@@ -458,6 +473,7 @@ class FlowRunner {
           final ctx = _context(run, msg, clock);
           final rule = {...node.config, 'type': node.type};
           port = evaluateRule(rule, ctx) ? 'true' : 'false';
+          _see(trace, rule, ctx, msg);
           if (port == 'false' &&
               !run.dryRun &&
               !run.reachedAction &&
@@ -487,6 +503,11 @@ class FlowRunner {
           try {
             out = await _action(run, node, msg, clock);
             port = 'out';
+            if (node.type == 'ask' && node.config['choices'] is List) {
+              trace
+                ..seen = run.flowVars[_varName(node.config['as'], 'answer')]
+                ..hasSeen = true;
+            }
           } on RunCancelled {
             rethrow;
           } catch (e) {
@@ -508,6 +529,7 @@ class FlowRunner {
       trace.duration = watch.elapsed;
       trace.port = port;
       trace.output = port == null ? null : out;
+      onNode?.call(run.trace, trace, _statusOf(trace));
     }
     final next = follow ?? port;
     if (next != null) await _follow(run, node.id, next, out, clock);
@@ -1064,3 +1086,64 @@ const _valueSteps = {
 
 /// A node's label when the flow gave it one: without, it is the node id.
 String? _ownLabel(NodeSpec node) => node.label == node.id ? null : node.label;
+
+/// The nodes that wait, which say so as they start.
+const _waitingTypes = {'delay', 'wait_until', 'wait_for_event', 'ask'};
+
+/// How a finished node went: a cancelled run or a closed gate skips it.
+String _statusOf(NodeTrace t) => t.error == 'cancelled'
+    ? 'skipped'
+    : t.error != null || t.port == 'error'
+    ? 'failed'
+    : t.port == null
+    ? 'skipped'
+    : 'ran';
+
+/// Notes on [trace] what the condition [rule] saw: a compare's left side,
+/// or for an all_of each part up to the first that said no, as `{ok,
+/// seen?}`. A run variable (a web reply, an answer typed in) and a
+/// notification's words stay out, and so does anything but a short value.
+void _see(
+  NodeTrace trace,
+  Map<String, Object?> rule,
+  EvalContext ctx,
+  Map<String, Object?> msg,
+) {
+  (bool, Object?) seen(Map<String, Object?> r) {
+    if (r['type'] != 'compare') return (false, null);
+    final left = r['left'];
+    if (left is! Map) return (false, null);
+    final ref = left['var'];
+    if (ref is String && ref.startsWith('%')) return (false, null);
+    final at = left['msg'];
+    if (at != null &&
+        (isNotificationMsg(msg) || '$at'.startsWith('response'))) {
+      return (false, null);
+    }
+    final v = ctx.value(left);
+    final short =
+        v == null || v is bool || v is num || (v is String && v.length <= 200);
+    return short ? (true, v) : (false, null);
+  }
+
+  if (rule['type'] == 'all_of') {
+    final parts = <Map<String, Object?>>[];
+    for (final r in (rule['rules'] as List? ?? const [])) {
+      final part = Map<String, Object?>.from(r as Map);
+      final ok = evaluateRule(part, ctx);
+      final (has, v) = seen(part);
+      parts.add({'ok': ok, if (has) 'seen': v});
+      if (!ok) break;
+    }
+    trace
+      ..seen = parts
+      ..hasSeen = true;
+    return;
+  }
+  final (has, v) = seen(rule);
+  if (has) {
+    trace
+      ..seen = v
+      ..hasSeen = true;
+  }
+}

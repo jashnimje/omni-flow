@@ -7,6 +7,7 @@ import 'agent_policy.dart';
 import 'android_pair_commands.dart';
 import 'api_error.dart';
 import 'automation_commands.dart';
+import 'automation_diagram.dart';
 import 'backup_commands.dart';
 import 'board_commands.dart';
 import 'board_runtime.dart';
@@ -675,6 +676,7 @@ class OmniEngine {
     ...HomeStatsCommands(_core).commands,
     ...SuggestionCommands(_core, _automationCommands).commands,
     ...RuleParseCommands(_core, _automationCommands).commands,
+    ...AutomationDiagramCommands(_core, _automationCommands).commands,
     ..._smartHome.commands,
     ..._backupCommands.commands,
     'secret.set': _deviceCommands.secretSet,
@@ -710,11 +712,43 @@ class OmniEngine {
       return _failure(ApiError('unknown_command', 'no command $command'));
     }
     try {
-      return {'ok': true, ...await handler(args)};
+      final result = {'ok': true, ...await handler(args)};
+      if (automationChangeCommands.contains(command)) {
+        _core.emit({
+          'event': automationChangedEvent,
+          'command': command,
+          if (args['id'] ?? result['id'] case final Object id) 'id': '$id',
+        });
+      }
+      return result;
     } catch (e) {
       return _failure(apiErrorOf(e));
     }
   }
+
+  /// Sent after any command that saves, removes, turns on or off, approves
+  /// or restores an automation, so every screen reading the list (another
+  /// phone on the hub, the app after a CLI or agent change) reads it again.
+  static const automationChangedEvent = 'automation.changed';
+
+  /// The commands that change the stored automations.
+  static const automationChangeCommands = {
+    'automation.save',
+    'automation.enable',
+    'automation.remove',
+    'automation.approve',
+    'automation.restore',
+    'flow.save',
+    'flow.enable',
+    'flow.remove',
+    'flow.approve',
+    'link.create',
+    'link.remove',
+    'scene.save',
+    'scene.remove',
+    'scene.capture',
+    'config.import',
+  };
 
   static Map<String, Object?> _failure(ApiError e) => {
     'ok': false,

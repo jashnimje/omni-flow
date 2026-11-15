@@ -11,6 +11,7 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 import 'automation_insights.dart';
 import 'automations_state.dart';
+import 'diagram/diagram.dart';
 import 'dialogs.dart';
 import 'review_page.dart';
 import 'look_picker.dart';
@@ -74,7 +75,10 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
 
   @override
   void dispose() {
-    if (_draft case final draft?) dropUndoFor(draft);
+    if (_draft case final draft?) {
+      dropUndoFor(draft);
+      dropDiagramUndoFor(draft);
+    }
     _draft?.dispose();
     super.dispose();
   }
@@ -171,6 +175,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
           name: _name.isEmpty ? 'New rule' : _name,
           id: widget.id,
           dryRun: reply.value!.firstOrNull,
+          rule: draft.spec.toJson(),
           unsaved: _draft?.dirty ?? false,
         ),
       ),
@@ -317,6 +322,42 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     Navigator.of(context).pop();
   }
 
+  /// The Sentence and Diagram switch, then the rule in the chosen view.
+  /// Both edit [draft], so a change in one shows in the other.
+  Widget _views(
+    RuleDraft draft, {
+    required List<Widget> banners,
+    required List<Widget> sentence,
+  }) {
+    final view = ref.watch(ruleViewProvider);
+    final pick = OmniSegmented<RuleView>(
+      key: const ValueKey('rule-view'),
+      segments: const [
+        OmniSegment(RuleView.sentence, 'Sentence'),
+        OmniSegment(RuleView.diagram, 'Diagram'),
+      ],
+      selected: view,
+      onChanged: (v) => ref.read(ruleViewProvider.notifier).set(v),
+    );
+    if (view == RuleView.diagram) {
+      return Column(
+        key: const ValueKey('rule-diagram'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          pick,
+          ...banners,
+          Expanded(
+            child: DiagramEditor(draft: draft, id: widget.id),
+          ),
+        ],
+      );
+    }
+    return ListView(
+      key: const ValueKey('rule-editor'),
+      children: [pick, ...banners, ...sentence],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final things = ref.watch(ruleThingsProvider);
@@ -403,9 +444,9 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                 ],
               ),
             ],
-            body: ListView(
-              key: const ValueKey('rule-editor'),
-              children: [
+            body: _views(
+              draft,
+              banners: [
                 if (!_approved)
                   OmniBanner.warning(
                     'Made by Claude. It runs only after you approve this '
@@ -428,6 +469,8 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                     ].join('\n'),
                     key: const ValueKey('rule-errors'),
                   ),
+              ],
+              sentence: [
                 _LookAndAsk(draft: draft),
                 TriggerBlock(draft: draft),
                 ConditionBlock(
@@ -449,7 +492,9 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                       style: OmniText.caption,
                     ),
                   ),
-                // A saved rule: clashes, why it did not run, and History.
+                // A saved rule: its last run, clashes, why it did not run,
+                // and History.
+                if (widget.id != null) LastRunSection(id: widget.id!),
                 if (widget.id != null)
                   AutomationInsights(id: widget.id!, onRestored: _load),
                 const SizedBox(height: OmniSpace.lg),

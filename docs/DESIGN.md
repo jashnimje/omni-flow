@@ -70,6 +70,8 @@ The core API is a set of serializable commands (`device.invoke`, `flow.save`, `f
 
 Lifecycle commands: `hub.start` (optional `wizPort` and `helloPort`) starts the WiZ push listener, the board hello listener, device polls, MQTT watches, flow timers and the zone tick, and is safe to call twice. A port already in use returns `unavailable` and rolls the hub back. `hub.stop` stops all of it and frees the ports. A device added while the hub runs is polled and watched at once, and a removed one stops. `engine.status` reports whether the hub runs, the loaded flows and `loadIssues`: every stored manifest, zone or flow that failed to load, as `{kind, id, error}`. A bad stored item no longer stops the engine opening. It is skipped, reported there and in `flow.list` and `driver.list`, and emitted once as `engine.loadIssue`.
 
+Every command that saves, removes, turns on or off, approves or restores an automation (`automation.*`, `flow.*`, `link.*`, `scene.*` changes, `scene.capture` and `config.import`) is followed by `automation.changed {command, id?}`, so any screen showing automations reads them again after a change made by the CLI, an agent or another phone on the hub.
+
 This is what lets the Android UI and the engine live in separate isolates. The service runs its own Dart isolate, so the UI cannot hold a reference to the engine object. It sends commands and subscribes to events instead. On the Mac, other `omni` commands reach a running hub the same way, through its control socket.
 
 ### One owner for the database
@@ -733,6 +735,15 @@ A `toggle` is refused for a target that is not an on/off toggle, and from a nume
 - **Try as if.** Each trigger row starts `automation.dry_run` from that trigger with an event made up for it, and opens the test run.
 - **Conflicts.** `automation.conflicts {id?}` finds enabled automations that set the same capability to different values on overlapping triggers. `automation.list` rows carry `conflicts`.
 - **Versions.** Every save through `automation.save`, `scene.save`, `flow.save` and `link.create` keeps the version it replaced, the last 10 per automation with the time and who saved it, in the `automation_versions` table. `automation.versions {id}` is read level and `automation.restore {id, version}` user-only. A restored version an agent wrote stays untrusted.
+
+### The diagram
+
+The approved design is `docs/flow-diagram-design.md`. The engine owns the projection in `lib/src/api/automation_diagram.dart`, and the app only lays it out.
+
+- **`automation.diagram {id} | {spec, form?}`** (read) returns `{nodes, edges, source}`. A rule gives its triggers, its onlyIf checks as a chain with a no line to an end that "Stops here", then its steps. An if is a decision with its then and else branches merging after. Together, try, repeat and for each are groups with `children`. A try has a `fails` line to its otherwise, a repeat or for each an `each` line into its body, and a waitFor an `otherwise` line to its timeout steps, which end the run. An ask fans out one line per answer when the if steps right after it each check that answer. Keep steps sit in their own lane. A scene is one group of its actions, a link a trigger and a step, and a raw graph its own nodes and edges with no paths (`readOnly`). An unsaved rule that does not validate yet still draws, with `issues`.
+- **Words and places.** Each node's `words` come from `SentenceContext`, so the diagram and the sentence never word a part differently. `path` is a JSON pointer into the spec, and every rule edge's `insert {path, as: step | check}` says where a "+" on it adds. Each node also lists the `compiled` flow node ids it stands for, which `compiledNodeId` in `rules.dart` derives from the rule path.
+- **Runs.** `run` (a logged run id) or `last: true`, or `dryRun` with a dry run result, marks each node `ran`, `failed` or `skipped`, a decision's `seen`, and `taken` on edges. With `skipsToo: true` the newest skip, when newer than the run, marks the check that said no. The run log keeps `seen` per condition node: a compare's left value, or for an all_of each part up to the first that said no as `{ok, seen?}`. A choice ask keeps its answer. Run variables, a web reply and a notification's words never become `seen`.
+- **Live.** As each node of a real run starts waiting or finishes, the flow engine emits `run.node {run, flow, node, path?, status, port?, seen?}`, at most 200 per run. It carries ids, the port and `seen` only, never a step's config or message, so a web step's headers, body and secrets stay out. `path` is filled once the automation's diagram has been drawn.
 
 ### Suggestions and typed rules
 

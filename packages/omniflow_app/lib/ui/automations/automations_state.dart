@@ -25,7 +25,13 @@ class AutomationsNotifier extends AsyncNotifier<List<AutomationSummary>> {
   Future<List<AutomationSummary>> build() async {
     final client = ref.watch(engineClientProvider);
     final sub = client.events
-        .where((e) => e['event'] == 'run.finished')
+        // A run moves the last-run line, and a change made anywhere else
+        // (the CLI, an agent, another phone on the hub) changes the list.
+        .where(
+          (e) =>
+              e['event'] == 'run.finished' ||
+              e['event'] == 'automation.changed',
+        )
         .listen(
           (_) => _reload ??= Timer(settle, () {
             _reload = null;

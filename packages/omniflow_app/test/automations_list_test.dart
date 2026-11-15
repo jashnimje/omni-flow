@@ -27,6 +27,19 @@ void main() {
 
   setUp(() => engine = automationsEngine());
 
+  testWidgets('a change made elsewhere reads the list again', (tester) async {
+    await pumpPage(tester, engine, const AutomationsScreen());
+    final before = engine.callsOf('automation.list').length;
+    engine.eventsOut.add({
+      'event': 'automation.changed',
+      'command': 'automation.save',
+      'id': 'evening_lamp',
+    });
+    await tester.pump(AutomationsNotifier.settle);
+    await tester.pumpAndSettle();
+    expect(engine.callsOf('automation.list').length, before + 1);
+  });
+
   testWidgets('each automation shows its sentence, switch and last run, '
       'scenes stay out, and the review waiting is flagged', (tester) async {
     await pumpPage(tester, engine, const AutomationsScreen());

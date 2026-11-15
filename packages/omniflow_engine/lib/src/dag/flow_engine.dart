@@ -154,6 +154,7 @@ class FlowEngine implements FlowEffects, PeopleSource {
           web: _web,
           webSecret: _host.webSecret,
           asks: asks,
+          onNode: _onNode,
         );
         _runners[f.id] = runner;
         if (_timersOn) _startTimers(runner);
@@ -662,6 +663,30 @@ class FlowEngine implements FlowEffects, PeopleSource {
         stop: kind == SkipKind.condition ? trace.stoppedBy : null,
       ),
     );
+  }
+
+  /// The rule path of a compiled node, where the API layer knows it.
+  String? Function(String flowId, String nodeId)? nodePath;
+
+  /// The most `run.node` events one run sends, so a long repeat does not
+  /// flood the app. The run log still has every node.
+  static const nodeEventsPerRun = 200;
+
+  /// `run.node {run, flow, node, path?, status, port?, seen?}` as each node
+  /// of a real run starts waiting or finishes. It carries ids, the port and
+  /// what a condition saw, never a step's config or message.
+  void _onNode(RunTrace run, NodeTrace node, String status) {
+    if (run.dryRun || run.nodes.length > nodeEventsPerRun) return;
+    _host.emit({
+      'event': 'run.node',
+      'run': run.runId,
+      'flow': run.flowId,
+      'node': node.nodeId,
+      'path': ?nodePath?.call(run.flowId, node.nodeId),
+      'status': status,
+      if (status != 'waiting') 'port': ?node.port,
+      if (node.hasSeen) 'seen': node.seen,
+    });
   }
 
   void _onTrace(RunTrace trace) {

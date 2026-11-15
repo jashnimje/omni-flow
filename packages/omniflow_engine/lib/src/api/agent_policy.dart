@@ -36,6 +36,8 @@ const _readCommands = {
   'automation.conflicts',
   'automation.skips',
   'automation.versions',
+  // An automation as a diagram, with a run's path lit.
+  'automation.diagram',
   'board.describe',
   'board.ports',
   'device.discover',

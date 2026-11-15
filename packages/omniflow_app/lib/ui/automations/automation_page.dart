@@ -5,6 +5,7 @@ import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import 'automations_state.dart';
+import 'diagram/run_view.dart' show LastRunSection;
 import 'review_page.dart';
 import 'rule_editor.dart';
 import 'scenes.dart';
@@ -115,6 +116,8 @@ class _LinkRunsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) => TestRunPage(
     name: name,
     id: id,
+    // Its last run on the diagram, lit as it goes while one is live.
+    header: LastRunSection(id: id),
     actions: [
       OmniIconAction(
         key: const ValueKey('automation-remove'),
