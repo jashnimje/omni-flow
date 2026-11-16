@@ -72,6 +72,9 @@ abstract final class RemoteLayout {
     RemoteKey(7, '0'),
     RemoteKey(66, 'Enter', TvIcons.enter),
   ];
+
+  /// The four colour keys wear the colour printed on a real remote, so
+  /// these stay fixed whatever the Appearance setting is.
   static const colors = [
     (RemoteKey(183, 'Red'), Color(0xFFEF5350)),
     (RemoteKey(184, 'Green'), Color(0xFF43A047)),
@@ -193,7 +196,7 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
         icon: k.icon,
         showLabel: k.icon == null || k.text != null,
         text: k.text,
-        background: background ?? OmniColors.card,
+        background: background,
         foreground: foreground ?? OmniColors.text,
         onTap: () => _press(k),
         onLongPress: () => _press(k, long: true),
@@ -216,12 +219,12 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
       physics: _mode == _RemoteMode.mouse
           ? const NeverScrollableScrollPhysics()
           : null,
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+      padding: omniBodyPadding(OmniInsets.bottom(context)),
       children: [
         OmniSegmented<_RemoteMode>(
           key: const ValueKey('tv-remote-mode'),
           segments: const [
-            OmniSegment(_RemoteMode.remote, 'Remote'),
+            OmniSegment(_RemoteMode.remote, 'Buttons'),
             OmniSegment(_RemoteMode.gamepad, 'Gamepad'),
             OmniSegment(_RemoteMode.mouse, 'Mouse'),
           ],
@@ -261,7 +264,7 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
             columns: 4,
             children: [
               for (final (k, color) in RemoteLayout.colors)
-                _key(k, background: color, foreground: const Color(0xFF14171C)),
+                _key(k, background: color, foreground: OmniSurface.low),
             ],
           ),
           const OmniSectionHeader('Channels'),
@@ -295,7 +298,7 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
                 key: const ValueKey('tv-text-send'),
                 icon: TvIcons.send,
                 label: 'Type it on the TV',
-                color: OmniColors.accent,
+                color: OmniPalette.of(context).accent,
                 onPressed: _sendText,
               ),
             ),
@@ -420,37 +423,38 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
     required double height,
     required ShapeBorder shape,
     required bool accent,
-  }) => SizedBox(
-    width: width,
-    height: height,
-    child: Semantics(
-      button: true,
-      label: k.label,
-      excludeSemantics: true,
-      onTap: () => _press(k),
-      onLongPress: () => _press(k, long: true),
-      child: Material(
-        key: ValueKey('key-${k.keycode}'),
-        color: accent ? OmniColors.accentSoft : OmniColors.card,
-        shape: shape,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () => _press(k),
-          onLongPress: () => _press(k, long: true),
-          child: Center(
-            child: Text(
-              k.text ?? k.label,
-              style: TextStyle(
-                color: accent ? OmniColors.accent : OmniColors.text,
-                fontWeight: FontWeight.w600,
-                fontSize: accent ? 18 : 13,
+  }) {
+    final palette = OmniPalette.of(context);
+    return SizedBox(
+      width: width,
+      height: height,
+      child: Semantics(
+        button: true,
+        label: k.label,
+        excludeSemantics: true,
+        onTap: () => _press(k),
+        onLongPress: () => _press(k, long: true),
+        child: Material(
+          key: ValueKey('key-${k.keycode}'),
+          color: accent ? palette.accentSoft : palette.card,
+          shape: shape,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => _press(k),
+            onLongPress: () => _press(k, long: true),
+            child: Center(
+              child: Text(
+                k.text ?? k.label,
+                style: accent
+                    ? OmniText.titleMedium.copyWith(color: palette.accent)
+                    : OmniText.label,
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   static bool _isPlaced(TvKey k) =>
       k.keycode != null && RemoteLayout.placed.contains(k.keycode);
@@ -470,9 +474,9 @@ class _DPad extends StatelessWidget {
         width: 168,
         height: 168,
         decoration: BoxDecoration(
-          color: OmniColors.card,
+          color: OmniPalette.of(context).card,
           shape: BoxShape.circle,
-          border: Border.all(color: OmniColors.line),
+          border: Border.all(color: OmniPalette.of(context).line),
         ),
         child: Stack(
           alignment: Alignment.center,
@@ -521,11 +525,10 @@ class _DPad extends StatelessWidget {
             onLongPress: () => press(k, long: true),
             child: Center(
               child: ok
-                  ? const Text(
+                  ? Text(
                       'OK',
-                      style: TextStyle(
+                      style: OmniText.label.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: OmniColors.text,
                       ),
                     )
                   : Icon(k.icon, color: OmniColors.muted, size: 26),

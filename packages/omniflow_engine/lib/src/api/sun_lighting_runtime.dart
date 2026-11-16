@@ -90,9 +90,9 @@ class SunLighting {
     if (enabled && _location == null) {
       throw ApiError(
         'invalid',
-        'Follow the sun needs to know where home is. Set it in Settings, '
-            'Your home, Home location (or omni home location set), then turn '
-            'it on',
+        'Follow the sun needs to know where ${_core.houses.nameOf(house)} is. '
+            'Set it in Settings, This house, Home location (or omni home '
+            'location set), then turn it on',
       );
     }
     final devices = await DriftDeviceStore(_core.db).all();

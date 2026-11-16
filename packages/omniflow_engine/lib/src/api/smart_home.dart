@@ -68,9 +68,74 @@ class SmartHome {
   /// The first house's away lighting, as before houses.
   AwayLighting get away => awayOf(firstHouseId);
 
-  SunLighting sunOf(String house) => _suns[house] ?? _suns.values.first;
+  /// [house]'s own sun-following lights. Never another house's: a house
+  /// that is not open yet is opened by [_ensure] before a command reads it.
+  SunLighting sunOf(String house) =>
+      _suns[house] ?? (throw ApiError('not_found', _noHouse(house)));
 
-  AwayLighting awayOf(String house) => _aways[house] ?? _aways.values.first;
+  /// [house]'s own away lighting, never another house's.
+  AwayLighting awayOf(String house) =>
+      _aways[house] ?? (throw ApiError('not_found', _noHouse(house)));
+
+  String _noHouse(String house) => 'There is no house $house';
+
+  /// Each house's helpers while they load, so a command waits for them.
+  final _opening = <String, Future<void>>{};
+
+  /// Opens and loads [house]'s helpers unless they are open, and keeps
+  /// their lights to that house. Throws `not_found` for a house that does
+  /// not exist.
+  Future<void> _ensure(String house) {
+    if (_suns.containsKey(house)) return _opening[house] ?? Future.value();
+    if (house != firstHouseId && _core.houses.byId(house) == null) {
+      throw ApiError('not_found', _noHouse(house));
+    }
+    _openHouse(house);
+    return _opening[house] = () async {
+      await _suns[house]!.load();
+      await _aways[house]!.load();
+      await _keepToHouse(house);
+    }();
+  }
+
+  /// Drops the lights and rooms of another house from [house]'s sun and
+  /// away lighting, which an older engine could put there.
+  Future<void> _keepToHouse(String house) async {
+    final houses = _core.houses;
+    if (houses.all.isEmpty) return;
+    final rooms = await houses.housesOf(HouseKind.room);
+    String? houseOf(String id) => houses.thingHouses[id] ?? rooms[id];
+    final sun = _suns[house];
+    if (sun != null) {
+      for (final id in sun.targets.keys.toList()) {
+        final of = houseOf(id);
+        if (of != null && of != house) await sun.forgetTarget(id);
+      }
+    }
+    final away = _aways[house];
+    if (away != null) {
+      for (final id in away.lights.toList()) {
+        final of = houseOf(id);
+        if (of != null && of != house) await away.forgetLight(id);
+      }
+    }
+  }
+
+  /// Refuses a room of another house as a target of [house]'s lights.
+  Future<void> _checkRooms(Object? targets, String house) async {
+    final ids = targets is String ? [targets] : targets;
+    if (ids is! List) return;
+    final rooms = await _core.houses.housesOf(HouseKind.room);
+    for (final id in ids.whereType<String>()) {
+      final of = rooms[id];
+      if (of == null || of == house) continue;
+      throw ApiError(
+        'invalid',
+        'The room ${_core.roomNames[id] ?? id} is in '
+            '${_core.houses.nameOf(of)}, not ${_core.houses.nameOf(house)}',
+      );
+    }
+  }
 
   static String _fileOf(String name, String house) =>
       house == firstHouseId ? '$name.json' : '$name.$house.json';
@@ -98,14 +163,19 @@ class SmartHome {
     for (final gone in _suns.keys.where((k) => !ids.contains(k)).toList()) {
       if (gone == firstHouseId) continue;
       _suns.remove(gone);
+      _opening.remove(gone);
       await _aways.remove(gone)?.flush();
     }
     for (final id in ids) {
-      if (_openHouse(id)) {
-        await _suns[id]!.load();
-        await _aways[id]!.load();
-      }
+      await _ensure(id);
     }
+  }
+
+  /// Opens every house's helpers once the houses are read. The engine
+  /// calls it after the houses open, since [load] runs before them.
+  Future<void> openHouses() async {
+    await _loadHouses();
+    await _keepToHouse(firstHouseId);
   }
 
   /// The house a command names, or the first house.
@@ -130,13 +200,16 @@ class SmartHome {
     for (final name in sun.commands.keys)
       name: (args) async {
         final house = _houseOf(args);
+        await _ensure(house);
         final targets = args['targets'] ?? args['target'];
         await _core.houses.checkNames({'things': targets}, house);
+        await _checkRooms(targets, house);
         return sunOf(house).commands[name]!(args);
       },
     for (final name in away.commands.keys)
       name: (args) async {
         final house = _houseOf(args);
+        await _ensure(house);
         await _core.houses.checkNames({'things': args['lights']}, house);
         return awayOf(house).commands[name]!(args);
       },

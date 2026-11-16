@@ -203,8 +203,9 @@ class _RunTileState extends ConsumerState<RunTile> {
     if (run == null || run.ok) return null;
     final failed = run.steps.where((n) => n.error != null).firstOrNull;
     if (failed != null) {
-      return '${failed.label ?? 'A step'} failed'
-          '${failed.error!.isEmpty ? '' : ': ${failed.error}'}';
+      return failed.error!.isEmpty
+          ? '${failed.label ?? 'A step'} did not work'
+          : failed.error!;
     }
     return run.reason ?? 'It did not finish';
   }
@@ -335,7 +336,10 @@ class _Indicator extends StatelessWidget {
     _RunState.running => SizedBox.square(
       key: ValueKey('run-busy-$id'),
       dimension: 18,
-      child: const CircularProgressIndicator(strokeWidth: 2),
+      child: CircularProgressIndicator(
+        strokeWidth: 2,
+        color: OmniPalette.of(context).accent,
+      ),
     ),
     _RunState.done => PoppingCheck(key: ValueKey('run-done-$id')),
     _RunState.failed => Icon(

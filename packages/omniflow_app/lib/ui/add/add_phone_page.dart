@@ -48,6 +48,7 @@ class AddPhonePage extends ConsumerStatefulWidget {
 
 class _AddPhonePageState extends ConsumerState<AddPhonePage> {
   var _route = PhoneRoute.wireless;
+  var _step = 1;
   List<FoundPhone>? _found;
   var _looking = false;
   var _findMissing = false;
@@ -259,58 +260,103 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
     );
   }
 
+  /// 1 the other phone, 2 pair (or the classic address), 3 the port it
+  /// connects on, only when mDNS did not give it.
+  int get _current => _step == 1 ? 1 : (_paired == null ? 2 : 3);
+
+  void _go(int step) => setState(() {
+    _step = step;
+    _error = null;
+  });
+
   @override
-  Widget build(BuildContext context) => OmniPage(
-    title: 'Another phone',
-    body: ListView(
+  Widget build(BuildContext context) {
+    final wireless = _route == PhoneRoute.wireless;
+    final current = _current;
+    return StepFlow(
       key: const ValueKey('add-phone'),
-      padding: const EdgeInsets.only(bottom: OmniSpace.xl),
-      children: [
-        OmniSegmented<PhoneRoute>(
-          key: const ValueKey('phone-route'),
-          segments: const [
-            OmniSegment(PhoneRoute.wireless, 'Wireless debugging'),
-            OmniSegment(PhoneRoute.classic, 'Port 5555'),
-          ],
-          selected: _route,
-          onChanged: (r) => setState(() {
-            _route = r;
-            _error = null;
-          }),
-        ),
-        if (_route == PhoneRoute.wireless) ..._wireless() else ..._classic(),
-        if (_error case final error?)
-          Padding(
-            padding: const EdgeInsets.only(top: OmniSpace.sm),
-            child: OmniBanner.error(error, key: const ValueKey('phone-error')),
+      title: 'Another phone',
+      close: false,
+      count: wireless ? 3 : 2,
+      current: current,
+      heading: switch (current) {
+        1 => wireless ? 'On the other phone' : 'Port 5555',
+        2 => wireless ? 'Pair with the code' : 'Its address',
+        _ => 'Paired',
+      },
+      banners: [
+        if (current == 2 && _needsUpdate)
+          const OmniBanner.warning(
+            key: ValueKey('phone-needs-update'),
+            'Pairing with a code needs an update of OmniFlow. For now, use '
+            'Port 5555 if a computer can turn it on over USB.',
           ),
+        if (_error case final error?)
+          OmniBanner.error(error, key: const ValueKey('phone-error')),
       ],
-    ),
-  );
+      onBack: switch (current) {
+        1 => null,
+        2 => () => _go(1),
+        _ => () => setState(() {
+          _paired = null;
+          _error = null;
+        }),
+      },
+      primaryKey: switch (current) {
+        1 => const ValueKey('phone-next'),
+        2 when wireless => const ValueKey('phone-pair'),
+        2 => const ValueKey('phone-classic-add'),
+        _ => const ValueKey('phone-connect-add'),
+      },
+      primaryLabel: switch (current) {
+        1 => 'Next',
+        2 when wireless => _busy ? 'Pairing' : 'Pair',
+        _ => 'Add the phone',
+      },
+      onPrimary: switch (current) {
+        1 => () => _go(2),
+        _ when _busy => null,
+        2 when wireless => _pair,
+        2 => _addClassic,
+        _ => _addPaired,
+      },
+      children: (context) => switch (current) {
+        1 => [
+          OmniSegmented<PhoneRoute>(
+            key: const ValueKey('phone-route'),
+            segments: const [
+              OmniSegment(PhoneRoute.wireless, 'Wireless debugging'),
+              OmniSegment(PhoneRoute.classic, 'Port 5555'),
+            ],
+            selected: _route,
+            onChanged: (r) => setState(() {
+              _route = r;
+              _error = null;
+            }),
+          ),
+          const SizedBox(height: OmniSpace.lg),
+          if (wireless) ..._wireless() else ..._classicWhy(),
+        ],
+        2 when wireless => _pairing(),
+        2 => _classic(),
+        _ => _connect(),
+      },
+    );
+  }
 
   List<Widget> _wireless() => [
-    const OmniSectionHeader('On the other phone'),
     for (final (i, step) in phoneSetupSteps.indexed)
       Padding(
         key: ValueKey('phone-step-$i'),
         padding: const EdgeInsets.only(bottom: OmniSpace.xs),
         child: Text('${i + 1}. $step', style: OmniText.body),
       ),
+    const SizedBox(height: OmniSpace.sm),
     const Text(
       'Wireless debugging turns off when that phone restarts, so its owner '
       'turns it on again, and can turn it off there at any time.',
       style: OmniText.caption,
     ),
-    if (_needsUpdate)
-      const Padding(
-        padding: EdgeInsets.only(top: OmniSpace.sm),
-        child: OmniBanner.warning(
-          key: ValueKey('phone-needs-update'),
-          'Pairing with a code needs an update of OmniFlow. For now, use '
-          'Port 5555 if a computer can turn it on over USB.',
-        ),
-      ),
-    if (_paired == null) ..._pairing() else ..._connect(),
   ];
 
   List<Widget> _pairing() => [
@@ -338,20 +384,24 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
             else
               'ready to pair',
           ].join(' · '),
+          selected: _picked == p,
           trailing: _picked == p
-              ? const Icon(OmniIcons.check, color: OmniColors.accent)
+              ? Icon(OmniIcons.check, color: OmniPalette.of(context).accent)
               : null,
           onTap: p.pairingPort == null ? null : () => _pick(p),
         )
     else
-      Text(
-        _findMissing
-            ? 'This OmniFlow cannot look for phones yet. Type the address '
-                  'and port below.'
-            : 'No phone found. Check both phones are on the same Wi-Fi, or '
-                  'type the address and port below.',
+      OmniEmptyState(
         key: const ValueKey('phone-none'),
-        style: OmniText.caption,
+        icon: OmniIcons.phone,
+        title: _findMissing
+            ? 'This OmniFlow cannot look for phones yet'
+            : 'No phone found',
+        message: _findMissing
+            ? 'Type the address and port below.'
+            : 'Check both phones are on the same Wi-Fi, or type the address '
+                  'and port below.',
+        compact: true,
       ),
     OmniButton.ghost(
       key: const ValueKey('phone-look-again'),
@@ -359,7 +409,7 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
       icon: OmniIcons.retry,
       onPressed: _looking ? null : _look,
     ),
-    const OmniSectionHeader('Pair'),
+    const OmniSectionHeader('From Pair device with pairing code'),
     TextField(
       key: const ValueKey('phone-host'),
       controller: _host,
@@ -368,6 +418,7 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
         labelText: 'Address, such as 192.168.1.20',
       ),
     ),
+    const SizedBox(height: OmniSpace.md),
     TextField(
       key: const ValueKey('phone-pair-port'),
       controller: _pairPort,
@@ -377,6 +428,7 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
         labelText: 'Port, the number after the colon',
       ),
     ),
+    const SizedBox(height: OmniSpace.md),
     TextField(
       key: const ValueKey('phone-code'),
       controller: _code,
@@ -392,21 +444,15 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
       ),
       onSubmitted: (_) => _busy ? null : _pair(),
     ),
-    const SizedBox(height: OmniSpace.sm),
-    OmniButton(
-      key: const ValueKey('phone-pair'),
-      label: _busy ? 'Pairing…' : 'Pair',
-      onPressed: _busy ? null : _pair,
-    ),
   ];
 
   List<Widget> _connect() => [
-    const OmniSectionHeader('Paired'),
     const Text(
       'The phone said yes. Now type the port under Wireless debugging, IP '
       'address and port. It is not the pairing port.',
       style: OmniText.body,
     ),
+    const SizedBox(height: OmniSpace.md),
     TextField(
       key: const ValueKey('phone-connect-port'),
       controller: _connectPort,
@@ -414,22 +460,18 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       decoration: const InputDecoration(labelText: 'Port'),
     ),
-    const SizedBox(height: OmniSpace.sm),
-    OmniButton(
-      key: const ValueKey('phone-connect-add'),
-      label: 'Add the phone',
-      onPressed: _busy ? null : _addPaired,
-    ),
   ];
 
-  List<Widget> _classic() => [
-    const OmniSectionHeader('Port 5555'),
+  List<Widget> _classicWhy() => [
     const Text(
       'For a phone a computer has set up: connect it by USB and run adb tcpip '
       '5555 once. The phone asks "Allow USB debugging?" the first time, and '
       'its owner chooses Allow. It turns off again when the phone restarts.',
       style: OmniText.body,
     ),
+  ];
+
+  List<Widget> _classic() => [
     TextField(
       key: const ValueKey('phone-classic-host'),
       controller: _classicHost,
@@ -438,18 +480,13 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
         labelText: 'Address, such as 192.168.1.20',
       ),
     ),
+    const SizedBox(height: OmniSpace.md),
     TextField(
       key: const ValueKey('phone-classic-port'),
       controller: _classicPort,
       keyboardType: TextInputType.number,
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       decoration: const InputDecoration(labelText: 'Port'),
-    ),
-    const SizedBox(height: OmniSpace.sm),
-    OmniButton(
-      key: const ValueKey('phone-classic-add'),
-      label: 'Add the phone',
-      onPressed: _busy ? null : _addClassic,
     ),
   ];
 }

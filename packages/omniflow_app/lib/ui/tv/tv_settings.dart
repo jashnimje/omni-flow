@@ -98,7 +98,7 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
       onRefresh: _load,
       child: ListView(
         key: const ValueKey('settings-list'),
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+        padding: omniBodyPadding(OmniInsets.bottom(context)),
         children: [
           TextField(
             key: const ValueKey('settings-search'),
@@ -112,9 +112,14 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
             onChanged: (_) => setState(() {}),
           ),
           if (_error != null)
-            TvLoadError(what: 'The settings', reason: _error!, onRetry: _load)
+            TvLoadError(
+              what: 'The settings',
+              reason: _error!,
+              noun: tv.noun,
+              onRetry: _load,
+            )
           else if (categories == null)
-            const TvLoading(label: 'Reading the settings')
+            const OmniListSkeleton(label: 'Reading the settings')
           else if (query.isNotEmpty)
             ..._results(categories, query)
           else ...[
@@ -177,6 +182,7 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
           icon: OmniIcons.search,
           title: 'No setting matches',
           message: 'Search looks at names, descriptions, keys and values.',
+          compact: true,
         ),
       ];
     }
@@ -394,7 +400,7 @@ class _SettingCardState extends State<SettingCard> {
                     key: ValueKey('setting-save-${s.key}'),
                     icon: OmniIcons.check,
                     label: 'Save ${s.label}',
-                    color: OmniColors.accent,
+                    color: OmniPalette.of(context).accent,
                     onPressed: _busy
                         ? null
                         : () {
@@ -444,41 +450,41 @@ class _AllSettingsPageState extends State<AllSettingsPage> {
   late final _opened = {_ns};
 
   @override
-  Widget build(BuildContext context) => OmniPage(
+  Widget build(BuildContext context) => ListPage.custom(
     title: 'All settings',
-    body: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    filters: OmniSegmented<String>(
+      key: const ValueKey('raw-namespaces'),
+      segments: [for (final n in tvNamespaces) OmniSegment(n, _capital(n))],
+      selected: _ns,
+      onChanged: (n) => setState(() {
+        _ns = n;
+        _opened.add(n);
+      }),
+    ),
+    body: (context, padding) => IndexedStack(
+      index: tvNamespaces.indexOf(_ns),
       children: [
-        OmniSegmented<String>(
-          key: const ValueKey('raw-namespaces'),
-          segments: [for (final n in tvNamespaces) OmniSegment(n, _capital(n))],
-          selected: _ns,
-          onChanged: (n) => setState(() {
-            _ns = n;
-            _opened.add(n);
-          }),
-        ),
-        Expanded(
-          child: IndexedStack(
-            index: tvNamespaces.indexOf(_ns),
-            children: [
-              for (final n in tvNamespaces)
-                _opened.contains(n)
-                    ? _NamespaceList(tv: widget.tv, namespace: n)
-                    : const SizedBox.shrink(),
-            ],
-          ),
-        ),
+        for (final n in tvNamespaces)
+          _opened.contains(n)
+              ? _NamespaceList(tv: widget.tv, namespace: n, padding: padding)
+              : const SizedBox.shrink(),
       ],
     ),
   );
 }
 
 class _NamespaceList extends StatefulWidget {
-  const _NamespaceList({required this.tv, required this.namespace});
+  const _NamespaceList({
+    required this.tv,
+    required this.namespace,
+    required this.padding,
+  });
 
   final TvController tv;
   final String namespace;
+
+  /// The list template's body padding.
+  final EdgeInsets padding;
 
   @override
   State<_NamespaceList> createState() => _NamespaceListState();
@@ -603,7 +609,7 @@ class _NamespaceListState extends State<_NamespaceList> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
+        padding: widget.padding,
         children: [
           Row(
             children: [
@@ -630,14 +636,16 @@ class _NamespaceListState extends State<_NamespaceList> {
             TvLoadError(
               what: 'The $ns settings',
               reason: _error!,
+              noun: tv.noun,
               onRetry: _load,
             )
           else if (_settings == null)
-            const TvLoading(label: 'Reading the settings')
+            const OmniListSkeleton(label: 'Reading the settings')
           else if (settings.isEmpty)
-            const OmniEmptyState(
+            OmniEmptyState(
               icon: OmniIcons.search,
-              title: 'No setting matches',
+              title: query.isEmpty ? 'No $ns settings' : 'No setting matches',
+              compact: query.isNotEmpty,
             )
           else
             for (final s in settings)

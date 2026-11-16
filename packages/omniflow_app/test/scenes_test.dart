@@ -64,7 +64,7 @@ void main() {
   testWidgets('when OmniFlow does not answer the list says so', (tester) async {
     engine.throwOn.add('automation.list');
     await pumpPushed(tester, engine, const ScenesPage());
-    expect(find.byKey(const ValueKey('scenes-offline')), findsOneWidget);
+    expect(find.byKey(const ValueKey('omni-error')), findsOneWidget);
   });
 
   testWidgets('a new scene picks devices and their actions, and saves as '

@@ -8,6 +8,7 @@ import '../design/design.dart';
 import '../home/home_data.dart';
 import 'device_sections.dart';
 import 'device_text.dart';
+import 'open_device.dart' show DeviceGone;
 
 /// The last 24 hours of a sensor's first reading key, oldest first.
 final sensorDayProvider =
@@ -44,7 +45,9 @@ class SensorPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final d = liveDevice(ref, id);
-    if (d == null) return const OmniPage(title: 'Sensor', body: SizedBox());
+    if (d == null) {
+      return DeviceGone(loading: ref.watch(devicesProvider).isLoading);
+    }
     final key = _readingKey(d);
     if (key != null) {
       ref.listen(
@@ -64,57 +67,54 @@ class SensorPage extends ConsumerWidget {
         if (e.value is num) (e.value as num).toDouble(),
     ];
     final updated = d.lastSeen == null ? null : 'updated ${ago(d.lastSeen!)}';
-    return OmniPage(
+    return DetailPage(
+      key: ValueKey('sensor-page-$id'),
       title: d.name,
       actions: [
         FavouriteStar(device: d),
         DeviceMenu(device: d, onRemove: () => removeDevice(context, ref, d)),
       ],
-      body: ListView(
-        key: ValueKey('sensor-page-$id'),
-        padding: const EdgeInsets.only(top: OmniSpace.xs),
-        children: [
-          if (!d.online) OfflineHelp(device: d),
-          OmniHeroCard(
-            key: ValueKey('sensor-hero-$id'),
-            title: sensorReading(d) ?? 'No reading yet',
-            subtitle: [driver, ?updated].join(' · '),
-            tone: d.online ? HeroTone.accent : HeroTone.plain,
-            footer: values.length < 2
-                ? 'The chart fills in as readings arrive'
-                : 'Last 24 h · low ${_one(values.reduce(_min))} · '
-                      'high ${_one(values.reduce(_max))}',
-            child: values.length < 2 ? null : DayChart(values: values),
-          ),
-          OmniButton.ghost(
-            key: ValueKey('sensor-automate-$id'),
-            label: 'Make an automation from this',
-            icon: OmniIcons.add,
-            onPressed: () => openRuleEditor(
-              context,
-              spec: key == null
-                  ? null
-                  : {
-                      'name': '',
-                      'when': [
-                        {
-                          'on': '$id.$key',
-                          'crosses': {
-                            'above': switch (d.state[key]) {
-                              final num v => v.round(),
-                              _ => 0,
-                            },
+      banners: [if (!d.online) OfflineHelp(device: d)],
+      hero: OmniHeroCard(
+        key: ValueKey('sensor-hero-$id'),
+        title: sensorReading(d) ?? 'No reading yet',
+        subtitle: [driver, ?updated].join(' · '),
+        tone: d.online ? HeroTone.accent : HeroTone.plain,
+        footer: values.length < 2
+            ? 'The chart fills in as readings arrive'
+            : 'Last 24 h · low ${_one(values.reduce(_min))} · '
+                  'high ${_one(values.reduce(_max))}',
+        child: values.length < 2 ? null : DayChart(values: values),
+      ),
+      children: (context) => [
+        OmniButton.ghost(
+          key: ValueKey('sensor-automate-$id'),
+          label: 'Make an automation from this',
+          icon: OmniIcons.add,
+          onPressed: () => openRuleEditor(
+            context,
+            spec: key == null
+                ? null
+                : {
+                    'name': '',
+                    'when': [
+                      {
+                        'on': '$id.$key',
+                        'crosses': {
+                          'above': switch (d.state[key]) {
+                            final num v => v.round(),
+                            _ => 0,
                           },
                         },
-                      ],
-                      'then': const <Object?>[],
-                    },
-            ),
+                      },
+                    ],
+                    'then': const <Object?>[],
+                  },
           ),
-          UsedInSection(device: d),
-          DeviceSection(device: d),
-        ],
-      ),
+        ),
+        UsedInSection(device: d),
+        DeviceSection(device: d),
+      ],
     );
   }
 
@@ -164,8 +164,8 @@ class DayChart extends StatelessWidget {
                         : 0.25 + 0.75 * (v - low) / span,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: OmniColors.sliderFill,
-                        borderRadius: BorderRadius.circular(2),
+                        color: OmniPalette.of(context).accentLine,
+                        borderRadius: BorderRadius.circular(OmniShape.xs),
                       ),
                     ),
                   ),

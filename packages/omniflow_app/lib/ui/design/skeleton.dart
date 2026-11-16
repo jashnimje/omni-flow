@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'tile.dart';
 import 'tokens.dart';
 
 /// A soft light that sweeps across [child] while something loads. It
@@ -170,4 +171,76 @@ class OmniListSkeleton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A detail page's shape while it loads: the hero card, then [rows] list
+/// rows, read as [label].
+class OmniPageSkeleton extends StatelessWidget {
+  const OmniPageSkeleton({super.key, this.rows = 3, this.label = 'Loading'});
+
+  final int rows;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: label,
+    container: true,
+    child: ExcludeSemantics(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const OmniShimmer(
+            child: OmniBone(height: 140, radius: OmniRadii.hero),
+          ),
+          const SizedBox(height: OmniSpace.lg),
+          OmniListSkeleton(rows: rows, label: label),
+        ],
+      ),
+    ),
+  );
+}
+
+/// [count] tiles' shapes in a grid of [columns] while a grid loads.
+class OmniTileGridSkeleton extends StatelessWidget {
+  const OmniTileGridSkeleton({
+    super.key,
+    this.count = 6,
+    this.columns = 2,
+    this.label = 'Loading',
+  });
+
+  final int count;
+  final int columns;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: label,
+    container: true,
+    child: ExcludeSemantics(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var r = 0; r * columns < count; r++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var c = 0; c < columns; c++) ...[
+                    if (c > 0) const SizedBox(width: OmniSpace.gap),
+                    Expanded(
+                      child: r * columns + c < count
+                          ? const OmniTileSkeleton()
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
 }

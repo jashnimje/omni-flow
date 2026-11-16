@@ -161,122 +161,126 @@ class _SunLightingPageState extends ConsumerState<SunLightingPage> {
     final curve = _curve ?? saved ?? const SunCurveView();
     final targets = <String>[for (final t in view?.targets ?? const []) t.id];
     final noHome = view?.problem != null;
-    return OmniPage(
+    final litRooms = [
+      for (final r in rooms)
+        if (targets.contains(r.id) ||
+            lights.any((l) => l.roomId == r.id || l.room == r.name))
+          r,
+    ];
+    Future<void> saveRange() async {
+      await _setFollow(ref, targets, true, curve: _curve);
+      if (mounted) setState(() => _curve = null);
+    }
+
+    // The switches apply at once. Only a changed range waits for Save.
+    return FormPage(
       title: 'Follow the sun',
-      body: ListView(
-        key: const ValueKey('sun-lighting-page'),
-        children: [
-          if (view?.problem case final p?)
-            OmniBanner.info(
-              p,
-              key: const ValueKey('sun-problem'),
-              actionLabel: 'Set home location',
-              onAction: () => openHomeLocation(context),
-            ),
-          if (view != null && view.preview.isNotEmpty) ...[
-            const OmniSectionHeader('Today'),
-            SunCurvePreview(points: view.preview),
-            if (view.nowKelvin != null)
-              Padding(
-                padding: const EdgeInsets.only(top: OmniSpace.xs),
-                child: Text(
-                  'Now: ${view.nowKelvin} K at ${view.nowBrightness}% '
-                  'brightness. Lights that are on move every 5 minutes.',
-                  style: OmniText.caption,
-                ),
-              ),
-          ],
-          const OmniSectionHeader('Range'),
-          _RangeRow(
-            key: const ValueKey('sun-kelvin'),
-            label: 'White',
-            values: RangeValues(curve.minK.toDouble(), curve.maxK.toDouble()),
-            min: 2000,
-            max: 6500,
-            divisions: 45,
-            words: (v) => '${v.round()} K',
-            onChanged: (v) => setState(
-              () => _curve = curve.copyWith(
-                minK: v.start.round(),
-                maxK: v.end.round(),
-              ),
-            ),
+      commitLabel: 'Save the range',
+      commitKey: const ValueKey('sun-save'),
+      onCommit: _curve != null && targets.isNotEmpty ? saveRange : null,
+      missing: targets.isEmpty
+          ? 'Turn on a room or a light first.'
+          : 'Move a slider to change the range.',
+      children: (context) => [
+        if (view?.problem case final p?)
+          OmniBanner.info(
+            p,
+            key: const ValueKey('sun-problem'),
+            actionLabel: 'Set home location',
+            onAction: () => openHomeLocation(context),
           ),
-          _RangeRow(
-            key: const ValueKey('sun-brightness'),
-            label: 'Brightness',
-            values: RangeValues(
-              curve.minBrightness.toDouble(),
-              curve.maxBrightness.toDouble(),
-            ),
-            min: 1,
-            max: 100,
-            divisions: 99,
-            words: (v) => '${v.round()}%',
-            onChanged: (v) => setState(
-              () => _curve = curve.copyWith(
-                minBrightness: v.start.round(),
-                maxBrightness: v.end.round(),
-              ),
-            ),
-          ),
-          if (_curve != null && targets.isNotEmpty)
-            OmniButton(
-              key: const ValueKey('sun-save'),
-              label: 'Save the range',
-              onPressed: () async {
-                await _setFollow(ref, targets, true, curve: _curve);
-                if (mounted) setState(() => _curve = null);
-              },
-            ),
-          if (rooms.isNotEmpty) ...[
-            const OmniSectionHeader('Rooms'),
-            for (final r in rooms)
-              OmniListRow(
-                key: ValueKey('sun-room-${r.id}'),
-                icon: OmniIcons.room,
-                title: r.name,
-                trailing: LabelledSwitch(
-                  value: targets.contains(r.id),
-                  label: '${r.name} follows the sun',
-                  onChanged: noHome && !targets.contains(r.id)
-                      ? null
-                      : (on) => _setFollow(
-                          ref,
-                          [r.id],
-                          on,
-                          curve: on ? curve : null,
-                        ),
-                ),
-              ),
-          ],
-          const OmniSectionHeader('Lights'),
-          if (lights.isEmpty)
-            const Text(
-              'No light with a brightness or white setting yet.',
-              style: OmniText.caption,
-            ),
-          for (final l in lights)
-            OmniListRow(
-              key: ValueKey('sun-light-${l.id}'),
-              icon: OmniIcons.light,
-              title: l.name,
-              subtitle: view?.paused.contains(l.id) == true
-                  ? 'Paused for an hour after a change by hand'
-                  : !targets.contains(l.id) && view?.followsLight(l.id) == true
-                  ? 'Follows with its room'
-                  : null,
-              trailing: LabelledSwitch(
-                value: targets.contains(l.id),
-                label: '${l.name} follows the sun',
-                onChanged: noHome && !targets.contains(l.id)
-                    ? null
-                    : (on) =>
-                          _setFollow(ref, [l.id], on, curve: on ? curve : null),
+        if (view != null && view.preview.isNotEmpty) ...[
+          const OmniSectionHeader('Today'),
+          SunCurvePreview(points: view.preview),
+          if (view.nowKelvin != null)
+            Padding(
+              padding: const EdgeInsets.only(top: OmniSpace.xs),
+              child: Text(
+                'Now: ${view.nowKelvin} K at ${view.nowBrightness}% '
+                'brightness. Lights that are on move every 5 minutes.',
+                style: OmniText.caption,
               ),
             ),
         ],
-      ),
+        const OmniSectionHeader('Range'),
+        _RangeRow(
+          key: const ValueKey('sun-kelvin'),
+          label: 'White',
+          values: RangeValues(curve.minK.toDouble(), curve.maxK.toDouble()),
+          min: 2000,
+          max: 6500,
+          divisions: 45,
+          words: (v) => '${v.round()} K',
+          onChanged: (v) => setState(
+            () => _curve = curve.copyWith(
+              minK: v.start.round(),
+              maxK: v.end.round(),
+            ),
+          ),
+        ),
+        _RangeRow(
+          key: const ValueKey('sun-brightness'),
+          label: 'Brightness',
+          values: RangeValues(
+            curve.minBrightness.toDouble(),
+            curve.maxBrightness.toDouble(),
+          ),
+          min: 1,
+          max: 100,
+          divisions: 99,
+          words: (v) => '${v.round()}%',
+          onChanged: (v) => setState(
+            () => _curve = curve.copyWith(
+              minBrightness: v.start.round(),
+              maxBrightness: v.end.round(),
+            ),
+          ),
+        ),
+        // Only a room with a light that can follow, or one already set.
+        if (litRooms.isNotEmpty) ...[
+          const OmniSectionHeader('Rooms'),
+          for (final r in litRooms)
+            OmniListRow(
+              key: ValueKey('sun-room-${r.id}'),
+              icon: OmniIcons.room,
+              title: r.name,
+              trailing: LabelledSwitch(
+                value: targets.contains(r.id),
+                label: '${r.name} follows the sun',
+                onChanged: noHome && !targets.contains(r.id)
+                    ? null
+                    : (on) =>
+                          _setFollow(ref, [r.id], on, curve: on ? curve : null),
+              ),
+            ),
+        ],
+        const OmniSectionHeader('Lights'),
+        if (lights.isEmpty)
+          const OmniEmptyState(
+            icon: OmniIcons.light,
+            title: 'No light with a brightness or white setting yet',
+            compact: true,
+          ),
+        for (final l in lights)
+          OmniListRow(
+            key: ValueKey('sun-light-${l.id}'),
+            icon: OmniIcons.light,
+            title: l.name,
+            subtitle: view?.paused.contains(l.id) == true
+                ? 'Paused for an hour after a change by hand'
+                : !targets.contains(l.id) && view?.followsLight(l.id) == true
+                ? 'Follows with its room'
+                : null,
+            trailing: LabelledSwitch(
+              value: targets.contains(l.id),
+              label: '${l.name} follows the sun',
+              onChanged: noHome && !targets.contains(l.id)
+                  ? null
+                  : (on) =>
+                        _setFollow(ref, [l.id], on, curve: on ? curve : null),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -359,7 +363,7 @@ class SunCurvePreview extends StatelessWidget {
                     height: 6 + 74 * p.brightness / 100,
                     decoration: BoxDecoration(
                       color: whiteOf(p.kelvin.toDouble()),
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: BorderRadius.circular(OmniShape.xs),
                     ),
                   ),
                 ),

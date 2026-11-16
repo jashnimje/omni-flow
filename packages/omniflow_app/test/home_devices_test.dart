@@ -307,8 +307,7 @@ void main() {
       expect(find.byKey(const ValueKey('tile-desk_lamp')), findsNWidgets(2));
       expect(find.text('80% · warm'), findsNothing);
       expect(find.text('80%'), findsNWidgets(2));
-      expect(find.text('Netflix'), findsOneWidget);
-      expect(find.text('Playing · vol 35'), findsOneWidget);
+      expect(find.text('Netflix · Playing · vol 35'), findsOneWidget);
       expect(find.byKey(const ValueKey('tile-hall_bulb')), findsNothing);
       expect(find.text('Hall bulb offline'), findsOneWidget);
       expect(find.text('24.5 °C'), findsOneWidget);
@@ -431,10 +430,12 @@ void main() {
     ) async {
       engine.throwOn.add('device.list');
       await pump(tester, engine);
-      expect(find.text('OmniFlow is not answering'), findsOneWidget);
+      expect(find.textContaining('OmniFlow is not answering'), findsOneWidget);
       expect(find.textContaining('StateError'), findsNothing);
+      // The tab keeps its header: search and what needs you stay.
+      expect(find.byKey(const ValueKey('open-search')), findsOneWidget);
       engine.throwOn.clear();
-      await tapKey(tester, 'engine-retry');
+      await tapKey(tester, 'omni-retry');
       expect(find.byKey(const ValueKey('tile-desk_lamp')), findsWidgets);
     });
 
@@ -1001,10 +1002,11 @@ void main() {
       await tapKey(tester, 'settings-rooms');
       await tapKey(tester, 'rooms-add');
       await tester.enterText(
-        find.byKey(const ValueKey('room-name')),
+        find.byKey(const ValueKey('prompt-field')),
         'Kitchen',
       );
-      await tapKey(tester, 'room-name-save');
+      await tester.pump();
+      await tapKey(tester, 'prompt-save');
       expect(engine.callsOf('room.save').single.$2, {'name': 'Kitchen'});
     });
 
@@ -1114,10 +1116,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.byKey(const ValueKey('beacon-name')),
+        find.byKey(const ValueKey('prompt-field')),
         'OMNI_DESK',
       );
-      await tapKey(tester, 'beacon-save');
+      await tester.pump();
+      await tapKey(tester, 'prompt-save');
       expect(engine.callsOf('zone.save').single.$2, {
         'zone': {
           'id': 'home',
@@ -1252,7 +1255,8 @@ void main() {
       expect(find.byType(FirstRunScreen), findsNothing);
       // The home setup follows, and Not now leaves it for Settings.
       expect(find.text('Who are you?'), findsOneWidget);
-      await tapKey(tester, 'setup-not-now');
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
       await tester.pumpAndSettle();
       expect(find.text('Nothing added yet'), findsOneWidget);
       expect(find.byKey(const ValueKey('shell-tabs')), findsOneWidget);

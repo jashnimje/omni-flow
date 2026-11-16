@@ -18,7 +18,7 @@ bool pairsInApp(Map device) => switch (device['pairing']) {
 /// button). The engine says what the user does: the prompt comes from the
 /// device's `pairing`, the outcome from device.pair.
 Future<void> showPairDevice(BuildContext context, Json device) =>
-    showOmniSheet<void>(
+    SheetTemplate.show<void>(
       context,
       builder: (_) => PairDeviceSheet(device: device),
     );
@@ -65,9 +65,20 @@ class _PairDeviceSheetState extends ConsumerState<PairDeviceSheet> {
   @override
   Widget build(BuildContext context) {
     final pairing = widget.device['pairing'] as Map? ?? const {};
-    return OmniSheet(
+    return SheetTemplate(
       title: 'Pair ${widget.device['name']}',
-      children: [
+      primaryLabel: _paired
+          ? 'Done'
+          : _outcome == null
+          ? 'Start pairing'
+          : 'Try again',
+      primaryKey: ValueKey(_paired ? 'pair-done' : 'pair-start'),
+      onPrimary: _paired
+          ? () => Navigator.of(context).pop()
+          : _pairing
+          ? null
+          : _pair,
+      children: (context) => [
         Text(
           '${pairing['prompt'] ?? ''}',
           key: const ValueKey('pair-prompt'),
@@ -84,19 +95,6 @@ class _PairDeviceSheetState extends ConsumerState<PairDeviceSheet> {
             child: _failed
                 ? OmniBanner.error(outcome, key: const ValueKey('pair-outcome'))
                 : OmniBanner.info(outcome, key: const ValueKey('pair-outcome')),
-          ),
-        const SizedBox(height: OmniSpace.md),
-        if (_paired)
-          OmniButton(
-            key: const ValueKey('pair-done'),
-            label: 'Done',
-            onPressed: () => Navigator.of(context).pop(),
-          )
-        else
-          OmniButton(
-            key: const ValueKey('pair-start'),
-            label: _outcome == null ? 'Start pairing' : 'Try again',
-            onPressed: _pairing ? null : _pair,
           ),
       ],
     );

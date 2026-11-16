@@ -24,7 +24,7 @@ const firmwareChips = {
 /// Writes firmware to a board plugged into the phone: OmniFlow's own, so
 /// a blank board becomes one OmniFlow can use, or the user's own build.
 Future<void> showFirmwareSheet(BuildContext context) =>
-    showOmniSheet<void>(context, builder: (_) => const _FirmwareSheet());
+    SheetTemplate.show<void>(context, builder: (_) => const _FirmwareSheet());
 
 class _FirmwareSheet extends ConsumerStatefulWidget {
   const _FirmwareSheet();
@@ -100,6 +100,7 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
           'It replaces what the board runs now, and its Wi-Fi and pins are '
           'set up again afterwards. Keep the cable in until it says done.',
       action: 'Write it',
+      destructive: true,
     );
     if (!ok || !mounted) return;
     final engine = ref.read(engineClientProvider);
@@ -155,16 +156,25 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
   Widget build(BuildContext context) {
     final ports = _ports;
     final progress = _progress;
-    return OmniSheet(
+    final hasPorts = ports != null && ports.isNotEmpty;
+    return SheetTemplate(
       title: 'Install firmware',
       subtitle: 'For a new board, or to put OmniFlow back on one.',
-      children: [
-        if (ports == null)
-          const Padding(
-            padding: EdgeInsets.all(OmniSpace.lg),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (ports.isEmpty) ...[
+      state: OmniLoad.flags(loading: ports == null),
+      primaryLabel: hasPorts
+          ? (progress == null ? 'Write firmware' : 'Writing…')
+          : null,
+      primaryKey: const ValueKey('fw-write'),
+      onPrimary: progress != null || _port == null ? null : _flash,
+      missing: progress == null ? 'Tap the board to write to first.' : null,
+      banners: [
+        if (_error case final e?)
+          OmniBanner.error(key: const ValueKey('fw-error'), e),
+        if (_result case final r?)
+          OmniBanner.info(key: const ValueKey('fw-done'), r),
+      ],
+      children: (context) => [
+        if (!hasPorts) ...[
           const OmniBanner.info(
             'Plug the board into this phone with a USB data cable, and say '
             'yes if the phone asks to let OmniFlow use it.',
@@ -182,15 +192,16 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
               key: ValueKey('fw-port-$p'),
               icon: OmniIcons.board,
               title: ports.length == 1 ? 'The board on USB' : p,
+              selected: p == _port,
               trailing: p == _port
-                  ? const Icon(OmniIcons.check, color: OmniColors.accent)
+                  ? Icon(OmniIcons.check, color: OmniPalette.of(context).accent)
                   : null,
               onTap: () => setState(() => _port = p),
             ),
           const OmniSectionHeader('Which board is it?'),
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: OmniSpace.sm,
+            runSpacing: OmniSpace.sm,
             children: [
               for (final MapEntry(key: chip, value: c) in firmwareChips.entries)
                 OmniFilterChip(
@@ -224,21 +235,12 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
             const SizedBox(height: OmniSpace.md),
             Text(p.stage, key: const ValueKey('fw-stage')),
             const SizedBox(height: OmniSpace.xs),
-            LinearProgressIndicator(
+            OmniProgressBar(
               key: const ValueKey('fw-progress'),
               value: p.stage == 'Writing' ? p.done : null,
+              semanticLabel: p.stage,
             ),
           ],
-          if (_error case final e?)
-            OmniBanner.error(key: const ValueKey('fw-error'), e),
-          if (_result case final r?)
-            OmniBanner.info(key: const ValueKey('fw-done'), r),
-          const SizedBox(height: OmniSpace.md),
-          OmniButton(
-            key: const ValueKey('fw-write'),
-            label: progress == null ? 'Write firmware' : 'Writing…',
-            onPressed: progress != null || _port == null ? null : _flash,
-          ),
         ],
       ],
     );

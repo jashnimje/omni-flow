@@ -66,20 +66,23 @@ class _PinSheetState extends ConsumerState<PinSheet> {
   Widget build(BuildContext context) {
     final device = _device;
     final pins = NamedPin.ofDevice(device);
-    return OmniSheet(
+    return SheetTemplate(
       title: 'Pins of ${device['name'] ?? _id}',
       subtitle: 'Each named pin shows up as a control and in automations',
-      children: [
+      primaryLabel: 'Add a pin',
+      primaryKey: const ValueKey('pin-add'),
+      onPrimary: _add,
+      banners: [
         for (final w in _warnings)
           OmniBanner.warning(w, key: ValueKey('pin-warning-$w')),
+      ],
+      children: (context) => [
         if (pins.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: OmniSpace.sm),
-            child: Text(
-              'No pins named yet. Add the button, relay or sensor you wired '
-              'to it.',
-              style: OmniText.caption,
-            ),
+          const OmniEmptyState(
+            icon: OmniIcons.board,
+            title: 'No pins named yet',
+            message: 'Add the button, relay or sensor you wired to it.',
+            compact: true,
           ),
         for (final p in pins)
           OmniListRow(
@@ -94,13 +97,6 @@ class _PinSheetState extends ConsumerState<PinSheet> {
               onPressed: () => _remove(p),
             ),
           ),
-        const SizedBox(height: OmniSpace.md),
-        OmniButton(
-          key: const ValueKey('pin-add'),
-          label: 'Add a pin',
-          icon: OmniIcons.add,
-          onPressed: _add,
-        ),
       ],
     );
   }

@@ -27,7 +27,8 @@ class OmniFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = selected ? OmniColors.accentInk : OmniColors.text;
+    final palette = OmniPalette.of(context);
+    final fg = selected ? palette.onAccent : OmniColors.text;
     final text = count == null ? label : '$label $count';
     final radius = BorderRadius.circular(OmniRadii.chip);
     return Semantics(
@@ -41,11 +42,9 @@ class OmniFilterChip extends StatelessWidget {
         child: AnimatedContainer(
           duration: OmniMotion.of(context, OmniMotion.fast),
           decoration: BoxDecoration(
-            color: selected ? OmniColors.accent : OmniColors.card,
+            color: selected ? palette.accent : palette.card,
             borderRadius: radius,
-            border: Border.all(
-              color: selected ? OmniColors.accent : OmniColors.line,
-            ),
+            border: Border.all(color: selected ? palette.accent : palette.line),
           ),
           child: Material(
             type: MaterialType.transparency,

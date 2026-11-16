@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../state/clock.dart' show hour12Provider;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
@@ -13,9 +16,12 @@ import '../devices/device_text.dart';
 import '../home/home_presence.dart';
 
 /// The places that have inputs, as zone.list reports them.
-final zonesProvider = FutureProvider<List<Json>>(
-  (ref) async => (await ref.watch(engineApiProvider).zones()).or(const []),
-);
+/// Read again whenever a place or device changes anywhere (the CLI, an
+/// agent, another phone), not only from this screen.
+final zonesProvider = FutureProvider<List<Json>>((ref) async {
+  ref.watch(deviceChangesProvider);
+  return (await ref.watch(engineApiProvider).zones()).or(const []);
+});
 
 /// The home place: the zone named home, else the first one.
 Json? homeZone(List<Json> zones) =>
@@ -116,35 +122,13 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
   }
 
   Future<Json?> _askBeacon() async {
-    final field = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialog) => Owning(
-        [field],
-        child: AlertDialog(
-          title: const Text('Bluetooth beacon'),
-          content: TextField(
-            key: const ValueKey('beacon-name'),
-            controller: field,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'The name the beacon shows',
-              helperText: 'Like OMNI_DESK. OmniFlow never uses its address.',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialog).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              key: const ValueKey('beacon-save'),
-              onPressed: () => Navigator.of(dialog).pop(field.text.trim()),
-              child: const Text('Use it'),
-            ),
-          ],
-        ),
-      ),
+    final name = await showPromptSheet(
+      context,
+      title: 'Bluetooth beacon',
+      label: 'The name the beacon shows',
+      hint: 'Like OMNI_DESK',
+      message: 'OmniFlow never uses its address.',
+      action: 'Use it',
     );
     return name == null || name.isEmpty ? null : {'matchName': name};
   }
@@ -172,7 +156,8 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
     final ble = zone['ble'] is Map ? zone['ble'] as Map : null;
     final exitMs = (ble?['exitDwellMs'] as num?)?.toInt();
     final awayMs = (wifi['awayAfterMs'] as num?)?.toInt() ?? _defaultAwayMs;
-    return OmniPage(
+    return DetailPage(
+      key: const ValueKey('places-list'),
       title: title,
       actions: [
         if (person != null)
@@ -192,136 +177,131 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
             ],
           ),
       ],
-      body: ListView(
-        key: const ValueKey('places-list'),
-        children: [
-          OmniHeroCard(
-            key: const ValueKey('presence-hero'),
-            title: switch (presenceShown(presence, zones.value)) {
-              PresenceShown.notSetUp => presenceNotSetUp,
-              _ => switch (presence?.home) {
-                true => 'You are home',
-                false => 'You are away',
-                null => 'Not known yet',
-              },
-            },
-            subtitle:
-                presence == null ||
-                    presence.home == null ||
-                    presenceShown(presence, zones.value) ==
-                        PresenceShown.notSetUp
-                ? 'Add your home Wi-Fi or a beacon below, and OmniFlow can '
-                      'tell when you are home'
-                : [
-                    if (presence.since != null)
-                      'since ${when(presence.since!)}',
-                    'seen by ${sourceWord(presence.source)}',
-                  ].join(' · '),
-            tone: presence?.home == true ? HeroTone.accent : HeroTone.plain,
-          ),
-          if (ssids.isNotEmpty &&
-              ref.watch(phoneAccessStateProvider).value?.locationAlways ==
-                  false)
-            OmniBanner.warning(
-              key: const ValueKey('wifi-needs-always'),
-              'With the screen off, Android hides the Wi-Fi name from '
-              'OmniFlow, so arriving home goes unnoticed until you open it. '
-              'Allow location all the time to fix it.',
-              actionLabel: 'Allow',
-              onAction: () async {
-                await ref.read(phoneAccessProvider).askLocationAlways();
-                ref.invalidate(phoneAccessStateProvider);
-              },
-            ),
-          const OmniSectionHeader('How OmniFlow knows you are here'),
-          if (zones.isLoading && zones.value == null)
-            const SizedBox(height: 52)
-          else ...[
-            for (final ssid in {...ssids, ..._offNetworks})
-              OmniListRow(
-                key: ValueKey('network-$ssid'),
-                icon: OmniIcons.wifi,
-                title: 'Wi-Fi $ssid',
-                subtitle: 'this phone joins it',
-                trailing: Switch(
-                  value: ssids.contains(ssid),
-                  onChanged: (on) => _setNetwork(zone, ssid, on),
-                ),
-              ),
-            if (currentSsid is String &&
-                currentSsid.isNotEmpty &&
-                !ssids.contains(currentSsid) &&
-                !_offNetworks.contains(currentSsid))
-              OmniListRow(
-                key: const ValueKey('network-add-current'),
-                icon: OmniIcons.add,
-                title: 'Use $currentSsid',
-                subtitle: 'the Wi-Fi this phone is on now',
-                onTap: () => _addCurrentWifi(zone, currentSsid),
-              ),
-            OmniListRow(
-              key: const ValueKey('presence-beacon'),
-              icon: OmniIcons.bluetooth,
-              title: 'Bluetooth beacon',
-              subtitle: ble == null
-                  ? 'a small beacon near the door or desk'
-                  : '${ble['matchName']}',
-              trailing: Switch(
-                value: ble != null,
-                onChanged: (on) => _setBeacon(zone, on),
-              ),
-            ),
-            const OmniListRow(
-              key: ValueKey('presence-hub'),
-              icon: OmniIcons.hub,
-              title: 'Seen by a hub',
-              subtitle: 'not available yet',
-              trailing: Switch(value: false, onChanged: null),
-            ),
-          ],
-          const SizedBox(height: OmniSpace.md),
-          OmniListRow(
-            key: const ValueKey('away-wait'),
-            icon: OmniIcons.time,
-            title: 'Wait before "away"',
-            subtitle: ssids.isEmpty
-                ? (exitMs == null
-                      ? 'Set up Wi-Fi or a beacon first'
-                      : 'The beacon stays quiet ${_duration(exitMs)} first')
-                : 'Off the Wi-Fi this long first, so a router restart is not '
-                      'leaving',
-            subtitleLines: 2,
-            value: ssids.isEmpty ? null : _duration(awayMs),
-            chevron: ssids.isNotEmpty,
-            onTap: ssids.isEmpty ? null : () => _editAwayWait(zone, awayMs),
-          ),
-          const OmniSectionHeader('People'),
-          for (final p in people)
-            OmniListRow(
-              key: ValueKey('person-${p.id}'),
-              icon: OmniIcons.person,
-              title: p.name,
-              subtitle: phone == null ? null : 'this phone',
-              value: switch (Presence.of(p.json).home) {
-                true => 'home',
-                false => 'away',
-                null => null,
-              },
-              chevron: true,
-              onTap: () => showOrganizeSheet(context, p.json),
-            ),
-          if (people.isEmpty)
-            OmniListRow(
-              key: const ValueKey('add-person'),
-              icon: OmniIcons.person,
-              title: 'Add a person',
-              subtitle: 'Who this phone belongs to',
-              chevron: true,
-              onTap: () => _addByHand(context, 'person'),
-            ),
-          const SizedBox(height: OmniSpace.xl),
-        ],
+      hero: OmniHeroCard(
+        key: const ValueKey('presence-hero'),
+        title: switch (presenceShown(presence, zones.value)) {
+          PresenceShown.notSetUp => presenceNotSetUp,
+          _ => switch (presence?.home) {
+            true => 'You are home',
+            false => 'You are away',
+            null => 'Not known yet',
+          },
+        },
+        subtitle:
+            presence == null ||
+                presence.home == null ||
+                presenceShown(presence, zones.value) == PresenceShown.notSetUp
+            ? 'Add your home Wi-Fi or a beacon below, and OmniFlow can '
+                  'tell when you are home'
+            : [
+                if (presence.since != null)
+                  'since ${when(presence.since!, hour12: ref.watch(hour12Provider))}',
+                'seen by ${sourceWord(presence.source)}',
+              ].join(' · '),
+        tone: presence?.home == true ? HeroTone.accent : HeroTone.plain,
       ),
+      children: (context) => [
+        if (ssids.isNotEmpty &&
+            ref.watch(phoneAccessStateProvider).value?.locationAlways == false)
+          OmniBanner.warning(
+            key: const ValueKey('wifi-needs-always'),
+            'With the screen off, Android hides the Wi-Fi name from '
+            'OmniFlow, so arriving home goes unnoticed until you open it. '
+            'Allow location all the time to fix it.',
+            actionLabel: 'Allow',
+            onAction: () async {
+              await ref.read(phoneAccessProvider).askLocationAlways();
+              ref.invalidate(phoneAccessStateProvider);
+            },
+          ),
+        const OmniSectionHeader('How OmniFlow knows you are here'),
+        if (zones.isLoading && zones.value == null)
+          const OmniListSkeleton(rows: 2, label: 'Loading your places')
+        else ...[
+          for (final ssid in {...ssids, ..._offNetworks})
+            OmniListRow(
+              key: ValueKey('network-$ssid'),
+              icon: OmniIcons.wifi,
+              title: 'Wi-Fi $ssid',
+              subtitle: 'this phone joins it',
+              trailing: Switch(
+                value: ssids.contains(ssid),
+                onChanged: (on) => _setNetwork(zone, ssid, on),
+              ),
+            ),
+          if (currentSsid is String &&
+              currentSsid.isNotEmpty &&
+              !ssids.contains(currentSsid) &&
+              !_offNetworks.contains(currentSsid))
+            OmniListRow(
+              key: const ValueKey('network-add-current'),
+              icon: OmniIcons.add,
+              title: 'Use $currentSsid',
+              subtitle: 'the Wi-Fi this phone is on now',
+              onTap: () => _addCurrentWifi(zone, currentSsid),
+            ),
+          OmniListRow(
+            key: const ValueKey('presence-beacon'),
+            icon: OmniIcons.bluetooth,
+            title: 'Bluetooth beacon',
+            subtitle: ble == null
+                ? 'a small beacon near the door or desk'
+                : '${ble['matchName']}',
+            trailing: Switch(
+              value: ble != null,
+              onChanged: (on) => _setBeacon(zone, on),
+            ),
+          ),
+          const OmniListRow(
+            key: ValueKey('presence-hub'),
+            icon: OmniIcons.hub,
+            title: 'Seen by a hub',
+            subtitle: 'Coming later',
+            value: 'Not yet',
+            valueColor: OmniColors.muted,
+          ),
+        ],
+        const SizedBox(height: OmniSpace.md),
+        OmniListRow(
+          key: const ValueKey('away-wait'),
+          icon: OmniIcons.time,
+          title: 'Wait before "away"',
+          subtitle: ssids.isEmpty
+              ? (exitMs == null
+                    ? 'Set up Wi-Fi or a beacon first'
+                    : 'The beacon stays quiet ${_duration(exitMs)} first')
+              : 'Off the Wi-Fi this long first, so a router restart is not '
+                    'leaving',
+          subtitleLines: 2,
+          value: ssids.isEmpty ? null : _duration(awayMs),
+          chevron: ssids.isNotEmpty,
+          onTap: ssids.isEmpty ? null : () => _editAwayWait(zone, awayMs),
+        ),
+        const OmniSectionHeader('People'),
+        for (final p in people)
+          OmniListRow(
+            key: ValueKey('person-${p.id}'),
+            icon: OmniIcons.person,
+            title: p.name,
+            subtitle: phone == null ? null : 'this phone',
+            value: switch (Presence.of(p.json).home) {
+              true => 'home',
+              false => 'away',
+              null => null,
+            },
+            chevron: true,
+            onTap: () => showOrganizeSheet(context, p.json),
+          ),
+        if (people.isEmpty)
+          OmniListRow(
+            key: const ValueKey('add-person'),
+            icon: OmniIcons.person,
+            title: 'Add a person',
+            subtitle: 'Who this phone belongs to',
+            chevron: true,
+            onTap: () => _addByHand(context, 'person'),
+          ),
+      ],
     );
   }
 

@@ -278,8 +278,7 @@ void main() {
 
       // Settings, This house.
       await openTab(tester, 'Settings');
-      expect(find.text('This house'), findsOneWidget);
-      expect(find.text('Bangalore'), findsWidgets);
+      expect(find.text('This house · Bangalore'), findsOneWidget);
       expect(find.text('Your home'), findsNothing);
       expectAllIn(engine, 'zone.list', 'bangalore');
       expectAllIn(engine, 'home.location', 'bangalore');
@@ -327,19 +326,17 @@ void main() {
       await pumpHouses(tester, engine, store: store);
       await tapKey(tester, 'house-switcher');
       await tapKey(tester, 'house-add');
-      await tester.enterText(
-        find.byKey(const ValueKey('house-name-field')),
-        'Goa',
-      );
-      await tapKey(tester, 'house-name-save');
+      await tester.enterText(find.byKey(const ValueKey('prompt-field')), 'Goa');
+      await tester.pump();
+      await tapKey(tester, 'prompt-save');
       expect(engine.callsOf('house.add').single.$2, {'name': 'Goa'});
       expect(store.saved, 'goa');
       // The first-run steps for a house: where it is, then its Wi-Fi.
       expect(find.text('Set up Goa'), findsOneWidget);
-      expect(find.text('Step 1 of 2'), findsOneWidget);
+      expect(find.bySemanticsLabel('Step 1 of 2'), findsOneWidget);
       expect(find.byKey(const ValueKey('setup-home-location')), findsOneWidget);
-      await tapKey(tester, 'setup-skip');
-      expect(find.text('Step 2 of 2'), findsOneWidget);
+      await tapKey(tester, 'step-skip');
+      expect(find.bySemanticsLabel('Step 2 of 2'), findsOneWidget);
       expect(find.byKey(const ValueKey('setup-permission-location')), findsOne);
     });
 
@@ -351,10 +348,10 @@ void main() {
       await tester.tap(find.text('Rename'));
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.byKey(const ValueKey('house-name-field')),
+        find.byKey(const ValueKey('prompt-field')),
         'Work flat',
       );
-      await tapKey(tester, 'house-name-save');
+      await tapKey(tester, 'prompt-save');
       expect(engine.callsOf('house.rename').single.$2, {
         'id': 'bangalore',
         'name': 'Work flat',

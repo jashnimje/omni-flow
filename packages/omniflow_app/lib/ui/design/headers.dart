@@ -47,8 +47,10 @@ class OmniSectionHeader extends StatelessWidget {
           if (trailingText != null)
             Text(
               trailingText!,
+              // A count, not a link: muted, so only real actions use the
+              // accent.
               style: OmniText.caption.copyWith(
-                color: OmniPalette.of(context).accent,
+                color: OmniColors.muted,
                 fontWeight: FontWeight.w500,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
@@ -60,8 +62,7 @@ class OmniSectionHeader extends StatelessWidget {
                 foregroundColor: OmniPalette.of(context).accent,
                 minimumSize: const Size(OmniSpace.target, OmniSpace.target),
                 padding: const EdgeInsets.symmetric(horizontal: OmniSpace.sm),
-                textStyle: const TextStyle(
-                  fontSize: 12,
+                textStyle: OmniText.labelMedium.copyWith(
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -99,16 +100,19 @@ class OmniScreenTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = collapse.clamp(0.0, 1.0);
     if (reveal) {
+      // Shows only over the last quarter of the scroll, once the hero's
+      // own title has gone under the bar.
+      final shown = ((t - 0.75) / 0.25).clamp(0.0, 1.0);
       return Padding(
         padding: const EdgeInsetsDirectional.only(start: 2),
         child: Row(
           children: [
             Expanded(
-              child: t == 0
+              child: shown == 0
                   ? const SizedBox(height: OmniSpace.target)
                   : ExcludeSemantics(
                       child: Opacity(
-                        opacity: t,
+                        opacity: shown,
                         child: Text(
                           title,
                           maxLines: 1,
@@ -168,10 +172,21 @@ class OmniScreenTitle extends StatelessWidget {
 /// How far the page's main list scrolls before its title is fully small.
 const _collapseDistance = 56.0;
 
+/// How far a hero page scrolls before the bar's small title shows: the
+/// hero's own big title is above the bar by then, so the two are never on
+/// screen together.
+const _revealDistance = 120.0;
+
 /// Turns the vertical scrolling of the list inside [child] into a 0 to 1
 /// [collapse] for a large title.
 class _CollapseOnScroll extends StatefulWidget {
-  const _CollapseOnScroll({required this.builder, required this.child});
+  const _CollapseOnScroll({
+    required this.builder,
+    required this.child,
+    this.distance = _collapseDistance,
+  });
+
+  final double distance;
 
   final Widget Function(BuildContext context, double collapse) builder;
   final Widget child;
@@ -191,7 +206,7 @@ class _CollapseOnScrollState extends State<_CollapseOnScroll> {
 
   bool _onScroll(ScrollNotification n) {
     if (n.depth == 0 && n.metrics.axis == Axis.vertical) {
-      final v = (n.metrics.pixels / _collapseDistance).clamp(0.0, 1.0);
+      final v = (n.metrics.pixels / widget.distance).clamp(0.0, 1.0);
       if ((v - _collapse.value).abs() > 0.001) _collapse.value = v;
     }
     return false;
@@ -407,6 +422,8 @@ class OmniTabPage extends StatelessWidget {
     this.actions = const [],
     this.padded = true,
     this.heroTitle = false,
+    this.house,
+    this.filters,
   });
 
   final String title;
@@ -414,6 +431,14 @@ class OmniTabPage extends StatelessWidget {
   final List<Widget> actions;
   final Widget body;
   final bool padded;
+
+  /// The house chip under the title, on the tabs whose content is per
+  /// house (Home, Automations, Devices).
+  final Widget? house;
+
+  /// Pinned above the scrolling [body]: a segmented control, filter chips
+  /// or the tab's search field. It does not scroll away.
+  final Widget? filters;
 
   /// [body] opens with its own big title (Home's hero), so the bar holds
   /// only [actions] until the page scrolls ([OmniScreenTitle.reveal]).
@@ -426,6 +451,7 @@ class OmniTabPage extends StatelessWidget {
       body: SafeArea(
         bottom: false,
         child: _CollapseOnScroll(
+          distance: heroTitle ? _revealDistance : _collapseDistance,
           builder: (context, collapse) => Padding(
             padding: OmniSpace.screenPadding,
             child: OmniScreenTitle(
@@ -436,11 +462,42 @@ class OmniTabPage extends StatelessWidget {
               reveal: heroTitle,
             ),
           ),
-          child: padded
-              ? Padding(padding: OmniSpace.screenPadding, child: body)
-              : body,
+          child: house == null && filters == null
+              ? _padBody()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (house != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          OmniSpace.screen,
+                          0,
+                          OmniSpace.screen,
+                          OmniSpace.sm,
+                        ),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: house,
+                        ),
+                      ),
+                    if (filters != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          OmniSpace.screen,
+                          0,
+                          OmniSpace.screen,
+                          OmniSpace.sm,
+                        ),
+                        child: filters,
+                      ),
+                    Expanded(child: _padBody()),
+                  ],
+                ),
         ),
       ),
     ),
   );
+
+  Widget _padBody() =>
+      padded ? Padding(padding: OmniSpace.screenPadding, child: body) : body;
 }

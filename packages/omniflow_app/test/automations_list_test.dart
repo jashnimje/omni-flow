@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/ui/automations/automations.dart';
+import 'package:omniflow_app/ui/design/design.dart';
 
 import 'automations_fixtures.dart';
 import 'fake_engine.dart';
@@ -187,11 +189,86 @@ void main() {
     expect(find.text('No automations yet'), findsOneWidget);
   });
 
-  testWidgets('while loading it shows the shape of the list', (tester) async {
-    engine.delay = const Duration(seconds: 1);
+  testWidgets('with scenes and no rules the list shows and keeps the New '
+      'button', (tester) async {
+    engine.answers['automation.list'] = {
+      'ok': true,
+      'automations': [
+        for (final a in automationRows())
+          if (a['source'] == 'scene') a,
+      ],
+    };
+    bool? empty;
+    await pumpPage(
+      tester,
+      engine,
+      Consumer(
+        builder: (context, ref, _) {
+          empty = automationsAreEmpty(ref);
+          return const AutomationsScreen();
+        },
+      ),
+    );
+    expect(find.byKey(const ValueKey('automations-empty')), findsNothing);
+    expect(find.byKey(const ValueKey('filter-empty')), findsOneWidget);
+    expect(empty, isFalse);
+  });
+
+  testWidgets('a swiped one put back from Recently removed shows again', (
+    tester,
+  ) async {
+    final rows = automationRows();
+    final row = rows.firstWhere((a) => a['source'] != 'scene');
+    final id = row['id'];
+    engine.answers['automation.get'] = {
+      'ok': true,
+      'id': id,
+      'source': 'rule',
+      'spec': {'name': row['name'], 'when': [], 'then': []},
+      'approved': true,
+    };
     await pumpPage(tester, engine, const AutomationsScreen());
-    expect(find.byKey(const ValueKey('automations-loading')), findsOneWidget);
-    await tester.pump(const Duration(seconds: 2));
+    engine.answers['automation.list'] = {
+      'ok': true,
+      'automations': [
+        for (final a in rows)
+          if (a['id'] != id) a,
+      ],
+    };
+    await tester.drag(
+      find.byKey(ValueKey('automation-$id')),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('automation-$id')), findsNothing);
+    // Restored elsewhere: the next list has it again.
+    engine.answers['automation.list'] = {'ok': true, 'automations': rows};
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(AutomationsScreen)),
+    );
+    await container.read(automationsProvider.notifier).refresh();
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('automation-$id')), findsOneWidget);
+  });
+
+  testWidgets('with the hub stopped it says so and shows no next run', (
+    tester,
+  ) async {
+    engine.answers['engine.status'] = {'ok': true, 'hubRunning': false};
+    await pumpPage(tester, engine, const AutomationsScreen());
+    expect(
+      find.text('Stopped. Start them from the banner above.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Next:'), findsNothing);
+  });
+
+  testWidgets('while loading it shows the shape of the list', (tester) async {
+    // Longer than the skeleton's shimmer, which settles on its own.
+    engine.delay = const Duration(seconds: 30);
+    await pumpPage(tester, engine, const AutomationsScreen());
+    expect(find.byType(OmniListSkeleton), findsOneWidget);
+    await tester.pump(const Duration(seconds: 31));
     await tester.pumpAndSettle();
     expect(find.byType(AutomationCard), findsWidgets);
   });
@@ -200,7 +277,7 @@ void main() {
       'loads the list', (tester) async {
     engine.throwOn.add('automation.list');
     await pumpPage(tester, engine, const AutomationsScreen());
-    expect(find.byKey(const ValueKey('automations-offline')), findsOneWidget);
+    expect(find.byType(OmniErrorState), findsOneWidget);
     expect(find.textContaining('OmniFlow did not answer'), findsWidgets);
     engine.throwOn.clear();
     await tapText(tester, 'Try again');

@@ -353,8 +353,9 @@ void main() {
         'latitude': 51.5074,
         'longitude': -0.1278,
       });
-      expect(find.textContaining('Sunrise 6:41'), findsOneWidget);
-      expect(find.textContaining('sunset 5:23'), findsOneWidget);
+      // Tests read a 24-hour clock (flutter_test_config.dart).
+      expect(find.textContaining('Sunrise 06:41'), findsOneWidget);
+      expect(find.textContaining('sunset 17:23'), findsOneWidget);
     });
 
     testWidgets('typed numbers save, and a phone with no fix says why', (

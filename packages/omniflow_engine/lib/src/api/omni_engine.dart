@@ -11,6 +11,7 @@ import 'automation_commands.dart';
 import 'automation_diagram.dart';
 import 'backup_commands.dart';
 import 'board_commands.dart';
+import 'clock_words.dart' show callHour12, hour12Arg, withHour12;
 import 'board_runtime.dart';
 import 'command_args.dart';
 import 'device_commands.dart';
@@ -257,6 +258,8 @@ class OmniEngine {
       await houses.open();
       engine._closers.add(houses.close);
       await engine._homeLocation.openHouses(engine._core);
+      // Each house's own sun and away lighting, never the first house's.
+      await built._smartHome.openHouses();
       engine._core.agentDrivers.addAll(await DriftManifestStore(db).byAgent());
       await engine._core.loadRooms();
       await engine._core.history.seed();
@@ -771,17 +774,38 @@ class OmniEngine {
     if (handler == null) {
       return _failure(ApiError('unknown_command', 'no command $command'));
     }
+    // How this client reads the time, for the words of this call. A call
+    // made inside another reads as that one.
+    final hour12 = args.containsKey(hour12Arg)
+        ? args[hour12Arg] == true
+        : callHour12;
+    if (args.containsKey(hour12Arg)) args = {...args}..remove(hour12Arg);
     try {
       // In the house the command names: lists keep to it, saves stay in it.
       final result = {
         'ok': true,
-        ...await _core.houses.scoped(command, args, handler),
+        ...await withHour12(
+          hour12,
+          () => _core.houses.scoped(command, args, handler),
+        ),
       };
       if (automationChangeCommands.contains(command)) {
         _core.emit({
           'event': automationChangedEvent,
           'command': command,
           if (args['id'] ?? result['id'] case final Object id) 'id': '$id',
+        });
+      }
+      if (deviceChangeCommands.contains(command)) {
+        final device = result['device'] ?? result['room'];
+        _core.emit({
+          'event': deviceChangedEvent,
+          'command': command,
+          if (args['id'] ??
+                  result['id'] ??
+                  (device is Map ? device['id'] : null)
+              case final Object id)
+            'id': '$id',
         });
       }
       return result;
@@ -811,6 +835,30 @@ class OmniEngine {
     'scene.save',
     'scene.remove',
     'scene.capture',
+    'config.import',
+  };
+
+  /// Sent after any command that adds, removes, renames, moves or
+  /// organizes a thing or a room, so every screen listing devices and rooms
+  /// (the app after a CLI or agent change, another phone) reads them again.
+  static const deviceChangedEvent = 'device.changed';
+
+  /// The commands that change the stored things or rooms.
+  static const deviceChangeCommands = {
+    'device.add',
+    'thing.add',
+    'thing.configure',
+    'device.remove',
+    'device.organize',
+    'device.move',
+    'room.save',
+    'room.remove',
+    'room.order',
+    'zone.save',
+    'zone.remove',
+    'weather.add',
+    'board.setup',
+    'board.provision',
     'config.import',
   };
 

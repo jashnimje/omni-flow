@@ -1,5 +1,6 @@
 import '../dag/node_types.dart';
 import '../dag/rules.dart' show daysSuffix, daysWords, sunTriggerLabel;
+import 'clock_words.dart';
 import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../storage/database.dart';
@@ -24,12 +25,19 @@ class SentenceContext {
     this.drivers = const {},
     this.person,
     this.automations = const {},
+    this.hour12 = false,
   });
 
   final Map<String, String> names;
   final Map<String, DriverManifest> drivers;
   final String? person;
   final Map<String, String> automations;
+
+  /// Whether times read on a 12-hour clock ("7:30 PM") or 24 hours.
+  final bool hour12;
+
+  /// [hhmm] as the person reads the time.
+  String clock(Object? hhmm) => clockWords(hhmm, hour12: hour12);
 
   String name(String thing) => thing.startsWith('{{')
       ? 'each device'
@@ -49,9 +57,32 @@ class SentenceContext {
   }
 
   /// The words for one key of a thing: its capability label, or the key.
-  String _key(String thing, String key) =>
-      (_capability(thing, key)?.label ?? key.replaceAll('_', ' '))
-          .toLowerCase();
+  /// A label listing the values a sensor reports ("Power (on, asleep or
+  /// off)") drops the list: the value says which.
+  String _key(String thing, String key) {
+    final capability = _capability(thing, key);
+    if (capability == null) return key.replaceAll('_', ' ').toLowerCase();
+    final label = capability.values.isEmpty
+        ? capability.label
+        : capability.label.replaceAll(RegExp(r'\s*\([^)]*\)'), '');
+    return label.toLowerCase();
+  }
+
+  /// Whether [key] of [thing] is a power reading with a fixed set of values
+  /// (a TV's on, asleep or off), which reads as the thing itself: "Living
+  /// room TV is asleep".
+  bool _isPowerChoice(String thing, String key) =>
+      drivers[thing]?.capabilities.any(
+        (c) =>
+            c.values.isNotEmpty &&
+            (c.id == key || stateKeyOf(c.stateJsonPath) == key) &&
+            c.label
+                    .replaceAll(RegExp(r'\s*\([^)]*\)'), '')
+                    .trim()
+                    .toLowerCase() ==
+                'power',
+      ) ??
+      false;
 
   /// Whether [key] of [thing] is its one on/off: a toggle that is the
   /// thing's only toggle, so "Desk lamp is on" says enough.
@@ -111,7 +142,7 @@ class SentenceContext {
     if (t['on'] is String) return 'When ${_on(t)}';
     if (t['time'] != null) {
       final days = t['days'];
-      return 'At ${t['time']}${daysSuffix(days)}';
+      return 'At ${clock(t['time'])}${daysSuffix(days)}';
     }
     if (t['sun'] != null) {
       final label = sunTriggerLabel(t);
@@ -149,6 +180,9 @@ class SentenceContext {
       if (to is bool && isOnOff(thing, key)) {
         return '${name(thing)} turns ${value(to)}';
       }
+      if (to is String && _isPowerChoice(thing, key)) {
+        return '${name(thing)} ${to == 'asleep' ? 'falls asleep' : 'turns $to'}';
+      }
       return '${state(t['on'] as String)} turns ${value(to)}';
     }
     return '${state(t['on'] as String)} changes';
@@ -167,7 +201,7 @@ class SentenceContext {
     if (houseConditionWords(c) case final words?) return words;
     if (rulesCoreConditionWords(c) case final words?) return words;
     if (c['between'] case [final start, final end]) {
-      return 'between $start and $end';
+      return 'between ${clock(start)} and ${clock(end)}';
     }
     if (c['days'] is List) return daysWords(c['days'] as List);
     if (c['not'] is Map) {
@@ -203,6 +237,11 @@ class SentenceContext {
           (c['op'] == '==' || c['op'] == '!=')) {
         final on = (c['op'] == '==') == right;
         return '${name(thing)} is ${on ? 'on' : 'off'}';
+      }
+      if (right is String &&
+          _isPowerChoice(thing, key) &&
+          (c['op'] == '==' || c['op'] == '!=')) {
+        return '${name(thing)} $op $right';
       }
       return '${state(ref)} $op $rightText';
     }

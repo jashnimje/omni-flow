@@ -64,10 +64,10 @@ class _NewSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final templates = ref.watch(_templatesProvider);
     void pick(_NewChoice c) => Navigator.of(context).pop(c);
-    return OmniSheet(
+    return SheetTemplate(
       title: 'New automation',
       subtitle: 'Each runs on the phone, even with the screen off.',
-      children: [
+      children: (context) => [
         OmniListRow(
           key: const ValueKey('new-blank-rule'),
           icon: AutomationIcons.rule,
@@ -85,7 +85,11 @@ class _NewSheet extends ConsumerWidget {
           chevron: true,
           onTap: () => pick(const _NewLink()),
         ),
-        const OmniSectionHeader('Start from a template'),
+        // A caption, so it does not stack on the first group's heading.
+        const Padding(
+          padding: EdgeInsets.only(top: OmniSpace.md),
+          child: Text('Or start from a template', style: OmniText.caption),
+        ),
         switch (templates) {
           AsyncData(:final value) when value.ok => TemplateGallery(
             templates: value.value!,
@@ -97,10 +101,7 @@ class _NewSheet extends ConsumerWidget {
             actionLabel: 'Try again',
             onAction: () => ref.invalidate(_templatesProvider),
           ),
-          _ => const Padding(
-            padding: EdgeInsets.all(OmniSpace.lg),
-            child: Center(child: CircularProgressIndicator()),
-          ),
+          _ => const OmniListSkeleton(rows: 3, label: 'Loading templates'),
         },
       ],
     );
@@ -223,7 +224,7 @@ class _TemplateCard extends StatelessWidget {
                 const SizedBox(height: OmniSpace.gap),
                 Text(t.name, style: OmniText.bodyStrong),
                 if (t.description.isNotEmpty) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: OmniSpace.xs),
                   Text(
                     t.description,
                     maxLines: 3,
@@ -295,42 +296,40 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
         _values['person'] == null) {
       _values['person'] = words.me;
     }
-    return OmniPage(
+    return FormPage(
       title: widget.template.name,
-      body: ListView(
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-            child: Row(
-              children: [
-                AutomationBadge(
-                  icon: AutomationLook.iconOf(
-                    widget.template.icon,
-                    fallback: AutomationIcons.template,
-                  ),
-                  color: widget.template.color,
+      commitLabel: 'Continue',
+      commitKey: const ValueKey('template-continue'),
+      onCommit: _busy || !_ready ? null : _continue,
+      missing: _busy ? null : 'Fill in every part first.',
+      banners: [
+        if (_error != null)
+          OmniBanner.error(_error!, key: const ValueKey('template-error')),
+      ],
+      children: (context) => [
+        Padding(
+          padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+          child: Row(
+            children: [
+              AutomationBadge(
+                icon: AutomationLook.iconOf(
+                  widget.template.icon,
+                  fallback: AutomationIcons.template,
                 ),
-                const SizedBox(width: OmniSpace.gap),
-                Expanded(
-                  child: Text(
-                    widget.template.description,
-                    style: OmniText.caption,
-                  ),
+                color: widget.template.color,
+              ),
+              const SizedBox(width: OmniSpace.gap),
+              Expanded(
+                child: Text(
+                  widget.template.description,
+                  style: OmniText.caption,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          if (_error != null)
-            OmniBanner.error(_error!, key: const ValueKey('template-error')),
-          for (final p in _placeholders) ..._field(p, words),
-          const SizedBox(height: OmniSpace.xl),
-        ],
-      ),
-      bottom: OmniButton(
-        key: const ValueKey('template-continue'),
-        label: 'Continue',
-        onPressed: _busy || !_ready ? null : _continue,
-      ),
+        ),
+        for (final p in _placeholders) ..._field(p, words),
+      ],
     );
   }
 

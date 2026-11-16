@@ -10,6 +10,7 @@ import '../api/engine_calls.dart' show EngineCalls, Json;
 import '../api/engine_client.dart';
 import '../api/houses_calls.dart';
 import '../ui/settings/shake_scene.dart' show thisPhoneIdProvider;
+import 'clock.dart';
 import 'providers.dart';
 
 export '../api/houses_calls.dart' show House;
@@ -234,7 +235,12 @@ Json newHomePlace(House? house) {
 }
 
 /// The engine scoped to the house in view, for [engineClientProvider].
-HouseScopedClient scopedEngine(Ref ref) {
+/// Every call also carries this phone's clock setting where words hold a
+/// time ([ClockClient]).
+EngineClient scopedEngine(Ref ref) =>
+    ClockClient(_houseScoped(ref), hour12: ref.watch(hour12Provider));
+
+HouseScopedClient _houseScoped(Ref ref) {
   final raw = ref.watch(engineConnectionProvider);
   // Only the house itself: reading the list of houses again, or an engine
   // with no houses finishing its read, changes nothing for the screens.

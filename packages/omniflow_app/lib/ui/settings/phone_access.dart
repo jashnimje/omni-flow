@@ -245,22 +245,19 @@ class PermissionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ok = granted == true || !needed;
+    final accent = OmniPalette.of(context).accent;
     return OmniListRow(
       icon: icon,
       title: title,
       subtitle: '$why\n${stateText ?? accessWord(granted, needed: needed)}',
-      subtitleLines: 4,
+      subtitleLines: 6,
       trailing: ok
-          ? const Icon(
-              AreaIcons.ok,
-              color: OmniColors.accent,
-              semanticLabel: 'Allowed',
-            )
+          ? Icon(AreaIcons.ok, color: accent, semanticLabel: 'Allowed')
           : TextButton(
               key: ValueKey('grant-$id'),
               onPressed: onGrant,
               style: TextButton.styleFrom(
-                foregroundColor: OmniColors.accent,
+                foregroundColor: accent,
                 minimumSize: const Size(OmniSpace.target, OmniSpace.target),
               ),
               child: Text(grantLabel),
@@ -402,16 +399,18 @@ class _PhoneAccessPageState extends ConsumerState<PhoneAccessPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(phoneAccessStateProvider).value;
+    final loaded = ref.watch(phoneAccessStateProvider);
     final access = ref.read(phoneAccessProvider);
-    if (state == null) {
-      return const OmniPage(title: 'This phone', body: SizedBox());
-    }
-    return OmniPage(
-      title: 'This phone',
-      body: ListView(
-        key: const ValueKey('phone-access'),
-        children: [
+    return FormPage.instant(
+      key: const ValueKey('phone-access'),
+      title: 'Phone setup',
+      state: OmniLoad.of(
+        loaded,
+        error: 'OmniFlow could not read what this phone allows.',
+        onRetry: () => ref.invalidate(phoneAccessStateProvider),
+      ),
+      children: (context) => [
+        if (loaded.value case final state?) ...[
           const OmniSectionHeader('Running in the background'),
           if (!state.backgroundOk)
             OmniBanner.warning(
@@ -539,9 +538,8 @@ class _PhoneAccessPageState extends ConsumerState<PhoneAccessPage> {
             label: 'Open OmniFlow in system settings',
             onPressed: access.openAppSettings,
           ),
-          const SizedBox(height: OmniSpace.xl),
         ],
-      ),
+      ],
     );
   }
 }

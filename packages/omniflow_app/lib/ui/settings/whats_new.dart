@@ -212,19 +212,14 @@ Future<void> showWhatsNewAfterUpdate(
   if (!context.mounted) return;
   final notes = releaseNotes.where((r) => r.version == appVersion).firstOrNull;
   if (notes == null) return;
-  await showOmniSheet<void>(
+  await SheetTemplate.show<void>(
     context,
-    builder: (sheet) => OmniSheet(
+    builder: (sheet) => SheetTemplate(
       title: 'New in OmniFlow ${notes.version}',
-      children: [
-        for (final n in notes.notes) _Note(n),
-        const SizedBox(height: OmniSpace.md),
-        OmniButton(
-          key: const ValueKey('whats-new-ok'),
-          label: 'Got it',
-          onPressed: () => Navigator.of(sheet).pop(),
-        ),
-      ],
+      primaryLabel: 'Got it',
+      primaryKey: const ValueKey('whats-new-ok'),
+      onPrimary: () => Navigator.of(sheet).pop(),
+      children: (_) => [for (final n in notes.notes) _Note(n)],
     ),
   );
 }
@@ -240,9 +235,16 @@ class _Note extends StatelessWidget {
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 6, right: 10),
-          child: Icon(Icons.circle, size: 6, color: OmniColors.accent),
+        Padding(
+          padding: const EdgeInsets.only(
+            top: OmniSpace.sm,
+            right: OmniSpace.gap,
+          ),
+          child: Icon(
+            Icons.circle,
+            size: 6,
+            color: OmniPalette.of(context).accent,
+          ),
         ),
         Expanded(child: Text(text)),
       ],
@@ -255,38 +257,35 @@ class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
   @override
-  Widget build(BuildContext context) => OmniPage(
+  Widget build(BuildContext context) => ListPage(
     title: 'About',
-    body: ListView(
-      children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: OmniSpace.lg),
-          child: Center(child: OmniMark(size: 96)),
+    children: (context) => [
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: OmniSpace.lg),
+        child: Center(child: OmniMark(size: 96)),
+      ),
+      OmniListRow(
+        key: const ValueKey('about-version'),
+        icon: OmniIcons.about,
+        title: 'OmniFlow $appVersion',
+        subtitle: 'Runs on this phone. Nothing leaves it unless you send it.',
+      ),
+      OmniListRow(
+        key: const ValueKey('about-licences'),
+        icon: OmniIcons.info,
+        title: 'Licences',
+        chevron: true,
+        onTap: () => showLicensePage(
+          context: context,
+          applicationName: 'OmniFlow',
+          applicationVersion: appVersion,
         ),
-        OmniListRow(
-          key: const ValueKey('about-version'),
-          icon: OmniIcons.about,
-          title: 'OmniFlow $appVersion',
-          subtitle: 'Runs on this phone. Nothing leaves it unless you send it.',
-        ),
-        OmniListRow(
-          key: const ValueKey('about-licences'),
-          icon: OmniIcons.info,
-          title: 'Licences',
-          chevron: true,
-          onTap: () => showLicensePage(
-            context: context,
-            applicationName: 'OmniFlow',
-            applicationVersion: appVersion,
-          ),
-        ),
-        for (final r in releaseNotes) ...[
-          OmniSectionHeader('What is new in ${r.version} · ${r.date}'),
-          for (final n in r.notes) _Note(n),
-        ],
-        const SizedBox(height: OmniSpace.xl),
+      ),
+      for (final r in releaseNotes) ...[
+        OmniSectionHeader('What is new in ${r.version} · ${r.date}'),
+        for (final n in r.notes) _Note(n),
       ],
-    ),
+    ],
   );
 }
 

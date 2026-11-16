@@ -488,6 +488,10 @@ abstract final class OmniText {
     height: 1.6,
     color: OmniColors.text,
   );
+
+  /// The words of a rule step: an editor row, a sentence row and a
+  /// diagram node, sized to fit the node boxes.
+  static const step = TextStyle(fontSize: 13, color: OmniColors.text);
 }
 
 /// A spring from Material 3 Expressive, as a [curve] and the [duration]

@@ -299,10 +299,11 @@ void main() {
       expect(engine.callsOf('alerts.set').single.$2, {'offline': false});
       await tapKey(tester, 'mode-add');
       await tester.enterText(
-        find.byKey(const ValueKey('mode-add-name')),
+        find.byKey(const ValueKey('prompt-field')),
         'Movie night',
       );
-      await tapKey(tester, 'mode-add-done');
+      await tester.pump();
+      await tapKey(tester, 'prompt-save');
       expect(engine.callsOf('home.mode.set').last.$2, {
         'modes': ['Guests', 'Movie night'],
       });

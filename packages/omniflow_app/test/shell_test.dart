@@ -14,9 +14,9 @@ import 'package:omniflow_app/ui/shell/shell.dart';
 
 import 'fake_engine.dart';
 
-ShellController shellOf(WidgetTester tester) =>
-    ProviderScope.containerOf(tester.element(find.byType(OmniShell)))
-        .read(shellControllerProvider);
+ShellController shellOf(WidgetTester tester) => ProviderScope.containerOf(
+  tester.element(find.byType(OmniShell, skipOffstage: false)),
+).read(shellControllerProvider);
 
 Finder fabWith(String key) => find.byKey(ValueKey(key));
 
@@ -80,13 +80,23 @@ void main() {
     expect(find.byKey(const ValueKey('automations-empty')), findsOneWidget);
   });
 
-  testWidgets('a page opened in a tab keeps the tab bar and hides the button', (
+  testWidgets('Add covers the whole screen, tab bar and button too', (
     tester,
   ) async {
     await pumpApp(tester, engine);
     await tester.tap(fabWith('add-device'));
     await tester.pumpAndSettle();
     expect(find.byType(AddPage), findsOneWidget);
+    expect(find.byKey(const ValueKey('shell-tabs')), findsNothing);
+    expect(find.byType(FloatingActionButton), findsNothing);
+  });
+
+  testWidgets('a page opened in a tab keeps the tab bar and hides the button', (
+    tester,
+  ) async {
+    await pumpApp(tester, engine);
+    await openDeveloper(tester);
+    expect(find.byType(DeveloperScreen), findsOneWidget);
     expect(find.byKey(const ValueKey('shell-tabs')), findsOneWidget);
     expect(find.byType(FloatingActionButton), findsNothing);
   });

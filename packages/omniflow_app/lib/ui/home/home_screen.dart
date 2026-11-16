@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../automations/sun_lighting_page.dart' show RoomFollowSunSwitch;
+import '../automations/test_run.dart' show RunPage;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -62,12 +63,14 @@ class HomeScreen extends ConsumerWidget {
     final devices = ref.watch(devicesProvider);
     final list = devices.value;
     if (list == null && devices.hasError) {
-      return Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: EngineSilent(onRetry: () => ref.invalidate(devicesProvider)),
-          ),
+      return TabPage(
+        title: 'Home',
+        actions: _homeActions(context, ref),
+        state: OmniLoad.error(
+          engineSilent,
+          () => ref.invalidate(devicesProvider),
         ),
+        children: (_) => const [],
       );
     }
     if (homeIsEmpty(ref)) {
@@ -85,6 +88,32 @@ class HomeScreen extends ConsumerWidget {
     return _Overview(devices: list);
   }
 }
+
+/// Home's header actions: search, what needs you, and help. They stay on
+/// the error state too.
+List<Widget> _homeActions(BuildContext context, WidgetRef ref) => [
+  OmniIconAction(
+    key: const ValueKey('open-search'),
+    icon: OmniIcons.search,
+    label: 'Search and commands',
+    onPressed: () => ref.read(shellControllerProvider).open(const SearchLink()),
+  ),
+  switch (needsYouCount(ref)) {
+    final n => Badge(
+      key: const ValueKey('alerts-count'),
+      isLabelVisible: n > 0,
+      label: Text('$n'),
+      offset: const Offset(-OmniSpace.xs, OmniSpace.xs),
+      child: OmniIconAction(
+        key: const ValueKey('open-alerts'),
+        icon: OmniIcons.notifications,
+        label: n == 0 ? 'What needs you' : 'What needs you, $n',
+        onPressed: () => showNeedsYou(context, ref),
+      ),
+    ),
+  },
+  const ScreenHelpButton(HelpScreen.home),
+];
 
 class _Overview extends ConsumerWidget {
   const _Overview({required this.devices});
@@ -118,41 +147,26 @@ class _Overview extends ConsumerWidget {
     ].whereType<String>().join(' · ');
     final offline = tiles?.where((d) => !d.online).toList() ?? const [];
     final title = name == null ? greeting(now) : '${greeting(now)}, $name';
-    return OmniTabPage(
+    return TabPage.custom(
       title: title,
       heroTitle: true,
-      padded: false,
-      actions: [
-        OmniIconAction(
-          key: const ValueKey('open-search'),
-          icon: OmniIcons.search,
-          label: 'Search and commands',
-          onPressed: () =>
-              ref.read(shellControllerProvider).open(const SearchLink()),
-        ),
-        OmniIconAction(
-          key: const ValueKey('open-alerts'),
-          icon: OmniIcons.notifications,
-          label: 'What needs you',
-          onPressed: () => showNeedsYou(context, ref),
-        ),
-        const ScreenHelpButton(HelpScreen.home),
-      ],
-      body: RefreshIndicator(
+      actions: _homeActions(context, ref),
+      // The hero stays over the tile skeleton while the list loads, so
+      // the body draws its own loading shape.
+      body: (context, padding) => RefreshIndicator(
         onRefresh: () => reloadHome(ref),
         child: ListView(
           key: const ValueKey('home-list'),
-          padding: EdgeInsets.fromLTRB(
-            OmniSpace.screen,
-            0,
-            OmniSpace.screen,
-            OmniInsets.fabClearance(context),
-          ),
+          padding: padding,
           children: [
             HomeHero(title: title, subtitle: status.isEmpty ? null : status),
-            if (tiles == null)
-              const _Loading()
-            else ...[
+            if (tiles == null) ...[
+              const SizedBox(height: OmniSpace.lg),
+              OmniTileGridSkeleton(
+                count: OmniWidth.of(context).tileColumns * 2,
+                columns: OmniWidth.of(context).tileColumns,
+              ),
+            ] else ...[
               HomeNotices(devices: all),
               const HomeHelpers(),
               const SuggestionCard(),
@@ -161,6 +175,12 @@ class _Overview extends ConsumerWidget {
                 tiles: tiles,
                 presence: shown == PresenceShown.notSetUp ? null : presence,
                 person: person,
+                // Not set up at all has its own notice above. This is a
+                // house the engine cannot place the person in.
+                notSetUp:
+                    person != null &&
+                    shown != PresenceShown.notSetUp &&
+                    presence?.home == null,
               ),
               RunSection(items: runItems(scenes, summaries)),
               ..._favourites(context, ref, tiles, drivers),
@@ -206,7 +226,7 @@ class _Overview extends ConsumerWidget {
       ),
       if (favourites.isEmpty)
         const Padding(
-          padding: EdgeInsets.fromLTRB(2, 0, 2, OmniSpace.xs),
+          padding: EdgeInsets.only(bottom: OmniSpace.xs),
           child: Text(
             'Star a device on its page, or tap Edit, to keep it here.',
             style: OmniText.caption,
@@ -243,27 +263,6 @@ class _Overview extends ConsumerWidget {
       out.add((title: 'Not in a room', devices: none..sort(byOrderThenName)));
     }
     return out;
-  }
-}
-
-class _Loading extends StatelessWidget {
-  const _Loading();
-
-  @override
-  Widget build(BuildContext context) {
-    final columns = OmniWidth.of(context).tileColumns;
-    return Column(
-      children: [
-        const SizedBox(height: OmniSpace.lg),
-        for (var r = 0; r < 2; r++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: OmniSpace.gap),
-            child: _Row([
-              for (var c = 0; c < columns; c++) const OmniTileSkeleton(),
-            ], columns: columns),
-          ),
-      ],
-    );
   }
 }
 
@@ -394,11 +393,15 @@ class _StatusChips extends ConsumerWidget {
     required this.tiles,
     required this.presence,
     required this.person,
+    this.notSetUp = false,
   });
 
   final List<DeviceView> tiles;
   final Presence? presence;
   final DeviceView? person;
+
+  /// Nothing can tell where the person is, so the chip says so.
+  final bool notSetUp;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -411,6 +414,15 @@ class _StatusChips extends ConsumerWidget {
           key: const ValueKey('chip-presence'),
           label: home ? 'You are home' : 'You are away',
           dot: home ? StatusKind.online : StatusKind.offline,
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const PlacesPage())),
+        )
+      else if (notSetUp)
+        OmniStatusChip(
+          key: const ValueKey('chip-presence'),
+          label: presenceNotSetUp,
+          dot: StatusKind.warning,
           onTap: () => Navigator.of(
             context,
           ).push(MaterialPageRoute<void>(builder: (_) => const PlacesPage())),
@@ -445,10 +457,10 @@ Future<void> showFavourites(BuildContext context, List<DeviceView> tiles) =>
         builder: (context, ref, _) {
           final live = tileDevices(ref.watch(devicesProvider).value ?? const [])
             ..sort(byOrderThenName);
-          return OmniSheet(
+          return SheetTemplate(
             title: 'Favourites',
             subtitle: 'Starred devices show first on Home',
-            children: [
+            children: (context) => [
               for (final d in live)
                 OmniListRow(
                   key: ValueKey('favourite-${d.id}'),
@@ -476,6 +488,18 @@ Future<void> showFavourites(BuildContext context, List<DeviceView> tiles) =>
       ),
     );
 
+/// How many things the bell lists: automations waiting or failing, and
+/// devices that stopped answering.
+int needsYouCount(WidgetRef ref) {
+  final waiting = [
+    for (final a in ref.watch(summariesProvider).value ?? const [])
+      if (a.needsApproval || (a.enabled && a.lastRun?.ok == false)) a,
+  ];
+  final offline = tileDevices(ref.watch(devicesProvider).value ?? const [])
+      .where((d) => !d.online);
+  return waiting.length + offline.length;
+}
+
 /// The bell: automations waiting for review or failing, and devices that
 /// stopped answering.
 Future<void> showNeedsYou(BuildContext context, WidgetRef ref) {
@@ -491,17 +515,18 @@ Future<void> showNeedsYou(BuildContext context, WidgetRef ref) {
         final offline = tileDevices(
           ref.watch(devicesProvider).value ?? const [],
         ).where((d) => !d.online).toList();
-        return OmniSheet(
+        return SheetTemplate(
           title: 'Needs you',
-          children: [
-            if (waiting.isEmpty && offline.isEmpty)
-              const OmniEmptyState(
-                icon: AreaIcons.ok,
-                title: 'Nothing needs you',
-                message:
-                    'Every automation is running and every device answers.',
-                padding: EdgeInsets.symmetric(vertical: 24),
-              ),
+          state: waiting.isEmpty && offline.isEmpty
+              ? const OmniLoad.empty()
+              : const OmniLoad.data(),
+          empty: const OmniEmptyState(
+            icon: AreaIcons.ok,
+            title: 'Nothing needs you',
+            message: 'Every automation is running and every device answers.',
+            padding: EdgeInsets.symmetric(vertical: OmniSpace.xl),
+          ),
+          children: (context) => [
             for (final a in waiting)
               OmniListRow(
                 key: ValueKey('needs-${a.id}'),
@@ -513,9 +538,26 @@ Future<void> showNeedsYou(BuildContext context, WidgetRef ref) {
                 chevron: true,
                 onTap: () {
                   Navigator.of(sheet).pop();
-                  shell.open(
-                    a.needsApproval ? ReviewLink(a.id) : AutomationLink(a.id),
-                  );
+                  // A failed run opens what failed, here on Home, with
+                  // Run it again. A review still goes to Automations.
+                  if (!a.needsApproval && a.lastRun?.run != null) {
+                    Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => RunPage(
+                          automationId: a.id,
+                          runId: a.lastRun!.run,
+                          name: a.name,
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+                  shell.open(switch (a) {
+                    _ when a.needsApproval => ReviewLink(a.id),
+                    AutomationSummary(lastRun: LastRun(run: final String r)) =>
+                      RunLink(a.id, r),
+                    _ => AutomationLink(a.id),
+                  });
                 },
               ),
             for (final d in offline)
@@ -551,26 +593,39 @@ class RoomDevicesPage extends ConsumerWidget {
       for (final j in ref.watch(devicesProvider).value ?? const <Json>[])
         if (ids.contains(j['id'])) DeviceView(j),
     ]..sort(byOrderThenName);
-    return OmniPage(
+    final read = ref.watch(devicesProvider);
+    return ListPage(
       title: title,
-      body: ListView(
-        children: [
-          for (final d in devices)
-            OmniListRow(
-              key: ValueKey('room-row-${d.id}'),
-              icon: iconOf(d, drivers),
-              title: d.name,
-              subtitle: rowSubtitle(
-                d,
-                shortDriverName(drivers[d.driver], d.driver),
-              ),
-              dot: statusOf(d),
-              onTap: () => openDevice(context, d.id),
-              onLongPress: () => showQuickSheet(context, d.id),
-            ),
-          RoomFollowSunSwitch(ids: ids),
-        ],
+      state: OmniLoad.of(
+        read,
+        error: 'The devices did not load.',
+        onRetry: () => ref.invalidate(devicesProvider),
       ),
+      children: (context) => [
+        if (devices.isEmpty)
+          const OmniEmptyState(
+            key: ValueKey('room-empty'),
+            icon: OmniIcons.room,
+            title: 'No devices in this room',
+            compact: true,
+          )
+        else
+          OmniSectionHeader('Devices', trailingText: '${devices.length}'),
+        for (final d in devices)
+          OmniListRow(
+            key: ValueKey('room-row-${d.id}'),
+            icon: iconOf(d, drivers),
+            title: d.name,
+            subtitle: rowSubtitle(
+              d,
+              shortDriverName(drivers[d.driver], d.driver),
+            ),
+            dot: statusOf(d),
+            onTap: () => openDevice(context, d.id),
+            onLongPress: () => showQuickSheet(context, d.id),
+          ),
+        RoomFollowSunSwitch(ids: ids),
+      ],
     );
   }
 }

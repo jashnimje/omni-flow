@@ -42,10 +42,42 @@ Map<String, Object?> asIfMessage(Map<String, Object?> t, {DateTime? at}) {
     return {'person': 'someone', 'asIf': true};
   }
   final when = at ?? DateTime.now();
-  if (t['time'] != null || t['sun'] != null || t['interval'] != null) {
+  if (t['time'] case final String hhmm) {
+    // At its own time, so a check of the hour judges that time, not now.
+    final next = nextTimeOf(hhmm, t['days'], when);
+    return {'scheduled': (next ?? when).toIso8601String(), 'asIf': true};
+  }
+  if (t['sun'] != null || t['interval'] != null) {
     return {'scheduled': when.toIso8601String(), 'asIf': true};
   }
   return {'asIf': true};
+}
+
+const _weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/// The next moment from [from] (included) the clock reads [hhmm] on one
+/// of [days] (`mon` to `sun`, every day when not a list), or null when
+/// [hhmm] is not a time.
+DateTime? nextTimeOf(String hhmm, Object? days, DateTime from) {
+  final parts = hhmm.split(':');
+  final h = parts.length == 2 ? int.tryParse(parts[0]) : null;
+  final m = parts.length == 2 ? int.tryParse(parts[1]) : null;
+  if (h == null || m == null) return null;
+  final allowed = days is List && days.isNotEmpty ? days : _weekdays;
+  for (var i = 0; i < 8; i++) {
+    final day = DateTime(from.year, from.month, from.day + i, h, m);
+    if (day.isBefore(from)) continue;
+    if (allowed.contains(_weekdays[day.weekday - 1])) return day;
+  }
+  return null;
+}
+
+/// The clock a dry run from [msg] reads: a made-up scheduled trigger's own
+/// time, else [at].
+DateTime asIfClock(Map<String, Object?> msg, DateTime at) {
+  if (msg['asIf'] != true) return at;
+  final scheduled = msg['scheduled'];
+  return scheduled is String ? DateTime.tryParse(scheduled) ?? at : at;
 }
 
 /// The value a state trigger changes to and from: its `change.to` and the

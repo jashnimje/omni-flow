@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../api/diagram_calls.dart';
 import '../../../api/engine_calls.dart';
+import '../../../state/clock.dart' show hour12Provider;
 import '../../../state/providers.dart';
 import '../../design/design.dart';
 import '../automations_state.dart' show ruleThingsProvider;
@@ -81,6 +82,8 @@ class DiagramRunPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) => OmniPage(
     title: title,
     large: false,
+    // The canvas runs edge to edge. The viewer pads its own toolbar.
+    padded: false,
     body: DiagramViewer(
       diagram: diagram,
       handlers: runHandlers(ref, diagram, spec: spec),
@@ -292,8 +295,8 @@ class _LastRunSectionState extends ConsumerState<LastRunSection> {
     });
   }
 
-  static String _when(Object? iso) => switch (DateTime.tryParse('$iso')) {
-    final at? => whenInline(at.toLocal()),
+  String _when(Object? iso) => switch (DateTime.tryParse('$iso')) {
+    final at? => whenInline(at.toLocal(), hour12: ref.read(hour12Provider)),
     null => 'lately',
   };
 

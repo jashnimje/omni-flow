@@ -124,6 +124,6 @@ void main() {
 Future<void> openPairOnTv(WidgetTester tester) async {
   await openDevicePage(tester, 'lounge_tv');
   expect(find.byKey(const ValueKey('tv-offline')), findsOneWidget);
-  await tester.tap(find.byKey(const ValueKey('tv-pair')));
+  await tester.tap(find.text('Pair again'));
   await tester.pumpAndSettle();
 }

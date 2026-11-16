@@ -15,11 +15,6 @@ typedef _Run = ({
   String? cwd,
 });
 
-/// The terminal well of the mockup: darker than a card, with the prompt in
-/// a light accent tint.
-const _well = Color(0xFF07090B);
-const _prompt = Color(0xFFB8F5EC);
-
 /// 4.5 Console: a shell on the TV. It runs anything, so it stays behind a
 /// warning the user accepts once per session, and the banner stays above
 /// the output after.
@@ -89,10 +84,18 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
   @override
   Widget build(BuildContext context) {
     if (!ref.watch(consoleAcceptedProvider)) return _warning(context);
-    final mono = OmniText.mono.copyWith(color: _prompt);
+    // The terminal well of the mockup: the screen colour, darker than a
+    // card, with the prompt in the light accent tint.
+    final palette = OmniPalette.of(context);
+    final mono = OmniText.mono.copyWith(color: palette.onAccentSoft);
     final out = OmniText.mono.copyWith(color: OmniColors.muted);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+      padding: const EdgeInsets.fromLTRB(
+        OmniSpace.screen,
+        0,
+        OmniSpace.screen,
+        OmniSpace.sm,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -103,9 +106,9 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: _well,
+                color: palette.background,
                 borderRadius: BorderRadius.circular(OmniRadii.button),
-                border: Border.all(color: OmniColors.line),
+                border: Border.all(color: palette.line),
               ),
               child: _runs.isEmpty
                   ? Padding(
@@ -203,7 +206,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
                 key: const ValueKey('console-run'),
                 icon: TvIcons.run,
                 label: 'Run',
-                color: OmniColors.accent,
+                color: palette.accent,
                 onPressed: _running ? null : _run,
               ),
               OmniIconAction(
@@ -220,7 +223,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
   }
 
   Widget _warning(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+    padding: omniBodyPadding(OmniInsets.bottom(context)),
     children: [
       OmniEmptyState(
         key: const ValueKey('console-warning'),
@@ -230,7 +233,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
             'OmniFlow does not check what you type. A command can delete '
             'files, remove apps, change settings or make the ${tv.noun} unusable '
             'until it is reset. Only you can use it, never an agent.',
-        action: OmniButton(
+        action: OmniButton.danger(
           key: const ValueKey('console-accept'),
           label: 'I understand, open the console',
           onPressed: () => ref.read(consoleAcceptedProvider.notifier).accept(),

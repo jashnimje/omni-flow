@@ -560,7 +560,7 @@ void main() {
           'enabled': true,
           'house': 'bangalore',
         });
-        expect(curve['message'], contains('needs to know where home is'));
+        expect(curve['message'], contains('needs to know where Bangalore is'));
         await ok('home.location.set', {
           'latitude': 12.97,
           'longitude': 77.59,
@@ -711,6 +711,7 @@ void main() {
           'order': 0,
           'things': 3,
           'automations': 3,
+          'presence': 'not_set_up',
         },
       ]);
       final devices = {

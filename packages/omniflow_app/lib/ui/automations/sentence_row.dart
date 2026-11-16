@@ -67,32 +67,31 @@ class _SentenceRowState extends State<SentenceRow> {
   }
 
   InlineSpan _sentence(Color ink) {
+    final palette = OmniPalette.of(context);
     var taps = 0;
     final onBlank = widget.onBlank;
     return TextSpan(
-      style: TextStyle(fontSize: 13, color: ink),
+      style: OmniText.step.copyWith(color: ink),
       children: [
         for (final p in widget.parts)
           if (p.blank case final blank? when onBlank != null)
             TextSpan(
               text: p.text,
               style: TextStyle(
-                color: p.token != null
-                    ? OmniColors.onAccentSoft
-                    : OmniColors.accent,
-                backgroundColor: p.token != null ? OmniColors.accentSoft : null,
+                color: p.token != null ? palette.onAccentSoft : palette.accent,
+                backgroundColor: p.token != null ? palette.accentSoft : null,
                 fontWeight: FontWeight.w600,
                 decoration: TextDecoration.underline,
-                decorationColor: OmniColors.accentLine,
+                decorationColor: palette.accentLine,
               ),
               recognizer: _tap(taps++, () => onBlank(blank)),
             )
           else if (p.token != null)
             TextSpan(
               text: p.text,
-              style: const TextStyle(
-                color: OmniColors.onAccentSoft,
-                backgroundColor: OmniColors.accentSoft,
+              style: TextStyle(
+                color: palette.onAccentSoft,
+                backgroundColor: palette.accentSoft,
               ),
             )
           else
@@ -150,7 +149,7 @@ class _SentenceRowState extends State<SentenceRow> {
         ],
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: OmniSpace.sm),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -164,7 +163,7 @@ class _SentenceRowState extends State<SentenceRow> {
         ),
         if (w.trailingText != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: OmniSpace.sm),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -197,7 +196,7 @@ class _SentenceRowState extends State<SentenceRow> {
       child: InkWell(onTap: w.onTap, child: body),
     );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: OmniSpace.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -205,7 +204,12 @@ class _SentenceRowState extends State<SentenceRow> {
           _named(card),
           if (w.error != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              padding: const EdgeInsets.fromLTRB(
+                OmniSpace.md,
+                OmniSpace.xs,
+                OmniSpace.md,
+                0,
+              ),
               child: Text(
                 w.error!,
                 style: OmniText.caption.copyWith(color: OmniColors.bad),

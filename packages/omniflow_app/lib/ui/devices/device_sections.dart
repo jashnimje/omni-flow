@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/clock.dart' show hour12Provider;
 import '../../state/providers.dart';
 import '../add/guided_steps_page.dart';
 import '../add/pair_sheet.dart';
@@ -112,7 +113,7 @@ class DeviceMenu extends ConsumerWidget {
           const PopupMenuItem(value: 'pins', child: Text('Pins')),
         if (pairsInApp(d.json))
           const PopupMenuItem(value: 'pair', child: Text('Pair')),
-        const PopupMenuItem(value: 'link', child: Text('Link to...')),
+        const PopupMenuItem(value: 'link', child: Text('Link to…')),
         const PopupMenuItem(value: 'remove', child: Text('Remove')),
       ],
     );
@@ -123,9 +124,8 @@ Future<void> _openSheet(
   BuildContext context,
   DeviceView d, {
   required bool pins,
-}) => showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
+}) => showOmniSheet<void>(
+  context,
   builder: (_) => pins ? PinSheet(device: d.json) : LinkSheet(fromDevice: d.id),
 );
 
@@ -144,6 +144,7 @@ Future<void> removeDevice(
         'Automations and links that use it stop working until it is added '
         'again. Its history is deleted.',
     action: 'Remove',
+    destructive: true,
   );
   if (!ok) return;
   final removed = await api.removeDevice(d.id);
@@ -162,7 +163,9 @@ class OfflineHelp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final d = device;
-    final since = d.lastSeen == null ? '' : ' since ${when(d.lastSeen!)}';
+    final since = d.lastSeen == null
+        ? ''
+        : ' since ${when(d.lastSeen!, hour12: ref.watch(hour12Provider))}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -171,18 +174,9 @@ class OfflineHelp extends ConsumerWidget {
           'another Wi-Fi.',
           key: ValueKey('offline-${d.id}'),
         ),
-        OmniListRow(
-          key: const ValueKey('device-retry'),
-          icon: OmniIcons.retry,
-          title: 'Try again',
-          chevron: true,
-          onTap: () async {
-            final read = await ref.read(engineApiProvider).refreshDevice(d.id);
-            if (read.ok) {
-              showMessage('${d.name} answered');
-              await ref.read(devicesProvider.notifier).refresh();
-            }
-          },
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: OmniSpace.sm),
+          child: _RetryButton(device: d),
         ),
         OmniListRow(
           key: const ValueKey('device-find'),
@@ -198,6 +192,40 @@ class OfflineHelp extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// Asks the device again, and says so while it waits.
+class _RetryButton extends ConsumerStatefulWidget {
+  const _RetryButton({required this.device});
+
+  final DeviceView device;
+
+  @override
+  ConsumerState<_RetryButton> createState() => _RetryButtonState();
+}
+
+class _RetryButtonState extends ConsumerState<_RetryButton> {
+  var _busy = false;
+
+  Future<void> _retry() async {
+    final d = widget.device;
+    setState(() => _busy = true);
+    final read = await ref.read(engineApiProvider).refreshDevice(d.id);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (read.ok) {
+      showMessage('${d.name} answered');
+      await ref.read(devicesProvider.notifier).refresh();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => OmniButton.ghost(
+    key: const ValueKey('device-retry'),
+    label: _busy ? 'Asking it' : 'Try again',
+    icon: OmniIcons.retry,
+    onPressed: _busy ? null : _retry,
+  );
 }
 
 /// What only someone debugging a device needs, folded away: its raw ids
@@ -316,11 +344,13 @@ class UsedInSection extends ConsumerWidget {
         for (final a in used)
           OmniListRow(
             key: ValueKey('used-in-${a.id}'),
-            icon: OmniIcons.automations,
+            icon: a.isScene ? OmniIcons.scene : OmniIcons.automations,
             title: a.name,
             subtitle: device.online
                 ? _drives(a)
-                : 'Steps on it fail while it is offline',
+                : a.controls.isEmpty || a.controls.contains(device.id)
+                ? 'Steps on it fail while it is offline'
+                : 'Does not start or check it while it is offline',
             chevron: true,
             onTap: () =>
                 ref.read(shellControllerProvider).open(AutomationLink(a.id)),
@@ -339,8 +369,9 @@ class RecentSection extends ConsumerWidget {
   static String describe(
     HistoryEntry e,
     DeviceView d,
-    Map<String, String> names,
-  ) {
+    Map<String, String> names, {
+    bool hour12 = false,
+  }) {
     final cap = d.capabilities.where((c) => c['stateKey'] == e.key).firstOrNull;
     final type = cap?['type'];
     final value = e.value;
@@ -357,7 +388,7 @@ class RecentSection extends ConsumerWidget {
       'user' => ' by you',
       final id => ' by ${names[id] ?? id}',
     };
-    return '${when(e.at)} $what$by';
+    return '${when(e.at, hour12: hour12)} $what$by';
   }
 
   @override
@@ -374,7 +405,14 @@ class RecentSection extends ConsumerWidget {
       children: [
         const OmniSectionHeader('Recent'),
         for (final e in entries.take(8))
-          OmniListRow(title: describe(e, device, names)),
+          OmniListRow(
+            title: describe(
+              e,
+              device,
+              names,
+              hour12: ref.watch(hour12Provider),
+            ),
+          ),
       ],
     );
   }
@@ -424,7 +462,6 @@ class DeviceSection extends ConsumerWidget {
           icon: OmniIcons.delete,
           onPressed: () => removeDevice(context, ref, d),
         ),
-        const SizedBox(height: OmniSpace.xl),
       ],
     );
   }
@@ -435,35 +472,32 @@ class DeviceSection extends ConsumerWidget {
     DeviceView d,
   ) async {
     final name = ReplaceableText(d.name);
-    final settings = await showOmniSheet<bool>(
+    final settings = await SheetTemplate.show<bool>(
       context,
       builder: (sheet) => Owning(
         [name],
-        child: OmniSheet(
+        child: SheetTemplate(
           title: 'Name, address and settings',
-          children: [
+          primaryLabel: 'Save name',
+          primaryKey: const ValueKey('device-name-save'),
+          onPrimary: () async {
+            final text = name.text.trim();
+            if (text.isEmpty || text == d.name) {
+              Navigator.of(sheet).pop(false);
+              return;
+            }
+            final saved = await ref
+                .read(engineApiProvider)
+                .organizeDevice(d.id, name: text);
+            if (saved.ok) await _reloadDevices(ref);
+            if (sheet.mounted) Navigator.of(sheet).pop(false);
+          },
+          children: (context) => [
             TextField(
               key: const ValueKey('device-name-field'),
               controller: name,
               onTap: name.firstTap,
               decoration: const InputDecoration(labelText: 'Name'),
-            ),
-            const SizedBox(height: OmniSpace.sm),
-            OmniButton(
-              key: const ValueKey('device-name-save'),
-              label: 'Save name',
-              onPressed: () async {
-                final text = name.text.trim();
-                if (text.isEmpty || text == d.name) {
-                  Navigator.of(sheet).pop(false);
-                  return;
-                }
-                final saved = await ref
-                    .read(engineApiProvider)
-                    .organizeDevice(d.id, name: text);
-                if (saved.ok) await _reloadDevices(ref);
-                if (sheet.mounted) Navigator.of(sheet).pop(false);
-              },
             ),
             if (d.host != null)
               OmniListRow(
@@ -471,11 +505,14 @@ class DeviceSection extends ConsumerWidget {
                 value: d.host,
                 valueColor: OmniColors.muted,
               ),
-            const SizedBox(height: OmniSpace.md),
-            OmniButton.ghost(
+            OmniListRow(
               key: const ValueKey('device-settings'),
-              label: 'Change its settings',
-              onPressed: () => Navigator.of(sheet).pop(true),
+              icon: OmniIcons.edit,
+              title: 'Change its settings',
+              subtitle: 'The setup steps of its driver',
+              chevron: true,
+              divider: false,
+              onTap: () => Navigator.of(sheet).pop(true),
             ),
           ],
         ),
@@ -493,85 +530,52 @@ Future<void> pickRoom(BuildContext context, WidgetRef ref, DeviceView d) async {
       ref.read(roomsProvider).value ?? await ref.read(roomsProvider.future);
   if (!context.mounted) return;
   final api = ref.read(engineApiProvider);
-  final picked = await showOmniSheet<String>(
+  Future<void> move(String room) async {
+    if (room == (d.roomId ?? '')) return;
+    final moved = await api.organizeDevice(d.id, room: room);
+    if (moved.ok) await _reloadDevices(ref);
+  }
+
+  final picked = await showPickerSheet<String>(
     context,
-    builder: (sheet) => OmniSheet(
-      title: 'Room for ${d.name}',
-      children: [
+    title: 'Room for ${d.name}',
+    selected: d.roomId ?? '',
+    sections: [
+      PickerSection([
         for (final r in rooms)
-          OmniListRow(
+          PickerItem(
             key: ValueKey('room-pick-${r.id}'),
-            icon: OmniIcons.room,
+            value: r.id,
             title: r.name,
-            trailing: r.id == d.roomId
-                ? const Icon(OmniIcons.check, color: OmniColors.accent)
-                : null,
-            onTap: () => Navigator.of(sheet).pop(r.id),
+            icon: OmniIcons.room,
           ),
-        OmniListRow(
-          key: const ValueKey('room-none'),
-          icon: OmniIcons.close,
+        const PickerItem(
+          key: ValueKey('room-none'),
+          value: '',
           title: 'Not in a room',
-          trailing: d.roomId == null
-              ? const Icon(OmniIcons.check, color: OmniColors.accent)
-              : null,
-          onTap: () => Navigator.of(sheet).pop(''),
+          icon: OmniIcons.close,
         ),
-        OmniListRow(
-          key: const ValueKey('room-new'),
-          icon: OmniIcons.add,
-          title: 'New room',
-          divider: false,
-          onTap: () async {
-            final name = await askRoomName(sheet);
-            if (name == null) return;
-            final saved = await api.saveRoom(name: name);
-            if (saved.ok && sheet.mounted) {
-              Navigator.of(sheet).pop(saved.value ?? '');
-            }
-          },
-        ),
-      ],
-    ),
+      ]),
+    ],
+    addLabel: 'New room',
+    onAdd: () async {
+      final name = await askRoomName(context);
+      if (name == null) return;
+      final saved = await api.saveRoom(name: name);
+      if (saved.ok) await move(saved.value ?? '');
+    },
   );
-  if (picked == null || picked == (d.roomId ?? '')) return;
-  final moved = await api.organizeDevice(d.id, room: picked);
-  if (moved.ok) await _reloadDevices(ref);
+  if (picked != null) await move(picked);
 }
 
 /// Asks for a room's name. Null when cancelled.
-Future<String?> askRoomName(BuildContext context, {String initial = ''}) {
-  final field = ReplaceableText(initial);
-  return showDialog<String>(
-    context: context,
-    builder: (dialog) => Owning(
-      [field],
-      child: AlertDialog(
-        title: Text(initial.isEmpty ? 'New room' : 'Rename room'),
-        content: TextField(
-          key: const ValueKey('room-name'),
-          controller: field,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('room-name-save'),
-            onPressed: () {
-              final text = field.text.trim();
-              if (text.isNotEmpty) Navigator.of(dialog).pop(text);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    ),
-  );
-}
+Future<String?> askRoomName(BuildContext context, {String initial = ''}) =>
+    showPromptSheet(
+      context,
+      title: initial.isEmpty ? 'New room' : 'Rename room',
+      label: 'Name',
+      initial: initial,
+    );
 
 /// Looks for [device]'s driver on the network and points [device] at the
 /// find the user picks: same id, name, room and settings, so automations
@@ -643,16 +647,14 @@ class _FindAgainSheetState extends ConsumerState<_FindAgainSheet> {
   @override
   Widget build(BuildContext context) {
     final found = _found;
-    return OmniSheet(
+    return SheetTemplate(
       title: 'Find ${widget.device.name}',
       subtitle: 'Pick it, and it keeps its name, room and automations.',
-      children: [
-        if (found == null)
-          const Padding(
-            padding: EdgeInsets.all(OmniSpace.lg),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (found.isEmpty)
+      state: found == null ? const OmniLoad.loading() : const OmniLoad.data(),
+      secondaryLabel: 'Look again',
+      onSecondary: _look,
+      children: (context) => [
+        if (found!.isEmpty)
           OmniBanner.info(
             _error ??
                 'Nothing like it answered. Check it has power and is on this '
@@ -671,15 +673,7 @@ class _FindAgainSheetState extends ConsumerState<_FindAgainSheet> {
               chevron: true,
               onTap: _busy ? null : () => _use(f),
             ),
-        if (_error != null && found != null && found.isNotEmpty)
-          OmniBanner.error(_error!),
-        const SizedBox(height: OmniSpace.sm),
-        OmniButton.ghost(
-          key: const ValueKey('find-again-look'),
-          label: 'Look again',
-          icon: OmniIcons.retry,
-          onPressed: found == null ? null : _look,
-        ),
+        if (_error != null && found.isNotEmpty) OmniBanner.error(_error!),
       ],
     );
   }

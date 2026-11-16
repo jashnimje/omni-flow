@@ -74,9 +74,6 @@ String? tileReading(DeviceView d) {
       return b is num ? '${b.round()}%' : null;
     case DeviceKind.sensor:
       return sensorReading(d);
-    case DeviceKind.tv:
-      final s = TvState.ofDevice(d.json);
-      return s.isOn && s.app != null ? appName(s.app!) : null;
     case DeviceKind.simple when !d.hasPower:
       return sensorReading(d);
     default:
@@ -96,6 +93,18 @@ String? tileState(DeviceView d) {
             if (d.state['charging'] == true) 'charging',
           ].join(' · ');
     return line.isEmpty ? stateLine(d) : line;
+  }
+  // A TV keeps its own name as the tile's title: what it shows goes on
+  // this line, never in place of the name.
+  if (d.online && kindOf(d) == DeviceKind.tv) {
+    final s = TvState.ofDevice(d.json);
+    if (!s.isOn || s.app == null) return stateLine(d);
+    return [
+      appName(s.app!),
+      if (s.playing == 'playing') 'Playing',
+      if (s.playing == 'paused') 'Paused',
+      if (s.volume != null) 'vol ${s.volume}',
+    ].join(' · ');
   }
   final reading = tileReading(d);
   if (reading == null) return stateLine(d);

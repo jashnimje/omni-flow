@@ -447,6 +447,8 @@ class DeviceCommands {
               },
               d,
               all,
+              houses: _core.houses,
+              house: _core.houses.resolve(args['house']),
             ),
       ],
     };
@@ -459,6 +461,8 @@ class DeviceCommands {
         _core.deviceJson(d),
         d,
         await DriftDeviceStore(_db).all(),
+        houses: _core.houses,
+        house: _core.houses.resolve(args['house']),
       ),
     };
   }

@@ -60,28 +60,26 @@ class _AutomationPageState extends ConsumerState<AutomationPage> {
   Widget build(BuildContext context) {
     final kind = _kind;
     if (kind == null) {
-      return OmniPage(
-        title: widget.id,
-        body: _failure == null
-            ? const Center(child: CircularProgressIndicator())
-            : OmniEmptyState(
-                key: const ValueKey('automation-error'),
-                icon: OmniIcons.error,
-                title: _failure!.type == 'not_found'
-                    ? 'This automation is gone'
-                    : 'Could not open it',
-                message: _failure!.type == 'not_found'
-                    ? 'It was removed after the link to it was made.'
-                    : _failure!.message,
-                action: _failure!.type == 'not_found'
-                    ? null
-                    : OmniButton.ghost(label: 'Try again', onPressed: _load),
-              ),
+      final failure = _failure;
+      return DetailPage(
+        title: 'Automation',
+        state: switch (failure) {
+          null => const OmniLoad.loading(),
+          ApiFailure(type: 'not_found') => const OmniLoad.empty(),
+          _ => OmniLoad.error(failure.message, _load),
+        },
+        notFound: const OmniEmptyState(
+          key: ValueKey('automation-error'),
+          icon: OmniIcons.error,
+          title: 'This automation is gone',
+          message: 'It was removed after the link to it was made.',
+        ),
+        children: (_) => const [],
       );
     }
     if (!kind.approved) return ReviewPage(id: widget.id);
     return switch (kind.source) {
-      'rule' => RuleEditorPage(id: widget.id),
+      'rule' => RuleEditorPage(id: widget.id, name: kind.name),
       'scene' => SceneEditorPage(id: widget.id),
       _ => _LinkRunsPage(id: widget.id, name: kind.name),
     };

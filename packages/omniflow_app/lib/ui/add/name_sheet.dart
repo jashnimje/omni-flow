@@ -11,7 +11,7 @@ Future<({String name, String? room})?> askName(
   String name = '',
   String? room,
   bool withRoom = true,
-}) => showOmniSheet<({String name, String? room})>(
+}) => SheetTemplate.show<({String name, String? room})>(
   context,
   builder: (_) =>
       _NameSheet(title: title, name: name, room: room, withRoom: withRoom),
@@ -47,9 +47,17 @@ class _NameSheetState extends State<_NameSheet> {
   @override
   Widget build(BuildContext context) {
     final name = _name.text.trim();
-    return OmniSheet(
+    return SheetTemplate(
       title: widget.title,
-      children: [
+      primaryLabel: 'Add',
+      primaryKey: const ValueKey('add-confirm'),
+      missing: 'Give it a name first.',
+      onPrimary: name.isEmpty
+          ? null
+          : () =>
+                Navigator.of(context)
+                    .pop((name: name, room: _room.isEmpty ? null : _room)),
+      children: (context) => [
         TextField(
           key: const ValueKey('add-name'),
           controller: _name,
@@ -63,16 +71,6 @@ class _NameSheetState extends State<_NameSheet> {
           const SizedBox(height: OmniSpace.sm),
           RoomField(value: _room, onChanged: (r) => setState(() => _room = r)),
         ],
-        const SizedBox(height: OmniSpace.md),
-        OmniButton(
-          key: const ValueKey('add-confirm'),
-          label: 'Add',
-          onPressed: name.isEmpty
-              ? null
-              : () =>
-                    Navigator.of(context)
-                        .pop((name: name, room: _room.isEmpty ? null : _room)),
-        ),
       ],
     );
   }

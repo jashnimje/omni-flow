@@ -15,9 +15,15 @@ import 'driver_kinds.dart';
 import 'guided_steps_page.dart';
 import '../devices/weather_page.dart' show AddWeatherRow;
 
+/// Add covers the whole screen, tab bar included, as a task you finish or
+/// close with its cross.
 Future<void> openAddThing(BuildContext context) =>
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const AddPage()));
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => const AddPage(),
+      ),
+    );
 
 /// 6.1 Add: the engine looks on every method at once. While it looks a
 /// banner says so; then what it found, with Add, the ones already added
@@ -125,14 +131,22 @@ class _AddPageState extends ConsumerState<AddPage> {
         if (m['driver'] != 'place' && m['driver'] != 'nfc_tag')
           plainDriverName('${m['name'] ?? m['driver']}'),
     ];
-    return OmniPage(
+    return ListPage.custom(
       title: 'Add',
       close: true,
-      body: RefreshIndicator(
+      actions: [
+        OmniIconAction(
+          key: const ValueKey('add-rescan'),
+          icon: OmniIcons.retry,
+          label: 'Look again',
+          onPressed: _looking ? null : _discover,
+        ),
+      ],
+      body: (context, padding) => RefreshIndicator(
         onRefresh: _discover,
         child: ListView(
           key: const ValueKey('add-page'),
-          padding: const EdgeInsets.only(bottom: OmniSpace.xl),
+          padding: padding,
           children: [
             if (_looking)
               OmniBanner.info(
@@ -152,18 +166,17 @@ class _AddPageState extends ConsumerState<AddPage> {
               trailingText: find == null ? null : '${found.length}',
             ),
             if (find == null && _looking)
-              for (var i = 0; i < 3; i++) const _RowSkeleton()
+              const OmniListSkeleton(rows: 3, label: 'Looking nearby')
             else if (found.isEmpty)
-              Padding(
+              OmniEmptyState(
                 key: const ValueKey('add-nothing'),
-                padding: const EdgeInsets.symmetric(vertical: OmniSpace.sm),
-                child: Text(
-                  _looking
-                      ? 'Still looking'
-                      : 'Nothing new found. Check it is switched on and on '
-                            'the same Wi-Fi as this phone, or add it by hand.',
-                  style: OmniText.caption,
-                ),
+                icon: OmniIcons.search,
+                title: _looking ? 'Still looking' : 'Nothing new found',
+                message: _looking
+                    ? null
+                    : 'Check it is switched on and on the same Wi-Fi as this '
+                          'phone, or add it by hand.',
+                compact: true,
               )
             else
               for (final (i, f) in found.indexed)
@@ -265,32 +278,9 @@ class _AddPageState extends ConsumerState<AddPage> {
               chevron: true,
               onTap: _byHand,
             ),
-            const SizedBox(height: OmniSpace.md),
-            OmniButton.ghost(
-              key: const ValueKey('add-rescan'),
-              label: 'Look again',
-              icon: OmniIcons.retry,
-              onPressed: _looking ? null : _discover,
-            ),
           ],
         ),
       ),
     );
   }
-}
-
-class _RowSkeleton extends StatelessWidget {
-  const _RowSkeleton();
-
-  @override
-  Widget build(BuildContext context) => ExcludeSemantics(
-    child: Container(
-      height: 52,
-      margin: const EdgeInsets.only(bottom: OmniSpace.xs),
-      decoration: BoxDecoration(
-        color: OmniColors.card,
-        borderRadius: BorderRadius.circular(OmniRadii.step),
-      ),
-    ),
-  );
 }

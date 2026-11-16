@@ -25,7 +25,7 @@ void main() {
       find.byKey(const ValueKey('slider-desk_lamp.brightness')),
       findsOneWidget,
     );
-    expect(find.widgetWithText(OutlinedButton, 'Wake'), findsOneWidget);
+    expect(find.byKey(const ValueKey('desk_lamp.wake')), findsOneWidget);
   });
 
   testWidgets('tapping a tile icon switches it at once', (tester) async {
@@ -206,7 +206,8 @@ void main() {
     };
     await pumpApp(tester, engine);
     await openDevicePage(tester, 'desk_lamp');
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Wake'));
+    await tester.ensureVisible(find.byKey(const ValueKey('desk_lamp.wake')));
+    await tester.tap(find.byKey(const ValueKey('desk_lamp.wake')));
     await tester.pumpAndSettle();
     expect(find.text('No reply from desk_lamp.'), findsOneWidget);
   });

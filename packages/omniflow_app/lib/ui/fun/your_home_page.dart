@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../design/design.dart';
-import 'breathing_mark.dart';
 import 'fun_prefs.dart';
 import 'home_today_card.dart' show listenForAchievements;
 import 'home_stats.dart';
@@ -24,67 +23,53 @@ class YourHomePage extends ConsumerWidget {
     listenForAchievements(context, ref);
     final stats = ref.watch(homeStatsProvider);
     final celebrations = ref.watch(celebrationsProvider);
-    return OmniPage(
+    final s = stats.value;
+    return ListPage(
+      key: const ValueKey('your-home'),
       title: 'Your activity',
-      body: switch (stats) {
-        AsyncData(value: final s?) => ListView(
-          key: const ValueKey('your-home'),
-          padding: const EdgeInsets.only(bottom: OmniSpace.xl),
-          children: [
-            if (s.totalRuns == 0 && s.week.automationsRun == 0)
-              const FunEmptyState(
-                key: ValueKey('your-home-empty'),
-                title: 'Nothing has run yet',
-                body:
-                    'When your scenes and automations run, you will see what '
-                    'they did for you here.',
-              )
-            else
-              _Week(stats: s),
-            OmniSectionHeader(
-              'Achievements',
-              trailingText: '${s.earnedCount} of ${s.achievements.length}',
+      state: s != null
+          ? const OmniLoad.data()
+          : stats.isLoading
+          ? const OmniLoad.loading()
+          : OmniLoad.error(
+              'Your activity did not load.',
+              () => ref.invalidate(homeStatsProvider),
             ),
-            _AchievementGrid(achievements: s.achievements),
-            const SizedBox(height: OmniSpace.md),
-            OmniCard(
-              child: OmniListRow(
-                key: const ValueKey('celebrations-switch'),
-                title: 'Celebrations',
-                subtitle: 'A little confetti when you earn something',
-                icon: Symbols.celebration_rounded,
-                divider: false,
-                trailing: Switch(
-                  value: celebrations,
-                  onChanged: (on) =>
-                      ref.read(celebrationsProvider.notifier).set(on),
-                ),
-              ),
-            ),
-          ],
+      children: (context) => [
+        if (s!.totalRuns == 0 && s.week.automationsRun == 0)
+          const OmniEmptyState(
+            key: ValueKey('your-home-empty'),
+            icon: Symbols.celebration_rounded,
+            title: 'Nothing has run yet',
+            message:
+                'When your scenes and automations run, you will see what '
+                'they did for you here.',
+          )
+        else
+          _Week(stats: s),
+        OmniSectionHeader(
+          'Achievements',
+          trailingText: '${s.earnedCount} of ${s.achievements.length}',
         ),
-        AsyncLoading() => const Center(child: CircularProgressIndicator()),
-        _ => Center(
-          child: _Quiet(
-            'OmniFlow did not answer. Pull Home down to try again.',
+        _AchievementGrid(achievements: s.achievements),
+        const SizedBox(height: OmniSpace.md),
+        OmniCard(
+          child: OmniListRow(
+            key: const ValueKey('celebrations-switch'),
+            title: 'Celebrations',
+            subtitle: 'A little confetti when you earn something',
+            icon: Symbols.celebration_rounded,
+            divider: false,
+            trailing: Switch(
+              value: celebrations,
+              onChanged: (on) =>
+                  ref.read(celebrationsProvider.notifier).set(on),
+            ),
           ),
         ),
-      },
+      ],
     );
   }
-}
-
-/// Plain centred text for a page that has nothing to show.
-class _Quiet extends StatelessWidget {
-  const _Quiet(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(OmniSpace.xl),
-    child: Text(text, style: OmniText.caption, textAlign: TextAlign.center),
-  );
 }
 
 class _Week extends StatelessWidget {
@@ -254,6 +239,7 @@ class _AchievementTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
     final at = a.earnedAt;
     final detail = a.earned
         ? (at == null ? 'Earned' : 'Earned ${shortDate(at)}')
@@ -266,10 +252,10 @@ class _AchievementTile extends StatelessWidget {
         constraints: const BoxConstraints(minHeight: 112),
         padding: const EdgeInsets.all(OmniSpace.md),
         decoration: BoxDecoration(
-          color: a.earned ? OmniColors.accentSoft : OmniColors.card,
+          color: a.earned ? palette.accentSoft : palette.card,
           borderRadius: BorderRadius.circular(OmniRadii.tile),
           border: Border.all(
-            color: a.earned ? OmniColors.accentLine : OmniColors.line,
+            color: a.earned ? palette.accentLine : palette.line,
           ),
         ),
         child: Column(
@@ -279,7 +265,7 @@ class _AchievementTile extends StatelessWidget {
               achievementIcon(a.id),
               size: 26,
               fill: a.earned ? 1 : 0,
-              color: a.earned ? OmniColors.accent : OmniColors.muted,
+              color: a.earned ? palette.accent : OmniColors.muted,
             ),
             const SizedBox(height: OmniSpace.sm),
             Text(
@@ -288,11 +274,11 @@ class _AchievementTile extends StatelessWidget {
                 color: a.earned ? OmniColors.text : OmniColors.muted,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: OmniSpace.xs),
             Text(
               detail,
               style: OmniText.caption.copyWith(
-                color: a.earned ? OmniColors.onAccentSoft : OmniColors.muted,
+                color: a.earned ? palette.onAccentSoft : OmniColors.muted,
               ),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,

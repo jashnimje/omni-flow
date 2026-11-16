@@ -184,15 +184,26 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
             (num.tryParse(_limit.text) != null &&
                 (_setTo != 'number' ||
                     num.tryParse(_set.text.trim()) != null)));
-    return OmniSheet(
+    return SheetTemplate(
       title: 'Quick link',
       subtitle: 'When this changes, drive that.',
-      children: [
+      primaryLabel: 'Create link',
+      primaryKey: const ValueKey('link-create'),
+      onPrimary: ready ? _create : null,
+      missing: _busy || all.isEmpty
+          ? null
+          : _to == null
+          ? 'Pick what to drive first.'
+          : _mode == 'threshold'
+          ? 'Enter the numbers first.'
+          : null,
+      children: (context) => [
         if (all.isEmpty)
           const OmniEmptyState(
             icon: OmniIcons.devices,
             title: 'Nothing to link yet',
             message: 'Add a device that reports something, like a button.',
+            compact: true,
           ),
         DropdownButtonFormField<String>(
           key: const ValueKey('link-from'),
@@ -271,7 +282,7 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: OmniSpace.sm),
-          Text('Then', style: OmniText.caption),
+          const Text('Then', style: OmniText.caption),
           OmniSegmented<String>(
             key: const ValueKey('link-set-to'),
             segments: const [
@@ -294,12 +305,6 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
               onChanged: (_) => setState(() {}),
             ),
         ],
-        const SizedBox(height: OmniSpace.md),
-        OmniButton(
-          key: const ValueKey('link-create'),
-          label: 'Create link',
-          onPressed: ready ? _create : null,
-        ),
       ],
     );
   }

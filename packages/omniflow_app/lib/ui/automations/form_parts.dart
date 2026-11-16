@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show clockWords;
 
 import '../../api/engine_calls.dart' show Json;
 import '../../rules/rule_spec.dart';
+import '../../state/clock.dart' show hour12Provider;
 import '../design/design.dart';
 import 'rule_words.dart';
 
@@ -24,28 +27,17 @@ Future<T?> showFormSheet<T>(
     child: StatefulBuilder(
       builder: (context, setState) {
         final value = result();
-        return OmniSheet(
+        return SheetTemplate(
           title: title,
           subtitle: subtitle,
-          children: [
-            ...build(context, setState),
-            if ((value == null ? whyNot?.call() : null) case final why?) ...[
-              const SizedBox(height: OmniSpace.sm),
-              Text(
-                why,
-                key: const ValueKey('form-why-not'),
-                style: OmniText.caption.copyWith(color: OmniColors.warn),
-              ),
-            ],
-            const SizedBox(height: OmniSpace.md),
-            OmniButton(
-              key: const ValueKey('form-done'),
-              label: doneLabel,
-              onPressed: value == null
-                  ? null
-                  : () => Navigator.of(context).pop(value),
-            ),
-          ],
+          primaryLabel: doneLabel,
+          primaryKey: const ValueKey('form-done'),
+          onPrimary: value == null
+              ? null
+              : () => Navigator.of(context).pop(value),
+          // Why Done is off, above it in the pinned bar.
+          missing: value == null ? whyNot?.call() : null,
+          children: (context) => build(context, setState),
         );
       },
     ),
@@ -84,7 +76,11 @@ class ChoiceRow extends StatelessWidget {
       icon: icon,
       onTap: onTap,
       trailing: selected
-          ? const Icon(OmniIcons.check, color: OmniColors.accent, size: 22)
+          ? Icon(
+              OmniIcons.check,
+              color: OmniPalette.of(context).accent,
+              size: 22,
+            )
           : warning
           ? const Icon(
               OmniIcons.warning,
@@ -141,7 +137,7 @@ class LabelledField extends StatelessWidget {
 }
 
 /// A time of day as a row that opens the time picker.
-class TimeRow extends StatelessWidget {
+class TimeRow extends ConsumerWidget {
   const TimeRow({
     super.key,
     required this.label,
@@ -167,20 +163,24 @@ class TimeRow extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => OmniListRow(
-    title: label,
-    icon: OmniIcons.time,
-    value: value,
-    semanticLabel: '$label $value. Change',
-    onTap: () async {
-      final picked = await showTimePicker(
-        context: context,
-        initialTime: parse(value),
-        initialEntryMode: TimePickerEntryMode.dial,
-      );
-      if (picked != null) onChanged(format(picked));
-    },
-  );
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Kept as HH:MM, shown as the phone reads the time.
+    final shown = clockWords(value, hour12: ref.watch(hour12Provider));
+    return OmniListRow(
+      title: label,
+      icon: OmniIcons.time,
+      value: shown,
+      semanticLabel: '$label $shown. Change',
+      onTap: () async {
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: parse(value),
+          initialEntryMode: TimePickerEntryMode.dial,
+        );
+        if (picked != null) onChanged(format(picked));
+      },
+    );
+  }
 }
 
 /// The days of the week as chips. None picked means every day.
@@ -463,7 +463,10 @@ class _ParamControlsState extends State<ParamControls> {
       children: [
         OmniListRow(
           key: ValueKey('param-$key-pick'),
-          leading: const Icon(OmniIcons.search, color: OmniColors.accent),
+          leading: Icon(
+            OmniIcons.search,
+            color: OmniPalette.of(context).accent,
+          ),
           title: 'Choose from the list',
           subtitle: widget.values[key] == null
               ? null
@@ -504,65 +507,37 @@ class ChoiceSheet extends StatefulWidget {
 
 class _ChoiceSheetState extends State<ChoiceSheet> {
   late final _choices = widget.load();
-  var _query = '';
 
   @override
-  Widget build(BuildContext context) => OmniSheet(
-    title: widget.title,
-    children: [
-      TextField(
-        key: const ValueKey('choice-search'),
-        decoration: const InputDecoration(
-          labelText: 'Search',
-          prefixIcon: Icon(OmniIcons.search),
-        ),
-        onChanged: (t) => setState(() => _query = t.trim().toLowerCase()),
-      ),
-      const SizedBox(height: OmniSpace.sm),
-      FutureBuilder<List<ParamChoice>>(
-        future: _choices,
-        builder: (context, snap) {
-          if (snap.hasError) {
-            final e = snap.error;
-            return OmniBanner.error(
-              e is String
-                  ? e
-                  : 'The list did not load. Close this and try again.',
-            );
-          }
-          final all = snap.data;
-          if (all == null) {
-            return const Padding(
-              padding: EdgeInsets.all(OmniSpace.lg),
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-          final shown = [
-            for (final c in all)
-              if (_query.isEmpty ||
-                  c.label.toLowerCase().contains(_query) ||
-                  c.value.toLowerCase().contains(_query))
-                c,
-          ];
-          if (shown.isEmpty) {
-            return const Padding(
-              padding: EdgeInsets.all(OmniSpace.md),
-              child: Text('Nothing matches', style: OmniText.caption),
-            );
-          }
-          return Column(
-            children: [
-              for (final c in shown)
-                OmniListRow(
-                  key: ValueKey('choice-${c.value}'),
-                  title: c.label,
-                  subtitle: c.label == c.value ? null : c.value,
-                  onTap: () => Navigator.of(context).pop(c),
-                ),
-            ],
-          );
-        },
-      ),
-    ],
+  Widget build(BuildContext context) => FutureBuilder<List<ParamChoice>>(
+    future: _choices,
+    builder: (context, snap) {
+      final e = snap.error;
+      return PickerSheet<ParamChoice>(
+        title: widget.title,
+        // Searchable however short: the list is a TV's apps or the like.
+        searchFrom: 0,
+        state: snap.hasError
+            ? OmniLoad.error(
+                e is String
+                    ? e
+                    : 'The list did not load. Close this and try again.',
+              )
+            : snap.data == null
+            ? const OmniLoad.loading()
+            : const OmniLoad.data(),
+        sections: [
+          PickerSection([
+            for (final c in snap.data ?? const <ParamChoice>[])
+              PickerItem(
+                key: ValueKey('choice-${c.value}'),
+                value: c,
+                title: c.label,
+                subtitle: c.label == c.value ? null : c.value,
+              ),
+          ]),
+        ],
+      );
+    },
   );
 }

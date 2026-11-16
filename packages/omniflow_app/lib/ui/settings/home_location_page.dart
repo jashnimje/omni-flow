@@ -167,83 +167,80 @@ class _HomeLocationPageState extends ConsumerState<HomeLocationPage> {
       }
     }
     final set = view?.isSet == true;
-    return OmniPage(
+    return DetailPage(
+      key: const ValueKey('home-location-page'),
       title: 'Home location',
-      body: ListView(
-        key: const ValueKey('home-location-page'),
-        padding: EdgeInsets.only(bottom: OmniInsets.bottom(context)),
-        children: [
-          OmniHeroCard(
-            key: const ValueKey('home-location-hero'),
-            tone: set ? HeroTone.accent : HeroTone.plain,
-            icon: OmniIcons.sun,
-            title: set
-                ? 'Sunrise ${clockOf(context, view!.sunrise)}, '
-                      'sunset ${clockOf(context, view.sunset)}'
-                : home.isLoading
-                ? 'Reading where home is'
-                : 'Not set yet',
-            subtitle: set
-                ? 'Today at home, ${_fixed(view!.latitude!)}, '
-                      '${_fixed(view.longitude!)}'
-                : 'Sunrise and sunset automations, the weather and Follow '
-                      'the sun need to know where home is.',
-          ),
-          if (_problem case final p?)
-            OmniBanner.warning(p, key: const ValueKey('home-location-problem')),
-          OmniButton(
-            key: const ValueKey('home-location-use-phone'),
-            label: 'Use this phone\'s location',
-            icon: OmniIcons.place,
-            onPressed: _busy ? null : _useThisPhone,
-          ),
-          const Padding(
-            padding: EdgeInsets.only(top: OmniSpace.xs),
-            child: Text(
-              'Do this while you are at home.',
-              style: OmniText.caption,
-            ),
-          ),
-          const OmniSectionHeader('Or type it'),
-          _NumberField(
-            key: const ValueKey('home-location-latitude'),
-            controller: _latitude,
-            label: 'Latitude',
-            hint: '51.5074, north is positive',
-          ),
-          _NumberField(
-            key: const ValueKey('home-location-longitude'),
-            controller: _longitude,
-            label: 'Longitude',
-            hint: '-0.1278, east is positive',
-          ),
-          OmniButton.ghost(
-            key: const ValueKey('home-location-save'),
-            label: 'Save this place',
-            onPressed: _busy ? null : _saveTyped,
-          ),
-          const OmniSectionHeader('What uses it'),
-          OmniListRow(
-            key: const ValueKey('home-location-sun'),
-            icon: OmniIcons.sun,
-            title: 'Follow the sun',
-            subtitle: set
-                ? 'Lights follow today\'s sun at home'
-                : 'Turns on once home is set',
-            chevron: true,
-            onTap: () => openSunLighting(context),
-          ),
-          const Padding(
-            padding: EdgeInsets.only(top: OmniSpace.sm),
-            child: Text(
-              'Sunrise and sunset are worked out on your own devices. If you '
-              'add the weather, this place, rounded, is sent to Open-Meteo to '
-              'read the forecast.',
-              style: OmniText.caption,
-            ),
-          ),
-        ],
+      hero: OmniHeroCard(
+        key: const ValueKey('home-location-hero'),
+        tone: set ? HeroTone.accent : HeroTone.plain,
+        icon: OmniIcons.sun,
+        title: set
+            ? 'Sunrise ${clockOf(context, view!.sunrise)}, '
+                  'sunset ${clockOf(context, view.sunset)}'
+            : home.isLoading
+            ? 'Reading where home is'
+            : 'Not set yet',
+        subtitle: set
+            ? 'Today at home, ${_fixed(view!.latitude!)}, '
+                  '${_fixed(view.longitude!)}'
+            : 'Sunrise and sunset automations, the weather and Follow '
+                  'the sun need to know where home is.',
       ),
+      children: (context) => [
+        if (_problem case final p?)
+          OmniBanner.warning(p, key: const ValueKey('home-location-problem')),
+        OmniButton(
+          key: const ValueKey('home-location-use-phone'),
+          label: 'Use this phone\'s location',
+          icon: OmniIcons.place,
+          onPressed: _busy ? null : _useThisPhone,
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: OmniSpace.xs),
+          child: Text(
+            'Do this while you are at home.',
+            style: OmniText.caption,
+          ),
+        ),
+        const OmniSectionHeader('Or type it'),
+        _NumberField(
+          key: const ValueKey('home-location-latitude'),
+          controller: _latitude,
+          label: 'Latitude',
+          hint: '51.5074, north is positive',
+        ),
+        _NumberField(
+          key: const ValueKey('home-location-longitude'),
+          controller: _longitude,
+          label: 'Longitude',
+          hint: '-0.1278, east is positive',
+        ),
+        OmniButton.ghost(
+          key: const ValueKey('home-location-save'),
+          label: 'Save this place',
+          onPressed: _busy ? null : _saveTyped,
+        ),
+        const OmniSectionHeader('What uses it'),
+        OmniListRow(
+          key: const ValueKey('home-location-sun'),
+          icon: OmniIcons.sun,
+          title: 'Follow the sun',
+          subtitle: set
+              ? 'Lights follow today\'s sun at home'
+              : 'Turns on once home is set',
+          chevron: true,
+          onTap: () => openSunLighting(context),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: OmniSpace.sm),
+          child: Text(
+            'Sunrise and sunset are worked out on your own devices. If you '
+            'add the weather, this place, rounded, is sent to Open-Meteo to '
+            'read the forecast.',
+            style: OmniText.caption,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -262,7 +259,7 @@ class _NumberField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+    padding: const EdgeInsets.only(bottom: OmniSpace.md),
     child: TextField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(

@@ -322,6 +322,8 @@ void main() {
       );
       expect(find.textContaining('This run failed'), findsOneWidget);
       expect(find.text('Hall bulb timed out.'), findsOneWidget);
+      await tapKey(tester, 'run-again');
+      expect(engine.callsOf('automation.run').single.$2, {'id': 'arrive_home'});
     });
 
     testWidgets('a run gone from the log says so', (tester) async {

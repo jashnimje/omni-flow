@@ -172,84 +172,81 @@ class _BackupPageState extends ConsumerState<BackupPage> {
         if (s is Map) s,
     ];
     final waiting = (restored?['waitForApproval'] as List? ?? const []);
-    return OmniPage(
+    return FormPage.instant(
       title: 'Backup and restore',
-      body: ListView(
-        children: [
-          const Text(
-            'A backup holds your things, rooms, places, tags, automations and '
-            'variables. Keys and passwords stay on this phone, so after a '
-            'restore each device that had one asks for it again.',
-            style: OmniText.caption,
-          ),
-          const SizedBox(height: OmniSpace.md),
-          OmniListRow(
-            key: const ValueKey('backup-export'),
-            icon: OmniIcons.backup,
-            title: 'Back up now',
-            subtitle: 'saves a file in Download',
-            onTap: _busy ? null : _export,
-          ),
-          OmniListRow(
-            key: const ValueKey('backup-share'),
-            icon: OmniIcons.upload,
-            title: 'Back up to Google Drive or another app',
-            subtitle:
-                'saves the file, then opens Share: pick Drive, Gmail, Files',
-            onTap: _busy ? null : _exportAndShare,
-          ),
-          OmniListRow(
-            key: const ValueKey('backup-restore'),
-            icon: OmniIcons.download,
-            title: 'Restore from a file',
-            subtitle: 'from Download or Drive. Shows what changes first',
-            onTap: _busy ? null : _restore,
-          ),
-          if (_busy)
-            const Padding(
-              padding: EdgeInsets.all(OmniSpace.lg),
-              child: Center(child: CircularProgressIndicator()),
+      children: (context) => [
+        const Text(
+          'A backup holds your things, rooms, places, tags, automations and '
+          'variables. Keys and passwords stay on this phone, so after a '
+          'restore each device that had one asks for it again.',
+          style: OmniText.caption,
+        ),
+        const SizedBox(height: OmniSpace.md),
+        OmniListRow(
+          key: const ValueKey('backup-export'),
+          icon: OmniIcons.backup,
+          title: 'Back up now',
+          subtitle: 'saves a file in Download',
+          onTap: _busy ? null : _export,
+        ),
+        OmniListRow(
+          key: const ValueKey('backup-share'),
+          icon: OmniIcons.upload,
+          title: 'Back up to Google Drive or another app',
+          subtitle:
+              'saves the file, then opens Share: pick Drive, Gmail, Files',
+          onTap: _busy ? null : _exportAndShare,
+        ),
+        OmniListRow(
+          key: const ValueKey('backup-restore'),
+          icon: OmniIcons.download,
+          title: 'Restore from a file',
+          subtitle: 'from Download or Drive. Shows what changes first',
+          onTap: _busy ? null : _restore,
+        ),
+        if (_busy)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: OmniSpace.lg),
+            child: OmniProgressBar(
+              key: ValueKey('backup-busy'),
+              semanticLabel: 'Working on the backup',
             ),
-          if (_error case final e?)
-            OmniBanner.error(e, key: const ValueKey('backup-error')),
-          if (_saved case final path?)
-            OmniBanner.info(
-              'Saved to $path',
-              key: const ValueKey('backup-saved'),
+          ),
+        if (_error case final e?)
+          OmniBanner.error(e, key: const ValueKey('backup-error')),
+        if (_saved case final path?)
+          OmniBanner.info(
+            'Saved to $path',
+            key: const ValueKey('backup-saved'),
+          ),
+        if (restored != null) ...[
+          const OmniBanner.info('Restored.', key: ValueKey('backup-restored')),
+          if (waiting.isNotEmpty)
+            OmniBanner.warning(
+              '${waiting.length} high-risk '
+              '${waiting.length == 1 ? 'automation waits' : 'automations wait'} '
+              'for your approval, in Settings, Waiting for approval.',
+              key: const ValueKey('backup-waiting'),
             ),
-          if (restored != null) ...[
-            const OmniBanner.info(
-              'Restored.',
-              key: ValueKey('backup-restored'),
-            ),
-            if (waiting.isNotEmpty)
-              OmniBanner.warning(
-                '${waiting.length} high-risk '
-                '${waiting.length == 1 ? 'automation waits' : 'automations wait'} '
-                'for your approval, in Settings, Waiting for approval.',
-                key: const ValueKey('backup-waiting'),
+          if (secrets.isNotEmpty) ...[
+            const OmniSectionHeader('These need their keys again'),
+            for (final s in secrets)
+              OmniListRow(
+                key: ValueKey('backup-secret-${s['id']}'),
+                icon: OmniIcons.permissions,
+                title: '${s['name'] ?? s['id']}',
+                subtitle: s['pair'] == true
+                    ? 'pair it again: tap to start'
+                    : 'enter its key again: tap to start',
+                chevron: true,
+                onTap: () => openSetup(context, {
+                  'id': s['id'],
+                  'name': s['name'] ?? s['id'],
+                }),
               ),
-            if (secrets.isNotEmpty) ...[
-              const OmniSectionHeader('These need their keys again'),
-              for (final s in secrets)
-                OmniListRow(
-                  key: ValueKey('backup-secret-${s['id']}'),
-                  icon: OmniIcons.permissions,
-                  title: '${s['name'] ?? s['id']}',
-                  subtitle: s['pair'] == true
-                      ? 'pair it again: tap to start'
-                      : 'enter its key again: tap to start',
-                  chevron: true,
-                  onTap: () => openSetup(context, {
-                    'id': s['id'],
-                    'name': s['name'] ?? s['id'],
-                  }),
-                ),
-            ],
           ],
-          const SizedBox(height: OmniSpace.xl),
         ],
-      ),
+      ],
     );
   }
 }

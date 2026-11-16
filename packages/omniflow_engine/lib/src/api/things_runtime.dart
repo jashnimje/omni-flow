@@ -420,8 +420,27 @@ class ThingsRuntime {
     return made;
   }
 
+  /// Whether [ssid] or [bssid] is the Wi-Fi of a place in any house, so
+  /// `$HomeWifiConnected` is on at every house whose Wi-Fi the phone is on.
+  bool _placeWifi(String? ssid, String? bssid) {
+    for (final place in _places.values) {
+      final wifi = place.settings['wifi'];
+      if (wifi is! Map) continue;
+      if (ssid != null && (wifi['ssids'] as List? ?? const []).contains(ssid)) {
+        return true;
+      }
+      final bssids = wifi['bssids'] as List? ?? const [];
+      if (bssid != null &&
+          bssids.any((b) => '$b'.toLowerCase() == bssid.toLowerCase())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// The phone's Wi-Fi. Keeps `$WifiSsid` and `$HomeWifiConnected` (the
-  /// SSID is in the global `$HomeSsids` list) current, and the places.
+  /// SSID is in the global `$HomeSsids` list, or is a place's Wi-Fi in any
+  /// house) current, and the places.
   Future<void> wifi(
     String? ssid,
     String? bssid,
@@ -436,7 +455,8 @@ class ThingsRuntime {
       await _core.flows.setGlobal('WifiSsid', ssid);
       await _core.flows.setGlobal(
         'HomeWifiConnected',
-        ssid != null && homes is List && homes.contains(ssid),
+        ssid != null && homes is List && homes.contains(ssid) ||
+            _placeWifi(ssid, bssid),
       );
     }
     _core.emit({

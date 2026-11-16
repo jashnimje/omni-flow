@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'alerts.dart';
+import 'api_error.dart';
 import 'auto_backup.dart';
 import 'automation_commands.dart';
 import 'command_args.dart';
@@ -65,7 +66,7 @@ class HouseHelpers {
     await helpers.timers.open();
     helpers._sub = core.events.listen((e) {
       if (e['event'] == housesChangedEvent) {
-        core.track(helpers._openHouses());
+        core.track(helpers._opening = helpers._openHouses());
       }
     });
     return helpers;
@@ -79,6 +80,9 @@ class HouseHelpers {
   final SceneCapture _scenes;
   StreamSubscription<Map<String, Object?>>? _sub;
 
+  /// The houses opening after one is added, which a command waits for.
+  Future<void>? _opening;
+
   /// Each house's mode, by house id.
   final _modes = <String, HouseModes>{};
 
@@ -89,14 +93,19 @@ class HouseHelpers {
   final AutoBackup backups;
 
   /// The mode of [house], or of the first house.
-  HouseModes modesOf([String? house]) =>
-      _modes[house ?? _core.houses.defaultId] ?? _modes.values.first;
+  HouseModes modesOf([String? house]) {
+    final id = house ?? _core.houses.defaultId;
+    return _modes[id] ?? (throw ApiError('not_found', 'There is no house $id'));
+  }
 
   HouseModes get modes => modesOf();
 
   /// The alerts of [house], or of the first house.
-  HouseAlerts alertsOf([String? house]) =>
-      _alerts[house ?? _core.houses.defaultId] ?? _alerts.values.first;
+  HouseAlerts alertsOf([String? house]) {
+    final id = house ?? _core.houses.defaultId;
+    return _alerts[id] ??
+        (throw ApiError('not_found', 'There is no house $id'));
+  }
 
   HouseAlerts get alerts => alertsOf();
 
@@ -143,18 +152,22 @@ class HouseHelpers {
       (flowId == null ? null : _core.houses.flowHouses[flowId]) ??
       _core.houses.defaultId;
 
-  HouseModes _modesFor(Map<String, Object?> args) =>
-      modesOf(_core.houses.resolve(args['house']));
+  Future<HouseModes> _modesFor(Map<String, Object?> args) async {
+    await _opening;
+    return modesOf(_core.houses.resolve(args['house']));
+  }
 
-  HouseAlerts _alertsFor(Map<String, Object?> args) =>
-      alertsOf(_core.houses.resolve(args['house']));
+  Future<HouseAlerts> _alertsFor(Map<String, Object?> args) async {
+    await _opening;
+    return alertsOf(_core.houses.resolve(args['house']));
+  }
 
   Map<String, CommandHandler> get commands => {
-    'home.mode': (args) => _modesFor(args).get(args),
-    'home.mode.set': (args) => _modesFor(args).set(args),
+    'home.mode': (args) async => (await _modesFor(args)).get(args),
+    'home.mode.set': (args) async => (await _modesFor(args)).set(args),
     ...timers.commands,
-    'alerts.get': (args) => _alertsFor(args).get(args),
-    'alerts.set': (args) => _alertsFor(args).set(args),
+    'alerts.get': (args) async => (await _alertsFor(args)).get(args),
+    'alerts.set': (args) async => (await _alertsFor(args)).set(args),
     ..._rooms.commands,
     ..._scenes.commands,
     ...backups.commands,
@@ -178,6 +191,7 @@ class HouseHelpers {
   /// Takes what a backup's `home` holds of them, into [house].
   Future<void> restore(Object? home, [String? house]) async {
     if (home is! Map) return;
+    await _opening;
     await modesOf(house).restore(home);
     final saved = home['alerts'];
     if (saved is Map) {

@@ -351,73 +351,119 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
   /// People and places are not tiles, so they get no room.
   bool get _presence => _device?['category'] == 'presence';
 
+  /// Added, but the device has not answered: Finish still saves it.
+  bool get _offline =>
+      _device != null && !DeviceView(_device!).online && !_presence;
+
   bool get _tv => _step?.method == 'adb' || _step?.method == 'tv';
 
   @override
   Widget build(BuildContext context) {
     final step = _step;
-    return OmniPage(
+    final (label, key, action) = _primary(step);
+    return StepFlow(
+      key: const ValueKey('guided-steps'),
       title: widget.stepsBefore == 0
           ? 'Set up ${widget.name}'
           : 'Add ${widget.name}',
-      body: ListView(
-        key: const ValueKey('guided-steps'),
-        padding: const EdgeInsets.only(bottom: OmniSpace.xl),
-        children: [
-          if (_total > 0) ...[
-            const SizedBox(height: OmniSpace.xs),
-            OmniStepBar(count: _total, current: _current),
-            const SizedBox(height: OmniSpace.md),
-          ],
-          if (step == null && _failure == null)
-            const Padding(
-              padding: EdgeInsets.all(OmniSpace.xl),
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
-            )
-          else if (step != null) ...[
-            Text(
-              'Step $_current of $_total · ${_stepName(step)}',
-              key: const ValueKey('setup-step'),
+      count: _total < 1 ? 1 : _total,
+      current: _current.clamp(1, _total < 1 ? 1 : _total),
+      state: step == null
+          ? (_failure == null
+                ? const OmniLoad.loading()
+                : OmniLoad.error(
+                    _failureText(_failure!, null),
+                    () => _run(() => _api.nextStep(widget.id)),
+                  ))
+          : const OmniLoad.data(),
+      banners: [
+        if (step != null && _failure != null)
+          OmniBanner.error(
+            key: const ValueKey('setup-error'),
+            _failureText(_failure!, step),
+          ),
+      ],
+      primaryLabel: label,
+      primaryKey: key,
+      onPrimary: action,
+      missing: step == null || step.kind == NextKind.pair || _busy
+          ? null
+          : 'Fill in each field first.',
+      children: (context) => [
+        if (step != null) ...[
+          Text(
+            'Step $_current of $_total · ${_stepName(step)}',
+            key: const ValueKey('setup-step'),
+            style: OmniText.caption,
+          ),
+          const SizedBox(height: OmniSpace.gap),
+          ..._stepBody(step),
+        ],
+        if (_note != null && step?.kind != NextKind.pair)
+          Padding(
+            padding: const EdgeInsets.only(top: OmniSpace.sm),
+            child: Text(
+              _note!,
+              key: const ValueKey('setup-note'),
               style: OmniText.caption,
             ),
-            const SizedBox(height: OmniSpace.gap),
-            ..._stepBody(step),
-          ],
-          if (_note != null && step?.kind != NextKind.pair)
-            Padding(
-              padding: const EdgeInsets.only(top: OmniSpace.sm),
-              child: Text(
-                _note!,
-                key: const ValueKey('setup-note'),
-                style: OmniText.caption,
-              ),
-            ),
-          if (_failure case final f?)
-            Padding(
-              padding: const EdgeInsets.only(top: OmniSpace.sm),
-              child: OmniBanner.error(
-                key: const ValueKey('setup-error'),
-                _failureText(f, step),
-                actionLabel: step == null ? 'Try again' : null,
-                onAction: step == null
-                    ? () => _run(() => _api.nextStep(widget.id))
-                    : null,
-              ),
-            ),
-          if (_busy && step?.kind != NextKind.pair)
-            const Padding(
-              padding: EdgeInsets.only(top: OmniSpace.sm),
-              child: OmniProgressBar(height: 2, semanticLabel: 'Working'),
-            ),
-          // The last step puts these above its Finish.
-          if (step?.kind != NextKind.done) ...[
-            const SizedBox(height: OmniSpace.lg),
-            ..._nameAndRoom(),
-          ],
+          ),
+        if (_busy && step?.kind != NextKind.pair)
+          const Padding(
+            padding: EdgeInsets.only(top: OmniSpace.sm),
+            child: OmniProgressBar(height: 2, semanticLabel: 'Working'),
+          ),
+        // The last step puts these above its optional keys.
+        if (step?.kind != NextKind.done) ...[
+          const SizedBox(height: OmniSpace.lg),
+          ..._nameAndRoom(),
         ],
-      ),
+      ],
     );
   }
+
+  /// The step's one commit in the bottom bar: its label, its key for
+  /// tests, and what it does (null while it cannot go on).
+  (String, Key, VoidCallback?) _primary(NextStep? step) => switch (step?.kind) {
+    null => ('Next', const ValueKey('step-primary'), null),
+    NextKind.pair => (
+      _busy
+          ? 'Waiting'
+          : _failure == null
+          ? 'Start pairing'
+          : 'Try again',
+      const ValueKey('setup-pair'),
+      _busy ? null : () => _run(_pair),
+    ),
+    NextKind.secret => (
+      'Save',
+      const ValueKey('setup-secret-save'),
+      _busy || !_filled(step!.keys)
+          ? null
+          : () => _run(() => _storeSecrets(step.keys)),
+    ),
+    NextKind.configure when step!.isPins => (
+      NamedPin.ofDevice(_device ?? const {}).isEmpty
+          ? 'No pins yet, continue'
+          : 'Continue',
+      const ValueKey('setup-pins-continue'),
+      _busy ? null : () => _run(_pinsDone),
+    ),
+    NextKind.configure => (
+      'Continue',
+      const ValueKey('setup-configure'),
+      _busy || !_filled(step!.keys)
+          ? null
+          : () => _run(
+              () => _api.configureThing(widget.id, _typedSettings(step.keys)),
+            ),
+    ),
+    NextKind.done => (
+      'Finish',
+      const ValueKey('setup-close'),
+      _busy ? null : _finish,
+    ),
+  };
 
   List<Widget> _nameAndRoom() => [
     TextField(
@@ -515,13 +561,6 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
                     }),
             ),
           ),
-      OmniButton(
-        key: const ValueKey('setup-secret-save'),
-        label: 'Save',
-        onPressed: _busy || !_filled(step.keys)
-            ? null
-            : () => _run(() => _storeSecrets(step.keys)),
-      ),
       const SizedBox(height: OmniSpace.xs),
       const Text(
         'Kept in the phone\'s secret store, never in settings or logs.',
@@ -555,14 +594,6 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
                 builder: (_) => PinSheet(device: _device!),
               ),
       ),
-      const SizedBox(height: OmniSpace.sm),
-      OmniButton(
-        key: const ValueKey('setup-pins-continue'),
-        label: NamedPin.ofDevice(_device ?? const {}).isEmpty
-            ? 'No pins yet, continue'
-            : 'Continue',
-        onPressed: _busy ? null : () => _run(_pinsDone),
-      ),
     ],
     NextKind.configure => [
       OmniHeroCard(
@@ -572,25 +603,22 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
         subtitle: step.instruction,
       ),
       for (final k in step.keys) _keyField(k),
-      OmniButton(
-        key: const ValueKey('setup-configure'),
-        label: 'Continue',
-        onPressed: _busy || !_filled(step.keys)
-            ? null
-            : () => _run(
-                () => _api.configureThing(widget.id, _typedSettings(step.keys)),
-              ),
-      ),
     ],
     NextKind.done => [
       OmniHeroCard(
         key: const ValueKey('setup-done'),
         icon: OmniIcons.check,
         centered: true,
-        title: step.instruction ?? '${widget.name} is ready',
-        subtitle: _presence
-            ? 'Give it a name, then finish.'
-            : 'Give it a name and a room, then finish.',
+        title: _offline
+            ? '${widget.name} is saved, but not answering'
+            : step.instruction ?? '${widget.name} is ready',
+        subtitle: [
+          if (_offline) 'Check it is on and on this Wi-Fi.',
+          _presence
+              ? 'Give it a name, then finish.'
+              : 'Give it a name and a room, then finish.',
+        ].join(' '),
+        tone: _offline ? HeroTone.plain : HeroTone.accent,
       ),
       const SizedBox(height: OmniSpace.sm),
       ..._nameAndRoom(),
@@ -603,12 +631,6 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
         const SizedBox(height: OmniSpace.sm),
         for (final k in step.optional) _keyField(k, secret: k.step == 'secret'),
       ],
-      const SizedBox(height: OmniSpace.md),
-      OmniButton(
-        key: const ValueKey('setup-close'),
-        label: 'Finish',
-        onPressed: _busy ? null : _finish,
-      ),
     ],
   };
 
@@ -634,7 +656,8 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
             : 'Pair ${widget.name}',
         subtitle: step.instruction ?? 'Get ${widget.name} ready to pair.',
       ),
-      if (_busy)
+      if (_busy) ...[
+        const SizedBox(height: OmniSpace.md),
         OmniCard(
           key: const ValueKey('setup-waiting'),
           child: Column(
@@ -654,22 +677,24 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
               ),
             ],
           ),
-        )
-      else
-        OmniButton(
-          key: const ValueKey('setup-pair'),
-          label: _failure == null ? 'Start pairing' : 'Try again',
-          onPressed: () => _run(_pair),
         ),
+      ],
       const SizedBox(height: OmniSpace.sm),
       OmniButton.ghost(
         key: const ValueKey('setup-help'),
         label: _tv ? 'The TV shows nothing' : 'Nothing happens',
-        onPressed: () => showOmniSheet<void>(
+        onPressed: () => SheetTemplate.show<void>(
           context,
-          builder: (context) => OmniSheet(
+          builder: (context) => SheetTemplate(
             title: _tv ? 'The TV shows nothing' : 'Nothing happens',
-            children: [
+            primaryLabel: 'Try again',
+            onPrimary: _busy
+                ? null
+                : () {
+                    Navigator.of(context).pop();
+                    unawaited(_run(_pair));
+                  },
+            children: (context) => [
               Text(
                 _tv
                     ? 'Check the TV is on, awake and on the same Wi-Fi as this '
@@ -685,17 +710,6 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
                     : 'Check $waitingFor is switched on and on the same Wi-Fi '
                           'as this phone, then try again.',
                 style: OmniText.body,
-              ),
-              const SizedBox(height: OmniSpace.md),
-              OmniButton(
-                label: 'Try again',
-                icon: OmniIcons.retry,
-                onPressed: _busy
-                    ? null
-                    : () {
-                        Navigator.of(context).pop();
-                        unawaited(_run(_pair));
-                      },
               ),
             ],
           ),

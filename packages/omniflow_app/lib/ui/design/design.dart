@@ -2,6 +2,7 @@
 /// one file. The component list is in README.md beside it.
 library;
 
+export 'action_bar.dart';
 export 'banner.dart';
 export 'brand.dart';
 export 'buttons.dart';
@@ -21,5 +22,6 @@ export 'sheet.dart';
 export 'skeleton.dart';
 export 'slider.dart';
 export 'step_row.dart';
+export 'templates/templates.dart';
 export 'tile.dart';
 export 'tokens.dart';

@@ -180,9 +180,10 @@ class DiagramNodeCard extends StatelessWidget {
   /// holds, so a large text size or a wide font ends in "…" instead of
   /// spilling out of the node.
   Widget _text(String text, {int lines = 3, TextAlign? align, double? size}) {
-    final style = TextStyle(
-      fontSize: size ?? 13,
-      color: OmniColors.text,
+    // Capitalised like the sentence rows.
+    if (text.isNotEmpty) text = text[0].toUpperCase() + text.substring(1);
+    final style = OmniText.step.copyWith(
+      fontSize: size ?? OmniText.step.fontSize,
       height: 1.3,
     );
     return LayoutBuilder(
@@ -205,7 +206,10 @@ class DiagramNodeCard extends StatelessWidget {
 
   Widget _pill(BuildContext context) => _withBadge(
     Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(
+        horizontal: OmniSpace.md,
+        vertical: OmniSpace.xs,
+      ),
       decoration: ShapeDecoration(
         color: OmniColors.triggerSoft,
         shape: StadiumBorder(
@@ -218,7 +222,7 @@ class DiagramNodeCard extends StatelessWidget {
       child: Row(
         children: [
           Icon(icon ?? OmniIcons.event, size: 18, color: OmniColors.trigger),
-          const SizedBox(width: 6),
+          const SizedBox(width: OmniSpace.sm),
           Expanded(child: _text(node.words, lines: 2, size: 12)),
         ],
       ),
@@ -284,7 +288,7 @@ class DiagramNodeCard extends StatelessWidget {
     final isWait = node.kind == NodeKind.wait;
     return _withBadge(
       Container(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+        padding: const EdgeInsets.all(OmniSpace.sm),
         decoration: BoxDecoration(
           color: OmniColors.card,
           borderRadius: BorderRadius.circular(OmniRadii.step),
@@ -306,7 +310,7 @@ class DiagramNodeCard extends StatelessWidget {
               ),
               child: Icon(icon ?? OmniIcons.action, size: 18, color: tint),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: OmniSpace.sm),
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -327,7 +331,7 @@ class DiagramNodeCard extends StatelessWidget {
             ),
             if (node.risk != null)
               const Padding(
-                padding: EdgeInsets.only(left: 4),
+                padding: EdgeInsets.only(left: OmniSpace.xs),
                 child: Icon(
                   OmniIcons.warning,
                   key: ValueKey('diagram-risk'),
@@ -373,7 +377,7 @@ class DiagramNodeCard extends StatelessWidget {
 
   Widget _header() => Container(
     alignment: Alignment.center,
-    padding: const EdgeInsets.symmetric(horizontal: 10),
+    padding: const EdgeInsets.symmetric(horizontal: OmniSpace.gap),
     decoration: BoxDecoration(
       color: OmniColors.flowSoft,
       borderRadius: BorderRadius.circular(OmniRadii.chip),
@@ -389,7 +393,7 @@ class DiagramNodeCard extends StatelessWidget {
           size: 14,
           color: OmniColors.flowControl,
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: OmniSpace.xs),
         Flexible(
           child: Text(
             node.words,
@@ -496,13 +500,13 @@ class DiagramPlus extends StatelessWidget {
             height: 22,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: OmniColors.raised,
-              border: Border.all(color: OmniColors.accentLine),
+              color: OmniPalette.of(context).raised,
+              border: Border.all(color: OmniPalette.of(context).accentLine),
             ),
-            child: const Icon(
+            child: Icon(
               OmniIcons.add,
               size: 16,
-              color: OmniColors.accent,
+              color: OmniPalette.of(context).accent,
             ),
           ),
         ),

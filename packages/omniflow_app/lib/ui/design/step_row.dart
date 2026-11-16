@@ -83,7 +83,7 @@ class OmniStepRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(text, style: TextStyle(fontSize: 13, color: ink)),
+                Text(text, style: OmniText.step.copyWith(color: ink)),
                 if (subtitle != null) Text(subtitle!, style: OmniText.caption),
               ],
             ),

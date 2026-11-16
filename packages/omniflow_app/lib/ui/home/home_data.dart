@@ -15,9 +15,11 @@ final driversProvider = FutureProvider<Map<String, Json>>((ref) async {
 });
 
 /// The rooms in their order.
-final roomsProvider = FutureProvider<List<Room>>(
-  (ref) async => (await ref.watch(engineApiProvider).rooms()).or(const []),
-);
+final roomsProvider = FutureProvider<List<Room>>((ref) async {
+  // A device added or moved in from the CLI or an agent can bring a room.
+  ref.watch(deviceChangesProvider);
+  return (await ref.watch(engineApiProvider).rooms()).or(const []);
+});
 
 /// The scenes, reloaded whenever the automations list is, so a scene
 /// changed in Scenes shows on Home.

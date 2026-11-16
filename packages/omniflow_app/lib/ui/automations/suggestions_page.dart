@@ -59,38 +59,36 @@ class SuggestionsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(suggestionsProvider);
-    final list = async.value;
-    return OmniPage(
+    return ListPage(
       title: 'Suggestions',
-      body: list == null
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              key: const ValueKey('suggestions-list'),
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(bottom: OmniSpace.md),
-                  child: Text(
-                    'From the last four weeks of what you turned on and off '
-                    'yourself. Make it opens the automation to check before it is '
-                    'saved.',
-                    style: OmniText.caption,
-                  ),
-                ),
-                if (list.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: OmniSpace.xl),
-                    child: Text(
-                      'Nothing to suggest yet. Suggestions show up once you '
-                      'do the same thing at about the same time for a couple '
-                      'of weeks.',
-                      key: ValueKey('suggestions-empty'),
-                      textAlign: TextAlign.center,
-                      style: OmniText.caption,
-                    ),
-                  ),
-                for (final s in list) SuggestionTile(suggestion: s),
-              ],
-            ),
+      state: OmniLoad.of(
+        async,
+        isEmpty: (v) => v.isEmpty,
+        onRetry: () => ref.invalidate(suggestionsProvider),
+        error: 'The suggestions did not load.',
+      ),
+      banners: const [
+        Padding(
+          padding: EdgeInsets.only(bottom: OmniSpace.md),
+          child: Text(
+            'From the last four weeks of what you turned on and off '
+            'yourself. Make it opens the automation to check before it is '
+            'saved.',
+            style: OmniText.caption,
+          ),
+        ),
+      ],
+      empty: const OmniEmptyState(
+        key: ValueKey('suggestions-empty'),
+        icon: OmniIcons.star,
+        title: 'Nothing to suggest yet',
+        message:
+            'Suggestions show up once you do the same thing at about the '
+            'same time for a couple of weeks.',
+      ),
+      children: (context) => [
+        for (final s in async.requireValue) SuggestionTile(suggestion: s),
+      ],
     );
   }
 }

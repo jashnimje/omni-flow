@@ -199,21 +199,9 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _back();
       },
-      child: OmniPage(
-        title: driver != null
-            ? 'Add ${plainDriverName('${driver['name']}')}'
-            : kind != null
-            ? kind.title
-            : 'Add by hand',
-        bottom: driver == null
-            ? null
-            : OmniButton(
-                key: const ValueKey('add-save'),
-                label: _adding ? 'Adding' : 'Add',
-                onPressed: _ready ? _add : null,
-              ),
-        body: driver == null ? _driverList() : _form(driver),
-      ),
+      child: driver == null
+          ? _driverList(kind?.title ?? 'Add by hand')
+          : _form(driver),
     );
   }
 
@@ -256,7 +244,7 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
 
   AddKind? get _pickedKind => addKinds.where((k) => k.id == _kind).firstOrNull;
 
-  Widget _driverList() {
+  Widget _driverList(String title) {
     final drivers = _drivers;
     final all = drivers?.value ?? const <Json>[];
     final query = _search.text.trim().toLowerCase();
@@ -276,19 +264,29 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
     // The common kinds first, in plain words. Every driver, with its
     // protocol in its name, sits under More kinds.
     final showKinds = kind == null && query.isEmpty && kinds.isNotEmpty;
-    return ListView(
+    return ListPage(
       key: const ValueKey('add-drivers'),
-      children: [
-        if (kind == null)
-          TextField(
-            key: const ValueKey('add-driver-search'),
-            controller: _search,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(OmniIcons.search),
-              hintText: 'Hue, Home Assistant, Tasmota, Mac…',
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
+      title: title,
+      search: kind == null
+          ? TextField(
+              key: const ValueKey('add-driver-search'),
+              controller: _search,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(OmniIcons.search),
+                hintText: 'Hue, Home Assistant, Tasmota, Mac…',
+              ),
+              onChanged: (_) => setState(() {}),
+            )
+          : null,
+      state: OmniLoad.flags(
+        loading: drivers == null,
+        error: drivers == null || drivers.ok
+            ? null
+            : 'The kinds of device could not be read. '
+                  '${drivers.failure!.message}',
+        onRetry: _load,
+      ),
+      children: (context) => [
         if (showKinds) ...[
           const OmniSectionHeader('What is it?'),
           for (final k in kinds)
@@ -304,21 +302,11 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
         // A kind's list has its name as the page title already.
         if (kind == null)
           OmniSectionHeader(showKinds ? 'More kinds' : 'What is it?'),
-        if (drivers == null)
-          const Padding(
-            padding: EdgeInsets.all(OmniSpace.xl),
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
-          )
-        else if (!drivers.ok)
-          OmniBanner.error(
-            'The kinds of device could not be read. ${drivers.failure!.message}',
-            actionLabel: 'Try again',
-            onAction: _load,
-          )
-        else if (list.isEmpty)
+        if (list.isEmpty)
           const OmniEmptyState(
             icon: OmniIcons.search,
             title: 'No driver matches',
+            compact: true,
           )
         else
           for (final d in list)
@@ -342,9 +330,26 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
 
   Widget _form(Json driver) {
     final found = _found;
-    return ListView(
+    final accent = OmniPalette.of(context).accent;
+    return FormPage(
       key: const ValueKey('add-form'),
-      children: [
+      title: 'Add ${plainDriverName('${driver['name']}')}',
+      commitLabel: _adding ? 'Adding' : 'Add',
+      commitKey: const ValueKey('add-save'),
+      onCommit: _ready ? _add : null,
+      missing: _adding
+          ? null
+          : _virtual || _host.text.trim().isNotEmpty
+          ? 'Give it a name first.'
+          : 'Type its address, or look for it, first.',
+      banners: [
+        if (_failure case final f?)
+          OmniBanner.error(
+            key: const ValueKey('add-refused'),
+            [f.message, for (final i in f.issues) i.message].join('. '),
+          ),
+      ],
+      children: (context) => [
         OmniListRow(
           key: const ValueKey('add-driver'),
           icon: _driverIcon(driver),
@@ -362,20 +367,17 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
             onPressed: _scanning ? null : _scan,
           ),
           if (found != null && found.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: OmniSpace.sm),
-              child: Text(
-                'Nothing found. Type its address below.',
-                style: OmniText.caption,
-              ),
+            const OmniEmptyState(
+              icon: OmniIcons.search,
+              title: 'Nothing found',
+              message: 'Type its address below.',
+              compact: true,
             ),
           for (final f in found ?? const <Json>[])
             OmniListRow(
               key: ValueKey('found-${f['host']}'),
               icon: _host.text == f['host'] ? OmniIcons.check : OmniIcons.wifi,
-              iconForeground: _host.text == f['host']
-                  ? OmniColors.accent
-                  : null,
+              iconForeground: _host.text == f['host'] ? accent : null,
               title: '${f['host']}',
               subtitle: switch ((f['stableId'], f['knownAs'])) {
                 (_, final String known) =>
@@ -427,14 +429,6 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
             ),
           ),
         ],
-        if (_failure case final f?)
-          Padding(
-            padding: const EdgeInsets.only(top: OmniSpace.sm),
-            child: OmniBanner.error(
-              key: const ValueKey('add-refused'),
-              [f.message, for (final i in f.issues) i.message].join('. '),
-            ),
-          ),
       ],
     );
   }

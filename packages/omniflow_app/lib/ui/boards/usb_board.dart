@@ -34,7 +34,10 @@ Future<List<UsbBoard>> findUsbBoards(EngineClient engine) async {
 /// Sets a board on USB up from the phone: its name and its Wi-Fi, which the
 /// board keeps in its flash. The password goes to the board only.
 Future<void> showUsbBoardSheet(BuildContext context, {String? node}) =>
-    showOmniSheet<void>(context, builder: (_) => _UsbBoardSheet(node: node));
+    SheetTemplate.show<void>(
+      context,
+      builder: (_) => _UsbBoardSheet(node: node),
+    );
 
 class _UsbBoardSheet extends ConsumerStatefulWidget {
   const _UsbBoardSheet({this.node});
@@ -160,16 +163,23 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
   @override
   Widget build(BuildContext context) {
     final boards = _boards;
-    return OmniSheet(
+    final hasBoards = boards != null && boards.isNotEmpty;
+    return SheetTemplate(
       title: 'Board on USB',
       subtitle: 'Plug the board into this phone with a USB cable.',
-      children: [
-        if (boards == null)
-          const Padding(
-            padding: EdgeInsets.all(OmniSpace.lg),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (boards.isEmpty) ...[
+      state: OmniLoad.flags(loading: boards == null),
+      primaryLabel: hasBoards ? (_busy ? 'Setting up…' : 'Set it up') : null,
+      primaryKey: const ValueKey('usb-save'),
+      onPrimary: _busy || _picked == null ? null : _save,
+      missing: _busy ? null : 'Tap the board to set up first.',
+      banners: [
+        if (_error case final e?)
+          OmniBanner.error(key: const ValueKey('usb-error'), e),
+        if (_result case final r?)
+          OmniBanner.info(key: const ValueKey('usb-result'), r),
+      ],
+      children: (context) => [
+        if (!hasBoards) ...[
           const OmniBanner.info(
             'No board found on USB. Use a data cable (some only charge), '
             'and say yes if the phone asks to let OmniFlow use it.',
@@ -181,6 +191,7 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
             icon: OmniIcons.retry,
             onPressed: _look,
           ),
+          const SizedBox(height: OmniSpace.sm),
           OmniButton.ghost(
             key: const ValueKey('usb-install'),
             label: 'It is new: install OmniFlow on it',
@@ -194,8 +205,9 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
               icon: OmniIcons.board,
               title: b.node ?? 'A board',
               subtitle: b.board ?? b.port,
+              selected: identical(b, _picked),
               trailing: identical(b, _picked)
-                  ? const Icon(OmniIcons.check, color: OmniColors.accent)
+                  ? Icon(OmniIcons.check, color: OmniPalette.of(context).accent)
                   : null,
               onTap: () => setState(() => _picked = b),
             ),
@@ -225,16 +237,6 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
               labelText: 'Wi-Fi password',
               helperText: 'Goes to the board only. OmniFlow does not keep it.',
             ),
-          ),
-          if (_error case final e?)
-            OmniBanner.error(key: const ValueKey('usb-error'), e),
-          if (_result case final r?)
-            OmniBanner.info(key: const ValueKey('usb-result'), r),
-          const SizedBox(height: OmniSpace.md),
-          OmniButton(
-            key: const ValueKey('usb-save'),
-            label: _busy ? 'Setting up…' : 'Set it up',
-            onPressed: _busy || _picked == null ? null : _save,
           ),
         ],
       ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omniflow_app/ui/design/design.dart';
 
 import 'fake_engine.dart';
 import 'tv_fixtures.dart';
@@ -244,7 +245,7 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<FilledButton>(find.byKey(const ValueKey('ask-text-ok')))
+            .widget<OmniButton>(find.byKey(const ValueKey('ask-text-ok')))
             .onPressed,
         isNull,
       );

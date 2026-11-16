@@ -125,12 +125,23 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
   Widget build(BuildContext context) {
     final diagram = _diagram;
     if (diagram == null) {
-      if (_loading) return const Center(child: CircularProgressIndicator());
-      return const OmniEmptyState(
-        key: ValueKey('diagram-unavailable'),
-        icon: OmniIcons.info,
-        title: 'The diagram did not load',
-        message: 'Switch to Sentence to see and change this automation.',
+      // The canvas is edge to edge, so the states pad themselves.
+      return ListView(
+        padding: OmniSpace.screenPadding,
+        children: [
+          if (_loading)
+            const OmniPageSkeleton(label: 'Loading the diagram')
+          else
+            OmniErrorState(
+              key: const ValueKey('diagram-unavailable'),
+              title: 'The diagram did not load',
+              message: 'Switch to Sentence to see and change this automation.',
+              onRetry: () {
+                setState(() => _loading = true);
+                _fetch();
+              },
+            ),
+        ],
       );
     }
     final editable = diagram.editable && !_stale;
@@ -141,21 +152,34 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_failed)
-          OmniBanner.error(
-            'The diagram did not refresh, so it cannot be changed until it '
-            'does. Your edits are kept.',
-            key: const ValueKey('diagram-refresh-failed'),
-            actionLabel: 'Retry',
-            onAction: _retry,
+          Padding(
+            padding: OmniSpace.screenPadding,
+            child: OmniBanner.error(
+              'The diagram did not refresh, so it cannot be changed until it '
+              'does. Your edits are kept.',
+              key: const ValueKey('diagram-refresh-failed'),
+              actionLabel: 'Retry',
+              onAction: _retry,
+            ),
           )
         else
           SizedBox(
             height: 2,
-            child: _stale ? const LinearProgressIndicator() : null,
+            child: _stale
+                ? const OmniProgressBar(
+                    height: 2,
+                    semanticLabel: 'Updating the diagram',
+                  )
+                : null,
           ),
         if (!diagram.editable)
           const Padding(
-            padding: EdgeInsets.only(top: OmniSpace.sm),
+            padding: EdgeInsets.fromLTRB(
+              OmniSpace.screen,
+              OmniSpace.sm,
+              OmniSpace.screen,
+              0,
+            ),
             child: Text(
               'This automation came as a graph, so it is shown but not '
               'changed here.',
@@ -213,14 +237,15 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
     if (first == null) return;
     var pick = first;
     if (e.alsoInsert case final also?) {
-      final chosen = await showOmniSheet<DiagramInsert>(
+      final chosen = await showPickerSheet<DiagramInsert>(
         context,
-        builder: (context) => OmniSheet(
-          title: 'Add here',
-          children: [
+        title: 'Add here',
+        sections: [
+          PickerSection([
             for (final insert in [first, also])
-              OmniListRow(
+              PickerItem(
                 key: ValueKey('diagram-add-${insert.as}'),
+                value: insert,
                 icon: insert.as == DiagramInsert.check
                     ? OmniIcons.branch
                     : OmniIcons.add,
@@ -229,10 +254,9 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
                     : insert.as == DiagramInsert.trigger
                     ? 'A trigger'
                     : 'A step',
-                onTap: () => Navigator.of(context).pop(insert),
               ),
-          ],
-        ),
+          ]),
+        ],
       );
       if (chosen == null) return;
       pick = chosen;
@@ -279,16 +303,17 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
   Future<void> _menu(DiagramNode n) async {
     final place = _placeOf(n);
     if (place == null) return;
-    final choice = await showOmniSheet<void Function()>(
+    final choice = await showPickerSheet<void Function()>(
       context,
-      builder: (context) => OmniSheet(
-        title: n.words,
-        children: [
+      title: n.words,
+      sections: [
+        PickerSection([
           for (final (label, action) in _choices(place))
-            OmniListRow(
+            PickerItem(
               key: ValueKey(
                 'diagram-${label.toLowerCase().replaceAll(' ', '-')}',
               ),
+              value: action,
               icon: switch (label) {
                 'Move up' => OmniIcons.upload,
                 'Move down' => OmniIcons.download,
@@ -296,10 +321,9 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
                 _ => OmniIcons.delete,
               },
               title: label,
-              onTap: () => Navigator.of(context).pop(action),
             ),
-        ],
-      ),
+        ]),
+      ],
     );
     choice?.call();
   }

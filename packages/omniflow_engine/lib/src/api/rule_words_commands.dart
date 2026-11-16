@@ -232,7 +232,7 @@ class RuleWordParts {
       final days = t['days'];
       return [
         _piece('At '),
-        _piece('${t['time']}', 'time'),
+        _piece(words.clock(t['time']), 'time'),
         if (days is List && days.isNotEmpty) ...[
           _piece(' '),
           _piece(daysWords(days), 'days'),
@@ -248,9 +248,9 @@ class RuleWordParts {
     if (c['between'] case [final start, final end]) {
       return [
         _piece('Between '),
-        _piece('$start', 'start'),
+        _piece(words.clock(start), 'start'),
         _piece(' and '),
-        _piece('$end', 'end'),
+        _piece(words.clock(end), 'end'),
       ];
     }
     return [_piece(_capital(words.condition(c)))];

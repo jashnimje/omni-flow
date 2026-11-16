@@ -38,20 +38,7 @@ class DeviceRoute extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final devices = ref.watch(devicesProvider);
     final json = devices.value?.where((d) => d['id'] == id).firstOrNull;
-    if (json == null) {
-      return OmniPage(
-        title: 'Device',
-        body: devices.isLoading
-            ? const OmniListSkeleton(rows: 3, label: 'Loading the device')
-            : const Center(
-                child: OmniEmptyState(
-                  icon: AreaIcons.notFound,
-                  title: 'This device is not here any more',
-                  message: 'It may have been removed.',
-                ),
-              ),
-      );
-    }
+    if (json == null) return DeviceGone(loading: devices.isLoading);
     final d = DeviceView(json);
     if (TvCalls.isPhone(json)) return TvPage(id: id, name: d.name, phone: true);
     return switch (kindOf(d)) {
@@ -62,4 +49,25 @@ class DeviceRoute extends ConsumerWidget {
       _ => DevicePage(id: id),
     };
   }
+}
+
+/// A device page with no device: the page skeleton while the list loads,
+/// then that it is not here any more. Every device page shows it.
+class DeviceGone extends StatelessWidget {
+  const DeviceGone({super.key, required this.loading});
+
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) => DetailPage(
+    title: 'Device',
+    state: loading ? const OmniLoad.loading() : const OmniLoad.empty(),
+    notFound: const OmniEmptyState(
+      key: ValueKey('device-gone'),
+      icon: AreaIcons.notFound,
+      title: 'This device is not here any more',
+      message: 'It may have been removed.',
+    ),
+    children: (_) => const [],
+  );
 }

@@ -45,7 +45,7 @@ class WeatherCard extends ConsumerWidget {
         excludeSemantics: true,
         child: Row(
           children: [
-            const Icon(OmniIcons.sun, color: OmniColors.accent),
+            Icon(OmniIcons.sun, color: OmniPalette.of(context).accent),
             const SizedBox(width: OmniSpace.md),
             Expanded(
               child: Column(
@@ -80,8 +80,15 @@ class WeatherPage extends ConsumerWidget {
     final w = WeatherView(thing?.state ?? const {});
     String number(double? v, String unit) =>
         v == null ? '-' : '${v.round()}$unit';
-    return OmniPage(
+    final list = ref.watch(devicesProvider);
+    return DetailPage(
+      key: const ValueKey('weather-page'),
       title: thing?.name ?? 'Weather',
+      state: thing != null
+          ? const OmniLoad.data()
+          : list.isLoading
+          ? const OmniLoad.loading()
+          : const OmniLoad.empty(),
       actions: [
         OmniIconAction(
           key: const ValueKey('weather-refresh'),
@@ -91,58 +98,57 @@ class WeatherPage extends ConsumerWidget {
               callEngine(ref, SmartHomeCalls.weatherRefresh, {'id': id}),
         ),
       ],
-      body: ListView(
-        key: const ValueKey('weather-page'),
-        children: [
-          if (w.problem != null)
-            OmniBanner.info(
-              w.problem!,
-              key: const ValueKey('weather-problem'),
-              actionLabel: ref.watch(homeLocationProvider).value?.isSet == false
-                  ? 'Set home location'
-                  : null,
-              onAction: () => openHomeLocation(context),
-            ),
-          OmniHeroCard(
-            key: const ValueKey('weather-hero'),
-            title: WeatherView.degrees(w.temperature),
-            subtitle: [
-              ?w.condition,
-              if (w.feelsLike != null)
-                'feels like ${WeatherView.degrees(w.feelsLike)}',
-            ].join(', '),
+      banners: [
+        if (w.problem != null)
+          OmniBanner.info(
+            w.problem!,
+            key: const ValueKey('weather-problem'),
+            actionLabel: ref.watch(homeLocationProvider).value?.isSet == false
+                ? 'Set home location'
+                : null,
+            onAction: () => openHomeLocation(context),
           ),
-          const OmniSectionHeader('Next hour'),
-          OmniListRow(
-            key: const ValueKey('weather-rain'),
-            title: w.rainExpected ? 'Rain is likely' : 'Rain is unlikely',
-            subtitle:
-                '${w.rainChance == null ? '-' : '${w.rainChance!.round()}%'} '
-                'chance, ${w.rainMm == null ? '-' : '${w.rainMm} mm'}',
-          ),
-          const OmniSectionHeader('Today'),
-          OmniListRow(
-            title: 'High and low',
-            value:
-                '${WeatherView.degrees(w.high)} / ${WeatherView.degrees(w.low)}',
-          ),
-          OmniListRow(title: 'Humidity', value: number(w.humidity, '%')),
-          OmniListRow(title: 'Wind', value: number(w.wind, ' km/h')),
-          OmniListRow(
-            title: 'UV index',
-            value: w.uv == null ? '-' : w.uv!.toStringAsFixed(1),
-          ),
-          if (w.updated case final at?)
-            Padding(
-              padding: const EdgeInsets.only(top: OmniSpace.md),
-              child: Text(
-                'Updated ${TimeOfDay.fromDateTime(at.toLocal()).format(context)}. '
-                'From Open-Meteo, read every hour near your home.',
-                style: OmniText.caption,
-              ),
-            ),
-        ],
+      ],
+      hero: OmniHeroCard(
+        key: const ValueKey('weather-hero'),
+        title: WeatherView.degrees(w.temperature),
+        subtitle: [
+          ?w.condition,
+          if (w.feelsLike != null)
+            'feels like ${WeatherView.degrees(w.feelsLike)}',
+        ].join(', '),
       ),
+      children: (context) => [
+        const OmniSectionHeader('Next hour'),
+        OmniListRow(
+          key: const ValueKey('weather-rain'),
+          title: w.rainExpected ? 'Rain is likely' : 'Rain is unlikely',
+          subtitle:
+              '${w.rainChance == null ? '-' : '${w.rainChance!.round()}%'} '
+              'chance, ${w.rainMm == null ? '-' : '${w.rainMm} mm'}',
+        ),
+        const OmniSectionHeader('Today'),
+        OmniListRow(
+          title: 'High and low',
+          value:
+              '${WeatherView.degrees(w.high)} / ${WeatherView.degrees(w.low)}',
+        ),
+        OmniListRow(title: 'Humidity', value: number(w.humidity, '%')),
+        OmniListRow(title: 'Wind', value: number(w.wind, ' km/h')),
+        OmniListRow(
+          title: 'UV index',
+          value: w.uv == null ? '-' : w.uv!.toStringAsFixed(1),
+        ),
+        if (w.updated case final at?)
+          Padding(
+            padding: const EdgeInsets.only(top: OmniSpace.md),
+            child: Text(
+              'Updated ${TimeOfDay.fromDateTime(at.toLocal()).format(context)}. '
+              'From Open-Meteo, read every hour near your home.',
+              style: OmniText.caption,
+            ),
+          ),
+      ],
     );
   }
 }

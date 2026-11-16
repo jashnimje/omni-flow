@@ -260,10 +260,8 @@ void main() {
       await pump(tester, engine);
       await tapKey(tester, 'run-lights_out');
       expect(find.byKey(const ValueKey('run-failed-lights_out')), findsOne);
-      expect(
-        find.text('Turn off desk lamp failed: the lamp did not answer'),
-        findsOneWidget,
-      );
+      // The engine words the step's error plainly, so it shows on its own.
+      expect(find.text('the lamp did not answer'), findsOneWidget);
     });
 
     testWidgets('a refused run shows the engine message', (tester) async {

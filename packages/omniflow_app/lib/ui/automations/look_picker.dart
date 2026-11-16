@@ -55,15 +55,19 @@ Future<Look?> pickLook(BuildContext context, Look current) {
   return showOmniSheet<Look>(
     context,
     builder: (_) => StatefulBuilder(
-      builder: (context, setState) => OmniSheet(
+      builder: (context, setState) => SheetTemplate(
         title: 'Colour and icon',
         subtitle: 'How it shows on Home and in the list.',
-        children: [
+        primaryLabel: 'Done',
+        primaryKey: const ValueKey('look-done'),
+        onPrimary: () =>
+            Navigator.of(context).pop<Look>((color: color, icon: icon)),
+        children: (context) => [
           const Text('Colour', style: OmniText.caption),
           const SizedBox(height: OmniSpace.xs),
           Wrap(
-            spacing: 4,
-            runSpacing: 4,
+            spacing: OmniSpace.xs,
+            runSpacing: OmniSpace.xs,
             children: [
               for (final hex in automationColors)
                 _Swatch(
@@ -86,8 +90,8 @@ Future<Look?> pickLook(BuildContext context, Look current) {
           const Text('Icon', style: OmniText.caption),
           const SizedBox(height: OmniSpace.xs),
           Wrap(
-            spacing: 4,
-            runSpacing: 4,
+            spacing: OmniSpace.xs,
+            runSpacing: OmniSpace.xs,
             children: [
               for (final name in automationIconNames)
                 _Swatch(
@@ -102,13 +106,6 @@ Future<Look?> pickLook(BuildContext context, Look current) {
                   ),
                 ),
             ],
-          ),
-          const SizedBox(height: OmniSpace.md),
-          OmniButton(
-            key: const ValueKey('look-done'),
-            label: 'Done',
-            onPressed: () =>
-                Navigator.of(context).pop<Look>((color: color, icon: icon)),
           ),
         ],
       ),

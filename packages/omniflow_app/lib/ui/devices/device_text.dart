@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:omniflow_engine/omniflow_engine.dart' show appLabelFor;
+import 'package:omniflow_engine/omniflow_engine.dart'
+    show appLabelFor, clockOfDay;
 
 import '../../api/engine_calls.dart';
 import '../../api/tv_calls.dart';
@@ -83,9 +84,10 @@ String ago(DateTime at, {DateTime? now}) {
   return days == 1 ? 'yesterday' : '$days days ago';
 }
 
-String _two(int n) => n.toString().padLeft(2, '0');
-
-String clock(DateTime at) => '${_two(at.hour)}:${_two(at.minute)}';
+/// The time of day, "19:02" or "7:02 PM" by [hour12] (the phone's setting,
+/// `hour12Provider`).
+String clock(DateTime at, {bool hour12 = false}) =>
+    clockOfDay(at, hour12: hour12);
 
 const _months = [
   'Jan',
@@ -103,14 +105,15 @@ const _months = [
 ];
 
 /// "19:02" today, "Yesterday 18:47", "3 Nov 18:10" before that.
-String when(DateTime at, {DateTime? now}) {
+String when(DateTime at, {DateTime? now, bool hour12 = false}) {
   final today = now ?? DateTime.now();
   final day = DateTime(at.year, at.month, at.day);
   final start = DateTime(today.year, today.month, today.day);
   final days = start.difference(day).inDays;
-  if (days == 0) return clock(at);
-  if (days == 1) return 'Yesterday ${clock(at)}';
-  return '${at.day} ${_months[at.month - 1]} ${clock(at)}';
+  final time = clock(at, hour12: hour12);
+  if (days == 0) return time;
+  if (days == 1) return 'Yesterday $time';
+  return '${at.day} ${_months[at.month - 1]} $time';
 }
 
 /// The level a capability holds as 0 to 1, from its value range.

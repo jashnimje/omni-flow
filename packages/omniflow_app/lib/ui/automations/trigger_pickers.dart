@@ -698,17 +698,15 @@ Future<TimeTrigger?> timeTriggerForm(
 /// Today's sunrise and sunset at home, or null while home has no place on
 /// the map.
 Future<({String sunrise, String sunset})?> _sunToday(
-  EngineClient engine,
-) async {
+  EngineClient engine, {
+  bool hour12 = false,
+}) async {
   final r = await engine.call(HomeLocationCalls.get);
   if (r['ok'] != true || r['location'] == null) return null;
   final today = r['today'] is Map ? r['today'] as Map : const {};
   String clock(Object? at) {
     final t = DateTime.tryParse('$at')?.toLocal();
-    return t == null
-        ? 'none today'
-        : '${t.hour.toString().padLeft(2, '0')}:'
-              '${t.minute.toString().padLeft(2, '0')}';
+    return t == null ? 'none today' : timeOfDayText(hour12, t);
   }
 
   return (sunrise: clock(today['sunrise']), sunset: clock(today['sunset']));
@@ -718,11 +716,10 @@ Future<SunTrigger?> sunTriggerForm(
   BuildContext context, [
   SunTrigger? current,
 ]) async {
-  final engine = ProviderScope.containerOf(
-    context,
-    listen: false,
-  ).read(engineClientProvider);
-  var today = await _sunToday(engine);
+  final scope = ProviderScope.containerOf(context, listen: false);
+  final engine = scope.read(engineClientProvider);
+  final hour12 = scope.read(hour12Provider);
+  var today = await _sunToday(engine, hour12: hour12);
   if (!context.mounted) return null;
   var event = current?.event ?? 'sunset';
   final initial = current?.offsetMinutes ?? 0;
@@ -793,7 +790,7 @@ Future<SunTrigger?> sunTriggerForm(
               setState(() => locating = errorMessage(r));
               return;
             }
-            final now = await _sunToday(engine);
+            final now = await _sunToday(engine, hour12: hour12);
             setState(() => today = now);
           },
         ),
@@ -804,7 +801,7 @@ Future<SunTrigger?> sunTriggerForm(
             await Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const HomeLocationPage()),
             );
-            final now = await _sunToday(engine);
+            final now = await _sunToday(engine, hour12: hour12);
             setState(() => today = now);
           },
         ),

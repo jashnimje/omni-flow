@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/clock.dart';
 import '../../state/providers.dart';
 import '../add/room_field.dart';
 import '../design/design.dart';
@@ -83,20 +84,16 @@ class _BoardPageState extends ConsumerState<BoardPage> {
   }
 
   Future<void> _pinSheet(Json device, NamedPin pin) async {
-    final remove = await showOmniSheet<bool>(
+    final remove = await SheetTemplate.show<bool>(
       context,
-      builder: (context) => OmniSheet(
+      builder: (context) => SheetTemplate(
         title: pin.label,
         subtitle: pin.description,
-        children: [
-          const SizedBox(height: OmniSpace.sm),
-          OmniButton.danger(
-            key: const ValueKey('pin-remove'),
-            label: 'Remove this pin',
-            icon: OmniIcons.delete,
-            onPressed: () => Navigator.of(context).pop(true),
-          ),
-        ],
+        primaryLabel: 'Remove this pin',
+        primaryKey: const ValueKey('pin-remove'),
+        destructive: true,
+        onPrimary: () => Navigator.of(context).pop(true),
+        children: (_) => const [],
       ),
     );
     if (remove != true || !mounted) return;
@@ -121,33 +118,32 @@ class _BoardPageState extends ConsumerState<BoardPage> {
   }
 
   Future<void> _more(Json device) async {
-    final choice = await showOmniSheet<String>(
+    final choice = await showPickerSheet<String>(
       context,
-      builder: (context) => OmniSheet(
-        title: '${device['name'] ?? widget.id}',
-        children: [
-          OmniListRow(
-            key: const ValueKey('board-organize'),
+      title: '${device['name'] ?? widget.id}',
+      sections: const [
+        PickerSection([
+          PickerItem(
+            key: ValueKey('board-organize'),
+            value: 'organize',
             icon: OmniIcons.edit,
             title: 'Name and room',
-            onTap: () => Navigator.of(context).pop('organize'),
           ),
-          OmniListRow(
-            key: const ValueKey('board-usb'),
+          PickerItem(
+            key: ValueKey('board-usb'),
+            value: 'usb',
             icon: OmniIcons.wifi,
             title: 'Wi-Fi and name, over USB',
             subtitle: 'Plug it into this phone',
-            onTap: () => Navigator.of(context).pop('usb'),
           ),
-          OmniListRow(
-            key: const ValueKey('board-remove'),
+          PickerItem(
+            key: ValueKey('board-remove'),
+            value: 'remove',
             icon: OmniIcons.delete,
-            iconForeground: OmniColors.bad,
             title: 'Remove this board',
-            onTap: () => Navigator.of(context).pop('remove'),
           ),
-        ],
-      ),
+        ]),
+      ],
     );
     if (!mounted) return;
     switch (choice) {
@@ -181,17 +177,23 @@ class _BoardPageState extends ConsumerState<BoardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final devices = ref.watch(devicesProvider);
     final device = _device;
     if (device == null) {
-      return OmniPage(
+      return DetailPage(
         title: 'Board',
-        body: ref.watch(devicesProvider).isLoading
-            ? const SizedBox.shrink()
-            : const OmniEmptyState(
-                icon: OmniIcons.board,
-                title: 'This board is not here any more',
-                message: 'It may have been removed.',
-              ),
+        state: OmniLoad.of(
+          devices,
+          isEmpty: (_) => true,
+          onRetry: () => ref.invalidate(devicesProvider),
+          error: 'The devices did not load.',
+        ),
+        notFound: const OmniEmptyState(
+          icon: OmniIcons.board,
+          title: 'This board is not here any more',
+          message: 'It may have been removed.',
+        ),
+        children: (_) => const [],
       );
     }
     final info = _info?.value;
@@ -199,123 +201,121 @@ class _BoardPageState extends ConsumerState<BoardPage> {
     final online = device['online'] != false && (info?.live ?? !failed);
     final pins = NamedPin.ofDevice(device);
     final state = DeviceView(device).state;
-    return OmniPage(
-      title: '${device['name'] ?? widget.id}',
-      actions: [
-        OmniIconAction(
-          key: const ValueKey('board-more'),
-          icon: OmniIcons.more,
-          label: 'More for this board',
-          onPressed: () => _more(device),
+    return RefreshIndicator(
+      onRefresh: _describe,
+      child: DetailPage(
+        key: const ValueKey('board-page'),
+        title: '${device['name'] ?? widget.id}',
+        actions: [
+          OmniIconAction(
+            key: const ValueKey('board-more'),
+            icon: OmniIcons.more,
+            label: 'More for this board',
+            onPressed: () => _more(device),
+          ),
+        ],
+        banners: [
+          if (failed)
+            OmniBanner.error(
+              key: const ValueKey('board-offline'),
+              'The board is not answering, so OmniFlow cannot read what it '
+              'offers. Check it has power and is on the same Wi-Fi.',
+              actionLabel: 'Try again',
+              onAction: _describe,
+            )
+          else if (info != null && !info.live)
+            OmniBanner.warning(
+              key: const ValueKey('board-stale'),
+              'The board is not answering. This is what it reported'
+              '${info.seenAt == null ? '' : ' at ${timeOfDayText(ref.watch(hour12Provider), info.seenAt!)}'}.',
+              actionLabel: 'Try again',
+              onAction: _describe,
+            ),
+        ],
+        hero: OmniHeroCard(
+          key: const ValueKey('board-hero'),
+          tone: online ? HeroTone.accent : HeroTone.problem,
+          title:
+              '${boardTypeLabel(info?.board)} · ${_info == null
+                  ? 'reading'
+                  : online
+                  ? 'online'
+                  : 'offline'}',
+          subtitle: [
+            ?info?.node ?? device['stableId'] as String?,
+            ?device['host'] as String?,
+            if (info?.firmware != null) 'firmware ${info!.firmware}',
+          ].join(' · '),
         ),
-      ],
-      body: RefreshIndicator(
-        onRefresh: _describe,
-        child: ListView(
-          key: const ValueKey('board-page'),
-          padding: const EdgeInsets.only(bottom: OmniSpace.xl),
-          children: [
-            if (failed)
-              OmniBanner.error(
-                key: const ValueKey('board-offline'),
-                'The board is not answering, so OmniFlow cannot read what it '
-                'offers. Check it has power and is on the same Wi-Fi.',
-                actionLabel: 'Try again',
-                onAction: _describe,
-              )
-            else if (info != null && !info.live)
-              OmniBanner.warning(
-                key: const ValueKey('board-stale'),
-                'The board is not answering. This is what it reported'
-                '${info.seenAt == null ? '' : ' at ${_time(info.seenAt!)}'}.',
-                actionLabel: 'Try again',
-                onAction: _describe,
+        children: (context) => [
+          for (final w in _warnings)
+            OmniBanner.warning(w, key: ValueKey('pin-warning-$w')),
+          // With no pins the empty state carries the one Add button.
+          OmniSectionHeader(
+            'Pins',
+            actionLabel: pins.isEmpty ? null : 'Add pin',
+            onAction: pins.isEmpty ? null : _addPin,
+          ),
+          if (pins.isEmpty)
+            OmniEmptyState(
+              key: const ValueKey('pins-empty'),
+              icon: OmniIcons.board,
+              title: 'No pins yet',
+              message:
+                  'Add the button, relay or sensor you wired to it, and it '
+                  'shows up here and in automations.',
+              padding: const EdgeInsets.symmetric(vertical: OmniSpace.lg),
+              action: OmniButton.ghost(
+                label: 'Add a pin',
+                icon: OmniIcons.add,
+                onPressed: _addPin,
               ),
-            OmniHeroCard(
-              key: const ValueKey('board-hero'),
-              tone: online ? HeroTone.accent : HeroTone.problem,
-              title:
-                  '${boardTypeLabel(info?.board)} · ${_info == null
-                      ? 'reading'
-                      : online
-                      ? 'online'
-                      : 'offline'}',
-              subtitle: [
-                ?info?.node ?? device['stableId'] as String?,
-                ?device['host'] as String?,
-                if (info?.firmware != null) 'firmware ${info!.firmware}',
-              ].join(' · '),
-            ),
-            for (final w in _warnings)
-              OmniBanner.warning(w, key: ValueKey('pin-warning-$w')),
-            // With no pins the empty state carries the one Add button.
-            OmniSectionHeader(
-              'Pins',
-              actionLabel: pins.isEmpty ? null : 'Add pin',
-              onAction: pins.isEmpty ? null : _addPin,
-            ),
-            if (pins.isEmpty)
-              OmniEmptyState(
-                key: const ValueKey('pins-empty'),
-                icon: OmniIcons.board,
-                title: 'No pins yet',
-                message:
-                    'Add the button, relay or sensor you wired to it, and it '
-                    'shows up here and in automations.',
-                padding: const EdgeInsets.symmetric(vertical: OmniSpace.lg),
-                action: OmniButton.ghost(
-                  label: 'Add a pin',
-                  icon: OmniIcons.add,
-                  onPressed: _addPin,
-                ),
-              )
-            else
-              for (final p in pins)
-                OmniListRow(
-                  key: ValueKey('pin-${p.name}'),
-                  icon: p.role.icon,
-                  title: p.label,
-                  subtitle: p.description,
-                  value: p.valueIn(state),
-                  valueColor: p.valueIn(state) == '-' ? OmniColors.muted : null,
-                  trailing: p.mode == 'out'
-                      ? Semantics(
-                          label: p.label,
-                          child: Switch(
-                            key: ValueKey('pin-switch-${p.name}'),
-                            value: state[p.name] == true,
-                            onChanged: (v) => ref
-                                .read(engineApiProvider)
-                                .invoke(widget.id, p.name, {'value': v}),
+            )
+          else
+            for (final p in pins)
+              OmniListRow(
+                key: ValueKey('pin-${p.name}'),
+                icon: p.role.icon,
+                title: p.label,
+                subtitle: p.description,
+                value: p.valueIn(state),
+                valueColor: p.valueIn(state) == '-' ? OmniColors.muted : null,
+                trailing: p.mode == 'out'
+                    ? Semantics(
+                        label: p.label,
+                        child: Switch(
+                          key: ValueKey('pin-switch-${p.name}'),
+                          value: state[p.name] == true,
+                          onChanged: (v) => ref.read(engineApiProvider).invoke(
+                            widget.id,
+                            p.name,
+                            {'value': v},
                           ),
-                        )
-                      : null,
-                  onTap: () => _pinSheet(device, p),
-                ),
-            if (info != null && info.periphTypes.isNotEmpty) ...[
-              const OmniSectionHeader('Extras'),
-              for (final type in _extraTypes(info))
-                OmniListRow(
-                  key: ValueKey('extra-$type'),
-                  icon: BoardExtras.icon(type),
-                  title: BoardExtras.title(type),
-                  subtitle: _extraLine(info, type),
-                  chevron: true,
-                  onTap: () async {
-                    final changed = await showOmniSheet<bool>(
-                      context,
-                      builder: (_) => ExtraSheet(
-                        boardId: widget.id,
-                        type: type,
-                        info: info,
-                      ),
-                    );
-                    if (changed == true && mounted) unawaited(_describe());
-                  },
-                ),
-            ],
+                        ),
+                      )
+                    : null,
+                onTap: () => _pinSheet(device, p),
+              ),
+          if (info != null && info.periphTypes.isNotEmpty) ...[
+            const OmniSectionHeader('Extras'),
+            for (final type in _extraTypes(info))
+              OmniListRow(
+                key: ValueKey('extra-$type'),
+                icon: BoardExtras.icon(type),
+                title: BoardExtras.title(type),
+                subtitle: _extraLine(info, type),
+                chevron: true,
+                onTap: () async {
+                  final changed = await SheetTemplate.show<bool>(
+                    context,
+                    builder: (_) =>
+                        ExtraSheet(boardId: widget.id, type: type, info: info),
+                  );
+                  if (changed == true && mounted) unawaited(_describe());
+                },
+              ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -351,7 +351,4 @@ class _BoardPageState extends ConsumerState<BoardPage> {
         : set.pins.entries.map((e) => '${e.key} ${e.value}').join(', ');
     return [if (chip.isNotEmpty) chip, pins, BoardExtras.job(type)].join(' · ');
   }
-
-  static String _time(DateTime t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }

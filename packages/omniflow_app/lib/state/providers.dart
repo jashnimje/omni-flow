@@ -11,6 +11,8 @@ import '../nfc/nfc.dart';
 import '../service/phone_files.dart';
 import '../api/screen_calls.dart';
 import 'house.dart' show scopedEngine;
+import '../ui/design/action_bar.dart' show OmniActionBar;
+import '../ui/design/tokens.dart' show OmniSpace;
 
 export '../api/engine_calls.dart' show Json;
 export '../service/phone_files.dart' show PhoneFiles, PickedFile;
@@ -104,6 +106,8 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showMessage(
   final shown = messenger.showSnackBar(
     SnackBar(
       content: Text(plain.text),
+      behavior: SnackBarBehavior.floating,
+      margin: snackMargin(messenger.context),
       // With an action Flutter keeps it up until tapped, over the Save
       // button. It goes after the usual few seconds instead.
       persist: false,
@@ -118,12 +122,35 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showMessage(
   return shown;
 }
 
+/// Where a snackbar floats: above the bottom bar a page pins its Save, Next
+/// or Done in (an [OmniActionBar], stacked at large text), so the bar stays
+/// tappable while the message shows. On a page with no bar it floats a
+/// little higher, which covers nothing.
+EdgeInsets snackMargin(BuildContext context) {
+  final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+  final stacked = scale > OmniActionBar.stackAbove;
+  // The bar's buttons, the "why it is off" line above them, and the page
+  // padding around the bar (OmniPage: sm above, md below).
+  final buttons = stacked
+      ? 2 * OmniSpace.target + OmniSpace.sm
+      : OmniSpace.target;
+  final missingLine = 20 * scale + OmniSpace.sm;
+  return EdgeInsets.fromLTRB(
+    OmniSpace.lg,
+    0,
+    OmniSpace.lg,
+    buttons + missingLine + OmniSpace.sm + OmniSpace.md + OmniSpace.sm,
+  );
+}
+
 void _showDetails(ScaffoldMessengerState messenger, String details) {
   _lastMessage = null;
   messenger.showSnackBar(
     SnackBar(
       key: const ValueKey('error-details'),
       content: Text(details),
+      behavior: SnackBarBehavior.floating,
+      margin: snackMargin(messenger.context),
       duration: const Duration(seconds: 8),
       persist: false,
     ),
@@ -224,8 +251,13 @@ String _errorText(Json result) {
 /// reason in `offlineReason` until it is heard from again.
 class DevicesNotifier extends AsyncNotifier<List<Json>>
     with _KeepsListOnFailure {
+  /// How long a burst of `device.changed` events (a move adds the thing
+  /// again, an import adds many) waits before one reload.
+  static const settle = Duration(milliseconds: 300);
+
   final _offline = <String, String>{};
   String? _lastBoardError;
+  Timer? _reload;
 
   /// State changes heard while the first list loads, put on top of it once
   /// it lands so none is lost.
@@ -236,7 +268,11 @@ class DevicesNotifier extends AsyncNotifier<List<Json>>
     final client = ref.watch(engineClientProvider);
     _early = [];
     final sub = client.events.listen(_onEvent);
-    ref.onDispose(sub.cancel);
+    ref.onDispose(() {
+      sub.cancel();
+      _reload?.cancel();
+      _reload = null;
+    });
     var list = await _load(client);
     final early = _early ?? const <Json>[];
     _early = null;
@@ -254,6 +290,15 @@ class DevicesNotifier extends AsyncNotifier<List<Json>>
   void _onEvent(Json e) {
     final current = state.value;
     switch (e['event']) {
+      // A thing added, removed, renamed or moved anywhere (the CLI, an
+      // agent, another phone): the list is read again.
+      case deviceChangedEvent || 'house.thingMoved':
+        _reloadSoon();
+      // The event carries the stored presence, which is the home place's.
+      // device.list says it for the house in view, so a person is read
+      // again rather than merged.
+      case 'device.stateChanged' when _isPerson(e['device']):
+        _reloadSoon();
       case 'device.stateChanged':
         final changed = Map<String, Object?>.from(e['device'] as Map);
         final heard = changed['online'] != false;
@@ -286,6 +331,14 @@ class DevicesNotifier extends AsyncNotifier<List<Json>>
         showMessage(text);
     }
   }
+
+  static bool _isPerson(Object? device) =>
+      device is Map && device['driver'] == 'person';
+
+  void _reloadSoon() => _reload ??= Timer(settle, () {
+    _reload = null;
+    if (ref.mounted) unawaited(refresh());
+  });
 
   Json _merge(Json d, Json changed, bool heard) {
     final merged = {...d, ...changed, 'capabilities': d['capabilities']};
@@ -320,6 +373,43 @@ class DevicesNotifier extends AsyncNotifier<List<Json>>
 
 final devicesProvider = AsyncNotifierProvider<DevicesNotifier, List<Json>>(
   DevicesNotifier.new,
+);
+
+/// The engine's event after a thing or a room is added, removed, renamed,
+/// moved or organized, from this phone or anywhere else.
+const deviceChangedEvent = 'device.changed';
+
+/// Counts `device.changed` events, at most one per [DevicesNotifier.settle].
+/// A list besides the devices (rooms, places) watches it to read again.
+class DeviceChanges extends Notifier<int> {
+  Timer? _bump;
+
+  @override
+  int build() {
+    final client = ref.watch(engineClientProvider);
+    final sub = client.events
+        .where(
+          (e) =>
+              e['event'] == deviceChangedEvent ||
+              e['event'] == 'house.thingMoved',
+        )
+        .listen(
+          (_) => _bump ??= Timer(DevicesNotifier.settle, () {
+            _bump = null;
+            if (ref.mounted) state++;
+          }),
+        );
+    ref.onDispose(() {
+      sub.cancel();
+      _bump?.cancel();
+      _bump = null;
+    });
+    return 0;
+  }
+}
+
+final deviceChangesProvider = NotifierProvider<DeviceChanges, int>(
+  DeviceChanges.new,
 );
 
 /// A list the engine did not give: it did not answer, or said why not.

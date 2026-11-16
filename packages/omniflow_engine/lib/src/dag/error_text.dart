@@ -11,3 +11,17 @@ String withoutTypeName(String text) {
   }
   return out;
 }
+
+/// A step that failed, in words a person can act on ("Desk lamp did not
+/// answer. Is it switched on?"), with the technical text ("no reply from
+/// 10.0.2.81:38899 after 3 attempts") in [details] for the run log's
+/// Details.
+class PlainStepFailure implements Exception {
+  const PlainStepFailure(this.message, this.details);
+
+  final String message;
+  final String details;
+
+  @override
+  String toString() => message;
+}

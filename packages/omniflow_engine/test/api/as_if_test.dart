@@ -81,4 +81,60 @@ void main() {
       reason: 'a message that is not made up reads the real state',
     );
   });
+
+  test(
+    'Try as if: a time trigger is judged at its own time, not now',
+    () async {
+      final trigger = {
+        'time': '19:30',
+        'days': ['mon', 'tue', 'wed', 'thu', 'fri'],
+      };
+      await ok('automation.save', {
+        'form': 'rule',
+        'trusted': true,
+        'spec': {
+          'name': 'Evening',
+          'when': [trigger],
+          'onlyIf': [
+            {
+              'between': ['18:00', '23:00'],
+            },
+          ],
+          'then': [
+            {
+              'notify': {'title': 'evening'},
+            },
+          ],
+        },
+      });
+      final noon = DateTime(2026, 11, 17, 12, 50);
+      final msg = asIfMessage(trigger, at: noon);
+      expect(
+        msg['scheduled'],
+        DateTime(2026, 11, 17, 19, 30).toIso8601String(),
+      );
+      final dry = await ok('automation.dry_run', {
+        'id': 'evening',
+        'trigger': ruleTriggerNodeId(0),
+        'msg': msg,
+      });
+      final ports = [
+        for (final n in ((dry['run'] as Map)['nodes'] as List).cast<Map>())
+          n['port'],
+      ];
+      expect(ports, contains('true'), reason: '$dry');
+      expect(ports, isNot(contains('false')), reason: '$dry');
+    },
+  );
+
+  test('the next time of a time trigger skips days it does not run', () {
+    final friday = DateTime(2026, 11, 20, 20);
+    expect(
+      nextTimeOf('19:30', ['mon', 'tue', 'wed', 'thu', 'fri'], friday),
+      DateTime(2026, 11, 23, 19, 30),
+    );
+    expect(nextTimeOf('19:30', null, friday), DateTime(2026, 11, 21, 19, 30));
+    expect(nextTimeOf('soon', null, friday), isNull);
+    expect(asIfClock({'scheduled': 'x'}, friday), friday);
+  });
 }

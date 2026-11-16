@@ -106,77 +106,71 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     final summary = _summary(ref.watch(automationsProvider).value ?? const []);
     final words = RuleWords(ref.watch(ruleThingsProvider));
     final approved = automation?['approved'] == true;
-    return OmniPage(
-      title: 'Review "$_name"',
-      body: switch ((automation, _failure)) {
-        (_, final ApiFailure f) => OmniEmptyState(
-          key: const ValueKey('review-error'),
-          icon: OmniIcons.error,
-          title: f.type == 'not_found'
-              ? 'This automation is gone'
-              : 'Could not open it',
-          message: f.type == 'not_found'
-              ? 'It was removed, or it was never saved.'
-              : f.message,
-          action: f.type == 'not_found'
-              ? null
-              : OmniButton.ghost(label: 'Try again', onPressed: _load),
-        ),
-        (null, _) => const Center(child: CircularProgressIndicator()),
-        (final Json a, _) => ListView(
-          children: [
-            if (_notice != null) OmniBanner.warning(_notice!),
-            if (approved)
-              const OmniBanner.info(
-                'Already approved. It runs on its own.',
-                key: ValueKey('review-approved'),
-              )
-            else
-              const OmniBanner.warning(
-                'Made by an agent. It runs only after you approve this exact '
-                'version.',
-              ),
-            if (summary != null && summary.sentence.isNotEmpty)
-              OmniCard(child: AutomationSentence(summary.sentence)),
-            const OmniSectionHeader('What it can do'),
-            ..._can(a, summary, words),
-            const OmniSectionHeader('It cannot'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                a['highRisk'] == true
-                    ? 'control any device not listed above'
-                    : 'run shell commands, install apps or change settings, '
-                          'or control any device not listed above',
-                key: const ValueKey('review-cannot'),
-                style: OmniText.caption,
-              ),
-            ),
-            const SizedBox(height: OmniSpace.xl),
-          ],
-        ),
+    final failure = _failure;
+    final title = automation != null
+        ? 'Review "$_name"'
+        : summary != null
+        ? 'Review "${summary.name}"'
+        : 'Review';
+    return DetailPage(
+      title: title,
+      state: switch ((automation, failure)) {
+        (_, ApiFailure(type: 'not_found')) => const OmniLoad.empty(),
+        (_, final ApiFailure f) => OmniLoad.error(f.message, _load),
+        (null, _) => const OmniLoad.loading(),
+        _ => const OmniLoad.data(),
       },
-      bottom: automation == null || approved
+      notFound: const OmniEmptyState(
+        key: ValueKey('review-error'),
+        icon: OmniIcons.error,
+        title: 'This automation is gone',
+        message: 'It was removed, or it was never saved.',
+      ),
+      banners: [
+        if (_notice != null) OmniBanner.warning(_notice!),
+        if (approved)
+          const OmniBanner.info(
+            'Already approved. It runs on its own.',
+            key: ValueKey('review-approved'),
+          )
+        else
+          const OmniBanner.warning(
+            'Made by an agent. It runs only after you approve this exact '
+            'version.',
+          ),
+      ],
+      bottom: approved
           ? null
-          : Row(
-              children: [
-                Expanded(
-                  child: OmniButton.danger(
-                    key: const ValueKey('review-reject'),
-                    label: 'Reject',
-                    onPressed: _busy ? null : _reject,
-                  ),
-                ),
-                const SizedBox(width: OmniSpace.sm),
-                Expanded(
-                  child: OmniButton(
-                    key: const ValueKey('review-approve'),
-                    label: 'Approve',
-                    onPressed: _busy ? null : _approve,
-                  ),
-                ),
-              ],
+          : OmniActionBar(
+              secondary: OmniButton.danger(
+                key: const ValueKey('review-reject'),
+                label: 'Reject',
+                onPressed: _busy ? null : _reject,
+              ),
+              primary: OmniButton(
+                key: const ValueKey('review-approve'),
+                label: 'Approve',
+                onPressed: _busy ? null : _approve,
+              ),
             ),
+      children: (context) => [
+        if (summary != null && summary.sentence.isNotEmpty)
+          OmniCard(child: AutomationSentence(summary.sentence)),
+        const OmniSectionHeader('What it can do'),
+        ..._can(automation!, summary, words),
+        const OmniSectionHeader('It cannot'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+          child: Text(
+            automation['highRisk'] == true
+                ? 'control any device not listed above'
+                : 'run shell commands, install apps or change settings, '
+                      'or control any device not listed above',
+            key: const ValueKey('review-cannot'),
+            style: OmniText.caption,
+          ),
+        ),
+      ],
     );
   }
 
@@ -251,7 +245,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     return rows.isEmpty
         ? [
             const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 2),
+              padding: EdgeInsets.symmetric(horizontal: OmniSpace.xs),
               child: Text(
                 'Nothing: it drives no device and runs nothing.',
                 style: OmniText.caption,

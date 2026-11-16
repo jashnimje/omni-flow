@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/ui/boards/board_page.dart';
+import 'package:omniflow_app/ui/design/design.dart' show OmniButton;
 
 import 'fake_engine.dart';
 
@@ -160,8 +161,14 @@ void main() {
       ];
       await pumpApp(tester, engine);
       await openDevicePage(tester, 'desk_lamp');
+      // The action is one row; its fields open in a sheet.
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('desk_lamp.ir_nec')),
+      );
+      await tester.tap(find.byKey(const ValueKey('desk_lamp.ir_nec')));
+      await tester.pumpAndSettle();
       final send = find.byKey(const ValueKey('params-run-IR'));
-      expect(tester.widget<OutlinedButton>(send).onPressed, isNull);
+      expect(tester.widget<OmniButton>(send).onPressed, isNull);
       await tester.enterText(find.byKey(const ValueKey('param-address')), '4');
       await tester.enterText(
         find.byKey(const ValueKey('param-command')),
@@ -169,7 +176,7 @@ void main() {
       );
       await tester.pump();
       expect(find.text('Must be 0 to 255'), findsOneWidget);
-      expect(tester.widget<OutlinedButton>(send).onPressed, isNull);
+      expect(tester.widget<OmniButton>(send).onPressed, isNull);
       await tester.enterText(find.byKey(const ValueKey('param-command')), '8');
       await tester.pump();
       await tester.ensureVisible(send);

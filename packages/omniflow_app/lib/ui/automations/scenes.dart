@@ -33,6 +33,22 @@ const sceneIcons = <String, IconData>{
   'spa': Symbols.spa_rounded,
 };
 
+/// What a screen reader says for each of [sceneIcons].
+const sceneIconWords = <String, String>{
+  'movie': 'Film',
+  'bedtime': 'Moon',
+  'home': 'Home',
+  'bed': 'Bed',
+  'power_settings_new': 'Power',
+  'lightbulb': 'Light bulb',
+  'wb_sunny': 'Sun',
+  'coffee': 'Coffee',
+  'music_note': 'Music',
+  'work': 'Work',
+  'celebration': 'Party',
+  'spa': 'Leaf',
+};
+
 /// A scene's icon, the scene icon when it names none this app knows.
 IconData sceneIconFor(String? name) => sceneIcons[name] ?? OmniIcons.scene;
 
@@ -76,54 +92,45 @@ class ScenesPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(automationsProvider);
-    return OmniPage(
+    final scenes = [
+      for (final a in async.value ?? const <AutomationSummary>[])
+        if (a.isScene) a,
+    ];
+    return ListPage(
       title: 'Scenes',
-      actions: const [CaptureSceneAction()],
-      body: switch (async) {
-        AsyncData(:final value) => _list(context, ref, [
-          for (final a in value)
-            if (a.isScene) a,
-        ]),
-        AsyncError() => ListView(
-          children: [
-            OmniBanner.error(
-              'OmniFlow did not answer, so the scenes cannot show. Try again '
-              'in a moment.',
-              key: const ValueKey('scenes-offline'),
-              actionLabel: 'Try again',
-              onAction: () => ref.read(automationsProvider.notifier).retry(),
-            ),
-          ],
+      actions: [
+        OmniIconAction(
+          key: const ValueKey('scene-new'),
+          icon: OmniIcons.add,
+          label: 'New scene',
+          onPressed: () => openSceneEditor(context),
         ),
-        _ => const Center(child: CircularProgressIndicator()),
-      },
-      bottom: OmniButton.ghost(
-        key: const ValueKey('scene-new'),
-        label: 'New scene',
-        icon: OmniIcons.add,
-        onPressed: () => openSceneEditor(context),
+        const CaptureSceneAction(),
+      ],
+      state: OmniLoad.of(
+        async,
+        isEmpty: (_) => scenes.isEmpty,
+        onRetry: () => ref.read(automationsProvider.notifier).retry(),
+        error:
+            'OmniFlow did not answer, so the scenes cannot show. Try again '
+            'in a moment.',
       ),
-    );
-  }
-
-  Widget _list(
-    BuildContext context,
-    WidgetRef ref,
-    List<AutomationSummary> scenes,
-  ) {
-    if (scenes.isEmpty) {
-      return const OmniEmptyState(
-        key: ValueKey('scenes-empty'),
+      empty: OmniEmptyState(
+        key: const ValueKey('scenes-empty'),
         icon: OmniIcons.scene,
         title: 'No scenes yet',
         message:
             'A scene sets several things at once, like Movie: desk lamp 20%, '
             'hall bulb off.',
-      );
-    }
-    return ListView(
-      key: const ValueKey('scenes-list'),
-      children: [for (final s in scenes) SceneRow(scene: s)],
+        action: OmniButton(
+          key: const ValueKey('scenes-empty-new'),
+          label: 'New scene',
+          icon: OmniIcons.add,
+          expand: false,
+          onPressed: () => openSceneEditor(context),
+        ),
+      ),
+      children: (context) => [for (final s in scenes) SceneRow(scene: s)],
     );
   }
 }
@@ -165,7 +172,7 @@ class SceneRow extends ConsumerWidget {
               key: ValueKey('scene-run-${s.id}'),
               icon: OmniIcons.play,
               label: 'Run ${s.name}',
-              color: OmniColors.accent,
+              color: OmniPalette.of(context).accent,
               onPressed: () => runScene(ref, s.id, s.name),
             ),
     );
@@ -305,19 +312,6 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  Future<void> _leave() async {
-    final ok = await confirm(
-      context,
-      title: 'Discard changes?',
-      body: 'What you changed in this scene is not saved and will be lost.',
-      action: 'Discard',
-      destructive: true,
-    );
-    if (!ok || !mounted) return;
-    _dirty = false;
-    Navigator.of(context).pop();
-  }
-
   @override
   Widget build(BuildContext context) {
     final words = RuleWords(ref.watch(ruleThingsProvider));
@@ -325,151 +319,156 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
     final title = _name.text.trim().isEmpty
         ? (widget.id == null ? 'New scene' : 'Scene')
         : _name.text.trim();
-    return PopScope(
-      canPop: !_dirty,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _leave();
-      },
-      child: OmniPage(
+    if (_missing) {
+      return DetailPage(
         title: title,
-        actions: [
-          if (widget.id != null && actions != null) ...[
-            OmniIconAction(
-              key: const ValueKey('scene-run'),
-              icon: OmniIcons.play,
-              label: 'Run $title',
-              onPressed: _dirty ? null : () => runScene(ref, widget.id!, title),
-            ),
-            OmniIconAction(
-              key: const ValueKey('scene-remove'),
-              icon: OmniIcons.delete,
-              label: 'Remove $title',
-              onPressed: _remove,
-            ),
-          ],
+        state: const OmniLoad.empty(),
+        notFound: const OmniEmptyState(
+          key: ValueKey('scene-missing'),
+          icon: OmniIcons.info,
+          title: 'This scene is gone',
+          message: 'It was removed.',
+        ),
+        children: (_) => const [],
+      );
+    }
+    final f = _saveFailure;
+    return FormPage(
+      title: title,
+      dirty: _dirty,
+      discardWhat: 'this scene',
+      onDiscard: () => _dirty = false,
+      commitKey: const ValueKey('scene-save'),
+      onCommit: _ready ? _save : null,
+      missing: _busy
+          ? null
+          : _name.text.trim().isEmpty
+          ? 'Give the scene a name first.'
+          : 'Add an action first.',
+      state: switch ((actions, _loadFailure)) {
+        (_, final ApiFailure f) => OmniLoad.error(f.message, _load),
+        (null, _) => const OmniLoad.loading(),
+        _ => const OmniLoad.data(),
+      },
+      actions: [
+        if (widget.id != null && actions != null) ...[
+          OmniIconAction(
+            key: const ValueKey('scene-run'),
+            icon: OmniIcons.play,
+            label: 'Run $title',
+            onPressed: _dirty ? null : () => runScene(ref, widget.id!, title),
+          ),
+          OmniIconAction(
+            key: const ValueKey('scene-remove'),
+            icon: OmniIcons.delete,
+            label: 'Remove $title',
+            onPressed: _remove,
+          ),
         ],
-        body: switch ((actions, _loadFailure)) {
-          (_, final ApiFailure f) => OmniEmptyState(
-            key: const ValueKey('scene-load-error'),
-            icon: OmniIcons.error,
-            title: 'Could not open this scene',
-            message: f.message,
-            action: OmniButton.ghost(label: 'Try again', onPressed: _load),
+      ],
+      banners: [
+        if (f != null)
+          OmniBanner.error(
+            [
+              for (final i in f.issues)
+                if (!i.path.startsWith('actions[')) i.message,
+              if (f.issues.any((i) => i.path.startsWith('actions[')))
+                'Fix the actions marked in red.',
+              if (f.issues.isEmpty) f.message,
+            ].join('\n'),
+            key: const ValueKey('scene-errors'),
           ),
-          _ when _missing => const OmniEmptyState(
-            key: ValueKey('scene-missing'),
-            icon: OmniIcons.info,
-            title: 'This scene is gone',
-            message: 'It was removed.',
+      ],
+      children: (context) {
+        final list = actions!;
+        return [
+          Padding(
+            padding: const EdgeInsets.only(top: OmniSpace.xs),
+            child: TextField(
+              key: const ValueKey('scene-name'),
+              controller: _name,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                labelText: 'Name',
+                hintText: 'Movie',
+                errorText: f?.issuesAt('name').firstOrNull,
+              ),
+              onChanged: (_) => _changed(),
+            ),
           ),
-          (null, _) => const Center(child: CircularProgressIndicator()),
-          (final List<SceneAction> list, _) => ListView(
+          const OmniSectionHeader('Icon'),
+          Wrap(
             children: [
-              if (_saveFailure case final f?)
-                OmniBanner.error(
-                  [
-                    for (final i in f.issues)
-                      if (!i.path.startsWith('actions[')) i.message,
-                    if (f.issues.any((i) => i.path.startsWith('actions[')))
-                      'Fix the actions marked in red.',
-                    if (f.issues.isEmpty) f.message,
-                  ].join('\n'),
-                  key: const ValueKey('scene-errors'),
+              for (final e in sceneIcons.entries)
+                OmniIconAction(
+                  key: ValueKey('scene-icon-${e.key}'),
+                  icon: e.value,
+                  label: 'Icon ${sceneIconWords[e.key] ?? e.key}',
+                  // No icon of its own wears the film, so that one is marked.
+                  selected: (_icon ?? 'movie') == e.key,
+                  onPressed: () {
+                    _icon = e.key;
+                    _changed();
+                  },
                 ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: TextField(
-                  key: const ValueKey('scene-name'),
-                  controller: _name,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    labelText: 'Name',
-                    hintText: 'Movie',
-                    errorText: _saveFailure?.issuesAt('name').firstOrNull,
-                  ),
-                  onChanged: (_) => _changed(),
-                ),
-              ),
-              const OmniSectionHeader('Icon'),
-              Wrap(
-                children: [
-                  for (final e in sceneIcons.entries)
-                    OmniIconAction(
-                      key: ValueKey('scene-icon-${e.key}'),
-                      icon: e.value,
-                      label: 'Icon ${e.key.replaceAll('_', ' ')}',
-                      selected: _icon == e.key,
-                      onPressed: () {
-                        _icon = e.key;
-                        _changed();
-                      },
-                    ),
-                ],
-              ),
-              const OmniSectionHeader('Colour'),
-              Wrap(
-                children: [
-                  for (final e in AutomationLook.colors.entries)
-                    ColorSwatchButton(
-                      key: ValueKey('scene-color-${e.key.substring(1)}'),
-                      color: e.value.color,
-                      label: 'Colour ${e.value.name.toLowerCase()}',
-                      selected: _color == e.key,
-                      onPressed: () {
-                        _color = _color == e.key ? null : e.key;
-                        _changed();
-                      },
-                    ),
-                ],
-              ),
-              OmniSectionHeader(
-                'What it does',
-                trailingText: list.isEmpty ? null : 'all at once',
-              ),
-              OmniRuleBlock(
-                kind: SentenceKind.then,
-                heading: 'Then',
-                caption: 'together',
-                addLabel: 'Add an action',
-                onAdd: () => _add(words),
-                children: [
-                  // Scene actions run together, so their rows have no
-                  // drag handle.
-                  for (final (i, a) in list.indexed)
-                    _ActionRow(
-                      key: ValueKey('scene-action-$i'),
-                      icon: words.stepIcon(_stepOf(a)),
-                      text: words.step(_stepOf(a)),
-                      error: _saveFailure?.issuesAt('actions[$i]').firstOrNull,
-                      onTap: () => _edit(words, i),
-                      onRemove: () {
-                        list.removeAt(i);
-                        _changed();
-                      },
-                    ),
-                ],
-              ),
-              if (list.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 2),
-                  child: Text(
-                    'Add what it should set, like the desk lamp at 20% and '
-                    'the hall bulb off.',
-                    style: OmniText.caption,
-                  ),
-                ),
-              const SizedBox(height: OmniSpace.xl),
             ],
           ),
-        },
-        bottom: actions == null
-            ? null
-            : OmniButton(
-                key: const ValueKey('scene-save'),
-                label: 'Save',
-                onPressed: _ready ? _save : null,
+          const OmniSectionHeader('Colour'),
+          Wrap(
+            children: [
+              for (final e in AutomationLook.colors.entries)
+                ColorSwatchButton(
+                  key: ValueKey('scene-color-${e.key.substring(1)}'),
+                  color: e.value.color,
+                  label: 'Colour ${e.value.name.toLowerCase()}',
+                  // No colour of its own shows in the first one.
+                  selected:
+                      (_color ?? AutomationLook.colors.keys.first) == e.key,
+                  onPressed: () {
+                    _color = _color == e.key ? null : e.key;
+                    _changed();
+                  },
+                ),
+            ],
+          ),
+          OmniSectionHeader(
+            'What it does',
+            trailingText: list.isEmpty ? null : 'all at once',
+          ),
+          OmniRuleBlock(
+            kind: SentenceKind.then,
+            heading: 'Then',
+            caption: 'together',
+            addLabel: 'Add an action',
+            onAdd: () => _add(words),
+            children: [
+              // Scene actions run together, so their rows have no drag
+              // handle.
+              for (final (i, a) in list.indexed)
+                _ActionRow(
+                  key: ValueKey('scene-action-$i'),
+                  icon: words.stepIcon(_stepOf(a)),
+                  text: words.step(_stepOf(a)),
+                  error: f?.issuesAt('actions[$i]').firstOrNull,
+                  onTap: () => _edit(words, i),
+                  onRemove: () {
+                    list.removeAt(i);
+                    _changed();
+                  },
+                ),
+            ],
+          ),
+          if (list.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+              child: Text(
+                'Add what it should set, like the desk lamp at 20% and the '
+                'hall bulb off.',
+                style: OmniText.caption,
               ),
-      ),
+            ),
+        ];
+      },
     );
   }
 }
@@ -509,7 +508,13 @@ class _ActionRow extends StatelessWidget {
       ),
       if (error != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(44, 4, 2, 6),
+          // Lines up with the row's title, past its icon.
+          padding: const EdgeInsets.fromLTRB(
+            OmniSpace.xl + OmniSpace.lg + OmniSpace.xs,
+            OmniSpace.xs,
+            OmniSpace.xs,
+            OmniSpace.sm,
+          ),
           child: Text(
             error!,
             style: OmniText.caption.copyWith(color: OmniColors.bad),

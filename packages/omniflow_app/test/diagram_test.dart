@@ -6,6 +6,7 @@ import 'package:omniflow_app/rules/rule_spec.dart';
 import 'package:omniflow_app/ui/automations/sentence_row.dart';
 import 'package:omniflow_app/ui/automations/automations.dart';
 import 'package:omniflow_app/ui/automations/diagram/diagram.dart';
+import 'package:omniflow_app/ui/design/design.dart';
 
 import 'automations_fixtures.dart';
 import 'diagram_fixtures.dart';
@@ -216,6 +217,22 @@ void main() {
 
     setUp(() => engine = automationsEngine());
 
+    testWidgets('the diagram canvas runs edge to edge, the sentence view '
+        'keeps the screen padding', (tester) async {
+      await _openEditor(tester, engine);
+      final screen = tester.getSize(find.byType(RuleEditorPage)).width;
+      expect(
+        tester.getSize(find.byKey(const ValueKey('diagram-viewer'))).width,
+        screen,
+      );
+      await tester.tap(find.text('Sentence'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const ValueKey('rule-editor'))).width,
+        lessThan(screen),
+      );
+    });
+
     testWidgets('the view switch keeps the rule, and is remembered', (
       tester,
     ) async {
@@ -407,6 +424,32 @@ void main() {
         'diagram-row-/onlyIf/0',
         'diagram-row-/then/0',
       ]);
+      // An if's two ways sit under it and say which way they are. The
+      // only-if's steps stay where they are.
+      String words(String row) => tester
+          .widget<OmniListRow>(
+            find.descendant(
+              of: find.byKey(ValueKey('diagram-row-$row')),
+              matching: find.byType(OmniListRow),
+              matchRoot: true,
+            ),
+          )
+          .subtitle!;
+      expect(words('/then/0'), isNot(contains('if it holds')));
+      expect(words('/then/1/then/0'), startsWith('if it holds'));
+      expect(words('/then/1/else/0'), startsWith('otherwise'));
+      expect(
+        tester
+            .getTopLeft(
+              find.byKey(const ValueKey('diagram-row-/then/1/else/0')),
+            )
+            .dx,
+        greaterThan(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('diagram-row-/then/1')))
+              .dx,
+        ),
+      );
       // A row does what a tap on the node does.
       await tester.tap(find.byKey(const ValueKey('diagram-row-/then/0')));
       await tester.pumpAndSettle();

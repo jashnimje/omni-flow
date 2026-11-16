@@ -8,7 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../api/rule_calls.dart';
+import '../../state/clock.dart' show hour12Provider;
+import '../../state/hub_mode.dart' show hubLinkProvider;
 import '../../state/providers.dart';
+import '../settings/settings_screen.dart' show engineStatusProvider;
 import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automation_insights.dart' show AutomationConflictChip;
@@ -44,17 +47,38 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
   /// Rows swiped away to be removed, hidden until Undo brings them back.
   final _removing = <String>{};
 
-  bool _shows(AutomationSummary a) {
-    final ok = switch (_filter) {
-      AutomationFilter.all => true,
-      AutomationFilter.rules => a.source == 'rule' || a.source == 'graph',
-      AutomationFilter.links => a.isLink,
-      AutomationFilter.scenes => false,
-      AutomationFilter.off => !a.enabled || a.needsApproval,
-      AutomationFilter.needsYou => a.needsYou,
+  /// Of [_removing], the ones the list no longer has. One that comes back
+  /// (Restore on Recently removed) shows again.
+  final _gone = <String>{};
+
+  /// Keeps [_removing] in step with the list: a swiped id leaves it once
+  /// the list has dropped it and then has it again.
+  void _track(List<AutomationSummary> all) {
+    if (_removing.isEmpty) return;
+    final ids = {for (final a in all) a.id};
+    final back = {
+      for (final id in _gone)
+        if (ids.contains(id)) id,
     };
+    _gone
+      ..addAll(_removing.where((id) => !ids.contains(id)))
+      ..removeAll(back);
+    if (back.isNotEmpty) setState(() => _removing.removeAll(back));
+  }
+
+  /// Whether [a] belongs under the filter [f], before any search.
+  static bool _inFilter(AutomationSummary a, AutomationFilter f) => switch (f) {
+    AutomationFilter.all => true,
+    AutomationFilter.rules => a.source == 'rule' || a.source == 'graph',
+    AutomationFilter.links => a.isLink,
+    AutomationFilter.scenes => false,
+    AutomationFilter.off => !a.enabled || a.needsApproval,
+    AutomationFilter.needsYou => a.needsYou,
+  };
+
+  bool _shows(AutomationSummary a) {
     final q = _query.trim().toLowerCase();
-    return ok &&
+    return _inFilter(a, _filter) &&
         (q.isEmpty ||
             a.name.toLowerCase().contains(q) ||
             a.sentence.any((p) => p.text.toLowerCase().contains(q)));
@@ -62,10 +86,25 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(automationsProvider, (_, next) {
+      if (next.value case final all?) _track(all);
+    });
     final async = ref.watch(automationsProvider);
-    return OmniTabPage(
+    final all = async.value ?? const <AutomationSummary>[];
+    final list = [
+      for (final a in all)
+        if (!a.isScene) a,
+    ];
+    final scenes = [
+      for (final a in all)
+        if (a.isScene) a,
+    ];
+    final error = async.error;
+    return TabPage.custom(
       title: 'Automations',
-      subtitle: 'Each runs on the phone, even with the screen off.',
+      subtitle: automationsStopped(ref)
+          ? 'Stopped. Start them from the banner above.'
+          : 'Each runs on the phone, even with the screen off.',
       actions: [
         OmniIconAction(
           key: const ValueKey('automations-search'),
@@ -78,39 +117,19 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
         ),
         const ScreenHelpButton(HelpScreen.automations),
       ],
-      body: switch (async) {
-        AsyncData(:final value) => _list(value),
-        AsyncError(:final error) => _offline(error),
-        _ => const _Skeleton(),
-      },
-    );
-  }
-
-  Widget _offline(Object error) => ListView(
-    key: const ValueKey('automations-offline'),
-    children: [
-      OmniBanner.error(
-        error is AutomationsUnavailable && error.failure.type != 'unreachable'
+      filters: all.isEmpty ? null : _filters(list, scenes),
+      state: OmniLoad.of(
+        async,
+        isEmpty: (v) => v.isEmpty,
+        onRetry: () => ref.read(automationsProvider.notifier).retry(),
+        error:
+            error is AutomationsUnavailable &&
+                error.failure.type != 'unreachable'
             ? 'The automations did not load: ${error.failure.message}'
             : 'OmniFlow did not answer, so the automations cannot show. It '
                   'may still be starting. Try again in a moment.',
-        actionLabel: 'Try again',
-        onAction: () => ref.read(automationsProvider.notifier).retry(),
       ),
-    ],
-  );
-
-  Widget _list(List<AutomationSummary> all) {
-    final list = [
-      for (final a in all)
-        if (!a.isScene) a,
-    ];
-    final scenes = [
-      for (final a in all)
-        if (a.isScene) a,
-    ];
-    if (list.isEmpty && scenes.isEmpty) {
-      return OmniEmptyState(
+      empty: OmniEmptyState(
         key: const ValueKey('automations-empty'),
         icon: OmniIcons.automations,
         title: 'No automations yet',
@@ -136,72 +155,97 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
             ),
           ],
         ),
-      );
-    }
+      ),
+      body: (context, padding) => _list(list, scenes, padding),
+    );
+  }
+
+  /// The search field (while searching) and the filter chips, pinned
+  /// above the list.
+  Widget _filters(
+    List<AutomationSummary> list,
+    List<AutomationSummary> scenes,
+  ) {
+    final needsYou = list.where((a) => a.needsYou).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_searching)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+            child: TextField(
+              key: const ValueKey('automations-query'),
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Search names and what they do',
+                prefixIcon: Icon(OmniIcons.search),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final f in AutomationFilter.values) ...[
+                OmniFilterChip(
+                  key: ValueKey('filter-${f.name}'),
+                  label: switch (f) {
+                    AutomationFilter.all => 'All',
+                    AutomationFilter.rules => 'Rules',
+                    AutomationFilter.links => 'Quick links',
+                    AutomationFilter.scenes => 'Scenes',
+                    AutomationFilter.off => 'Off',
+                    AutomationFilter.needsYou => 'Needs you',
+                  },
+                  // Each chip counts what it shows, and a zero shows none.
+                  count: switch (f == AutomationFilter.scenes
+                      ? scenes.length
+                      : list.where((a) => _inFilter(a, f)).length) {
+                    0 => null,
+                    final n => n,
+                  },
+                  dot: f == AutomationFilter.needsYou && needsYou > 0
+                      ? StatusKind.warning
+                      : null,
+                  selected: _filter == f,
+                  onTap: () => setState(() => _filter = f),
+                ),
+                if (f != AutomationFilter.values.last)
+                  const SizedBox(width: OmniSpace.sm),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _list(
+    List<AutomationSummary> list,
+    List<AutomationSummary> scenes,
+    EdgeInsets padding,
+  ) {
     final waiting = [
       for (final a in list)
         if (a.needsApproval) a,
     ];
-    final needsYou = list.where((a) => a.needsYou).length;
     final shown = [
       for (final a in list)
         if (!_removing.contains(a.id) && _shows(a)) a,
+    ];
+    final query = _query.trim().toLowerCase();
+    final shownScenes = [
+      for (final s in scenes)
+        if (query.isEmpty || s.name.toLowerCase().contains(query)) s,
     ];
     return RefreshIndicator(
       onRefresh: () => ref.read(automationsProvider.notifier).refresh(),
       child: ListView(
         key: const ValueKey('automations-list'),
+        padding: padding,
         children: [
-          if (_searching)
-            Padding(
-              padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-              child: TextField(
-                key: const ValueKey('automations-query'),
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search names and what they do',
-                  prefixIcon: Icon(OmniIcons.search),
-                ),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-            ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            // Room past the last chip, so it can scroll out from under the
-            // New button in landscape.
-            padding: const EdgeInsets.only(right: 88),
-            child: Row(
-              children: [
-                for (final f in AutomationFilter.values) ...[
-                  OmniFilterChip(
-                    key: ValueKey('filter-${f.name}'),
-                    label: switch (f) {
-                      AutomationFilter.all => 'All',
-                      AutomationFilter.rules => 'Rules',
-                      AutomationFilter.links => 'Quick links',
-                      AutomationFilter.scenes => 'Scenes',
-                      AutomationFilter.off => 'Off',
-                      AutomationFilter.needsYou => 'Needs you',
-                    },
-                    count: switch (f) {
-                      AutomationFilter.all => list.length,
-                      AutomationFilter.scenes when scenes.isNotEmpty =>
-                        scenes.length,
-                      AutomationFilter.needsYou when needsYou > 0 => needsYou,
-                      _ => null,
-                    },
-                    dot: f == AutomationFilter.needsYou && needsYou > 0
-                        ? StatusKind.warning
-                        : null,
-                    selected: _filter == f,
-                    onTap: () => setState(() => _filter = f),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: OmniSpace.sm),
           if (_filter == AutomationFilter.all && !_searching)
             const AutomationHelpers(),
           if (waiting.length == 1)
@@ -222,20 +266,23 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
             ),
           if (_filter == AutomationFilter.scenes) ...[
             if (scenes.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: OmniSpace.xl),
-                child: Text(
-                  'No scenes yet. A scene sets several things at once, '
-                  'like Movie: lamp 20%, TV on.',
-                  key: ValueKey('scenes-empty'),
-                  textAlign: TextAlign.center,
-                  style: OmniText.caption,
-                ),
+              const OmniEmptyState(
+                key: ValueKey('scenes-empty'),
+                icon: OmniIcons.scene,
+                title: 'No scenes yet',
+                message:
+                    'A scene sets several things at once, like Movie: lamp '
+                    '20%, TV on.',
+                compact: true,
+              )
+            else if (shownScenes.isEmpty)
+              OmniEmptyState(
+                key: const ValueKey('filter-empty'),
+                icon: OmniIcons.search,
+                title: 'Nothing matches "$_query"',
+                compact: true,
               ),
-            for (final s in scenes)
-              if (_query.isEmpty ||
-                  s.name.toLowerCase().contains(_query.trim().toLowerCase()))
-                SceneRow(scene: s),
+            for (final s in shownScenes) SceneRow(scene: s),
             Align(
               alignment: Alignment.centerLeft,
               child: OmniButton.ghost(
@@ -247,23 +294,20 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
               ),
             ),
           ] else if (shown.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: OmniSpace.xl),
-              child: Text(
-                _query.isNotEmpty
-                    ? 'Nothing matches "$_query".'
-                    : switch (_filter) {
-                        AutomationFilter.off => 'Every automation is on.',
-                        AutomationFilter.needsYou =>
-                          'Nothing needs you. Every automation is approved '
-                              'and its last run worked.',
-                        AutomationFilter.links => 'No quick links yet.',
-                        _ => 'No rules yet.',
-                      },
-                key: const ValueKey('filter-empty'),
-                textAlign: TextAlign.center,
-                style: OmniText.caption,
-              ),
+            OmniEmptyState(
+              key: const ValueKey('filter-empty'),
+              icon: OmniIcons.search,
+              title: _query.isNotEmpty
+                  ? 'Nothing matches "$_query".'
+                  : switch (_filter) {
+                      AutomationFilter.off => 'Every automation is on.',
+                      AutomationFilter.needsYou =>
+                        'Nothing needs you. Every automation is approved '
+                            'and its last run worked.',
+                      AutomationFilter.links => 'No quick links yet.',
+                      _ => 'No rules yet.',
+                    },
+              compact: true,
             ),
           for (final a in shown)
             _swipeable(
@@ -282,8 +326,6 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
               chevron: true,
               onTap: () => openRecentlyRemoved(context),
             ),
-          // Clear of the New button.
-          const SizedBox(height: 88),
         ],
       ),
     );
@@ -312,7 +354,7 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
         background: _SwipeBackground(
           icon: OmniIcons.power,
           label: toggle,
-          color: OmniColors.accent,
+          color: OmniPalette.of(context).accent,
           start: true,
         ),
         secondaryBackground: const _SwipeBackground(
@@ -386,7 +428,9 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
   /// frame first, so it comes back as a new row.
   Future<void> _show(String id) async {
     await WidgetsBinding.instance.endOfFrame;
-    if (mounted) setState(() => _removing.remove(id));
+    if (!mounted) return;
+    _gone.remove(id);
+    setState(() => _removing.remove(id));
   }
 }
 
@@ -406,7 +450,7 @@ class _SwipeBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.symmetric(vertical: 4),
+    margin: const EdgeInsets.symmetric(vertical: OmniSpace.xs),
     padding: const EdgeInsets.symmetric(horizontal: OmniSpace.lg),
     decoration: BoxDecoration(
       color: color.withValues(alpha: 0.18),
@@ -501,7 +545,7 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
                   style: OmniText.caption,
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: OmniSpace.sm),
               Semantics(
                 label: enabled && !a.needsApproval
                     ? 'Turn ${a.name} off'
@@ -516,14 +560,14 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: OmniSpace.xs),
           if (a.sentence.isNotEmpty) AutomationSentence(a.sentence),
           if (a.askFirst || a.notifyOnRun)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: OmniSpace.xs),
               child: Wrap(
-                spacing: 6,
-                runSpacing: 4,
+                spacing: OmniSpace.sm,
+                runSpacing: OmniSpace.xs,
                 children: [
                   if (a.askFirst)
                     BehaviourBadge(
@@ -544,7 +588,7 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
           AutomationConflictChip(id: a.id, conflicts: a.conflicts),
           if (a.needsApproval)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: OmniSpace.xs),
               child: Text(
                 'Waiting for your review',
                 style: OmniText.caption.copyWith(color: OmniColors.warn),
@@ -566,10 +610,7 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
                   style: TextButton.styleFrom(
                     foregroundColor: OmniColors.bad,
                     minimumSize: const Size(OmniSpace.target, OmniSpace.target),
-                    textStyle: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    textStyle: OmniText.labelMedium,
                   ),
                   child: const Text('Retry'),
                 ),
@@ -577,11 +618,11 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
             )
           else if (last != null)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: OmniSpace.xs),
               child: Text(
                 [
                   if (a.isLink) 'Link',
-                  'Ran ${whenInline(last.at)}',
+                  'Ran ${whenInline(last.at, hour12: ref.watch(hour12Provider))}',
                   '${last.steps} ${last.steps == 1 ? 'step' : 'steps'}',
                 ].join(' · '),
                 key: ValueKey('last-run-${a.id}'),
@@ -590,55 +631,28 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
             )
           else if (a.isLink)
             const Padding(
-              padding: EdgeInsets.only(top: 6),
+              padding: EdgeInsets.only(top: OmniSpace.xs),
               child: Text('Link', style: OmniText.caption),
             ),
-          NextRunLine(a, enabled: enabled),
+          // No next run while this phone's automations are stopped.
+          NextRunLine(a, enabled: enabled && !automationsStopped(ref)),
         ],
       ),
     );
   }
 }
 
-/// Grey cards in the shape of the list while it loads.
-class _Skeleton extends StatelessWidget {
-  const _Skeleton();
+/// Whether this phone runs its own home and its hub is off, so no
+/// automation runs on its own (the shell's banner says so, with Start).
+bool automationsStopped(WidgetRef ref) =>
+    ref.watch(hubLinkProvider) == null &&
+    ref.watch(engineStatusProvider).value?['hubRunning'] == false;
 
-  @override
-  Widget build(BuildContext context) => Semantics(
-    label: 'Loading automations',
-    child: ListView(
-      key: const ValueKey('automations-loading'),
-      children: [
-        for (var i = 0; i < 3; i++)
-          OmniCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final w in const [0.4, 0.9, 0.3])
-                  FractionallySizedBox(
-                    widthFactor: w,
-                    child: Container(
-                      height: 12,
-                      margin: const EdgeInsets.symmetric(vertical: 5),
-                      decoration: BoxDecoration(
-                        color: OmniColors.raised,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    ),
-  );
-}
-
-/// Whether the list has no automations yet, when its own empty state
-/// carries the New button, so the floating one would be a second.
+/// Whether the list has nothing at all, no rule and no scene, so its own
+/// empty state carries the New button and the floating one would be a
+/// second. With scenes and no rules the list shows, so the FAB must too.
 bool automationsAreEmpty(WidgetRef ref) =>
     switch (ref.watch(automationsProvider)) {
-      AsyncData(:final value) => !value.any((a) => !a.isScene),
+      AsyncData(:final value) => value.isEmpty,
       _ => false,
     };

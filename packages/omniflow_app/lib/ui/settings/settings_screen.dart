@@ -103,180 +103,179 @@ class SettingsScreen extends ConsumerWidget {
     final shell = ref.read(shellControllerProvider);
     final house = ref.watch(houseShownProvider);
     final mode = ref.watch(houseModeProvider).value;
-    return OmniTabPage(
+    return TabPage(
       title: 'Settings',
       actions: const [ScreenHelpButton(HelpScreen.settings)],
-      body: ListView(
-        key: const ValueKey('settings-list'),
-        padding: EdgeInsets.only(bottom: OmniInsets.bottom(context)),
-        children: [
-          OmniSectionHeader('This house', trailingText: house?.name),
-          const HomeSetupRow(),
+      fab: false,
+      children: (context) => [
+        OmniSectionHeader(
+          house == null ? 'This house' : 'This house · ${house.name}',
+        ),
+        const HomeSetupRow(),
+        OmniListRow(
+          key: const ValueKey('settings-places'),
+          icon: OmniIcons.place,
+          title: 'Places and people',
+          subtitle: switch (presenceShown(presence, zones)) {
+            PresenceShown.home => 'Home · you are here',
+            PresenceShown.away => 'Home · you are away',
+            PresenceShown.notSetUp => '$presenceNotSetUp. Tap to set it up',
+            _ => 'Where you are, and how OmniFlow knows',
+          },
+          chevron: true,
+          onTap: () => _push(context, const PlacesPage()),
+        ),
+        const HomeLocationRow(),
+        if (mode != null)
           OmniListRow(
-            key: const ValueKey('settings-places'),
-            icon: OmniIcons.place,
-            title: 'Places and people',
-            subtitle: switch (presenceShown(presence, zones)) {
-              PresenceShown.home => 'Home · you are here',
-              PresenceShown.away => 'Home · you are away',
-              PresenceShown.notSetUp => '$presenceNotSetUp. Tap to set it up',
-              _ => 'Where you are, and how OmniFlow knows',
-            },
+            key: const ValueKey('settings-mode'),
+            icon: OmniIcons.home,
+            title: 'House mode',
+            subtitle: mode.followPresence
+                ? '${mode.name} · follows who is home'
+                : mode.name,
             chevron: true,
-            onTap: () => _push(context, const PlacesPage()),
+            onTap: () => showModePicker(context, ref),
           ),
-          const HomeLocationRow(),
-          if (mode != null)
-            OmniListRow(
-              key: const ValueKey('settings-mode'),
-              icon: OmniIcons.home,
-              title: 'House mode',
-              subtitle: mode.followPresence
-                  ? '${mode.name} · follows who is home'
-                  : mode.name,
-              chevron: true,
-              onTap: () => showModePicker(context, ref),
-            ),
-          OmniListRow(
-            key: const ValueKey('settings-rooms'),
-            icon: OmniIcons.room,
-            title: 'Rooms',
-            subtitle: _count(rooms?.length, 'room', 'rooms'),
-            chevron: true,
-            onTap: () => _push(context, const RoomsPage()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-tags'),
-            icon: OmniIcons.tag,
-            title: 'NFC tags',
-            subtitle: _count(tags, 'tag', 'tags'),
-            chevron: true,
-            onTap: () => _push(context, const TagsPage()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-variables'),
-            icon: OmniIcons.level,
-            title: 'Variables',
-            subtitle: 'Values automations set, to see or clear',
-            chevron: true,
-            onTap: () => _push(context, const VariablesPage()),
-          ),
-          const AlertsSettingsRow(),
-          const SmartHomeSettingsRows(),
-          const OmniSectionHeader('This phone'),
-          const HomeRunsOnRow(),
-          const ShakeSceneRow(),
-          OmniListRow(
-            key: const ValueKey('settings-background'),
-            icon: OmniIcons.settings,
-            title: 'Phone setup',
-            subtitle: switch (access) {
-              null => 'Checking',
-              PhoneAccessState(running: false) => 'Off · automations wait',
-              PhoneAccessState(batteryUnrestricted: false) =>
-                'On · battery saver can stop it',
-              PhoneAccessState(batteryUnrestricted: true) =>
-                'On · battery saver off for OmniFlow',
-              _ => 'On',
-            },
-            dot: access == null
-                ? null
-                : access.backgroundOk
-                ? StatusKind.online
-                : StatusKind.warning,
-            onTap: () => _push(context, const PhoneAccessPage()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-appearance'),
-            icon: OmniIcons.color,
-            title: 'Appearance',
-            subtitle: appearance == null
-                ? 'Colours and background'
-                : AppearancePage.summary(appearance),
-            chevron: true,
-            onTap: () => _push(context, const AppearancePage()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-hubs'),
-            icon: OmniIcons.hub,
-            title: 'Hubs',
-            subtitle: hubError != null
-                ? 'The hub did not start'
-                : switch (hub?['hubRunning']) {
-                    true => 'This phone runs the hub',
-                    false => 'The hub is stopped',
-                    _ => 'What runs your automations',
-                  },
-            dot: hubError != null || hub?['hubRunning'] == false
-                ? StatusKind.warning
-                : null,
-            chevron: true,
-            onTap: () => _push(context, const HubsPage()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-usb'),
-            icon: OmniIcons.board,
-            title: 'Boards on USB',
-            subtitle: 'Set up a board, or install firmware on it',
-            chevron: true,
-            onTap: () => showUsbBoardSheet(context),
-          ),
-          const OmniSectionHeader('Agents'),
-          const AgentAccessRow(),
-          OmniListRow(
-            key: const ValueKey('settings-waiting'),
-            icon: OmniIcons.agent,
-            title: 'Waiting for approval',
-            subtitle: waiting == null
-                ? ''
-                : waiting.isEmpty
-                ? 'Nothing waiting'
-                : _count(waiting.length, 'automation', 'automations'),
-            value: waiting == null || waiting.isEmpty
-                ? null
-                : '${waiting.length}',
-            chevron: true,
-            onTap: () => waiting != null && waiting.length == 1
-                ? shell.open(ReviewLink(waiting.single.id))
-                : shell.select(ShellTab.automations),
-          ),
-          const OmniSectionHeader('Your data'),
-          OmniListRow(
-            key: const ValueKey('settings-backup'),
-            icon: OmniIcons.backup,
-            title: 'Backup and restore',
-            subtitle: 'Keep a copy of the whole home in a file',
-            chevron: true,
-            onTap: () => _push(context, const BackupPage()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-activity'),
-            icon: OmniIcons.automations,
-            title: 'Your activity',
-            subtitle: 'What ran this week, your streak and achievements',
-            chevron: true,
-            onTap: () => _push(context, const YourHomePage()),
-          ),
-          const OmniSectionHeader('Advanced'),
-          OmniListRow(
-            key: const ValueKey('settings-developer'),
-            icon: OmniIcons.developer,
-            title: 'Developer',
-            subtitle: 'Packets, run log, drivers, engine',
-            chevron: true,
-            onTap: () => shell.open(const DeveloperLink()),
-          ),
-          OmniListRow(
-            key: const ValueKey('settings-about'),
-            icon: OmniIcons.about,
-            title: 'About',
-            subtitle: 'OmniFlow $appVersion · what is new, licences',
-            chevron: true,
-            divider: false,
-            onTap: () => _push(context, const AboutPage()),
-          ),
-        ],
-      ),
+        OmniListRow(
+          key: const ValueKey('settings-rooms'),
+          icon: OmniIcons.room,
+          title: 'Rooms',
+          subtitle: _count(rooms?.length, 'room', 'rooms'),
+          chevron: true,
+          onTap: () => _push(context, const RoomsPage()),
+        ),
+        OmniListRow(
+          key: const ValueKey('settings-tags'),
+          icon: OmniIcons.tag,
+          title: 'NFC tags',
+          subtitle: _count(tags, 'tag', 'tags'),
+          chevron: true,
+          onTap: () => _push(context, const TagsPage()),
+        ),
+        OmniListRow(
+          key: const ValueKey('settings-variables'),
+          icon: OmniIcons.level,
+          title: 'Variables',
+          subtitle: 'Values automations set, to see or clear',
+          chevron: true,
+          onTap: () => _push(context, const VariablesPage()),
+        ),
+        const AlertsSettingsRow(),
+        const SmartHomeSettingsRows(),
+        const OmniSectionHeader('This phone'),
+        const HomeRunsOnRow(),
+        const ShakeSceneRow(),
+        OmniListRow(
+          key: const ValueKey('settings-background'),
+          icon: OmniIcons.settings,
+          title: 'Phone setup',
+          subtitle: switch (access) {
+            null => 'Checking',
+            PhoneAccessState(running: false) => 'Off · automations wait',
+            PhoneAccessState(batteryUnrestricted: false) =>
+              'On · battery saver can stop it',
+            PhoneAccessState(batteryUnrestricted: true) =>
+              'On · battery saver off for OmniFlow',
+            _ => 'On',
+          },
+          dot: access == null
+              ? null
+              : access.backgroundOk
+              ? StatusKind.online
+              : StatusKind.warning,
+          onTap: () => _push(context, const PhoneAccessPage()),
+        ),
+        OmniListRow(
+          key: const ValueKey('settings-appearance'),
+          icon: OmniIcons.color,
+          title: 'Appearance',
+          subtitle: appearance == null
+              ? 'Colours and background'
+              : AppearancePage.summary(appearance),
+          chevron: true,
+          onTap: () => _push(context, const AppearancePage()),
+        ),
+        OmniListRow(
+          key: const ValueKey('settings-hubs'),
+          icon: OmniIcons.hub,
+          title: 'Hubs',
+          subtitle: hubError != null
+              ? 'The hub did not start'
+              : switch (hub?['hubRunning']) {
+                  true => 'This phone runs the hub',
+                  false => 'The hub is stopped',
+                  _ => 'What runs your automations',
+                },
+          dot: hubError != null || hub?['hubRunning'] == false
+              ? StatusKind.warning
+              : null,
+          chevron: true,
+          onTap: () => _push(context, const HubsPage()),
+        ),
+        OmniListRow(
+          key: const ValueKey('settings-usb'),
+          icon: OmniIcons.board,
+          title: 'Boards on USB',
+          subtitle: 'Set up a board, or install firmware on it',
+          chevron: true,
+          onTap: () => showUsbBoardSheet(context),
+        ),
+        const OmniSectionHeader('Agents'),
+        const AgentAccessRow(),
+        OmniListRow(
+          key: const ValueKey('settings-waiting'),
+          icon: OmniIcons.agent,
+          title: 'Waiting for approval',
+          subtitle: waiting == null
+              ? ''
+              : waiting.isEmpty
+              ? 'Nothing waiting'
+              : _count(waiting.length, 'automation', 'automations'),
+          value: waiting == null || waiting.isEmpty
+              ? null
+              : '${waiting.length}',
+          chevron: true,
+          onTap: () => waiting != null && waiting.length == 1
+              ? shell.open(ReviewLink(waiting.single.id))
+              : shell.select(ShellTab.automations),
+        ),
+        const OmniSectionHeader('Your data'),
+        OmniListRow(
+          key: const ValueKey('settings-backup'),
+          icon: OmniIcons.backup,
+          title: 'Backup and restore',
+          subtitle: 'Keep a copy of the whole home in a file',
+          chevron: true,
+          onTap: () => _push(context, const BackupPage()),
+        ),
+        OmniListRow(
+          key: const ValueKey('settings-activity'),
+          icon: OmniIcons.automations,
+          title: 'Your activity',
+          subtitle: 'What ran this week, your streak and achievements',
+          chevron: true,
+          onTap: () => _push(context, const YourHomePage()),
+        ),
+        const OmniSectionHeader('Advanced'),
+        OmniListRow(
+          key: const ValueKey('settings-developer'),
+          icon: OmniIcons.developer,
+          title: 'Developer',
+          subtitle: 'Packets, run log, drivers, engine',
+          chevron: true,
+          onTap: () => shell.open(const DeveloperLink()),
+        ),
+        OmniListRow(
+          key: const ValueKey('settings-about'),
+          icon: OmniIcons.about,
+          title: 'About',
+          subtitle: 'OmniFlow $appVersion · what is new, licences',
+          chevron: true,
+          divider: false,
+          onTap: () => _push(context, const AboutPage()),
+        ),
+      ],
     );
   }
 }

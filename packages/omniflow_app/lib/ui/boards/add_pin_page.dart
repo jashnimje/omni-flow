@@ -138,136 +138,126 @@ class _AddPinPageState extends ConsumerState<AddPinPage> {
     final pin = _pin;
     final boot = pin != null && (info?.bootPins.contains(pin) ?? false);
     final ready = device != null && name.isNotEmpty && pin != null && !_saving;
-    return OmniPage(
+    return FormPage(
       title: 'Add a pin',
-      bottom: OmniButton(
-        key: const ValueKey('pin-save'),
-        label: _saving ? 'Saving' : 'Save pin',
-        onPressed: ready ? () => _save(device) : null,
-      ),
-      body: ListView(
-        key: const ValueKey('add-pin'),
-        children: [
+      commitLabel: _saving ? 'Saving' : 'Save pin',
+      commitKey: const ValueKey('pin-save'),
+      onCommit: ready ? () => _save(device) : null,
+      missing: _saving ? null : 'Give it a name and pick a pin first.',
+      banners: [
+        if (_refused case final failure?)
+          OmniBanner.error(
+            key: const ValueKey('pin-refused'),
+            failure.issues.isEmpty
+                ? failure.message
+                : [
+                    for (final i in failure.issues)
+                      plainError('invalid', i.message),
+                  ].join(' '),
+          ),
+      ],
+      children: (context) => [
+        TextField(
+          key: const ValueKey('pin-name'),
+          controller: _name,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: InputDecoration(
+            labelText: 'Name',
+            hintText: 'Door sensor',
+            helperText: name.isEmpty || name == _name.text.trim()
+                ? null
+                : 'Saved as $name',
+          ),
+          onChanged: (_) => setState(() => _refused = null),
+        ),
+        const OmniSectionHeader('What is wired to it?'),
+        Wrap(
+          spacing: OmniSpace.xs,
+          children: [
+            for (final r in PinRole.values)
+              OmniFilterChip(
+                key: ValueKey('pin-role-${r.name}'),
+                label: r.label,
+                selected: _role == r,
+                onTap: _roleOffered(r) ? () => _setRole(r) : null,
+              ),
+          ],
+        ),
+        const OmniSectionHeader(
+          'Pick a pin',
+          trailingText: 'pins this board offers',
+        ),
+        if (_info == null)
+          const OmniListSkeleton(rows: 2, rowHeight: OmniSpace.target)
+        else if (_gpios.isEmpty) ...[
+          const OmniBanner.warning(
+            key: ValueKey('pin-no-describe'),
+            'The board is not answering, so OmniFlow cannot list its pins. '
+            'Type the GPIO number printed next to the pin.',
+          ),
           TextField(
-            key: const ValueKey('pin-name'),
-            controller: _name,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(
-              labelText: 'Name',
-              hintText: 'Door sensor',
-              helperText: name.isEmpty || name == _name.text.trim()
-                  ? null
-                  : 'Saved as $name',
-            ),
+            key: const ValueKey('pin-number'),
+            controller: _typed,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'GPIO number'),
             onChanged: (_) => setState(() => _refused = null),
           ),
-          const OmniSectionHeader('What is wired to it?'),
-          Wrap(
-            spacing: OmniSpace.xs,
-            children: [
-              for (final r in PinRole.values)
-                OmniFilterChip(
-                  key: ValueKey('pin-role-${r.name}'),
-                  label: r.label,
-                  selected: _role == r,
-                  onTap: _roleOffered(r) ? () => _setRole(r) : null,
-                ),
-            ],
+        ] else
+          _PinGrid(
+            gpios: _gpios,
+            mode: _mode,
+            picked: _picked,
+            used: used,
+            boot: info?.bootPins ?? const {},
+            onPick: (p) => setState(() {
+              _picked = p;
+              _refused = null;
+            }),
           ),
-          const OmniSectionHeader(
-            'Pick a pin',
-            trailingText: 'pins this board offers',
+        const SizedBox(height: OmniSpace.sm),
+        if (boot)
+          OmniBanner.warning(
+            key: const ValueKey('pin-boot-warning'),
+            'GPIO $pin is a boot pin on ${boardTypeLabel(info?.board)}: it '
+            'can stop the board starting if it is held the wrong way at '
+            'power on. Pick another pin if one is free.',
           ),
-          if (_info == null)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: OmniSpace.lg),
-              child: Center(
-                child: SizedBox.square(
-                  dimension: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2.5),
-                ),
-              ),
-            )
-          else if (_gpios.isEmpty) ...[
-            const OmniBanner.warning(
-              key: ValueKey('pin-no-describe'),
-              'The board is not answering, so OmniFlow cannot list its pins. '
-              'Type the GPIO number printed next to the pin.',
-            ),
-            TextField(
-              key: const ValueKey('pin-number'),
-              controller: _typed,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'GPIO number'),
-              onChanged: (_) => setState(() => _refused = null),
-            ),
-          ] else
-            _PinGrid(
-              gpios: _gpios,
-              mode: _mode,
-              picked: _picked,
-              used: used,
-              boot: info?.bootPins ?? const {},
-              onPick: (p) => setState(() {
-                _picked = p;
-                _refused = null;
-              }),
-            ),
-          const SizedBox(height: OmniSpace.sm),
-          if (boot)
-            OmniBanner.warning(
-              key: const ValueKey('pin-boot-warning'),
-              'GPIO $pin is a boot pin on ${boardTypeLabel(info?.board)}: it '
-              'can stop the board starting if it is held the wrong way at '
-              'power on. Pick another pin if one is free.',
-            ),
-          if (_role == PinRole.button)
-            OmniCard(
-              title: 'Wired to ground (press reads on)',
-              trailing: Semantics(
-                label: 'Wired to ground',
-                child: Switch(
-                  key: const ValueKey('pin-to-ground'),
-                  value: _toGround,
-                  onChanged: (v) {
-                    _toGround = v;
-                    _setRole(_role);
-                  },
-                ),
-              ),
-              child: const Text(
-                'Off when the button connects the pin to 3.3 V instead.',
-                style: OmniText.caption,
+        if (_role == PinRole.button)
+          OmniCard(
+            title: 'Wired to ground (press reads on)',
+            trailing: Semantics(
+              label: 'Wired to ground',
+              child: Switch(
+                key: const ValueKey('pin-to-ground'),
+                value: _toGround,
+                onChanged: (v) {
+                  _toGround = v;
+                  _setRole(_role);
+                },
               ),
             ),
-          if (_role == PinRole.relay)
-            OmniCard(
-              title: 'Active low',
-              trailing: Semantics(
-                label: 'Active low',
-                child: Switch(
-                  key: const ValueKey('pin-active-low'),
-                  value: _activeLow,
-                  onChanged: (v) => setState(() => _activeLow = v),
-                ),
-              ),
-              child: const Text(
-                'For relay boards that switch on when the pin is low.',
-                style: OmniText.caption,
+            child: const Text(
+              'Off when the button connects the pin to 3.3 V instead.',
+              style: OmniText.caption,
+            ),
+          ),
+        if (_role == PinRole.relay)
+          OmniCard(
+            title: 'Active low',
+            trailing: Semantics(
+              label: 'Active low',
+              child: Switch(
+                key: const ValueKey('pin-active-low'),
+                value: _activeLow,
+                onChanged: (v) => setState(() => _activeLow = v),
               ),
             ),
-          if (_refused case final failure?)
-            OmniBanner.error(
-              key: const ValueKey('pin-refused'),
-              failure.issues.isEmpty
-                  ? failure.message
-                  : [
-                      for (final i in failure.issues)
-                        plainError('invalid', i.message),
-                    ].join(' '),
+            child: const Text(
+              'For relay boards that switch on when the pin is low.',
+              style: OmniText.caption,
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
@@ -296,30 +286,32 @@ class _PinGrid extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       const columns = 6;
-      const gap = 6.0;
+      const gap = OmniSpace.sm;
       final width = (box.maxWidth - gap * (columns - 1)) / columns;
       return Wrap(
         key: const ValueKey('pin-grid'),
         spacing: gap,
         runSpacing: gap,
         children: [
-          for (final g in gpios) SizedBox(width: width, child: _cell(g)),
+          for (final g in gpios)
+            SizedBox(width: width, child: _cell(context, g)),
         ],
       );
     },
   );
 
-  Widget _cell(BoardGpio g) {
+  Widget _cell(BuildContext context, BoardGpio g) {
     final can = g.caps.contains(capabilityFor(mode));
     final user = used[g.pin];
     final enabled = can && user == null;
     final selected = picked == g.pin;
     final isBoot = boot.contains(g.pin);
+    final palette = OmniPalette.of(context);
     final (bg, border, fg) = selected
-        ? (OmniColors.accent, OmniColors.accent, OmniColors.accentInk)
+        ? (palette.accent, palette.accent, palette.onAccent)
         : user != null
-        ? (OmniColors.accentSoft, OmniColors.accentLine, OmniColors.accent)
-        : (OmniColors.card, OmniColors.line, OmniColors.text);
+        ? (palette.accentSoft, palette.accentLine, palette.accent)
+        : (palette.card, palette.line, OmniColors.text);
     return Semantics(
       button: true,
       enabled: enabled,
@@ -338,7 +330,7 @@ class _PinGrid extends StatelessWidget {
           key: ValueKey('gpio-${g.pin}'),
           color: bg,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(OmniShape.sm),
             side: BorderSide(color: border),
           ),
           clipBehavior: Clip.antiAlias,
@@ -351,8 +343,7 @@ class _PinGrid extends StatelessWidget {
                   Center(
                     child: Text(
                       '${g.pin}',
-                      style: TextStyle(
-                        fontSize: 13,
+                      style: OmniText.label.copyWith(
                         color: fg,
                         fontWeight: selected
                             ? FontWeight.w700
@@ -363,8 +354,8 @@ class _PinGrid extends StatelessWidget {
                   ),
                   if (isBoot)
                     const Positioned(
-                      top: 5,
-                      right: 5,
+                      top: OmniSpace.xs,
+                      right: OmniSpace.xs,
                       child: StatusDot(StatusKind.warning, label: 'Boot pin'),
                     ),
                 ],

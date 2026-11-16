@@ -119,12 +119,20 @@ class _ExtraSheetState extends ConsumerState<ExtraSheet> {
       for (final t in [BoardExtras.rc522, BoardExtras.pn532])
         if (widget.info.periphTypes.contains(t)) t,
     ];
-    return OmniSheet(
+    return SheetTemplate(
       title: BoardExtras.title(_type),
       subtitle: _set == null
           ? 'Not set · ${BoardExtras.job(_type)}'
           : 'Set · ${BoardExtras.job(_type)}',
-      children: [
+      primaryLabel: 'Save',
+      primaryKey: const ValueKey('extra-save'),
+      onPrimary: _busy || _pins == null ? null : _run,
+      missing: _busy ? null : 'Give every pin a GPIO number first.',
+      banners: [
+        if (_failure case final f?)
+          OmniBanner.error(key: const ValueKey('extra-failed'), f.message),
+      ],
+      children: (context) => [
         const OmniBanner.info(
           'A board takes extras over USB only, so it cannot be changed from '
           'across the room. Plug it into this phone with a USB cable, then '
@@ -152,13 +160,6 @@ class _ExtraSheetState extends ConsumerState<ExtraSheet> {
               onChanged: (_) => setState(() => _failure = null),
             ),
           ),
-        if (_failure case final f?)
-          OmniBanner.error(key: const ValueKey('extra-failed'), f.message),
-        OmniButton(
-          key: const ValueKey('extra-save'),
-          label: 'Save',
-          onPressed: _busy || _pins == null ? null : _run,
-        ),
         if (_set != null) ...[
           const SizedBox(height: OmniSpace.sm),
           OmniButton.danger(

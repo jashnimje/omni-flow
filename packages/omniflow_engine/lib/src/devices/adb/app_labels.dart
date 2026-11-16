@@ -24,6 +24,7 @@ const knownAppLabels = {
   'com.android.chrome': 'Chrome',
   'com.android.systemui': 'System UI',
   'com.google.android.gms': 'Google Play services',
+  'com.jashnm.omniflow_app': 'OmniFlow',
   'com.google.android.gsf': 'Google Services Framework',
   'com.google.android.inputmethod.latin': 'Gboard',
   'com.android.inputmethod.latin': 'Keyboard',

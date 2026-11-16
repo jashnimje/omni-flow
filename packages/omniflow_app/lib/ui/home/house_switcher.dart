@@ -38,7 +38,7 @@ class HouseSwitcher extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(OmniIcons.home, size: 20, color: palette.onAccentSoft),
-              const SizedBox(width: 6),
+              const SizedBox(width: OmniSpace.xs),
               Flexible(
                 child: Text(
                   house.name,
@@ -69,10 +69,10 @@ Future<void> showHouses(BuildContext context) => showOmniSheet<void>(
     builder: (context, ref, _) {
       final houses = ref.watch(housesProvider).value ?? const <House>[];
       final shown = ref.watch(houseInViewProvider).value;
-      return OmniSheet(
+      return SheetTemplate(
         title: 'Houses',
         subtitle: 'The app shows one house at a time',
-        children: [
+        children: (context) => [
           for (final h in houses)
             OmniListRow(
               key: ValueKey('house-${h.id}'),
@@ -89,6 +89,7 @@ Future<void> showHouses(BuildContext context) => showOmniSheet<void>(
               trailing: PopupMenuButton<String>(
                 key: ValueKey('house-menu-${h.id}'),
                 tooltip: 'More for ${h.name}',
+                icon: const Icon(OmniIcons.more, color: OmniColors.muted),
                 onSelected: (action) => action == 'rename'
                     ? _rename(sheet, ref, h)
                     : _remove(sheet, ref, h),
@@ -119,37 +120,13 @@ Future<String?> askHouseName(
   String initial = '',
   required String action,
 }) async {
-  final field = TextEditingController(text: initial);
-  final name = await showDialog<String>(
-    context: context,
-    builder: (dialog) => Owning(
-      [field],
-      child: AlertDialog(
-        title: Text(title),
-        content: TextField(
-          key: const ValueKey('house-name-field'),
-          controller: field,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            helperText: 'Like Mumbai, or Work flat',
-          ),
-          onSubmitted: (v) => Navigator.of(dialog).pop(v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('house-name-save'),
-            onPressed: () => Navigator.of(dialog).pop(field.text.trim()),
-            child: Text(action),
-          ),
-        ],
-      ),
-    ),
+  final name = await showPromptSheet(
+    context,
+    title: title,
+    label: 'Name',
+    hint: 'Like Mumbai, or Work flat',
+    initial: initial,
+    action: action,
   );
   return name == null || name.isEmpty ? null : name;
 }

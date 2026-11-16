@@ -1,68 +1,34 @@
 import 'package:flutter/material.dart';
 
+import '../../state/clock.dart' show timeOfDayText;
 import '../design/design.dart';
 
-/// Asks for a name, starting from [initial]. Null when cancelled.
+/// Asks for a name in a sheet, starting from [initial]. Null when closed.
 Future<String?> askName(
   BuildContext context, {
   required String title,
   String initial = '',
   String action = 'Save',
   String hint = 'Arrive home',
-}) {
-  final controller = ReplaceableText(initial);
-  return showDialog<String>(
-    context: context,
-    builder: (context) => Owning(
-      [controller],
-      child: StatefulBuilder(
-        builder: (context, setState) {
-          final name = controller.text.trim();
-          return AlertDialog(
-            title: Text(title),
-            content: TextField(
-              key: const ValueKey('name-field'),
-              controller: controller,
-              onTap: controller.firstTap,
-              autofocus: true,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(labelText: 'Name', hintText: hint),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (v) {
-                if (v.trim().isNotEmpty) Navigator.of(context).pop(v.trim());
-              },
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              OmniButton(
-                key: const ValueKey('name-ok'),
-                label: action,
-                expand: false,
-                onPressed: name.isEmpty
-                    ? null
-                    : () => Navigator.of(context).pop(name),
-              ),
-            ],
-          );
-        },
-      ),
-    ),
-  );
-}
+}) => showPromptSheet(
+  context,
+  title: title,
+  label: 'Name',
+  initial: initial,
+  action: action,
+  hint: hint,
+);
 
-/// "Today 19:02", "Yesterday 18:47", "3 Nov 09:12".
-String whenText(DateTime t, {DateTime? now}) {
+/// "Today 19:02", "Yesterday 18:47", "3 Nov 09:12", or with [hour12]
+/// "Today 7:02 PM".
+String whenText(DateTime t, {DateTime? now, bool hour12 = false}) {
   final at = t.toLocal();
   final n = (now ?? DateTime.now()).toLocal();
   // Calendar days as UTC dates: local midnights are 23 or 25 hours apart
   // across a clock change.
   final today = DateTime.utc(n.year, n.month, n.day);
   final day = DateTime.utc(at.year, at.month, at.day);
-  final time =
-      '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+  final time = timeOfDayText(hour12, at);
   final diff = today.difference(day).inDays;
   if (diff == 0) return 'Today $time';
   if (diff == 1) return 'Yesterday $time';
@@ -74,8 +40,8 @@ String whenText(DateTime t, {DateTime? now}) {
 }
 
 /// [whenText] for the middle of a sentence: "ran today 19:02".
-String whenInline(DateTime at, {DateTime? now}) {
-  final s = whenText(at, now: now);
+String whenInline(DateTime at, {DateTime? now, bool hour12 = false}) {
+  final s = whenText(at, now: now, hour12: hour12);
   return s.startsWith('Today') || s.startsWith('Yesterday')
       ? '${s[0].toLowerCase()}${s.substring(1)}'
       : s;

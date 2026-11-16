@@ -16,12 +16,20 @@ class StatusDot extends StatelessWidget {
   /// Read out instead of the default word for [kind].
   final String? label;
 
+  /// The teal colour of [kind], for code with no [BuildContext]. Widgets
+  /// use [colorIn] so online follows the Appearance accent.
   static Color colorOf(StatusKind kind) => switch (kind) {
     StatusKind.online => OmniColors.accent,
     StatusKind.offline => OmniColors.muted,
     StatusKind.warning => OmniColors.warn,
     StatusKind.problem => OmniColors.bad,
   };
+
+  /// The colour of [kind] in the current palette.
+  static Color colorIn(BuildContext context, StatusKind kind) =>
+      kind == StatusKind.online
+      ? OmniPalette.of(context).accent
+      : colorOf(kind);
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -36,7 +44,10 @@ class StatusDot extends StatelessWidget {
     child: Container(
       width: 8,
       height: 8,
-      decoration: BoxDecoration(color: colorOf(kind), shape: BoxShape.circle),
+      decoration: BoxDecoration(
+        color: colorIn(context, kind),
+        shape: BoxShape.circle,
+      ),
     ),
   );
 }
@@ -99,7 +110,7 @@ class OmniListRow extends StatelessWidget {
         Text(
           value!,
           style: OmniText.number.copyWith(
-            color: valueColor ?? OmniColors.accent,
+            color: valueColor ?? OmniPalette.of(context).accent,
           ),
         ),
       if (dot != null) StatusDot(dot!),

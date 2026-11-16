@@ -165,109 +165,119 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               .where((d) => d.id == (reading['args'] as Map)['id'])
               .firstOrNull
         : null;
-    return OmniPage(
+    return ListPage(
+      key: const ValueKey('search-list'),
       title: 'Search',
-      body: ListView(
-        key: const ValueKey('search-list'),
-        children: [
-          TextField(
-            key: const ValueKey('command-bar'),
-            controller: _field,
-            autofocus: true,
-            textInputAction: TextInputAction.go,
-            onChanged: _changed,
-            onSubmitted: _submit,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(OmniIcons.chevron, color: OmniColors.muted),
-              hintText: 'Search, or say what to do: desk lamp 50',
+      search: TextField(
+        key: const ValueKey('command-bar'),
+        controller: _field,
+        autofocus: true,
+        textInputAction: TextInputAction.go,
+        onChanged: _changed,
+        onSubmitted: _submit,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(OmniIcons.chevron, color: OmniColors.muted),
+          hintText: 'Search, or say what to do: desk lamp 50',
+        ),
+      ),
+      children: (context) => [
+        if (_summary != null)
+          Padding(
+            padding: const EdgeInsets.only(top: OmniSpace.sm),
+            child: OmniBanner.info(
+              _summary!,
+              key: const ValueKey('command-summary'),
             ),
           ),
-          if (_summary != null)
-            Padding(
-              padding: const EdgeInsets.only(top: OmniSpace.sm),
-              child: OmniBanner.info(
-                _summary!,
-                key: const ValueKey('command-summary'),
-              ),
-            ),
-          if (showReading) ...[
-            const OmniSectionHeader('Do it'),
-            OmniCard(
-              key: const ValueKey('search-do-it'),
-              highlighted: runnable,
-              title: runnable ? '${reading['summary']}' : _askText(reading),
-              trailing: runnable
-                  ? const Icon(
-                      OmniIcons.enter,
-                      size: 18,
-                      color: OmniColors.muted,
-                      semanticLabel: 'Press enter to run',
-                    )
-                  : null,
-              onTap: runnable ? () => _submit(_field.text) : null,
-              child: target == null
-                  ? null
-                  : Text(
-                      [
-                        shortDriverName(drivers[target.driver], target.driver),
-                        ?target.room,
-                      ].join(' · '),
-                      style: OmniText.caption,
-                    ),
-            ),
-          ],
-          if (things.isNotEmpty) ...[
-            const OmniSectionHeader('Devices, places and tags'),
-            for (final d in things)
-              OmniListRow(
-                key: ValueKey('search-thing-${d.id}'),
-                icon: iconOf(d, drivers),
-                title: d.name,
-                subtitle: kindOf(d) == DeviceKind.phone
-                    ? phoneLine(d)
-                    : stateLine(d),
-                chevron: true,
-                onTap: () => openDevice(context, d.id),
-              ),
-          ],
-          if (matching.isNotEmpty) ...[
-            const OmniSectionHeader('Automations'),
-            for (final a in matching)
-              OmniListRow(
-                key: ValueKey('search-automation-${a.id}'),
-                icon: OmniIcons.automations,
-                title: a.name,
-                subtitle: a.sentence.map((p) => p.text).join(' '),
-                chevron: true,
-                onTap: () => ref
-                    .read(shellControllerProvider)
-                    .open(AutomationLink(a.id)),
-              ),
-          ],
-          if (places.isNotEmpty) ...[
-            const OmniSectionHeader('Settings'),
-            for (final p in places)
-              OmniListRow(
-                icon: p.icon,
-                title: p.title,
-                chevron: true,
-                onTap: () => p.open(context, ref),
-              ),
-          ],
-          const OmniSectionHeader('Try'),
-          Wrap(
-            spacing: 6,
-            children: [
-              for (final s in _suggestions(devices, automations, drivers))
-                OmniFilterChip(
-                  key: ValueKey('try-$s'),
-                  label: s,
-                  onTap: () => _fill(s),
-                ),
-            ],
+        if (showReading) ...[
+          const OmniSectionHeader('Do it'),
+          OmniCard(
+            key: const ValueKey('search-do-it'),
+            highlighted: runnable,
+            title: runnable ? '${reading['summary']}' : _askText(reading),
+            trailing: runnable
+                ? const Icon(
+                    OmniIcons.enter,
+                    size: 18,
+                    color: OmniColors.muted,
+                    semanticLabel: 'Press enter to run',
+                  )
+                : null,
+            onTap: runnable ? () => _submit(_field.text) : null,
+            child: target == null
+                ? null
+                : Text(
+                    [
+                      shortDriverName(drivers[target.driver], target.driver),
+                      ?target.room,
+                    ].join(' · '),
+                    style: OmniText.caption,
+                  ),
           ),
         ],
-      ),
+        if (things.isNotEmpty) ...[
+          const OmniSectionHeader('Devices, places and tags'),
+          for (final d in things)
+            OmniListRow(
+              key: ValueKey('search-thing-${d.id}'),
+              icon: iconOf(d, drivers),
+              title: d.name,
+              subtitle: kindOf(d) == DeviceKind.phone
+                  ? phoneLine(d)
+                  : stateLine(d),
+              chevron: true,
+              onTap: () => openDevice(context, d.id),
+            ),
+        ],
+        if (matching.isNotEmpty) ...[
+          const OmniSectionHeader('Automations'),
+          for (final a in matching)
+            OmniListRow(
+              key: ValueKey('search-automation-${a.id}'),
+              icon: OmniIcons.automations,
+              title: a.name,
+              subtitle: a.sentence.map((p) => p.text).join(' '),
+              chevron: true,
+              onTap: () =>
+                  ref.read(shellControllerProvider).open(AutomationLink(a.id)),
+            ),
+        ],
+        if (places.isNotEmpty) ...[
+          const OmniSectionHeader('Settings'),
+          for (final p in places)
+            OmniListRow(
+              icon: p.icon,
+              title: p.title,
+              chevron: true,
+              onTap: () => p.open(context, ref),
+            ),
+        ],
+        if (query.isNotEmpty &&
+            !showReading &&
+            things.isEmpty &&
+            matching.isEmpty &&
+            places.isEmpty)
+          OmniEmptyState(
+            key: const ValueKey('search-none'),
+            icon: OmniIcons.search,
+            title: 'No results for "${_field.text.trim()}"',
+            message: 'Try a device, a room or an automation name.',
+            compact: true,
+          ),
+        const OmniSectionHeader('Try'),
+        Wrap(
+          spacing: OmniSpace.sm,
+          runSpacing: OmniSpace.xs,
+          children: [
+            for (final s in _suggestions(devices, automations, drivers))
+              OmniFilterChip(
+                key: ValueKey('try-$s'),
+                label: s,
+                onTap: () => _fill(s),
+              ),
+          ],
+        ),
+      ],
     );
   }
 

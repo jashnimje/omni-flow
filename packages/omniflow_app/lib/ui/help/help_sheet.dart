@@ -27,7 +27,7 @@ class HelpText extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 24,
+                    width: OmniSpace.xl,
                     child: Text('${m[1]}.', style: OmniText.bodyStrong),
                   ),
                   Expanded(child: Text(m[2]!, style: OmniText.body)),
@@ -49,16 +49,22 @@ Future<void> showHelpSheet(
   List<HelpSection> sections = const [],
   List<Widget> extra = const [],
   Key? key,
-}) => showOmniSheet<void>(
+}) => SheetTemplate.show<void>(
   context,
-  builder: (context) => OmniSheet(
+  builder: (context) => SheetTemplate(
     key: key,
     title: title,
     subtitle: intro,
-    children: [
+    primaryLabel: 'Got it',
+    primaryKey: const ValueKey('help-close'),
+    onPrimary: () => Navigator.of(context).pop(),
+    children: (context) => [
       for (final s in sections) ...[
         Padding(
-          padding: const EdgeInsets.only(top: OmniSpace.sm, bottom: 4),
+          padding: const EdgeInsets.only(
+            top: OmniSpace.sm,
+            bottom: OmniSpace.xs,
+          ),
           child: Semantics(
             header: true,
             child: Text(s.heading, style: OmniText.bodyStrong),
@@ -67,12 +73,6 @@ Future<void> showHelpSheet(
         HelpText(s.body),
       ],
       ...extra,
-      const SizedBox(height: OmniSpace.sm),
-      OmniButton(
-        key: const ValueKey('help-close'),
-        label: 'Got it',
-        onPressed: () => Navigator.of(context).pop(),
-      ),
     ],
   ),
 );

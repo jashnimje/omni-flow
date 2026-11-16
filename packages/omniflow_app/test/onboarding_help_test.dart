@@ -433,7 +433,7 @@ void main() {
         const HomeSetupPage(),
         overrides: [phoneAccessProvider.overrideWithValue(access)],
       );
-      expect(find.text('Step 1 of 5'), findsOneWidget);
+      expect(find.bySemanticsLabel('Step 1 of 5'), findsOneWidget);
       expect(find.text('Who are you?'), findsOneWidget);
 
       await tester.enterText(find.byKey(const ValueKey('setup-name')), 'Asha');
@@ -450,12 +450,12 @@ void main() {
         'settings': {'person': 'asha'},
       });
 
-      expect(find.text('Step 2 of 5'), findsOneWidget);
+      expect(find.bySemanticsLabel('Step 2 of 5'), findsOneWidget);
       expect(find.byKey(const ValueKey('setup-home-location')), findsOne);
-      await tester.tap(find.byKey(const ValueKey('setup-skip')));
+      await tester.tap(find.byKey(const ValueKey('step-skip')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Step 3 of 5'), findsOneWidget);
+      expect(find.bySemanticsLabel('Step 3 of 5'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('setup-allow-location')));
       await tester.pumpAndSettle();
       expect(access.asked, ['location']);
@@ -465,12 +465,12 @@ void main() {
       expect(zone['id'], 'home');
       expect((zone['wifi'] as Map)['ssids'], ['HomeNet']);
 
-      expect(find.text('Step 4 of 5'), findsOneWidget);
+      expect(find.bySemanticsLabel('Step 4 of 5'), findsOneWidget);
       expect(find.byKey(const ValueKey('setup-add-device')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('setup-skip')));
+      await tester.tap(find.byKey(const ValueKey('step-skip')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('setup-new-automation')), findsOne);
-      await tester.tap(find.byKey(const ValueKey('setup-skip')));
+      await tester.tap(find.byKey(const ValueKey('step-skip')));
       await tester.pumpAndSettle();
       expect(find.text('That is all for now'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('setup-finish')));
@@ -500,7 +500,7 @@ void main() {
           ),
         ],
       );
-      expect(find.text('Step 3 of 5'), findsOneWidget);
+      expect(find.bySemanticsLabel('Step 3 of 5'), findsOneWidget);
       expect(find.byKey(const ValueKey('setup-no-wifi')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('setup-allow-location')),
@@ -520,7 +520,7 @@ void main() {
           ),
         ],
       );
-      await tester.tap(find.byKey(const ValueKey('setup-not-now')));
+      await tester.tap(find.byTooltip('Close'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('root')), findsOneWidget);
     });
@@ -545,7 +545,7 @@ void main() {
       expect(find.textContaining('1 of 5 done'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('settings-home-setup')));
       await tester.pumpAndSettle();
-      expect(find.text('Step 2 of 5'), findsOneWidget);
+      expect(find.bySemanticsLabel('Step 2 of 5'), findsOneWidget);
     });
   });
 

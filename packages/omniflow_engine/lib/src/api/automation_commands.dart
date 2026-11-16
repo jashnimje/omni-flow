@@ -1,5 +1,6 @@
 import 'api_error.dart';
 import 'automation_view.dart';
+import 'clock_words.dart' show callHour12;
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'flow_commands.dart';
@@ -329,6 +330,7 @@ class AutomationCommands {
       names: {for (final d in devices) d.id: d.name},
       drivers: {for (final d in devices) d.id: ?manifestFor(_core.registry, d)},
       person: await _stored.things.householdPerson(),
+      hour12: callHour12,
       automations: {
         for (final f in await DriftFlowStore(_core.db).all())
           '${f.json['id']}': '${f.json['name']}',

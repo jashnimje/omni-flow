@@ -130,6 +130,10 @@ class NodeTrace {
   String? port;
   Map<String, Object?>? output;
   String? error;
+
+  /// The technical text behind [error] (an address and a retry count),
+  /// for the run log's Details: [error] says it in plain words.
+  String? errorDetails;
   Duration? duration;
 
   /// What a condition saw, or the answer a choice ask got, for the diagram:
@@ -145,6 +149,7 @@ class NodeTrace {
     if (duration != null) 'ms': duration!.inMilliseconds,
     if (port != null) 'port': port,
     if (error != null) 'error': error,
+    'errorDetails': ?errorDetails,
     if (hasSeen) 'seen': seen,
     'input': _traced(input),
     if (output != null) 'output': _traced(output!),
@@ -531,9 +536,14 @@ class FlowRunner {
             rethrow;
           } catch (e) {
             port = 'error';
-            out = {...msg, 'error': _message(e)};
+            out = {
+              ...msg,
+              'error': _message(e),
+              if (e is PlainStepFailure) 'errorDetails': e.details,
+            };
             if (flow.edgesFrom(node.id, 'error').isEmpty) {
               trace.error = _message(e);
+              if (e is PlainStepFailure) trace.errorDetails = e.details;
               if (flow.continueOnError) follow = 'out';
             }
           }

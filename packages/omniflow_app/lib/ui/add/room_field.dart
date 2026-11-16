@@ -7,7 +7,6 @@ import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import '../home/home_data.dart' show roomsProvider;
-import '../tv/tv_widgets.dart' show askText;
 
 const _newRoom = '\u0000new';
 const _noRoom = '';
@@ -40,12 +39,11 @@ class _RoomFieldState extends ConsumerState<RoomField> {
   }
 
   Future<void> _create() async {
-    final name = await askText(
+    final name = await showPromptSheet(
       context,
       title: 'New room',
       label: 'Room name',
       action: 'Add',
-      validate: (t) => t.trim().isEmpty ? 'Enter a name' : null,
     );
     if (name == null || !mounted) return;
     final saved = await ref.read(engineApiProvider).saveRoom(name: name.trim());
@@ -79,13 +77,17 @@ class _RoomFieldState extends ConsumerState<RoomField> {
         const DropdownMenuItem(value: _noRoom, child: Text('No room')),
         for (final r in rooms)
           DropdownMenuItem(value: r.id, child: Text(r.name)),
-        const DropdownMenuItem(
+        DropdownMenuItem(
           value: _newRoom,
           child: Row(
             children: [
-              Icon(OmniIcons.add, size: 18, color: OmniColors.accent),
-              SizedBox(width: OmniSpace.sm),
-              Text('New room'),
+              Icon(
+                OmniIcons.add,
+                size: 18,
+                color: OmniPalette.of(context).accent,
+              ),
+              const SizedBox(width: OmniSpace.sm),
+              const Text('New room'),
             ],
           ),
         ),
@@ -103,7 +105,7 @@ class _RoomFieldState extends ConsumerState<RoomField> {
 
 /// Renames a device and moves it to a room, through `device.organize`.
 Future<void> showOrganizeSheet(BuildContext context, Json device) =>
-    showOmniSheet<void>(
+    SheetTemplate.show<void>(
       context,
       builder: (_) => _OrganizeSheet(device: device),
     );
@@ -149,9 +151,13 @@ class _OrganizeSheetState extends ConsumerState<_OrganizeSheet> {
   }
 
   @override
-  Widget build(BuildContext context) => OmniSheet(
+  Widget build(BuildContext context) => SheetTemplate(
     title: 'Name and room',
-    children: [
+    primaryLabel: 'Save',
+    primaryKey: const ValueKey('organize-save'),
+    onPrimary: _saving || _name.text.trim().isEmpty ? null : _save,
+    missing: 'Give it a name first.',
+    children: (context) => [
       TextField(
         key: const ValueKey('organize-name'),
         controller: _name,
@@ -160,12 +166,6 @@ class _OrganizeSheetState extends ConsumerState<_OrganizeSheet> {
       ),
       const SizedBox(height: OmniSpace.sm),
       RoomField(value: _room, onChanged: (r) => setState(() => _room = r)),
-      const SizedBox(height: OmniSpace.md),
-      OmniButton(
-        key: const ValueKey('organize-save'),
-        label: 'Save',
-        onPressed: _saving || _name.text.trim().isEmpty ? null : _save,
-      ),
     ],
   );
 }

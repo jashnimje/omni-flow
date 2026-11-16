@@ -32,7 +32,7 @@ Future<bool> writeTagWith(
     showMessage('OmniFlow sent nothing to write on the tag');
     return false;
   }
-  final written = await showOmniSheet<NfcScan>(
+  final written = await SheetTemplate.show<NfcScan>(
     context,
     dismissible: false,
     builder: (_) => WriteTagSheet(adapter: adapter, payload: payload),
@@ -90,10 +90,21 @@ class _WriteTagSheetState extends State<WriteTagSheet> {
     }
   }
 
+  void _cancel() {
+    _cancelled = true;
+    widget.adapter.cancelWrite();
+    Navigator.of(context).pop();
+  }
+
   @override
-  Widget build(BuildContext context) => OmniSheet(
+  Widget build(BuildContext context) => SheetTemplate(
     title: 'Write a tag',
-    children: [
+    primaryLabel: _error == null ? null : 'Try again',
+    primaryKey: const ValueKey('write-tag-retry'),
+    onPrimary: _write,
+    secondaryLabel: 'Cancel',
+    onSecondary: _cancel,
+    children: (context) => [
       OmniHeroCard(
         icon: OmniIcons.tag,
         centered: true,
@@ -109,25 +120,6 @@ class _WriteTagSheetState extends State<WriteTagSheet> {
         key: const ValueKey('write-tag-status'),
         style: OmniText.caption,
         textAlign: TextAlign.center,
-      ),
-      const SizedBox(height: OmniSpace.md),
-      if (_error != null) ...[
-        OmniButton(
-          key: const ValueKey('write-tag-retry'),
-          label: 'Try again',
-          icon: OmniIcons.retry,
-          onPressed: _write,
-        ),
-        const SizedBox(height: OmniSpace.sm),
-      ],
-      OmniButton.ghost(
-        key: const ValueKey('write-tag-cancel'),
-        label: 'Cancel',
-        onPressed: () {
-          _cancelled = true;
-          widget.adapter.cancelWrite();
-          Navigator.of(context).pop();
-        },
       ),
     ],
   );

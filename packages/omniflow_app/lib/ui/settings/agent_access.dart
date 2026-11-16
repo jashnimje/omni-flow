@@ -49,22 +49,23 @@ class AgentAccessRow extends ConsumerWidget {
     WidgetRef ref,
     String? current,
   ) async {
-    final picked = await showOmniSheet<String>(
+    final picked = await SheetTemplate.show<String>(
       context,
-      builder: (sheet) => OmniSheet(
+      builder: (sheet) => SheetTemplate(
         title: 'What agents can do',
         subtitle:
             'Claude and other agents reach OmniFlow through MCP, from a '
             'computer this phone allows for debugging.',
-        children: [
+        children: (context) => [
           for (final MapEntry(key: level, value: l) in _levels.entries)
             OmniListRow(
               key: ValueKey('agent-access-$level'),
               title: l.title,
               subtitle: l.detail,
               subtitleLines: 4,
+              selected: level == current,
               trailing: level == current
-                  ? const Icon(OmniIcons.check, color: OmniColors.accent)
+                  ? Icon(OmniIcons.check, color: OmniPalette.of(context).accent)
                   : null,
               onTap: () => Navigator.of(sheet).pop(level),
             ),

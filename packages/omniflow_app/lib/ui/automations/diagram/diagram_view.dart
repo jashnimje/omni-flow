@@ -278,27 +278,32 @@ class DiagramViewerState extends State<DiagramViewer> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            ...widget.toolbar,
-            const Spacer(),
-            if (!asList)
+        // The canvas runs edge to edge. The toolbar keeps the screen
+        // padding.
+        Padding(
+          padding: OmniSpace.screenPadding,
+          child: Row(
+            children: [
+              ...widget.toolbar,
+              const Spacer(),
+              if (!asList)
+                TextButton.icon(
+                  key: const ValueKey('diagram-fit'),
+                  onPressed: fitAll,
+                  icon: const Icon(OmniIcons.screen, size: 18),
+                  label: const Text('Fit'),
+                ),
               TextButton.icon(
-                key: const ValueKey('diagram-fit'),
-                onPressed: fitAll,
-                icon: const Icon(OmniIcons.screen, size: 18),
-                label: const Text('Fit'),
+                key: const ValueKey('diagram-as-list'),
+                onPressed: () => setState(() => _asList = !asList),
+                icon: Icon(
+                  asList ? OmniIcons.branch : AutomationIcons.list,
+                  size: 18,
+                ),
+                label: Text(asList ? 'Show diagram' : 'Show as list'),
               ),
-            TextButton.icon(
-              key: const ValueKey('diagram-as-list'),
-              onPressed: () => setState(() => _asList = !asList),
-              icon: Icon(
-                asList ? OmniIcons.branch : AutomationIcons.list,
-                size: 18,
-              ),
-              label: Text(asList ? 'Show diagram' : 'Show as list'),
-            ),
-          ],
+            ],
+          ),
         ),
         Expanded(
           child: asList
@@ -404,28 +409,88 @@ class DiagramList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final h = handlers;
+    final branches = _branches();
     final rows = [
       for (final id in layout.order)
         if (diagram.node(id) case final n? when n.kind != NodeKind.merge)
-          OmniListRow(
-            key: ValueKey('diagram-row-${n.id}'),
-            icon: h.iconOf?.call(n) ?? _kindIcon(n.kind),
-            iconForeground: RunColors.of(n),
-            title: n.words.isEmpty ? nodeKindWords(n.kind) : n.words,
-            subtitle: [
-              nodeKindWords(n.kind),
-              ?nodeStatusWords(n),
-              if (n.seen case final seen?) 'saw $seen',
-              ?h.errorOf?.call(n),
-            ].join(', '),
-            subtitleLines: 3,
-            onTap: h.onTap == null ? null : () => h.onTap!(n),
+          Padding(
+            // A step in a branch sits under its check, as in the sentence.
+            padding: EdgeInsetsDirectional.only(
+              start: OmniSpace.xl * (branches[n.id]?.depth ?? 0),
+            ),
+            child: OmniListRow(
+              key: ValueKey('diagram-row-${n.id}'),
+              icon: h.iconOf?.call(n) ?? _kindIcon(n.kind),
+              iconForeground: RunColors.of(n),
+              title: n.words.isEmpty ? nodeKindWords(n.kind) : n.words,
+              subtitle: [
+                ?branches[n.id]?.words,
+                nodeKindWords(n.kind),
+                ?nodeStatusWords(n),
+                if (n.seen case final seen?) 'saw $seen',
+                ?h.errorOf?.call(n),
+              ].join(', '),
+              subtitleLines: 3,
+              onTap: h.onTap == null ? null : () => h.onTap!(n),
+            ),
           ),
     ];
     if (!scrolls) {
       return Column(key: const ValueKey('diagram-list'), children: rows);
     }
-    return ListView(key: const ValueKey('diagram-list'), children: rows);
+    return ListView(
+      key: const ValueKey('diagram-list'),
+      padding: EdgeInsets.fromLTRB(
+        OmniSpace.screen,
+        0,
+        OmniSpace.screen,
+        OmniInsets.bottom(context),
+      ),
+      children: rows,
+    );
+  }
+
+  /// Each node's branch in reading order: how deep it sits and the words
+  /// of the way it came ("if it holds", "otherwise"). A labelled line opens
+  /// a branch, a merge closes one, and any other line keeps it.
+  Map<String, ({int depth, String? words})> _branches() {
+    final out = <String, ({int depth, String? words})>{};
+    for (final id in layout.order) {
+      final node = diagram.node(id);
+      ({int depth, String? words})? best;
+      for (final e in diagram.edges.where((e) => e.to == id)) {
+        final from = out[e.from] ?? (depth: 0, words: null);
+        // Only a real fork opens one: a check whose other way just ends
+        // (an only-if) leaves the steps where they are.
+        final forks =
+            diagram.edges
+                .where(
+                  (o) =>
+                      o.from == e.from &&
+                      o.label != null &&
+                      diagram.node(o.to)?.kind != NodeKind.end,
+                )
+                .length >
+            1;
+        final opened = !forks
+            ? null
+            : switch (e.label) {
+                'yes' => 'if it holds',
+                'no' || 'otherwise' => 'otherwise',
+                'fails' => 'if it fails',
+                'each' => 'for each',
+                _ => null,
+              };
+        final b = opened != null
+            ? (depth: from.depth + 1, words: opened)
+            : node?.kind == NodeKind.merge
+            ? (depth: math.max(0, from.depth - 1), words: null)
+            : from;
+        if (best == null || b.depth < best.depth) best = b;
+      }
+      out[id] = best ?? (depth: 0, words: null);
+    }
+    return out;
   }
 
   static IconData _kindIcon(String kind) => switch (kind) {
@@ -433,7 +498,7 @@ class DiagramList extends StatelessWidget {
     NodeKind.check || NodeKind.decision => OmniIcons.branch,
     NodeKind.wait => OmniIcons.wait,
     NodeKind.group => OmniIcons.repeat,
-    NodeKind.end => OmniIcons.close,
+    NodeKind.end => OmniIcons.check,
     _ => OmniIcons.action,
   };
 }

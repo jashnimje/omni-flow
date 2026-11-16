@@ -193,6 +193,11 @@ void main() {
       await tester.pump();
     }
 
+    Future<void> next(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('step-primary')));
+      await tester.pumpAndSettle();
+    }
+
     testWidgets('finds a hub, shows the allow line, then the fingerprint, and '
         'switches once it matches', (tester) async {
       final engine = FakeEngine();
@@ -214,9 +219,9 @@ void main() {
       );
       await pumpScreen(tester, engine, const HubPage(), overrides: overrides());
       expect(find.byKey(const ValueKey('hub-setup')), findsOneWidget);
-      // Connect waits for an address, a user and the key.
+      // Next waits for an address, a user and a name for the phone.
       expect(
-        tester.widget<OmniButton>(find.byKey(const ValueKey('hub-check'))),
+        tester.widget<OmniButton>(find.byKey(const ValueKey('step-primary'))),
         isA<OmniButton>().having((b) => b.onPressed, 'onPressed', isNull),
       );
 
@@ -226,6 +231,7 @@ void main() {
       await tester.pump();
       expect(find.text('192.168.1.20'), findsOneWidget);
       await fill(tester);
+      await next(tester);
 
       await tester.tap(find.byKey(const ValueKey('hub-make-key')));
       await tester.pumpAndSettle();
@@ -238,6 +244,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('hub-copy')));
       await tester.pump();
       expect(copied, line);
+      // Copied shows a snackbar over the bottom bar.
+      messengerKey.currentState!.removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+      await next(tester);
 
       await tester.tap(find.byKey(const ValueKey('hub-check')));
       await tester.pumpAndSettle();
@@ -274,8 +284,10 @@ void main() {
         'mac-mini.local',
       );
       await fill(tester);
+      await next(tester);
       await tester.tap(find.byKey(const ValueKey('hub-make-key')));
       await tester.pumpAndSettle();
+      await next(tester);
       await tester.tap(find.byKey(const ValueKey('hub-check')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('hub-matches')));
@@ -297,8 +309,10 @@ void main() {
       );
       await tester.enterText(find.byKey(const ValueKey('hub-host')), 'mac');
       await fill(tester);
+      await next(tester);
       await tester.tap(find.byKey(const ValueKey('hub-make-key')));
       await tester.pumpAndSettle();
+      await next(tester);
       await tester.tap(find.byKey(const ValueKey('hub-check')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('hub-no-match')));

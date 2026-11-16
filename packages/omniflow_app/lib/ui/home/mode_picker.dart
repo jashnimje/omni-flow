@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/house_providers.dart';
 import '../../state/providers.dart';
-import '../automations/form_parts.dart' show ChoiceRow;
 import '../design/design.dart';
 
 /// The icon each built-in mode shows, and one for the user's own.
@@ -47,28 +46,25 @@ class ModeChip extends ConsumerWidget {
 Future<void> showModePicker(BuildContext context, WidgetRef ref) async {
   final modes = ref.read(houseModeProvider).value;
   if (modes == null) return;
-  final picked = await showOmniSheet<String>(
+  final picked = await showPickerSheet<String>(
     context,
-    builder: (context) => OmniSheet(
-      title: 'House mode',
-      subtitle: 'Automations can start when it changes, or check it.',
-      children: [
+    title: 'House mode',
+    subtitle:
+        'Automations can start when it changes, or check it. Add your own '
+        'modes, or let the mode follow who is home, in Settings, Alerts and '
+        'modes.',
+    selected: modes.mode,
+    sections: [
+      PickerSection([
         for (final m in modes.modes)
-          ChoiceRow(
+          PickerItem(
             key: ValueKey('mode-${m.id}'),
+            value: m.id,
             title: m.name,
             icon: modeIcon(m.id),
-            selected: m.id == modes.mode,
-            onTap: () => Navigator.of(context).pop(m.id),
           ),
-        const SizedBox(height: OmniSpace.sm),
-        const Text(
-          'Add your own modes, or let the mode follow who is home, in '
-          'Settings, Alerts and modes.',
-          style: OmniText.caption,
-        ),
-      ],
-    ),
+      ]),
+    ],
   );
   if (picked == null || picked == modes.mode) return;
   final r = await ref.read(houseApiProvider).setMode(picked);

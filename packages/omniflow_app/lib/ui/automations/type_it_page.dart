@@ -99,12 +99,17 @@ class _TypeItSheetState extends ConsumerState<TypeItSheet> {
     final parsed = _parsed;
     final spec = parsed?.spec;
     final current = _text.text == _readText;
-    return OmniSheet(
+    return SheetTemplate(
       title: 'Type what you want',
       subtitle:
           'Say it in one sentence. You check it in the editor before '
           'anything is saved.',
-      children: [
+      primaryLabel: 'Open in editor',
+      primaryKey: const ValueKey('type-it-open'),
+      onPrimary: spec != null && current && !_reading
+          ? () => Navigator.of(context).pop(spec)
+          : null,
+      children: (context) => [
         TextField(
           key: const ValueKey('type-it-field'),
           controller: _text,
@@ -122,18 +127,19 @@ class _TypeItSheetState extends ConsumerState<TypeItSheet> {
           const Text('Try one of these', style: OmniText.caption),
           const SizedBox(height: OmniSpace.xs),
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: OmniSpace.sm,
+            runSpacing: OmniSpace.sm,
             children: [
               for (final e in _examples)
                 OmniFilterChip(label: e, onTap: () => _example(e)),
             ],
           ),
         ] else if (_silent)
-          const Text(
+          OmniBanner.error(
             'OmniFlow did not answer. Try again in a moment.',
-            key: ValueKey('type-it-silent'),
-            style: OmniText.caption,
+            key: const ValueKey('type-it-silent'),
+            actionLabel: 'Try again',
+            onAction: () => _changed(_text.text),
           )
         else if (parsed != null) ...[
           if (spec != null) ...[
@@ -177,15 +183,6 @@ class _TypeItSheetState extends ConsumerState<TypeItSheet> {
               style: OmniText.caption,
             ),
           ),
-        const SizedBox(height: OmniSpace.lg),
-        OmniButton(
-          key: const ValueKey('type-it-open'),
-          label: 'Open in editor',
-          icon: OmniIcons.edit,
-          onPressed: spec != null && current && !_reading
-              ? () => Navigator.of(context).pop(spec)
-              : null,
-        ),
       ],
     );
   }
@@ -220,11 +217,10 @@ class UnknownWords extends StatelessWidget {
               marked.contains(_bare(words[i]))
                   ? TextSpan(
                       text: words[i],
-                      style: const TextStyle(
+                      style: OmniText.bodyStrong.copyWith(
                         color: OmniColors.warn,
                         decoration: TextDecoration.underline,
                         decorationColor: OmniColors.warn,
-                        fontWeight: FontWeight.w600,
                       ),
                     )
                   : TextSpan(text: words[i]),

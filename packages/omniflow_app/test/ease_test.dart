@@ -85,7 +85,7 @@ void main() {
     ) async {
       final engine = automationsEngine();
       await pumpPage(tester, engine, const AutomationsScreen());
-      expect(find.text('Quick links'), findsOneWidget);
+      expect(find.textContaining('Quick links'), findsOneWidget);
       expect(
         tester
             .widget<Text>(

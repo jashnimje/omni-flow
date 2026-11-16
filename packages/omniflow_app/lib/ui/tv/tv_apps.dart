@@ -114,7 +114,7 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
       onRefresh: _load,
       child: ListView(
         key: const ValueKey('apps-list'),
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+        padding: omniBodyPadding(OmniInsets.bottom(context)),
         children: [
           TextField(
             key: const ValueKey('apps-search'),
@@ -152,7 +152,12 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
           ),
           TransferProgress(tv: tv),
           if (_error != null)
-            TvLoadError(what: 'The apps', reason: _error!, onRetry: _load)
+            TvLoadError(
+              what: 'The apps',
+              reason: _error!,
+              noun: tv.noun,
+              onRetry: _load,
+            )
           else if (all == null)
             const OmniListSkeleton(label: 'Reading the apps')
           else if (apps.isEmpty)
@@ -162,6 +167,7 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
               message: query.isEmpty
                   ? 'Try System apps or All.'
                   : 'Search looks at names and packages.',
+              compact: query.isNotEmpty,
             )
           else ...[
             for (final a in apps)
@@ -190,14 +196,14 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
           : !a.enabled
           ? 'disabled'
           : null,
-      valueColor: running ? OmniColors.accent : OmniColors.muted,
+      valueColor: running ? OmniPalette.of(context).accent : OmniColors.muted,
       chevron: true,
       onTap: () => _openApp(a),
     );
   }
 
   Future<void> _openApp(TvApp app) async {
-    final changed = await showOmniSheet<bool>(
+    final changed = await SheetTemplate.show<bool>(
       context,
       builder: (_) => AppSheet(tv: tv, app: app),
     );
@@ -262,22 +268,18 @@ class _AppSheetState extends State<AppSheet> {
     if (reload && mounted) Navigator.of(context).pop(true);
   }
 
-  Future<void> _showInfo(Json result) => showDialog<void>(
-    context: context,
-    builder: (context) {
+  Future<void> _showInfo(Json result) => SheetTemplate.show<void>(
+    context,
+    builder: (_) {
       final info = TvCalls.appInfoOf(result);
-      return AlertDialog(
-        title: Text(_name),
-        content: SingleChildScrollView(
-          child: SelectableText(
+      return SheetTemplate(
+        title: _name,
+        subtitle: 'App info',
+        children: (_) => [
+          SelectableText(
             [for (final e in info.entries) '${e.key}: ${e.value}'].join('\n'),
             key: const ValueKey('app-info-text'),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+            style: OmniText.mono,
           ),
         ],
       );
@@ -300,7 +302,7 @@ class _AppSheetState extends State<AppSheet> {
       onTap: _busy ? null : onTap,
     );
 
-    return OmniSheet(
+    return SheetTemplate(
       title: _name,
       subtitle: [
         app.package,
@@ -309,7 +311,7 @@ class _AppSheetState extends State<AppSheet> {
         if (app.system) 'system app',
         if (!app.enabled) 'disabled',
       ].join(' · '),
-      children: [
+      children: (context) => [
         if (_busy)
           const Padding(
             padding: EdgeInsets.only(bottom: OmniSpace.sm),
@@ -387,7 +389,7 @@ class _AppSheetState extends State<AppSheet> {
                 AppAction.uninstall,
                 ask: 'Uninstall $_name?',
                 body:
-                    'The app and all its data leave the TV: sign-ins, '
+                    'The app and all its data leave the ${widget.tv.noun}: sign-ins, '
                     'downloads and settings. Installing it again starts '
                     'fresh.',
                 done: 'Uninstalled $_name',
@@ -410,7 +412,7 @@ class _AppSheetState extends State<AppSheet> {
           icon: OmniIcons.permissions,
           onPressed: _busy
               ? null
-              : () => showOmniSheet<void>(
+              : () => SheetTemplate.show<void>(
                   context,
                   builder: (_) => _PermissionsSheet(tv: widget.tv, app: app),
                 ),
@@ -523,22 +525,21 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
       for (final p in all ?? const <TvPermission>[])
         if (_showAll || p.runtime) p,
     ];
-    return OmniSheet(
+    return SheetTemplate(
       title: 'Permissions',
       subtitle: appNameOf(widget.app.package, label: widget.app.label),
-      children: [
-        if (_error case final e?)
-          OmniBanner.error(e)
-        else if (all == null)
-          const Padding(
-            padding: EdgeInsets.all(OmniSpace.lg),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else ...[
+      state: OmniLoad.flags(
+        loading: all == null,
+        error: _error,
+        onRetry: _load,
+      ),
+      children: (context) => [
+        if (all != null) ...[
           if (shown.isEmpty)
-            const Text(
-              'It asks for nothing that can be turned off.',
-              style: OmniText.caption,
+            const OmniEmptyState(
+              icon: OmniIcons.permissions,
+              title: 'It asks for nothing that can be turned off',
+              compact: true,
             ),
           for (final p in shown)
             OmniListRow(

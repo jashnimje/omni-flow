@@ -116,14 +116,16 @@ class _TvPageState extends ConsumerState<TvPage> {
 
   /// The tabs that are not chips, as a sheet to pick one from.
   Future<void> _more() async {
-    final picked = await showOmniSheet<TvTab>(
+    final picked = await showPickerSheet<TvTab>(
       context,
-      builder: (sheet) => OmniSheet(
-        title: 'More',
-        children: [
+      title: 'More',
+      selected: _tab,
+      sections: [
+        PickerSection([
           for (final t in TvTab.moreFor(phone: _phone))
-            OmniListRow(
+            PickerItem(
               key: ValueKey('tv-more-${t.name}'),
+              value: t,
               icon: switch (t) {
                 TvTab.system => OmniIcons.system,
                 TvTab.files => OmniIcons.storage,
@@ -141,14 +143,9 @@ class _TvPageState extends ConsumerState<TvPage> {
                   'Back, Home, Recents, volume, notifications and lock',
                 _ => 'run commands on the ${tv.noun}, for experts',
               },
-              trailing: _tab == t
-                  ? const Icon(OmniIcons.check, color: OmniColors.accent)
-                  : null,
-              chevron: _tab != t,
-              onTap: () => Navigator.of(sheet).pop(t),
             ),
-        ],
-      ),
+        ]),
+      ],
     );
     if (picked != null && mounted) _open(picked);
   }
@@ -170,14 +167,20 @@ class _TvPageState extends ConsumerState<TvPage> {
       ?.where((d) => d['id'] == widget.id)
       .firstOrNull;
 
+  /// The app can pair it again itself (not a code shown on the TV).
+  bool get _pairable => switch (_device) {
+    final d? => pairsInApp(d) && !TvCalls.pairsWithCode(d),
+    null => false,
+  };
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: tv,
     builder: (context, _) {
       final on = tv.state.isOn;
-      return OmniPage(
+      final palette = OmniPalette.of(context);
+      return DetailPage.custom(
         title: widget.name,
-        padded: false,
         actions: [
           OmniIconAction(
             key: const ValueKey('tv-header-power'),
@@ -185,7 +188,7 @@ class _TvPageState extends ConsumerState<TvPage> {
             label: _phone
                 ? (on ? 'Lock the phone' : 'Wake the phone')
                 : (on ? 'Put the TV to sleep' : 'Wake the TV'),
-            color: on ? OmniColors.accent : OmniColors.muted,
+            color: on ? palette.accent : OmniColors.muted,
             onPressed: () => tv.key(on ? Keycodes.sleep : Keycodes.wakeup),
           ),
           if (_device case final device?)
@@ -193,11 +196,11 @@ class _TvPageState extends ConsumerState<TvPage> {
               key: const ValueKey('tv-header-device'),
               icon: OmniIcons.more,
               label: 'Room, name and settings',
-              onPressed: () => showOmniSheet<void>(
+              onPressed: () => SheetTemplate.show<void>(
                 context,
-                builder: (_) => OmniSheet(
+                builder: (_) => SheetTemplate(
                   title: widget.name,
-                  children: [
+                  children: (_) => [
                     UsedInSection(device: DeviceView(device)),
                     DeviceSection(device: DeviceView(device)),
                   ],
@@ -205,82 +208,64 @@ class _TvPageState extends ConsumerState<TvPage> {
               ),
             ),
         ],
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: OmniSpace.screenPadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (tv.offline case final reason?)
-                    OmniBanner.error(
-                      key: const ValueKey('tv-offline'),
-                      tv.needsPairing
-                          ? reason
-                          : _phone
-                          ? '$reason Wireless debugging turns off when the '
-                                'phone restarts or changes Wi-Fi, so turn it '
-                                'on again on that phone.'
-                          : '$reason It may be asleep, switched off at the '
-                                'wall, or on another Wi-Fi.',
-                      actionLabel: 'Retry',
-                      onAction: tv.refresh,
-                    ),
-                  if (_device case final device?
-                      when tv.offline != null &&
-                          pairsInApp(device) &&
-                          !TvCalls.pairsWithCode(device))
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-                      child: OmniButton.ghost(
-                        key: const ValueKey('tv-pair'),
-                        label: 'Pair again',
-                        icon: OmniIcons.retry,
-                        onPressed: () => showPairDevice(context, device),
-                      ),
-                    ),
-                  TvHeader(tv: tv),
-                  SingleChildScrollView(
-                    key: const ValueKey('tv-tabs'),
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (final t in TvTab.mainFor(phone: _phone)) ...[
-                          OmniFilterChip(
-                            key: ValueKey('tv-tab-${t.name}'),
-                            label: t.label,
-                            selected: _tab == t,
-                            onTap: () => _open(t),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        // Names the tab it is showing, so it is clear
-                        // where you are.
-                        OmniFilterChip(
-                          key: const ValueKey('tv-tab-more'),
-                          label: _tab.isMainFor(phone: _phone)
-                              ? 'More'
-                              : 'More: ${_tab.label}',
-                          icon: OmniIcons.more,
-                          selected: !_tab.isMainFor(phone: _phone),
-                          onTap: _more,
-                        ),
-                      ],
-                    ),
+        banners: [
+          // One banner, one action: Pair again when the app can pair it,
+          // else Retry.
+          if (tv.offline case final reason?)
+            OmniBanner.error(
+              key: const ValueKey('tv-offline'),
+              tv.needsPairing
+                  ? reason
+                  : _phone
+                  ? '$reason Wireless debugging turns off when the '
+                        'phone restarts or changes Wi-Fi, so turn it '
+                        'on again on that phone.'
+                  : '$reason It may be asleep, switched off at the '
+                        'wall, or on another Wi-Fi.',
+              actionLabel: _pairable ? 'Pair again' : 'Retry',
+              onAction: _pairable
+                  ? () => showPairDevice(context, _device!)
+                  : tv.refresh,
+            ),
+        ],
+        hero: TvHeader(tv: tv),
+        // Start-aligned, so the row does not jump as the More chip's
+        // name changes length.
+        tabs: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: SingleChildScrollView(
+            key: const ValueKey('tv-tabs'),
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final t in TvTab.mainFor(phone: _phone)) ...[
+                  OmniFilterChip(
+                    key: ValueKey('tv-tab-${t.name}'),
+                    label: t.label,
+                    selected: _tab == t,
+                    onTap: () => _open(t),
                   ),
+                  const SizedBox(width: OmniSpace.sm),
                 ],
-              ),
+                // Names the tab it is showing, so it is clear where you are.
+                OmniFilterChip(
+                  key: const ValueKey('tv-tab-more'),
+                  label: _tab.isMainFor(phone: _phone)
+                      ? 'More'
+                      : 'More: ${_tab.label}',
+                  icon: OmniIcons.more,
+                  selected: !_tab.isMainFor(phone: _phone),
+                  onTap: _more,
+                ),
+              ],
             ),
-            Expanded(
-              child: IndexedStack(
-                index: _tab.index,
-                children: [
-                  for (final t in TvTab.values)
-                    _opened.contains(t) ? _body(t) : const SizedBox.shrink(),
-                ],
-              ),
-            ),
+          ),
+        ),
+        body: (context) => IndexedStack(
+          index: _tab.index,
+          children: [
+            for (final t in TvTab.values)
+              _opened.contains(t) ? _body(t) : const SizedBox.shrink(),
           ],
         ),
       );
@@ -305,7 +290,14 @@ class TvHeader extends StatelessWidget {
       final name = tv.appName;
       final playing = playingLabel(s.playing);
       return OmniCard(
-        padding: const EdgeInsets.fromLTRB(12, 10, 4, 6),
+        // The detail template puts the gap under the hero.
+        margin: EdgeInsets.zero,
+        padding: const EdgeInsets.fromLTRB(
+          OmniSpace.md,
+          OmniSpace.gap,
+          OmniSpace.xs,
+          OmniSpace.xs,
+        ),
         child: Row(
           children: [
             if (app != null && name != null && s.isOn)

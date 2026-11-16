@@ -53,33 +53,3 @@ class _BreathingMarkState extends State<BreathingMark>
     child: OmniMark(size: widget.size),
   );
 }
-
-/// A friendly empty state: the breathing mark, a line, and what to do.
-class FunEmptyState extends StatelessWidget {
-  const FunEmptyState({
-    super.key,
-    required this.title,
-    required this.body,
-    this.action,
-  });
-
-  final String title;
-  final String body;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: OmniSpace.xl),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const BreathingMark(),
-        const SizedBox(height: OmniSpace.md),
-        Text(title, style: OmniText.bodyStrong, textAlign: TextAlign.center),
-        const SizedBox(height: OmniSpace.xs),
-        Text(body, style: OmniText.caption, textAlign: TextAlign.center),
-        if (action != null) ...[const SizedBox(height: OmniSpace.md), action!],
-      ],
-    ),
-  );
-}

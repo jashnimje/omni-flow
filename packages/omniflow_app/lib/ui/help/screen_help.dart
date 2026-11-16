@@ -19,9 +19,9 @@ const screenHelp = <HelpScreen, ({String title, List<HelpSection> sections})>{
       (
         heading: 'What you see',
         body:
-            'Your devices, room by room. Tap a tile to switch it, hold it for '
-            'more. The line under the greeting says whether you are home, how '
-            'many things are on and the mode the house is in.',
+            'Your devices, room by room. Tap a tile to open it, tap its icon '
+            'to switch it, and hold it for quick controls. The line under the '
+            'greeting says whether you are home and the mode the house is in.',
       ),
       (
         heading: 'Modes',

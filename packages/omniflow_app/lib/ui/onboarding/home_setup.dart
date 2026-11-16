@@ -196,90 +196,155 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
     final progress = ref.watch(setupProgressProvider)?.over(widget.steps);
     final step = _current(progress);
     final house = ref.watch(houseShownProvider);
-    return OmniPage(
+    final steps = widget.steps;
+    final total = steps.length;
+    final at = step == null ? total : steps.indexOf(step) + 1;
+    final done = step != null && (progress?.done.contains(step) ?? false);
+    final (heading, why) = _words(step, progress);
+    final (label, key, action) = _primary(step, progress);
+    return StepFlow(
+      key: ValueKey('setup-${step?.name ?? 'done'}'),
       title: widget.steps.length < SetupStep.values.length && house != null
           ? 'Set up ${house.name}'
           : 'Set up your home',
-      actions: [
-        TextButton(
-          key: const ValueKey('setup-not-now'),
-          onPressed: () => Navigator.of(context).pop(),
-          style: TextButton.styleFrom(
-            minimumSize: const Size(OmniSpace.target, OmniSpace.target),
-          ),
-          child: const Text('Not now'),
-        ),
+      count: total,
+      current: at,
+      heading: heading,
+      why: why,
+      state: progress == null
+          ? const OmniLoad.loading()
+          : const OmniLoad.data(),
+      onBack: step == null || step == steps.first || _busy
+          ? null
+          : () => _back(step),
+      onSkip: step == null || done || _busy ? null : () => _go(step),
+      primaryLabel: label,
+      primaryKey: key,
+      onPrimary: _busy ? null : action,
+      missing: step == SetupStep.you
+          ? 'Type your name first.'
+          : step == SetupStep.presence
+          ? 'Connect this phone to your home Wi-Fi first, or skip.'
+          : null,
+      children: (context) => [
+        ...switch (step) {
+          null => const <Widget>[],
+          SetupStep.you => _youBody(progress),
+          SetupStep.home => _homeBody(progress),
+          SetupStep.presence => _presenceBody(progress),
+          SetupStep.device => _deviceBody(progress),
+          SetupStep.automation => _automationBody(progress),
+        },
       ],
-      body: progress == null
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              key: ValueKey('setup-${step?.name ?? 'done'}'),
-              children: [
-                _StepBar(step: step, progress: progress),
-                const SizedBox(height: OmniSpace.md),
-                ...switch (step) {
-                  null => _doneBody(progress),
-                  SetupStep.you => _youBody(progress),
-                  SetupStep.home => _homeBody(progress),
-                  SetupStep.presence => _presenceBody(progress),
-                  SetupStep.device => _deviceBody(progress),
-                  SetupStep.automation => _automationBody(progress),
-                },
-                if (step != null) ...[
-                  const SizedBox(height: OmniSpace.sm),
-                  Row(
-                    children: [
-                      if (step != widget.steps.first)
-                        TextButton(
-                          key: const ValueKey('setup-back'),
-                          onPressed: _busy ? null : () => _back(step),
-                          child: const Text('Back'),
-                        ),
-                      const Spacer(),
-                      TextButton(
-                        key: const ValueKey('setup-skip'),
-                        onPressed: _busy ? null : () => _go(step),
-                        child: Text(
-                          progress.done.contains(step) ? 'Next' : 'Skip',
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
     );
   }
 
-  Widget _title(String title, String why) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Semantics(header: true, child: Text(title, style: OmniText.titleMedium)),
-      const SizedBox(height: 4),
-      Text(why, style: OmniText.body),
-      const SizedBox(height: OmniSpace.md),
-    ],
+  /// The step's title and why line.
+  (String, String) _words(SetupStep? step, SetupProgress? p) => switch (step) {
+    SetupStep.you => (
+      'Who are you?',
+      'Your name, so automations like "when I get home" know who is meant, '
+          'and Home can greet you.',
+    ),
+    SetupStep.home => (
+      'Where is home?',
+      'Sunrise and sunset, the weather and Follow the sun all need to know '
+          'roughly where home is. It stays on this phone.',
+    ),
+    SetupStep.presence => (
+      'How does the phone know you are home?',
+      'When the phone joins your home Wi-Fi, you are home. When it leaves '
+          'for a few minutes, you are away. Android shows the Wi-Fi name '
+          'only to apps allowed to use location.',
+    ),
+    SetupStep.device => (
+      'Add your first device',
+      'A light, plug, TV or speaker on your Wi-Fi. OmniFlow looks for them '
+          'first, and you can add one by hand.',
+    ),
+    SetupStep.automation => (
+      'Make your first automation',
+      'Something that happens by itself, like turn on the lamp when I get '
+          'home, or switch everything off at bedtime.',
+    ),
+    null when p?.complete ?? false => (
+      'Your home is set up',
+      'You can change any of it in Settings.',
+    ),
+    null => (
+      'That is all for now',
+      'You did ${p?.count ?? 0} of ${widget.steps.length}. Settings, '
+          'Set up your home picks up where you stopped.',
+    ),
+  };
+
+  /// The step's one action in the bottom bar: what it does while the step
+  /// is open, Next once it is done.
+  (String, Key, VoidCallback?) _primary(SetupStep? step, SetupProgress? p) {
+    if (step == null) {
+      return (
+        'Done',
+        const ValueKey('setup-finish'),
+        () => Navigator.of(context).pop(),
+      );
+    }
+    final next = ('Next', const ValueKey('setup-next'), () => _go(step));
+    if (p?.done.contains(step) ?? false) return next;
+    return switch (step) {
+      SetupStep.you => _youSave,
+      SetupStep.home => (
+        'Set home location',
+        const ValueKey('setup-home-location'),
+        () => openHomeLocation(context),
+      ),
+      SetupStep.presence => (
+        _wifi == null ? 'Use this Wi-Fi' : 'Use $_wifi as home Wi-Fi',
+        const ValueKey('setup-use-wifi'),
+        _wifi == null ? null : () => _useWifi(_wifi!),
+      ),
+      SetupStep.device => (
+        'Add a device',
+        const ValueKey('setup-add-device'),
+        () => openAddThing(context),
+      ),
+      SetupStep.automation => (
+        'Make an automation',
+        const ValueKey('setup-new-automation'),
+        () => openNewAutomation(context),
+      ),
+    };
+  }
+
+  (String, Key, VoidCallback?) get _youSave => (
+    'Save',
+    const ValueKey('setup-name-save'),
+    _name.text.trim().isEmpty ? null : _addPerson,
   );
+
+  /// The Wi-Fi this phone is on now, as the phone thing reports it.
+  String? get _wifi {
+    final phone = (ref.watch(devicesProvider).value ?? const <Json>[])
+        .map(DeviceView.new)
+        .where((d) => d.driver == 'phone')
+        .firstOrNull;
+    final ssid = phone?.state['wifi_ssid'];
+    return ssid is String && ssid.isNotEmpty ? ssid : null;
+  }
 
   Widget _doneLine(String text, {Key? key}) => OmniBanner.info(text, key: key);
 
-  List<Widget> _youBody(SetupProgress p) {
+  List<Widget> _youBody(SetupProgress? p) {
     final people = (ref.watch(devicesProvider).value ?? const <Json>[])
         .where((d) => d['driver'] == 'person')
         .map((d) => '${d['name'] ?? d['id']}')
         .toList();
     return [
-      _title(
-        'Who are you?',
-        'Your name, so automations like "when I get home" know who is '
-            'meant, and Home can greet you.',
-      ),
       if (people.isNotEmpty)
         _doneLine(
           'You are set up as ${people.join(', ')}.',
           key: const ValueKey('setup-you-done'),
         )
-      else ...[
+      else
         TextField(
           key: const ValueKey('setup-name'),
           controller: _name,
@@ -288,58 +353,26 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
           onChanged: (_) => setState(() {}),
           onSubmitted: (_) => _addPerson(),
         ),
-        const SizedBox(height: OmniSpace.md),
-        OmniButton(
-          key: const ValueKey('setup-name-save'),
-          label: 'Save',
-          onPressed: _busy || _name.text.trim().isEmpty ? null : _addPerson,
-        ),
-      ],
     ];
   }
 
-  List<Widget> _homeBody(SetupProgress p) => [
-    _title(
-      'Where is home?',
-      'Sunrise and sunset, the weather and Follow the sun all need to know '
-          'roughly where home is. It stays on this phone.',
-    ),
-    if (p.done.contains(SetupStep.home))
+  List<Widget> _homeBody(SetupProgress? p) => [
+    if (p?.done.contains(SetupStep.home) ?? false) ...[
       _doneLine(
         'Home\'s location is set.',
         key: const ValueKey('setup-home-done'),
       ),
-    OmniButton(
-      key: const ValueKey('setup-home-location'),
-      label: p.done.contains(SetupStep.home)
-          ? 'Change home location'
-          : 'Set home location',
-      kind: p.done.contains(SetupStep.home)
-          ? OmniButtonKind.ghost
-          : OmniButtonKind.primary,
-      onPressed: _busy
-          ? null
-          : () async {
-              openHomeLocation(context);
-            },
-    ),
+      OmniButton.ghost(
+        key: const ValueKey('setup-home-change'),
+        label: 'Change home location',
+        onPressed: _busy ? null : () => openHomeLocation(context),
+      ),
+    ],
   ];
 
-  List<Widget> _presenceBody(SetupProgress p) {
+  List<Widget> _presenceBody(SetupProgress? p) {
     final access = ref.watch(phoneAccessStateProvider).value;
-    final phone = (ref.watch(devicesProvider).value ?? const <Json>[])
-        .map(DeviceView.new)
-        .where((d) => d.driver == 'phone')
-        .firstOrNull;
-    final ssid = phone?.state['wifi_ssid'];
-    final wifi = ssid is String && ssid.isNotEmpty ? ssid : null;
     return [
-      _title(
-        'How does the phone know you are home?',
-        'When the phone joins your home Wi-Fi, you are home. When it leaves '
-            'for a few minutes, you are away. Android shows the Wi-Fi name '
-            'only to apps allowed to use location.',
-      ),
       _PermissionRow(
         id: 'location',
         title: '1. Allow location',
@@ -357,18 +390,12 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
         onAllow: _busy ? null : () => _ask((a) => a.askLocationAlways()),
       ),
       const SizedBox(height: OmniSpace.sm),
-      if (p.done.contains(SetupStep.presence))
+      if (p?.done.contains(SetupStep.presence) ?? false)
         _doneLine(
           'Home has its Wi-Fi. Arriving and leaving now work.',
           key: const ValueKey('setup-presence-done'),
         )
-      else if (wifi != null)
-        OmniButton(
-          key: const ValueKey('setup-use-wifi'),
-          label: 'Use $wifi as home Wi-Fi',
-          onPressed: _busy ? null : () => _useWifi(wifi),
-        )
-      else
+      else if (_wifi == null)
         const Text(
           '3. Connect this phone to your home Wi-Fi, then come back here. '
           'The network shows here once Android lets OmniFlow see it.',
@@ -378,115 +405,35 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
     ];
   }
 
-  List<Widget> _deviceBody(SetupProgress p) => [
-    _title(
-      'Add your first device',
-      'A light, plug, TV or speaker on your Wi-Fi. OmniFlow looks for them '
-          'first, and you can add one by hand.',
-    ),
-    if (p.done.contains(SetupStep.device))
+  List<Widget> _deviceBody(SetupProgress? p) => [
+    if (p?.done.contains(SetupStep.device) ?? false) ...[
       _doneLine(
         'You have a device. Add more any time from Devices.',
         key: const ValueKey('setup-device-done'),
       ),
-    OmniButton(
-      key: const ValueKey('setup-add-device'),
-      label: 'Add a device',
-      icon: OmniIcons.add,
-      kind: p.done.contains(SetupStep.device)
-          ? OmniButtonKind.ghost
-          : OmniButtonKind.primary,
-      onPressed: _busy ? null : () => openAddThing(context),
-    ),
+      OmniButton.ghost(
+        key: const ValueKey('setup-add-another'),
+        label: 'Add another device',
+        icon: OmniIcons.add,
+        onPressed: _busy ? null : () => openAddThing(context),
+      ),
+    ],
   ];
 
-  List<Widget> _automationBody(SetupProgress p) => [
-    _title(
-      'Make your first automation',
-      'Something that happens by itself, like turn on the lamp when I get '
-          'home, or switch everything off at bedtime.',
-    ),
-    if (p.done.contains(SetupStep.automation))
+  List<Widget> _automationBody(SetupProgress? p) => [
+    if (p?.done.contains(SetupStep.automation) ?? false) ...[
       _doneLine(
         'You have an automation. Find it under Automations.',
         key: const ValueKey('setup-automation-done'),
       ),
-    OmniButton(
-      key: const ValueKey('setup-new-automation'),
-      label: 'Make an automation',
-      icon: OmniIcons.automations,
-      kind: p.done.contains(SetupStep.automation)
-          ? OmniButtonKind.ghost
-          : OmniButtonKind.primary,
-      onPressed: _busy ? null : () => openNewAutomation(context),
-    ),
-  ];
-
-  List<Widget> _doneBody(SetupProgress p) => [
-    _title(
-      p.complete ? 'Your home is set up' : 'That is all for now',
-      p.complete
-          ? 'You can change any of it in Settings.'
-          : 'You did ${p.count} of ${p.steps.length}. Settings, '
-                'Set up your home picks up where you stopped.',
-    ),
-    OmniButton(
-      key: const ValueKey('setup-finish'),
-      label: 'Done',
-      onPressed: () => Navigator.of(context).pop(),
-    ),
-  ];
-}
-
-class _StepBar extends StatelessWidget {
-  const _StepBar({required this.step, required this.progress});
-
-  final SetupStep? step;
-  final SetupProgress progress;
-
-  @override
-  Widget build(BuildContext context) {
-    final steps = progress.steps;
-    final total = steps.length;
-    final at = step == null ? total : steps.indexOf(step!) + 1;
-    return Semantics(
-      label: step == null
-          ? '${progress.count} of $total steps done'
-          : 'Step $at of $total, ${progress.count} done',
-      excludeSemantics: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            step == null ? 'All steps' : 'Step $at of $total',
-            key: const ValueKey('setup-step-count'),
-            style: OmniText.caption,
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              for (final s in steps) ...[
-                Expanded(
-                  child: Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: progress.done.contains(s)
-                          ? OmniColors.accent
-                          : s == step
-                          ? OmniColors.muted
-                          : OmniColors.line,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                if (s != steps.last) const SizedBox(width: 4),
-              ],
-            ],
-          ),
-        ],
+      OmniButton.ghost(
+        key: const ValueKey('setup-new-another'),
+        label: 'Make another automation',
+        icon: OmniIcons.automations,
+        onPressed: _busy ? null : () => openNewAutomation(context),
       ),
-    );
-  }
+    ],
+  ];
 }
 
 class _PermissionRow extends StatelessWidget {

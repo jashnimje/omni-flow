@@ -34,16 +34,22 @@ class QuickSheet extends ConsumerWidget {
         ?.where((d) => d['id'] == id)
         .firstOrNull;
     if (json == null) {
-      return const OmniSheet(
+      return SheetTemplate(
         title: 'Not here any more',
-        children: [Text('This device was removed.', style: OmniText.caption)],
+        state: const OmniLoad.empty(),
+        empty: const OmniEmptyState(
+          icon: OmniIcons.info,
+          title: 'This device was removed.',
+          compact: true,
+        ),
+        children: (_) => const [],
       );
     }
     final d = DeviceView(json);
     final drivers = ref.watch(driversProvider).value ?? const {};
     final tv = kindOf(d) == DeviceKind.tv;
     final playing = tv ? TvState.ofDevice(json) : null;
-    return OmniSheet(
+    return SheetTemplate(
       key: ValueKey('quick-sheet-$id'),
       title: d.name,
       subtitle: tv
@@ -53,7 +59,7 @@ class QuickSheet extends ConsumerWidget {
               ?d.room,
             ].where((s) => s.isNotEmpty).join(' · '),
       trailing: hasMainPower(d) ? PowerSwitch(device: d) : null,
-      children: [
+      children: (context) => [
         if (!d.online && !tv)
           OmniBanner.error(
             'Not answering. It may be switched off at the wall, or on '

@@ -406,7 +406,7 @@ class _TvMouseState extends State<TvMouse> {
   Widget _button(String key, IconData icon, String label, VoidCallback onTap) =>
       Expanded(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3),
+          padding: const EdgeInsets.symmetric(horizontal: OmniSpace.xs),
           child: OmniButton.ghost(
             key: ValueKey(key),
             label: label,
@@ -423,7 +423,7 @@ class _TvMouseState extends State<TvMouse> {
     return AspectRatio(
       aspectRatio: _screen.width / _screen.height,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(OmniShape.md),
         child: ColoredBox(
           color: Colors.black,
           child: LayoutBuilder(
@@ -449,13 +449,13 @@ class _TvMouseState extends State<TvMouse> {
                 Positioned(
                   left: _pointer.dx * box.maxWidth - 2,
                   top: _pointer.dy * box.maxHeight - 2,
-                  child: const IgnorePointer(
+                  child: IgnorePointer(
                     child: Icon(
                       Icons.navigation_rounded,
-                      key: ValueKey('tv-mouse-pointer'),
+                      key: const ValueKey('tv-mouse-pointer'),
                       size: 22,
-                      color: OmniColors.accent,
-                      shadows: [Shadow(blurRadius: 3)],
+                      color: OmniPalette.of(context).accent,
+                      shadows: const [Shadow(blurRadius: 3)],
                     ),
                   ),
                 ),
@@ -514,9 +514,9 @@ class _TvMouseState extends State<TvMouse> {
               child: Container(
                 height: pad.height,
                 decoration: BoxDecoration(
-                  color: OmniColors.card,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: OmniColors.line),
+                  color: OmniPalette.of(context).card,
+                  borderRadius: BorderRadius.circular(OmniRadii.card),
+                  border: Border.all(color: OmniPalette.of(context).line),
                 ),
                 alignment: Alignment.center,
                 child: const Text(

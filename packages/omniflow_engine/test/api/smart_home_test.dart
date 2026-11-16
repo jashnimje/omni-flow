@@ -377,7 +377,7 @@ void main() {
             'targets': ['study'],
             'enabled': true,
           }))['message'],
-          contains('where home is'),
+          contains('where Home is'),
         );
         await ok('home.location.set', {'latitude': 51.5, 'longitude': -0.12});
         await ok('sunlight.set', {

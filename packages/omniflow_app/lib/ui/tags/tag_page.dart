@@ -5,11 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../rules/rule_spec.dart' show OnMode, OnTrigger;
+import '../../state/clock.dart';
 import '../../state/providers.dart';
 import '../automations/rule_editor.dart' show openRuleEditor;
 import '../design/design.dart';
 import '../shell/shell.dart';
-import '../tv/tv_widgets.dart' show askText;
 import 'write_tag_sheet.dart';
 
 /// Whether [device] is an NFC tag thing, which gets the tag page.
@@ -51,11 +51,8 @@ const _months = [
 
 String _day(DateTime t) => '${t.day} ${_months[t.month - 1]}';
 
-String _clock(DateTime t) =>
-    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-
 /// "Today 17:40", "Yesterday 09:12", "3 Nov 08:00".
-String whenText(DateTime t, {DateTime? now}) {
+String whenText(DateTime t, {DateTime? now, bool hour12 = false}) {
   final at = t.toLocal();
   final today = (now ?? DateTime.now()).toLocal();
   final midnight = DateTime(today.year, today.month, today.day);
@@ -64,7 +61,7 @@ String whenText(DateTime t, {DateTime? now}) {
       : !at.isBefore(DateTime(today.year, today.month, today.day - 1))
       ? 'Yesterday'
       : _day(at);
-  return '$day ${_clock(at)}';
+  return '$day ${timeOfDayText(hour12, at)}';
 }
 
 /// "04:A1:B2:C3" for the UID the engine keeps as hex.
@@ -154,33 +151,32 @@ class _TagPageState extends ConsumerState<TagPage> {
   ).then((_) => _load());
 
   Future<void> _more(Json device) async {
-    final choice = await showOmniSheet<String>(
+    final choice = await showPickerSheet<String>(
       context,
-      builder: (context) => OmniSheet(
-        title: '${device['name'] ?? widget.id}',
-        children: [
-          OmniListRow(
-            key: const ValueKey('tag-rename'),
+      title: '${device['name'] ?? widget.id}',
+      sections: const [
+        PickerSection([
+          PickerItem(
+            key: ValueKey('tag-rename'),
+            value: 'rename',
             icon: OmniIcons.edit,
             title: 'Rename',
-            onTap: () => Navigator.of(context).pop('rename'),
           ),
-          OmniListRow(
-            key: const ValueKey('tag-forget-card'),
+          PickerItem(
+            key: ValueKey('tag-forget-card'),
+            value: 'forget',
             icon: OmniIcons.retry,
             title: 'Use a different card',
             subtitle: 'The next card scanned with its link becomes this tag',
-            onTap: () => Navigator.of(context).pop('forget'),
           ),
-          OmniListRow(
-            key: const ValueKey('tag-remove'),
+          PickerItem(
+            key: ValueKey('tag-remove'),
+            value: 'remove',
             icon: OmniIcons.delete,
-            iconForeground: OmniColors.bad,
             title: 'Remove this tag',
-            onTap: () => Navigator.of(context).pop('remove'),
           ),
-        ],
-      ),
+        ]),
+      ],
     );
     if (!mounted) return;
     switch (choice) {
@@ -194,13 +190,11 @@ class _TagPageState extends ConsumerState<TagPage> {
   }
 
   Future<void> _rename(Json device) async {
-    final name = await askText(
+    final name = await showPromptSheet(
       context,
       title: 'Rename ${device['name']}',
       label: 'Name',
       initial: '${device['name'] ?? ''}',
-      action: 'Save',
-      validate: (t) => t.trim().isEmpty ? 'Enter a name' : null,
     );
     if (name == null || !mounted) return;
     final devices = ref.read(devicesProvider.notifier);
@@ -254,74 +248,75 @@ class _TagPageState extends ConsumerState<TagPage> {
 
   @override
   Widget build(BuildContext context) {
+    final devices = ref.watch(devicesProvider);
     final device = _device;
     if (device == null) {
-      return OmniPage(
+      return DetailPage(
         title: 'NFC tag',
-        body: ref.watch(devicesProvider).isLoading
-            ? const SizedBox.shrink()
-            : const OmniEmptyState(
-                icon: OmniIcons.tag,
-                title: 'This tag is not here any more',
-                message: 'It may have been removed.',
-              ),
+        state: OmniLoad.of(
+          devices,
+          isEmpty: (_) => true,
+          onRetry: () => ref.invalidate(devicesProvider),
+          error: 'The tags could not be read.',
+        ),
+        notFound: const OmniEmptyState(
+          icon: OmniIcons.tag,
+          title: 'This tag is not here any more',
+          message: 'It may have been removed.',
+        ),
+        children: (_) => const [],
       );
     }
     final view = DeviceView(device);
     final last = DateTime.tryParse('${view.state['last_scanned']}');
     final uid = (device['settings'] as Map? ?? const {})['uid'] as String?;
     final by = _readerName(view.state['last_source']);
-    return OmniPage(
-      title: view.name,
-      actions: [
-        OmniIconAction(
-          key: const ValueKey('tag-more'),
-          icon: OmniIcons.more,
-          label: 'More for this tag',
-          onPressed: () => _more(device),
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: DetailPage(
+        key: const ValueKey('tag-page'),
+        title: view.name,
+        actions: [
+          OmniIconAction(
+            key: const ValueKey('tag-more'),
+            icon: OmniIcons.more,
+            label: 'More for this tag',
+            onPressed: () => _more(device),
+          ),
+        ],
+        hero: OmniHeroCard(
+          key: const ValueKey('tag-hero'),
+          icon: OmniIcons.tag,
+          centered: true,
+          tone: last == null ? HeroTone.plain : HeroTone.accent,
+          title: last == null ? 'Not scanned yet' : 'Scanned ${agoText(last)}',
+          subtitle: [
+            if (by.isNotEmpty) 'by $by',
+            if (uid != null)
+              'card ${uidText(uid)}'
+            else
+              'no card yet: write one or scan it',
+          ].join(' · '),
         ),
-      ],
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          key: const ValueKey('tag-page'),
-          padding: const EdgeInsets.only(bottom: OmniSpace.xl),
-          children: [
-            OmniHeroCard(
-              key: const ValueKey('tag-hero'),
-              icon: OmniIcons.tag,
-              centered: true,
-              tone: last == null ? HeroTone.plain : HeroTone.accent,
-              title: last == null
-                  ? 'Not scanned yet'
-                  : 'Scanned ${agoText(last)}',
-              subtitle: [
-                if (by.isNotEmpty) 'by $by',
-                if (uid != null)
-                  'card ${uidText(uid)}'
-                else
-                  'no card yet: write one or scan it',
-              ].join(' · '),
-            ),
-            OmniButton.ghost(
-              key: const ValueKey('tag-write'),
-              label: 'Write to a new tag',
-              icon: OmniIcons.edit,
-              onPressed: () => _write(device),
-            ),
-            const OmniSectionHeader('When scanned'),
-            ..._usesList(),
-            const SizedBox(height: OmniSpace.sm),
-            OmniButton.ghost(
-              key: const ValueKey('tag-new-automation'),
-              label: 'Do something when scanned',
-              icon: OmniIcons.add,
-              onPressed: () => _newAutomation(device),
-            ),
-            const OmniSectionHeader('Recent scans'),
-            ..._scansList(),
-          ],
-        ),
+        children: (context) => [
+          OmniButton.ghost(
+            key: const ValueKey('tag-write'),
+            label: 'Write to a new tag',
+            icon: OmniIcons.edit,
+            onPressed: () => _write(device),
+          ),
+          const OmniSectionHeader('When scanned'),
+          ..._usesList(),
+          const SizedBox(height: OmniSpace.sm),
+          OmniButton.ghost(
+            key: const ValueKey('tag-new-automation'),
+            label: 'Do something when scanned',
+            icon: OmniIcons.add,
+            onPressed: () => _newAutomation(device),
+          ),
+          const OmniSectionHeader('Recent scans'),
+          ..._scansList(),
+        ],
       ),
     );
   }
@@ -329,7 +324,7 @@ class _TagPageState extends ConsumerState<TagPage> {
   List<Widget> _usesList() {
     final uses = _uses;
     if (uses == null) {
-      return const [_Loading(label: 'Reading automations')];
+      return const [OmniListSkeleton(rows: 1, label: 'Reading automations')];
     }
     if (!uses.ok) {
       return [
@@ -343,10 +338,11 @@ class _TagPageState extends ConsumerState<TagPage> {
     final list = uses.value!;
     if (list.isEmpty) {
       return const [
-        Text(
-          'Nothing happens yet when it is scanned.',
+        OmniEmptyState(
           key: ValueKey('tag-no-automations'),
-          style: OmniText.caption,
+          icon: OmniIcons.automations,
+          title: 'Nothing happens yet when it is scanned.',
+          compact: true,
         ),
       ];
     }
@@ -376,16 +372,28 @@ class _TagPageState extends ConsumerState<TagPage> {
 
   List<Widget> _scansList() {
     final scans = _scans;
-    if (scans == null) return const [_Loading(label: 'Reading scans')];
+    if (scans == null) {
+      return const [OmniListSkeleton(rows: 2, label: 'Reading scans')];
+    }
     final list = scans.value ?? const <HistoryEntry>[];
-    if (!scans.ok || list.isEmpty) {
+    if (!scans.ok) {
       return [
-        Text(
-          scans.ok
-              ? 'No scans yet. Hold the card to the phone to try it.'
-              : 'Could not read the scans: ${scans.failure!.message}',
+        OmniBanner.error(
           key: const ValueKey('tag-no-scans'),
-          style: OmniText.caption,
+          'Could not read the scans: ${scans.failure!.message}',
+          actionLabel: 'Try again',
+          onAction: _load,
+        ),
+      ];
+    }
+    if (list.isEmpty) {
+      return const [
+        OmniEmptyState(
+          key: ValueKey('tag-no-scans'),
+          icon: OmniIcons.tag,
+          title: 'No scans yet',
+          message: 'Hold the card to the phone to try it.',
+          compact: true,
         ),
       ];
     }
@@ -394,22 +402,13 @@ class _TagPageState extends ConsumerState<TagPage> {
         OmniListRow(
           key: ValueKey('tag-scan-$i'),
           title: [
-            whenText(DateTime.tryParse('${s.value}')?.toLocal() ?? s.at),
+            whenText(
+              DateTime.tryParse('${s.value}')?.toLocal() ?? s.at,
+              hour12: ref.watch(hour12Provider),
+            ),
             ?_sourceAt(s.at),
           ].join(' · '),
         ),
     ];
   }
-}
-
-class _Loading extends StatelessWidget {
-  const _Loading({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: OmniSpace.md),
-    child: Semantics(label: label, child: const OmniProgressBar(height: 2)),
-  );
 }

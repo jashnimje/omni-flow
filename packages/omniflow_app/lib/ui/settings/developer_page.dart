@@ -1,4 +1,7 @@
 import 'dart:convert';
+
+import '../../state/clock.dart' show hour12Provider;
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -37,37 +40,35 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
   var _tab = DeveloperTab.packets;
 
   @override
-  Widget build(BuildContext context) => OmniPage(
+  Widget build(BuildContext context) => ListPage.custom(
     title: 'Developer',
-    body: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        OmniSegmented<DeveloperTab>(
-          key: const ValueKey('developer-tabs'),
-          segments: const [
-            OmniSegment(DeveloperTab.packets, 'Packets'),
-            OmniSegment(DeveloperTab.runs, 'Run log'),
-            OmniSegment(DeveloperTab.drivers, 'Drivers'),
-            OmniSegment(DeveloperTab.engine, 'Engine'),
-          ],
-          selected: _tab,
-          onChanged: (t) => setState(() => _tab = t),
-        ),
-        Expanded(
-          child: switch (_tab) {
-            DeveloperTab.packets => Inspector(filter: widget.filter),
-            DeveloperTab.runs => const _RunLog(),
-            DeveloperTab.drivers => const _Drivers(),
-            DeveloperTab.engine => const _Engine(),
-          },
-        ),
+    filters: OmniSegmented<DeveloperTab>(
+      key: const ValueKey('developer-tabs'),
+      segments: const [
+        OmniSegment(DeveloperTab.packets, 'Packets'),
+        OmniSegment(DeveloperTab.runs, 'Run log'),
+        OmniSegment(DeveloperTab.drivers, 'Drivers'),
+        OmniSegment(DeveloperTab.engine, 'Engine'),
       ],
+      selected: _tab,
+      onChanged: (t) => setState(() => _tab = t),
     ),
+    body: (context, padding) => switch (_tab) {
+      DeveloperTab.packets => Padding(
+        padding: OmniSpace.screenPadding,
+        child: Inspector(filter: widget.filter),
+      ),
+      DeveloperTab.runs => _RunLog(padding: padding),
+      DeveloperTab.drivers => _Drivers(padding: padding),
+      DeveloperTab.engine => _Engine(padding: padding),
+    },
   );
 }
 
 class _RunLog extends ConsumerWidget {
-  const _RunLog();
+  const _RunLog({required this.padding});
+
+  final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -76,7 +77,12 @@ class _RunLog extends ConsumerWidget {
       for (final a in ref.watch(summariesProvider).value ?? const [])
         a.id: a.name,
     };
-    if (runs == null) return const SizedBox();
+    if (runs == null) {
+      return ListView(
+        padding: padding,
+        children: const [OmniListSkeleton(label: 'Loading the run log')],
+      );
+    }
     if (runs.isEmpty) {
       return const OmniEmptyState(
         icon: OmniIcons.automations,
@@ -84,20 +90,22 @@ class _RunLog extends ConsumerWidget {
         message: 'Each time an automation runs it shows here.',
       );
     }
+    final accent = OmniPalette.of(context).accent;
     return ListView(
       key: const ValueKey('run-log'),
+      padding: padding,
       children: [
         for (final r in runs)
           OmniListRow(
             key: ValueKey('run-${r.id}'),
             leading: Icon(
               r.ok ? AreaIcons.ok : AreaIcons.failed,
-              color: r.ok ? OmniColors.accent : OmniColors.bad,
+              color: r.ok ? accent : OmniColors.bad,
               semanticLabel: r.ok ? 'Worked' : 'Failed',
             ),
             title: names[r.automationId] ?? r.automationId,
             subtitle: [
-              when(r.startedAt),
+              when(r.startedAt, hour12: ref.watch(hour12Provider)),
               '${r.steps.length} step${r.steps.length == 1 ? '' : 's'}',
               if (r.duration case final d?)
                 '${(d.inMilliseconds / 1000).toStringAsFixed(1)} s',
@@ -115,7 +123,9 @@ class _RunLog extends ConsumerWidget {
 }
 
 class _Drivers extends ConsumerWidget {
-  const _Drivers();
+  const _Drivers({required this.padding});
+
+  final EdgeInsets padding;
 
   Future<void> _register(WidgetRef ref) async {
     final files = ref.read(phoneFilesProvider);
@@ -149,6 +159,7 @@ class _Drivers extends ConsumerWidget {
           ..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
     return ListView(
       key: const ValueKey('drivers-list'),
+      padding: padding,
       children: [
         OmniButton.ghost(
           key: const ValueKey('driver-register'),
@@ -175,14 +186,22 @@ class _Drivers extends ConsumerWidget {
 }
 
 class _Engine extends ConsumerWidget {
-  const _Engine();
+  const _Engine({required this.padding});
+
+  final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(engineStatusProvider);
     final s = status.value;
     final hubError = ref.watch(hubErrorProvider);
-    if (s == null) return const SizedBox();
+    if (s == null) {
+      return ListView(
+        padding: padding,
+        children: const [OmniListSkeleton(rows: 4, label: 'Asking the engine')],
+      );
+    }
+    final accent = OmniPalette.of(context).accent;
     final issues = [
       for (final i in (s['loadIssues'] as List? ?? const []))
         if (i is Map) Map<String, Object?>.from(i),
@@ -192,13 +211,12 @@ class _Engine extends ConsumerWidget {
       onRefresh: () async => ref.invalidate(engineStatusProvider),
       child: ListView(
         key: const ValueKey('engine-status'),
+        padding: padding,
         children: [
           OmniListRow(
             title: 'Hub',
             value: s['hubRunning'] == true ? 'running' : 'stopped',
-            valueColor: s['hubRunning'] == true
-                ? OmniColors.accent
-                : OmniColors.warn,
+            valueColor: s['hubRunning'] == true ? accent : OmniColors.warn,
           ),
           if (hubError != null)
             OmniListRow(
@@ -210,7 +228,7 @@ class _Engine extends ConsumerWidget {
           OmniListRow(
             title: 'Load issues',
             value: '${issues.length}',
-            valueColor: issues.isEmpty ? OmniColors.accent : OmniColors.warn,
+            valueColor: issues.isEmpty ? accent : OmniColors.warn,
           ),
           for (final i in issues)
             OmniListRow(

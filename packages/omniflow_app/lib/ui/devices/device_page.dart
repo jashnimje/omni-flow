@@ -10,6 +10,7 @@ import 'capability_control.dart' show CapabilityControl, isHighRiskCapability;
 import 'device_controls.dart';
 import 'device_sections.dart';
 import 'device_text.dart';
+import 'open_device.dart' show DeviceGone;
 import 'smart_home_sections.dart';
 
 /// 3.2: one layout for every simple device. A hero with its main state and
@@ -37,6 +38,31 @@ class DevicePage extends ConsumerWidget {
     'event' => 2,
     _ => 1,
   };
+
+  /// [caps] as Controls (switches and the rest), Actions and Events.
+  static List<(String, List<Json>)> _groups(List<Json> caps) => [
+    (
+      'Controls',
+      [
+        for (final c in caps)
+          if (!{'action', 'exec', 'event'}.contains(c['type'])) c,
+      ],
+    ),
+    (
+      'Actions',
+      [
+        for (final c in caps)
+          if (c['type'] == 'action' || c['type'] == 'exec') c,
+      ],
+    ),
+    (
+      'Events',
+      [
+        for (final c in caps)
+          if (c['type'] == 'event') c,
+      ],
+    ),
+  ];
 
   static String _heroTitle(DeviceView d) {
     if (_isPhone(d)) {
@@ -86,7 +112,9 @@ class DevicePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final d = liveDevice(ref, id);
-    if (d == null) return const OmniPage(title: 'Device', body: SizedBox());
+    if (d == null) {
+      return DeviceGone(loading: ref.watch(devicesProvider).isLoading);
+    }
     ref.listen(
       devicesProvider.select(
         (v) => v.value?.where((j) => j['id'] == id).firstOrNull?['state'],
@@ -107,35 +135,32 @@ class DevicePage extends ConsumerWidget {
           if (c['type'] == 'sensor') c,
     ];
     final lit = phone ? d.state['screen_on'] == true : shownOn(ref, d);
-    return OmniPage(
+    return DetailPage(
+      key: ValueKey('device-page-$id'),
       title: d.name,
       actions: [
         FavouriteStar(device: d),
         DeviceMenu(device: d, onRemove: () => removeDevice(context, ref, d)),
       ],
-      body: ListView(
-        key: ValueKey('device-page-$id'),
-        padding: const EdgeInsets.only(top: OmniSpace.xs),
-        children: [
-          // What the engine says the device refuses commands without (a
-          // WiZ bulb's home key), with the setup step that asks for it.
-          if (d.json['problem'] case {'message': final String message})
-            OmniBanner.warning(
-              message,
-              key: ValueKey('device-problem-$id'),
-              actionLabel: 'Add it',
-              onAction: () => openSetup(context, d.json),
-            ),
-          if (!d.online)
-            OfflineHelp(device: d)
-          else ...[
-            if (d.capabilities.any(isHighRiskCapability))
-              OmniBanner.warning(
-                'Some controls run commands on ${d.host ?? d.name}. OmniFlow '
-                'asks before each one.',
-                key: ValueKey('high-risk-$id'),
-              ),
-            OmniHeroCard(
+      banners: [
+        // What the engine says the device refuses commands without (a
+        // WiZ bulb's home key), with the setup step that asks for it.
+        if (d.json['problem'] case {'message': final String message})
+          OmniBanner.warning(
+            message,
+            key: ValueKey('device-problem-$id'),
+            actionLabel: 'Add it',
+            onAction: () => openSetup(context, d.json),
+          ),
+        if (d.online && !phone && d.capabilities.any(isHighRiskCapability))
+          OmniBanner.warning(
+            'Some controls run commands on ${d.host ?? d.name}. OmniFlow '
+            'asks before each one.',
+            key: ValueKey('high-risk-$id'),
+          ),
+      ],
+      hero: d.online
+          ? OmniHeroCard(
               key: ValueKey('device-hero-$id'),
               title: _heroTitle(d),
               subtitle: _heroSubtitle(d),
@@ -148,25 +173,40 @@ class DevicePage extends ConsumerWidget {
                       onPressed: () => togglePower(ref, d),
                     )
                   : null,
-            ),
-            LightControls(device: d),
-            if (others.isNotEmpty) ...[
-              const OmniSectionHeader('Controls'),
-              for (final c in others)
+            )
+          : null,
+      children: (context) => [
+        if (!d.online)
+          OfflineHelp(device: d)
+        else ...[
+          LightControls(device: d),
+          // Grouped by what each does, so a device with many (the phone)
+          // reads as sections rather than one long stack.
+          for (final (title, group) in _groups(others))
+            if (group.isNotEmpty) ...[
+              OmniSectionHeader(title),
+              if (title == 'Events')
+                const Padding(
+                  padding: EdgeInsets.only(bottom: OmniSpace.xs),
+                  child: Text(
+                    'Things it does. Each can start an automation.',
+                    style: OmniText.caption,
+                  ),
+                ),
+              for (final c in group)
                 CapabilityControl(device: d.json, capability: c),
             ],
-            if (readings.isNotEmpty) ...[
-              const OmniSectionHeader('Readings'),
-              for (final c in readings)
-                CapabilityControl(device: d.json, capability: c),
-            ],
+          if (readings.isNotEmpty) ...[
+            const OmniSectionHeader('Readings'),
+            for (final c in readings)
+              CapabilityControl(device: d.json, capability: c),
           ],
-          if (d.online) DeviceSmartSections(device: d),
-          UsedInSection(device: d),
-          if (d.online) RecentSection(device: d),
-          DeviceSection(device: d),
         ],
-      ),
+        if (d.online) DeviceSmartSections(device: d),
+        UsedInSection(device: d),
+        if (d.online) RecentSection(device: d),
+        DeviceSection(device: d),
+      ],
     );
   }
 }

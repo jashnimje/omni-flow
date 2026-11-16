@@ -42,6 +42,7 @@ class RoomsPage extends ConsumerWidget {
           : 'Its ${r.deviceCount} device${r.deviceCount == 1 ? '' : 's'} '
                 'stay, in no room.',
       action: 'Remove',
+      destructive: true,
     );
     if (!ok) return;
     final removed = await ref.read(engineApiProvider).removeRoom(r.id);
@@ -64,55 +65,61 @@ class RoomsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final rooms = ref.watch(roomsProvider);
-    final list = rooms.value;
-    return OmniPage(
+    final list = rooms.value ?? const <Room>[];
+    OmniButton addButton() => OmniButton(
+      key: const ValueKey('rooms-add'),
+      label: 'Add a room',
+      icon: OmniIcons.add,
+      onPressed: () => _add(context, ref),
+    );
+    return ListPage.custom(
       title: 'Rooms',
-      bottom: OmniButton(
-        key: const ValueKey('rooms-add'),
-        label: 'Add a room',
-        icon: OmniIcons.add,
-        onPressed: () => _add(context, ref),
+      state: OmniLoad.of(
+        rooms,
+        isEmpty: (r) => r.isEmpty,
+        error: 'The rooms did not load.',
+        onRetry: () => ref.invalidate(roomsProvider),
       ),
-      body: switch (list) {
-        null => const SizedBox(),
-        [] => const OmniEmptyState(
-          icon: OmniIcons.room,
-          title: 'No rooms yet',
-          message: 'Rooms group your devices on Home and in Devices.',
-        ),
-        _ => ReorderableListView(
-          key: const ValueKey('rooms-list'),
-          buildDefaultDragHandles: false,
-          onReorderItem: (from, to) => _reorder(ref, list, from, to),
-          children: [
-            for (var i = 0; i < list.length; i++)
-              OmniListRow(
-                key: ValueKey('room-${list[i].id}'),
-                leading: ReorderableDragStartListener(
-                  index: i,
-                  child: const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Icon(
-                      OmniIcons.drag,
-                      color: OmniColors.muted,
-                      semanticLabel: 'Drag to reorder',
-                    ),
+      empty: OmniEmptyState(
+        icon: OmniIcons.room,
+        title: 'No rooms yet',
+        message: 'Rooms group your devices on Home and in Devices.',
+        action: addButton(),
+      ),
+      bottom: OmniActionBar(primary: addButton()),
+      body: (context, padding) => ReorderableListView(
+        key: const ValueKey('rooms-list'),
+        padding: padding,
+        buildDefaultDragHandles: false,
+        onReorderItem: (from, to) => _reorder(ref, list, from, to),
+        children: [
+          for (var i = 0; i < list.length; i++)
+            OmniListRow(
+              key: ValueKey('room-${list[i].id}'),
+              leading: ReorderableDragStartListener(
+                index: i,
+                child: const Padding(
+                  padding: EdgeInsets.all(OmniSpace.md),
+                  child: Icon(
+                    OmniIcons.drag,
+                    color: OmniColors.muted,
+                    semanticLabel: 'Drag to reorder',
                   ),
                 ),
-                title: list[i].name,
-                subtitle:
-                    '${list[i].deviceCount} device${list[i].deviceCount == 1 ? '' : 's'}',
-                onTap: () => _rename(context, ref, list[i]),
-                trailing: OmniIconAction(
-                  key: ValueKey('room-remove-${list[i].id}'),
-                  icon: OmniIcons.delete,
-                  label: 'Remove ${list[i].name}',
-                  onPressed: () => _remove(context, ref, list[i]),
-                ),
               ),
-          ],
-        ),
-      },
+              title: list[i].name,
+              subtitle:
+                  '${list[i].deviceCount} device${list[i].deviceCount == 1 ? '' : 's'}',
+              onTap: () => _rename(context, ref, list[i]),
+              trailing: OmniIconAction(
+                key: ValueKey('room-remove-${list[i].id}'),
+                icon: OmniIcons.delete,
+                label: 'Remove ${list[i].name}',
+                onPressed: () => _remove(context, ref, list[i]),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

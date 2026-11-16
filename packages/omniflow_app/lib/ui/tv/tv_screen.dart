@@ -305,14 +305,14 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
         : DateTime.now().difference(since).inSeconds;
     return ListView(
       key: const ValueKey('tv-screen'),
-      padding: OmniSpace.screenPadding,
+      padding: omniBodyPadding(OmniInsets.bottom(context)),
       children: [
         ScreenFit(
           portrait: size.height > size.width,
           child: AspectRatio(
             aspectRatio: size.width / size.height,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(OmniShape.md),
               child: ColoredBox(
                 color: Colors.black,
                 child: frame == null

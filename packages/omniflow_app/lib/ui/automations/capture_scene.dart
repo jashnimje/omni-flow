@@ -33,9 +33,17 @@ class CaptureSceneAction extends ConsumerWidget {
 }
 
 Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
-  final devices = captureDevices(
-    await ref.read(devicesProvider.future).catchError((Object _) => <Json>[]),
-  )..sort((a, b) => a.name.compareTo(b.name));
+  final devices =
+      captureDevices(
+        await ref
+            .read(devicesProvider.future)
+            .catchError((Object _) => <Json>[]),
+      )..sort(
+        // Offline ones last: their state now is only the last one read.
+        (a, b) => a.online == b.online
+            ? a.name.compareTo(b.name)
+            : (a.online ? -1 : 1),
+      );
   if (!context.mounted) return;
   final name = TextEditingController();
   final picked = <String>{};
@@ -45,69 +53,82 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
     builder: (context) => Owning(
       [name],
       child: StatefulBuilder(
-        builder: (context, setState) => OmniSheet(
-          title: 'Save how things are now',
-          subtitle: 'The devices you pick keep their state now in a new scene.',
-          children: [
-            TextField(
-              key: const ValueKey('capture-name'),
-              controller: name,
-              maxLength: 60,
-              decoration: const InputDecoration(labelText: 'Scene name'),
-              onChanged: (_) => setState(() {}),
-            ),
-            if (devices.isEmpty)
-              const Text('Add a device first.', style: OmniText.caption)
-            else
-              for (final d in devices)
-                CheckboxListTile(
-                  key: ValueKey('capture-${d.id}'),
-                  value: picked.contains(d.id),
-                  title: Text(d.name),
-                  subtitle: switch (staleWords(d)) {
-                    final stale? => Text(
-                      stale,
-                      style: const TextStyle(color: OmniColors.warn),
-                    ),
-                    null => d.room == null ? null : Text(d.room!),
-                  },
-                  onChanged: (on) => setState(
-                    () => on == true ? picked.add(d.id) : picked.remove(d.id),
-                  ),
+        builder: (context, setState) {
+          Future<void> save() async {
+            final r = await ref
+                .read(houseApiProvider)
+                .captureScene(name.text.trim(), picked.toList());
+            if (!context.mounted) return;
+            if (r['ok'] != true) {
+              showMessage(errorMessage(r));
+              return;
+            }
+            stale = [
+              for (final s in r['stale'] as List? ?? const [])
+                if (s is Map) '${s['name'] ?? s['id']}',
+            ];
+            Navigator.of(context).pop(true);
+          }
+
+          return SheetTemplate(
+            title: 'Save how things are now',
+            subtitle:
+                'The devices you pick keep their state now in a new scene.',
+            primaryLabel: picked.isEmpty
+                ? 'Save scene'
+                : 'Save scene of ${picked.length} '
+                      'device${picked.length == 1 ? '' : 's'}',
+            primaryKey: const ValueKey('capture-save'),
+            onPrimary: picked.isEmpty || name.text.trim().isEmpty ? null : save,
+            missing: devices.isEmpty
+                ? null
+                : picked.isEmpty
+                ? 'Pick at least one device.'
+                : 'Give the scene a name first.',
+            banners: [
+              if (devices.any((d) => picked.contains(d.id) && !d.online))
+                const OmniBanner.warning(
+                  'Some devices you picked have not answered for a while. '
+                  'The scene keeps their last known state, which may be old.',
+                  key: ValueKey('capture-stale'),
                 ),
-            const SizedBox(height: OmniSpace.md),
-            if (devices.any((d) => picked.contains(d.id) && !d.online))
-              const OmniBanner.warning(
-                'Some devices you picked have not answered for a while. The '
-                'scene keeps their last known state, which may be old.',
-                key: ValueKey('capture-stale'),
+            ],
+            children: (context) => [
+              TextField(
+                key: const ValueKey('capture-name'),
+                controller: name,
+                maxLength: 60,
+                decoration: const InputDecoration(labelText: 'Scene name'),
+                onChanged: (_) => setState(() {}),
               ),
-            OmniButton(
-              key: const ValueKey('capture-save'),
-              label: picked.isEmpty
-                  ? 'Pick at least one device'
-                  : 'Save scene of ${picked.length} '
-                        'device${picked.length == 1 ? '' : 's'}',
-              onPressed: picked.isEmpty || name.text.trim().isEmpty
-                  ? null
-                  : () async {
-                      final r = await ref
-                          .read(houseApiProvider)
-                          .captureScene(name.text.trim(), picked.toList());
-                      if (!context.mounted) return;
-                      if (r['ok'] != true) {
-                        showMessage(errorMessage(r));
-                        return;
-                      }
-                      stale = [
-                        for (final s in r['stale'] as List? ?? const [])
-                          if (s is Map) '${s['name'] ?? s['id']}',
-                      ];
-                      Navigator.of(context).pop(true);
+              if (devices.isEmpty)
+                const OmniEmptyState(
+                  icon: OmniIcons.devices,
+                  title: 'Add a device first',
+                  compact: true,
+                )
+              else
+                for (final d in devices)
+                  CheckboxListTile(
+                    key: ValueKey('capture-${d.id}'),
+                    value: picked.contains(d.id),
+                    title: Text(d.name),
+                    subtitle: switch (staleWords(d)) {
+                      final stale? => Text(
+                        'Offline. $stale',
+                        style: OmniText.caption.copyWith(
+                          color: OmniColors.warn,
+                        ),
+                      ),
+                      null => d.room == null ? null : Text(d.room!),
                     },
-            ),
-          ],
-        ),
+                    onChanged: (on) => setState(
+                      () => on == true ? picked.add(d.id) : picked.remove(d.id),
+                    ),
+                  ),
+            ],
+          );
+        },
       ),
     ),
   );

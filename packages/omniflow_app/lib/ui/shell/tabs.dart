@@ -58,12 +58,6 @@ class ShellTabSpec {
   final bool Function(WidgetRef ref)? fullScreenWhen;
 }
 
-const _addFab = ShellFab(
-  key: ValueKey('add-device'),
-  label: 'Add',
-  onPressed: openAddThing,
-);
-
 final Map<ShellTab, ShellTabSpec> shellTabs = {
   ShellTab.home: ShellTabSpec(
     label: 'Home',
@@ -92,7 +86,12 @@ final Map<ShellTab, ShellTabSpec> shellTabs = {
     label: 'Devices',
     icon: OmniIcons.devices,
     root: (_) => const DevicesScreen(),
-    fab: _addFab,
+    fab: const ShellFab(
+      key: ValueKey('add-device'),
+      label: 'Add',
+      onPressed: openAddThing,
+      hiddenWhen: devicesAreEmpty,
+    ),
   ),
   ShellTab.settings: ShellTabSpec(
     label: 'Settings',

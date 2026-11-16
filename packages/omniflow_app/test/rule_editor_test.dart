@@ -43,9 +43,9 @@ Map<String, Object?> _stored(
 };
 
 Future<void> _name(WidgetTester tester, String name) async {
-  await tester.enterText(find.byKey(const ValueKey('name-field')), name);
+  await tester.enterText(find.byKey(const ValueKey('prompt-field')), name);
   await tester.pump();
-  await tapKey(tester, 'name-ok');
+  await tapKey(tester, 'prompt-save');
 }
 
 void main() {
@@ -280,7 +280,10 @@ void main() {
       find.byKey(const ValueKey('choice-com.android.shell')),
       findsNothing,
     );
-    await tester.enterText(find.byKey(const ValueKey('choice-search')), 'sett');
+    await tester.enterText(
+      find.byKey(const ValueKey('picker-search')).last,
+      'sett',
+    );
     await tester.pump();
     expect(
       find.byKey(const ValueKey('choice-com.netflix.ninja')),
@@ -451,11 +454,11 @@ void main() {
     });
     expect(find.byType(TestRunPage), findsOneWidget);
     expect(
-      find.text('Nothing was sent. This is what would happen now.'),
+      find.text('Nothing was sent. This is what would happen.'),
       findsOneWidget,
     );
     expect(find.text('pretended it happened'), findsOneWidget);
-    expect(find.text('holds now'), findsOneWidget);
+    expect(find.text('holds'), findsOneWidget);
     expect(find.text('pass'), findsOneWidget);
     expect(find.text('would send power on'), findsOneWidget);
     expect(find.text('Last runs'), findsNothing);
@@ -850,7 +853,7 @@ void main() {
       'error': {'type': 'timeout', 'message': 'OmniFlow is busy'},
     };
     await pumpPushed(tester, engine, const RuleEditorPage(id: 'arrive_home'));
-    expect(find.byKey(const ValueKey('rule-load-error')), findsOneWidget);
+    expect(find.byType(OmniErrorState), findsOneWidget);
     engine.answers['automation.get'] = _stored(_arrive);
     await tapText(tester, 'Try again');
     expect(find.text('I get home'), findsOneWidget);

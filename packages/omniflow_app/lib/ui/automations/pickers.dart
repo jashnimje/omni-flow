@@ -10,6 +10,7 @@ import '../../rules/rule_spec.dart';
 import '../../rules/things.dart';
 import '../../service/installed_apps.dart';
 import '../../service/permissions.dart';
+import '../../state/clock.dart' show hour12Provider, timeOfDayText;
 import '../../state/providers.dart';
 import '../design/design.dart';
 import '../settings/home_location_page.dart' show HomeLocationPage;
@@ -86,43 +87,38 @@ class _PickerPageState extends State<_PickerPage> {
       for (final (title, choices) in widget.sections)
         (title, choices.where(_matches).toList()),
     ].where((s) => s.$2.isNotEmpty).toList();
-    return OmniPage(
+    return ListPage(
       title: widget.title,
-      body: ListView(
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2, bottom: OmniSpace.gap),
-            child: TextField(
-              key: const ValueKey('picker-search'),
-              decoration: InputDecoration(
-                hintText: widget.hint,
-                prefixIcon: const Icon(OmniIcons.search),
-              ),
-              onChanged: (v) => setState(() => _query = v),
-            ),
-          ),
-          if (shown.isEmpty)
-            const OmniEmptyState(
-              icon: OmniIcons.search,
-              title: 'Nothing matches',
-              message: 'Try another word, or clear the search.',
-            ),
-          for (final (title, choices) in shown) ...[
-            OmniSectionHeader(title),
-            for (final c in choices)
-              OmniListRow(
-                key: ValueKey(c.key),
-                icon: c.icon,
-                title: c.title,
-                subtitle: c.subtitle,
-                subtitleLines: 2,
-                chevron: c.onTap != null,
-                onTap: c.onTap == null ? null : () => c.onTap!(context),
-              ),
-          ],
-          const SizedBox(height: OmniSpace.xl),
-        ],
+      search: TextField(
+        key: const ValueKey('picker-search'),
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          prefixIcon: const Icon(OmniIcons.search),
+        ),
+        onChanged: (v) => setState(() => _query = v),
       ),
+      state: shown.isEmpty ? const OmniLoad.empty() : const OmniLoad.data(),
+      empty: const OmniEmptyState(
+        icon: OmniIcons.search,
+        title: 'Nothing matches',
+        message: 'Try another word, or clear the search.',
+        compact: true,
+      ),
+      children: (context) => [
+        for (final (title, choices) in shown) ...[
+          OmniSectionHeader(title),
+          for (final c in choices)
+            OmniListRow(
+              key: ValueKey(c.key),
+              icon: c.icon,
+              title: c.title,
+              subtitle: c.subtitle,
+              subtitleLines: 2,
+              chevron: c.onTap != null,
+              onTap: c.onTap == null ? null : () => c.onTap!(context),
+            ),
+        ],
+      ],
     );
   }
 }
@@ -242,8 +238,8 @@ Future<T?> _optionsForm<T>(
           const SizedBox(height: OmniSpace.md),
           Wrap(
             key: const ValueKey('opt-choices'),
-            spacing: 6,
-            runSpacing: 6,
+            spacing: OmniSpace.sm,
+            runSpacing: OmniSpace.sm,
             children: [
               for (final v in option.choices)
                 OmniFilterChip(
@@ -343,8 +339,8 @@ class _KnownVariablesState extends ConsumerState<_KnownVariables> {
         padding: const EdgeInsets.only(bottom: OmniSpace.sm),
         child: Wrap(
           key: const ValueKey('known-variables'),
-          spacing: 6,
-          runSpacing: 6,
+          spacing: OmniSpace.sm,
+          runSpacing: OmniSpace.sm,
           children: [
             for (final n in names)
               OmniFilterChip(

@@ -60,7 +60,7 @@ class Thing {
   /// The values state [key] can take, when its capability lists them.
   List<Object> valuesOf(String key) => [
     for (final c in capabilities)
-      if (c['stateKey'] == key && c['values'] is List)
+      if ((c['stateKey'] == key || c['id'] == key) && c['values'] is List)
         ...(c['values'] as List).whereType<Object>(),
   ];
 
@@ -96,8 +96,14 @@ class Thing {
 
   String labelOf(String key) =>
       [...stateKeys, ...events].where((k) => k.key == key).firstOrNull?.label ??
-      capability(key)?['label'] as String? ??
-      key;
+      switch (capability(key)) {
+        {'label': final String label, 'values': List()} => label.replaceAll(
+          RegExp(r'\s*\([^)]*\)'),
+          '',
+        ),
+        {'label': final String label} => label,
+        _ => key,
+      };
 }
 
 /// The things in a device.list result, phone first, then people, places,

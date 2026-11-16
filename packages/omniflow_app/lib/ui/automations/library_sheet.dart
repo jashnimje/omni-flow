@@ -136,24 +136,25 @@ class _LibraryState extends State<_Library> {
               ],
             ),
       ].where((s) => s.$2.isNotEmpty).toList();
-      return OmniSheet(
+      return SheetTemplate(
         title: widget.title,
-        children: [
-          TextField(
-            key: const ValueKey('picker-search'),
-            autofocus: true,
-            decoration: InputDecoration(
-              hintText: widget.hint,
-              prefixIcon: const Icon(OmniIcons.search),
-            ),
-            onChanged: _search,
+        // Stays in view while the list scrolls under it.
+        pinned: TextField(
+          key: const ValueKey('picker-search'),
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: widget.hint,
+            prefixIcon: const Icon(OmniIcons.search),
           ),
+          onChanged: _search,
+        ),
+        children: (context) => [
           if (!searching && widget.suggestions.isNotEmpty) ...[
             const OmniSectionHeader('Suggestions'),
             Wrap(
               key: const ValueKey('library-suggestions'),
-              spacing: 6,
-              runSpacing: 6,
+              spacing: OmniSpace.sm,
+              runSpacing: OmniSpace.sm,
               children: [
                 for (final s in widget.suggestions)
                   OmniFilterChip(
@@ -166,13 +167,15 @@ class _LibraryState extends State<_Library> {
             ),
           ],
           if (!searching) ...[
-            const SizedBox(height: OmniSpace.sm),
+            // Its own heading, so the filters do not read as more
+            // suggestions.
+            const OmniSectionHeader('Show only'),
             // One row that scrolls sideways, so the list starts right under it.
             SingleChildScrollView(
               key: const ValueKey('library-categories'),
               scrollDirection: Axis.horizontal,
               child: Row(
-                spacing: 6,
+                spacing: OmniSpace.sm,
                 children: [
                   for (final cat in widget.categories)
                     if (all.any((c) => c.category == cat && !c.searchOnly))
@@ -188,13 +191,15 @@ class _LibraryState extends State<_Library> {
               ),
             ),
           ],
-          if (sections.isEmpty)
-            OmniEmptyState(
+          if (sections.isEmpty &&
+              snap.connectionState == ConnectionState.waiting)
+            const OmniListSkeleton(rows: 3, label: 'Looking')
+          else if (sections.isEmpty)
+            const OmniEmptyState(
               icon: OmniIcons.search,
-              title: snap.connectionState == ConnectionState.waiting
-                  ? 'Looking…'
-                  : 'Nothing matches',
+              title: 'Nothing matches',
               message: 'Try another word, or clear the search.',
+              compact: true,
             ),
           for (final (title, choices) in sections) ...[
             OmniSectionHeader(title),

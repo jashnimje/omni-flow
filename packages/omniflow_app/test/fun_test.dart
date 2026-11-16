@@ -3,7 +3,6 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/ui/design/design.dart';
-import 'package:omniflow_app/ui/fun/breathing_mark.dart';
 import 'package:omniflow_app/ui/fun/confetti.dart';
 import 'package:omniflow_app/ui/fun/fun_prefs.dart';
 import 'package:omniflow_app/ui/fun/home_stats.dart';
@@ -290,7 +289,7 @@ void main() {
       ),
     );
     expect(find.byKey(const ValueKey('your-home-empty')), findsOneWidget);
-    expect(find.byType(BreathingMark), findsOneWidget);
+    expect(find.byType(OmniEmptyState), findsOneWidget);
     expect(find.text('Nothing has run yet'), findsOneWidget);
   });
 

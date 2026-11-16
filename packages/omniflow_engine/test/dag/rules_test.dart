@@ -722,14 +722,29 @@ void main() {
     });
   });
 
-  test('a TV power check reads as its sensor, not its Power key', () {
+  test('a TV power check reads as the TV, with no list of values', () {
     final words = SentenceContext(
       names: const {'tv': 'TV'},
       drivers: {'tv': DriverRegistry.withBuiltIns()['android_tv_adb']!},
     );
     expect(
       words.condition({'state': 'tv.power', 'op': '==', 'value': 'on'}),
-      'TV power is on',
+      'TV is on',
+    );
+    expect(
+      words.condition({
+        'state': 'tv.power_state',
+        'op': '!=',
+        'value': 'asleep',
+      }),
+      'TV is not asleep',
+    );
+    expect(
+      words.trigger({
+        'on': 'tv.power',
+        'change': {'to': 'asleep'},
+      }),
+      'When TV falls asleep',
     );
     expect(words.action('tv.power', null), 'TV power key');
   });

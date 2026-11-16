@@ -8,6 +8,7 @@ import 'command_args.dart';
 import 'engine_core.dart';
 import 'house_things.dart' show houseIdOf;
 import 'hub_phone_session.dart' show isPhoneReading;
+import 'presence_view.dart' show housePresence;
 import 'things_runtime.dart'
     show defaultHomePlace, personDriverId, phoneDriverId;
 import '../devices/device.dart';
@@ -377,15 +378,18 @@ class Houses {
   /// their `home`, as before houses, so being at the office counts as out.
   /// In any other house, being at one of its places counts as in.
   bool personIn(Device person, String house) {
+    if (homeHouseOf(person) == house) return person.state['home'] == true;
+    final place = person.state['place'];
+    return place is String && thingHouses[place] == house;
+  }
+
+  /// The house of [person]'s home place, the first house when it has none.
+  String homeHouseOf(Device person) {
     final homePlace = person.settings['homePlace'];
-    final homeHouse =
-        thingHouses[homePlace is String && homePlace.isNotEmpty
+    return thingHouses[homePlace is String && homePlace.isNotEmpty
             ? homePlace
             : defaultHomePlace] ??
         defaultId;
-    if (homeHouse == house) return person.state['home'] == true;
-    final place = person.state['place'];
-    return place is String && thingHouses[place] == house;
   }
 
   /// Whether the thing [id] shows in [house]: it is in it, or it is shared
@@ -407,6 +411,9 @@ class Houses {
   Future<Map<String, Object?>> list(Map<String, Object?> _) async {
     final things = await _counts(HouseKind.thing);
     final flows = await _counts(HouseKind.flow);
+    final devices = await DriftDeviceStore(_db).all();
+    final who = await householdPerson?.call();
+    final person = devices.where((d) => d.id == who).firstOrNull;
     return {
       'houses': [
         for (final h in _houses)
@@ -414,6 +421,8 @@ class Houses {
             ...h.toJson(),
             'things': things[h.id] ?? 0,
             'automations': flows[h.id] ?? 0,
+            if (person != null)
+              'presence': housePresence(person, devices, this, h.id),
           },
       ],
     };

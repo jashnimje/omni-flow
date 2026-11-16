@@ -190,7 +190,7 @@ void main() {
       expect(find.text('This tag is locked'), findsOneWidget);
       await tapKey(tester, 'write-tag-retry');
       expect(find.text('Hold a tag to the phone'), findsOneWidget);
-      await tapKey(tester, 'write-tag-cancel');
+      await tapKey(tester, 'template-secondary');
       expect(find.byKey(const ValueKey('write-tag-status')), findsNothing);
       expect(nfc.write!.isCompleted, isTrue);
     });

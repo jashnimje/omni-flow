@@ -85,7 +85,8 @@ void main() {
       final tv = tester.widget<OmniTile>(
         find.byKey(const ValueKey('tile-lounge_tv')),
       );
-      expect((tv.reading, tv.state), ('Netflix', 'Playing · vol 35'));
+      // The TV keeps its name as the title: the app goes on the line under.
+      expect((tv.reading, tv.state), (null, 'Netflix · Playing · vol 35'));
     });
   });
 
@@ -227,8 +228,9 @@ void main() {
       final lights = tester.getTopLeft(find.text('Lights')).dy;
       final tvs = tester.getTopLeft(find.text('TVs')).dy;
       final sensors = tester.getTopLeft(find.text('Sensors')).dy;
-      final other = tester.getTopLeft(find.text('Other')).dy;
-      expect(lights < tvs && tvs < sensors && sensors < other, isTrue);
+      // The phone has a group of its own, as in the Add list.
+      final phones = tester.getTopLeft(find.text('Phones')).dy;
+      expect(lights < tvs && tvs < sensors && sensors < phones, isTrue);
       expect(find.text('Plugs and switches'), findsNothing);
     });
   });

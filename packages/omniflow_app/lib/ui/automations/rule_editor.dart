@@ -9,6 +9,7 @@ import '../../api/engine_calls.dart';
 import '../../api/rule_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../state/providers.dart';
+import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automation_insights.dart';
 import 'automations_state.dart';
@@ -34,10 +35,13 @@ Future<void> openRuleEditor(BuildContext context, {String? id, Json? spec}) =>
 /// engine's errors on the rows their rule paths name, dry-runs it and
 /// saves it.
 class RuleEditorPage extends ConsumerStatefulWidget {
-  const RuleEditorPage({super.key, this.id, this.initial});
+  const RuleEditorPage({super.key, this.id, this.initial, this.name});
 
   /// The rule to reopen, or null for a new one.
   final String? id;
+
+  /// The name the list already has for [id], shown while the rule loads.
+  final String? name;
 
   /// Where a new rule starts.
   final Json? initial;
@@ -321,61 +325,11 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     }
   }
 
-  Future<void> _leave() async {
-    final ok = await confirm(
-      context,
-      title: 'Discard changes?',
-      body:
-          'What you changed in ${_name.isEmpty ? 'this automation' : _name} is not '
-          'saved and will be lost.',
-      action: 'Discard',
-      destructive: true,
-    );
-    if (!ok || !mounted) return;
-    _draft?.dirty = false;
-    Navigator.of(context).pop();
-  }
-
-  /// The Sentence and Diagram switch, then the rule in the chosen view.
-  /// Both edit [draft], so a change in one shows in the other.
-  Widget _views(
-    RuleDraft draft, {
-    required List<Widget> banners,
-    required List<Widget> sentence,
-  }) {
-    final view = ref.watch(ruleViewProvider);
-    final pick = OmniSegmented<RuleView>(
-      key: const ValueKey('rule-view'),
-      segments: const [
-        OmniSegment(RuleView.sentence, 'Sentence'),
-        OmniSegment(RuleView.diagram, 'Diagram'),
-      ],
-      selected: view,
-      onChanged: (v) => ref.read(ruleViewProvider.notifier).set(v),
-    );
-    if (view == RuleView.diagram) {
-      return Column(
-        key: const ValueKey('rule-diagram'),
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          pick,
-          ...banners,
-          Expanded(
-            child: DiagramEditor(draft: draft, id: widget.id),
-          ),
-        ],
-      );
-    }
-    return ListView(
-      key: const ValueKey('rule-editor'),
-      children: [pick, ...banners, ...sentence],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final things = ref.watch(ruleThingsProvider);
     final automations = ref.watch(automationsProvider).value ?? const [];
+    final view = ref.watch(ruleViewProvider);
     final draft = _draft;
     if (draft != null) {
       draft
@@ -393,24 +347,22 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       unawaited(draft.fetchWords());
     }
     if (draft == null) {
-      return OmniPage(
-        title: widget.id ?? 'New automation',
-        body: switch ((_loadFailure, _notARule)) {
-          (final ApiFailure f, _) => OmniEmptyState(
-            key: const ValueKey('rule-load-error'),
-            icon: OmniIcons.error,
-            title: 'Could not open this automation',
-            message: f.message,
-            action: OmniButton.ghost(label: 'Try again', onPressed: _load),
-          ),
-          (_, final String form) => OmniEmptyState(
-            key: const ValueKey('rule-not-a-rule'),
-            icon: OmniIcons.info,
-            title: 'This is a $form, not a rule',
-            message: 'Open it from the Automations list to see its runs.',
-          ),
-          _ => const Center(child: CircularProgressIndicator()),
+      return EditorPage(
+        // The list's name for it, never its id, until the rule is read.
+        title: widget.name ?? 'Automation',
+        onPrimary: null,
+        state: switch ((_loadFailure, _notARule)) {
+          (final ApiFailure f, _) => OmniLoad.error(f.message, _load),
+          (_, String _) => const OmniLoad.empty(),
+          _ => const OmniLoad.loading(),
         },
+        empty: OmniEmptyState(
+          key: const ValueKey('rule-not-a-rule'),
+          icon: OmniIcons.info,
+          title: 'This is a ${_notARule ?? 'link'}, not a rule',
+          message: 'Open it from the Automations list to see its runs.',
+        ),
+        children: (_) => const [],
       );
     }
     return ListenableBuilder(
@@ -418,152 +370,128 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       builder: (context, _) {
         final spec = draft.spec;
         final missing = _missing(spec);
-        final short = MediaQuery.sizeOf(context).height < 480;
         final loose = draft.looseIssues;
-        return PopScope(
-          canPop: !draft.dirty,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _leave();
-          },
-          child: OmniPage(
-            title: _name.isEmpty ? 'New automation' : _name,
-            actions: [
-              PopupMenuButton<_Menu>(
-                key: const ValueKey('rule-menu'),
-                tooltip: 'More',
-                icon: const Icon(OmniIcons.more, color: OmniColors.muted),
-                onSelected: _onMenu,
-                itemBuilder: (_) => [
+        final ready = !_busy && missing == null;
+        return EditorPage(
+          title: _name.isEmpty ? 'New automation' : _name,
+          dirty: draft.dirty,
+          discardWhat: widget.id == null
+              ? 'this new automation'
+              : _name.isEmpty
+              ? 'this automation'
+              : _name,
+          onDiscard: () => draft.dirty = false,
+          actions: [
+            PopupMenuButton<_Menu>(
+              key: const ValueKey('rule-menu'),
+              tooltip: 'More',
+              icon: const Icon(OmniIcons.more, color: OmniColors.muted),
+              onSelected: _onMenu,
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: _Menu.rename, child: Text('Rename')),
+                CheckedPopupMenuItem(
+                  value: _Menu.stopOnError,
+                  checked: spec.stopOnError,
+                  child: const Text('Stop at the first failed step'),
+                ),
+                if (widget.id != null) ...[
                   const PopupMenuItem(
-                    value: _Menu.rename,
-                    child: Text('Rename'),
+                    key: ValueKey('rule-duplicate'),
+                    value: _Menu.duplicate,
+                    child: Text('Duplicate'),
                   ),
-                  CheckedPopupMenuItem(
-                    value: _Menu.stopOnError,
-                    checked: spec.stopOnError,
-                    child: const Text('Stop at the first failed step'),
+                  const PopupMenuItem(
+                    value: _Menu.history,
+                    child: Text('Runs and test'),
                   ),
-                  if (widget.id != null) ...[
-                    const PopupMenuItem(
-                      key: ValueKey('rule-duplicate'),
-                      value: _Menu.duplicate,
-                      child: Text('Duplicate'),
+                  PopupMenuItem(
+                    value: _Menu.remove,
+                    child: Text(
+                      'Remove',
+                      style: OmniText.body.copyWith(color: OmniColors.bad),
                     ),
-                    const PopupMenuItem(
-                      value: _Menu.history,
-                      child: Text('Runs and test'),
-                    ),
-                    const PopupMenuItem(
-                      value: _Menu.remove,
-                      child: Text(
-                        'Remove',
-                        style: TextStyle(color: OmniColors.bad),
-                      ),
-                    ),
-                  ],
+                  ),
                 ],
-              ),
+              ],
+            ),
+          ],
+          // Both views edit [draft], so a change in one shows in the other.
+          views: OmniSegmented<RuleView>(
+            key: const ValueKey('rule-view'),
+            segments: const [
+              OmniSegment(RuleView.sentence, 'Sentence'),
+              OmniSegment(RuleView.diagram, 'Diagram'),
             ],
-            body: _views(
-              draft,
-              banners: [
-                if (!_approved)
-                  OmniBanner.warning(
-                    'Made by an agent. It runs only after you approve this '
-                    'exact version.',
-                    key: const ValueKey('rule-needs-approval'),
-                    actionLabel: 'Review',
-                    onAction: () => Navigator.of(context).push<void>(
-                      MaterialPageRoute(
-                        builder: (_) => ReviewPage(id: widget.id!),
-                      ),
-                    ),
-                  ),
-                if (draft.failure != null)
-                  OmniBanner.error(
-                    [
-                      if (loose.isNotEmpty) ...loose,
-                      if (loose.length < draft.failure!.issues.length)
-                        'Fix the rows marked in red.',
-                      if (draft.failure!.issues.isEmpty) draft.failure!.message,
-                    ].join('\n'),
-                    key: const ValueKey('rule-errors'),
-                  ),
-              ],
-              sentence: [
-                _LookAndAsk(draft: draft),
-                TriggerBlock(draft: draft),
-                ConditionBlock(
-                  draft: draft,
-                  conditions: spec.onlyIf,
-                  path: 'onlyIf',
-                ),
-                StepBlock(
-                  draft: draft,
-                  steps: spec.then,
-                  path: 'then',
-                  allowKeep: true,
-                ),
-                if (spec.stopOnError)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 2),
-                    child: Text(
-                      'Stops at the first step that fails.',
-                      style: OmniText.caption,
-                    ),
-                  ),
-                // A saved rule: its last run, clashes, why it did not run,
-                // and History.
-                if (widget.id != null) LastRunSection(id: widget.id!),
-                if (widget.id != null)
-                  AutomationInsights(id: widget.id!, onRestored: _load),
-                // On a short screen (a phone on its side) the bar keeps
-                // only its buttons, so more of the rule shows.
-                if (short && missing != null)
-                  Text(
-                    missing,
-                    key: const ValueKey('rule-missing'),
-                    style: OmniText.caption,
-                  ),
-                const SizedBox(height: OmniSpace.lg),
-              ],
-            ),
-            bottom: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!short && missing != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-                    child: Text(
-                      missing,
-                      key: const ValueKey('rule-missing'),
-                      style: OmniText.caption,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OmniButton.ghost(
-                        key: const ValueKey('rule-test'),
-                        label: 'Test run',
-                        icon: OmniIcons.test,
-                        onPressed: _busy || missing != null ? null : _test,
-                      ),
-                    ),
-                    const SizedBox(width: OmniSpace.sm),
-                    Expanded(
-                      child: OmniButton(
-                        key: const ValueKey('rule-save'),
-                        label: 'Save',
-                        onPressed: _busy || missing != null ? null : _save,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            selected: view,
+            onChanged: (v) => ref.read(ruleViewProvider.notifier).set(v),
           ),
+          banners: [
+            if (!_approved)
+              OmniBanner.warning(
+                'Made by an agent. It runs only after you approve this '
+                'exact version.',
+                key: const ValueKey('rule-needs-approval'),
+                actionLabel: 'Review',
+                onAction: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (_) => ReviewPage(id: widget.id!)),
+                ),
+              ),
+            if (draft.failure != null)
+              OmniBanner.error(
+                [
+                  if (loose.isNotEmpty) ...loose,
+                  if (loose.length < draft.failure!.issues.length)
+                    'Fix the rows marked in red.',
+                  if (draft.failure!.issues.isEmpty) draft.failure!.message,
+                ].join('\n'),
+                key: const ValueKey('rule-errors'),
+              ),
+          ],
+          secondaryLabel: 'Test run',
+          secondaryKey: const ValueKey('rule-test'),
+          onSecondary: ready ? _test : null,
+          primaryKey: const ValueKey('rule-save'),
+          onPrimary: ready ? _save : null,
+          missing: missing,
+          canvas: view == RuleView.diagram
+              ? (context) => KeyedSubtree(
+                  key: const ValueKey('rule-diagram'),
+                  child: DiagramEditor(draft: draft, id: widget.id),
+                )
+              : null,
+          children: view == RuleView.diagram
+              ? null
+              : (context) => [
+                  KeyedSubtree(
+                    key: const ValueKey('rule-editor'),
+                    child: _LookAndAsk(draft: draft),
+                  ),
+                  TriggerBlock(draft: draft),
+                  ConditionBlock(
+                    draft: draft,
+                    conditions: spec.onlyIf,
+                    path: 'onlyIf',
+                  ),
+                  StepBlock(
+                    draft: draft,
+                    steps: spec.then,
+                    path: 'then',
+                    allowKeep: true,
+                  ),
+                  if (spec.stopOnError)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+                      child: Text(
+                        'Stops at the first step that fails.',
+                        style: OmniText.caption,
+                      ),
+                    ),
+                  // A saved rule: its last run, clashes, why it did not
+                  // run, and History.
+                  if (widget.id != null) LastRunSection(id: widget.id!),
+                  if (widget.id != null)
+                    AutomationInsights(id: widget.id!, onRestored: _load),
+                ],
         );
       },
     );
@@ -617,6 +545,7 @@ class _LookAndAsk extends StatelessWidget {
         ),
         OmniListRow(
           key: const ValueKey('rule-ask-first'),
+          icon: AutomationLook.askIcon,
           title: 'Ask before running',
           subtitle:
               draft.errorAt('askFirst') ??
@@ -639,6 +568,7 @@ class _LookAndAsk extends StatelessWidget {
         ),
         OmniListRow(
           key: const ValueKey('rule-notify-on-run'),
+          icon: OmniIcons.notifications,
           title: 'Notify when it runs',
           subtitle: 'A notification each time it finishes.',
           trailing: Switch(

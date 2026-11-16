@@ -399,7 +399,7 @@ class StepBlock extends StatelessWidget {
             style: TextButton.styleFrom(
               foregroundColor: OmniColors.bad,
               minimumSize: const Size(OmniSpace.target, OmniSpace.target),
-              textStyle: const TextStyle(fontSize: 12),
+              textStyle: OmniText.labelMedium,
             ),
             child: Text('Remove ${heading.toLowerCase()}'),
           ),
@@ -623,7 +623,8 @@ class GroupPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: draft,
-    builder: (context, _) => OmniPage(
+    // Edits apply in place, so Done only closes the page.
+    builder: (context, _) => FormPage(
       title: switch (step) {
         IfStep() => 'If… otherwise',
         TogetherStep() => 'Do these together',
@@ -632,12 +633,10 @@ class GroupPage extends StatelessWidget {
         ForEachStep() => 'Repeat with each',
         _ => 'Wait until',
       },
-      body: ListView(
-        children: [
-          ..._blocks(context),
-          const SizedBox(height: OmniSpace.xl),
-        ],
-      ),
+      commitLabel: 'Done',
+      commitKey: const ValueKey('group-done'),
+      onCommit: () => Navigator.of(context).maybePop(),
+      children: _blocks,
     ),
   );
 
@@ -860,73 +859,69 @@ class _KeepPageState extends State<KeepPage> {
     listenable: _draft,
     builder: (context, _) {
       final path = widget.path;
-      return OmniPage(
+      return FormPage(
         title: 'Keep a value',
-        body: ListView(
-          children: [
-            OmniRuleBlock(
-              kind: SentenceKind.then,
-              heading: 'Keep',
-              caption: 'this value',
-              addLabel: _keep.thing.isEmpty ? 'Choose what to keep' : null,
-              onAdd: _pickTarget,
-              children: [
-                if (_keep.thing.isNotEmpty)
-                  OmniStepRow(
-                    key: const ValueKey('keep-target'),
-                    icon: _draft.words.stepIcon(
-                      DoStep(_keep.thing, _keep.capability),
-                    ),
-                    text: _draft.words
-                        .keep(
-                          KeepStep(
-                            _keep.thing,
-                            _keep.capability,
-                            value: _keep.value,
-                          ),
-                        )
-                        .replaceFirst(RegExp(r'…$'), ''),
-                    error: path == null
-                        ? null
-                        : _draft.errorAt('$path.keep.target'),
-                    onTap: _pickTarget,
-                    onRemove: () => setState(
-                      () => _keep = KeepStep(
-                        '',
-                        '',
-                        whileConditions: _keep.whileConditions,
-                      ),
+        commitLabel: 'Done',
+        commitKey: const ValueKey('keep-done'),
+        onCommit: _ready ? () => Navigator.of(context).pop(_keep) : null,
+        missing: 'Choose what to keep and when to keep it first.',
+        children: (context) => [
+          OmniRuleBlock(
+            kind: SentenceKind.then,
+            heading: 'Keep',
+            caption: 'this value',
+            addLabel: _keep.thing.isEmpty ? 'Choose what to keep' : null,
+            onAdd: _pickTarget,
+            children: [
+              if (_keep.thing.isNotEmpty)
+                OmniStepRow(
+                  key: const ValueKey('keep-target'),
+                  icon: _draft.words.stepIcon(
+                    DoStep(_keep.thing, _keep.capability),
+                  ),
+                  text: _draft.words
+                      .keep(
+                        KeepStep(
+                          _keep.thing,
+                          _keep.capability,
+                          value: _keep.value,
+                        ),
+                      )
+                      .replaceFirst(RegExp(r'…$'), ''),
+                  error: path == null
+                      ? null
+                      : _draft.errorAt('$path.keep.target'),
+                  onTap: _pickTarget,
+                  onRemove: () => setState(
+                    () => _keep = KeepStep(
+                      '',
+                      '',
+                      whileConditions: _keep.whileConditions,
                     ),
                   ),
-              ],
+                ),
+            ],
+          ),
+          ConditionBlock(
+            draft: _draft,
+            conditions: _keep.whileConditions,
+            path: '${path ?? 'keep'}.keep.while',
+            heading: 'While',
+            caption: 'all of these hold',
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+            child: Text(
+              _keep.value is bool
+                  ? 'When they stop holding, it is turned '
+                        '${_keep.value == true ? 'off' : 'on'} again, once. '
+                        'Anything that changes it in between is put back.'
+                  : 'Anything that changes it while they hold is put back. '
+                        'When they stop, it is left as it is.',
+              style: OmniText.caption,
             ),
-            ConditionBlock(
-              draft: _draft,
-              conditions: _keep.whileConditions,
-              path: '${path ?? 'keep'}.keep.while',
-              heading: 'While',
-              caption: 'all of these hold',
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                _keep.value is bool
-                    ? 'When they stop holding, it is turned '
-                          '${_keep.value == true ? 'off' : 'on'} again, once. '
-                          'Anything that changes it in between is put back.'
-                    : 'Anything that changes it while they hold is put back. '
-                          'When they stop, it is left as it is.',
-                style: OmniText.caption,
-              ),
-            ),
-            const SizedBox(height: OmniSpace.xl),
-          ],
-        ),
-        bottom: OmniButton(
-          key: const ValueKey('keep-done'),
-          label: 'Done',
-          onPressed: _ready ? () => Navigator.of(context).pop(_keep) : null,
-        ),
+          ),
+        ],
       );
     },
   );

@@ -366,22 +366,20 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
       TvCalls.pathArgs(tv.id, path),
     );
     if (result['ok'] != true || !mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(e.name),
-        content: SelectableText(
-          [
-            'Path: $path',
-            for (final entry in result.entries)
-              if (entry.key != 'ok') '${entry.key}: ${entry.value}',
-          ].join('\n'),
-          key: const ValueKey('file-info-text'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+    await SheetTemplate.show<void>(
+      context,
+      builder: (_) => SheetTemplate(
+        title: e.name,
+        subtitle: 'Details',
+        children: (_) => [
+          SelectableText(
+            [
+              'Path: $path',
+              for (final entry in result.entries)
+                if (entry.key != 'ok') '${entry.key}: ${entry.value}',
+            ].join('\n'),
+            key: const ValueKey('file-info-text'),
+            style: OmniText.mono,
           ),
         ],
       ),
@@ -389,12 +387,12 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
   }
 
   Future<void> _fileSheet(TvFileEntry e) async {
-    final choice = await showOmniSheet<String>(
+    final choice = await SheetTemplate.show<String>(
       context,
-      builder: (context) => OmniSheet(
+      builder: (_) => SheetTemplate(
         title: e.name,
         subtitle: _subtitle(e),
-        children: [
+        children: (context) => [
           for (final (value, icon, label) in [
             if (!e.isDir)
               ('download', TvIcons.download, 'Download to the phone'),
@@ -432,11 +430,11 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
   }
 
   Future<void> _addSheet() async {
-    final choice = await showOmniSheet<String>(
+    final choice = await SheetTemplate.show<String>(
       context,
-      builder: (context) => OmniSheet(
+      builder: (_) => SheetTemplate(
         title: 'Add to ${_crumbLabel(_path, phone: tv.isPhone)}',
-        children: [
+        children: (context) => [
           OmniListRow(
             key: const ValueKey('files-new-folder'),
             icon: TvIcons.newFolder,
@@ -473,65 +471,81 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
   Widget build(BuildContext context) {
     final selecting = _selected.isNotEmpty;
     final entries = _entries;
-    return Stack(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        RefreshIndicator(
-          onRefresh: _reload,
-          child: ListView(
-            key: const ValueKey('files-list'),
-            padding: EdgeInsets.fromLTRB(14, 0, 14, selecting ? 96 : 24),
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: _Breadcrumbs(
-                      phone: tv.isPhone,
-                      path: _path,
-                      onOpen: _busy ? null : _open,
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _reload,
+            child: ListView(
+              key: const ValueKey('files-list'),
+              padding: omniBodyPadding(
+                selecting ? OmniSpace.md : OmniInsets.bottom(context),
+              ),
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _Breadcrumbs(
+                        phone: tv.isPhone,
+                        path: _path,
+                        onOpen: _busy ? null : _open,
+                      ),
                     ),
-                  ),
-                  OmniIconAction(
-                    key: const ValueKey('files-add'),
-                    icon: OmniIcons.add,
-                    label: 'New folder or upload',
-                    onPressed: _busy ? null : _addSheet,
-                  ),
-                ],
-              ),
-              if (selecting) _selectionHeader(),
-              if (_clipboard case final clip?) _pasteCard(clip),
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.only(bottom: OmniSpace.xs),
-                  child: OmniProgressBar(height: 2, semanticLabel: 'Reading'),
+                    OmniIconAction(
+                      key: const ValueKey('files-add'),
+                      icon: OmniIcons.add,
+                      label: 'New folder or upload',
+                      onPressed: _busy ? null : _addSheet,
+                    ),
+                  ],
                 ),
-              TransferProgress(
-                tv: tv,
-                onCancel: _busy && !_stopBatch
-                    ? () => setState(() => _stopBatch = true)
-                    : null,
-              ),
-              if (_error != null)
-                TvLoadError(
-                  what: 'This folder',
-                  reason: _error!,
-                  onRetry: _reload,
-                )
-              else if (entries == null)
-                const TvLoading(label: 'Reading the folder')
-              else if (entries.isEmpty)
-                const OmniEmptyState(
-                  icon: TvIcons.folder,
-                  title: 'This folder is empty',
-                  message: 'Use the plus to add a folder or upload a file.',
-                )
-              else
-                for (final e in entries) _entryRow(e),
-            ],
+                if (selecting) _selectionHeader(),
+                if (_clipboard case final clip?) _pasteCard(clip),
+                if (_loading)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: OmniSpace.xs),
+                    child: OmniProgressBar(height: 2, semanticLabel: 'Reading'),
+                  ),
+                TransferProgress(
+                  tv: tv,
+                  onCancel: _busy && !_stopBatch
+                      ? () => setState(() => _stopBatch = true)
+                      : null,
+                ),
+                if (_error != null)
+                  TvLoadError(
+                    what: 'This folder',
+                    reason: _error!,
+                    noun: tv.noun,
+                    onRetry: _reload,
+                  )
+                else if (entries == null)
+                  const OmniListSkeleton(label: 'Reading the folder')
+                else if (entries.isEmpty)
+                  const OmniEmptyState(
+                    icon: TvIcons.folder,
+                    title: 'This folder is empty',
+                    message: 'Use the plus to add a folder or upload a file.',
+                  )
+                else
+                  for (final e in entries) _entryRow(e),
+              ],
+            ),
           ),
         ),
+        // The selection's actions, pinned under the list like a page's
+        // bottom bar, clear of the system navigation bar.
         if (selecting)
-          Positioned(left: 12, right: 12, bottom: 14, child: _actionBar()),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              OmniSpace.md,
+              OmniSpace.sm,
+              OmniSpace.md,
+              MediaQuery.paddingOf(context).bottom + OmniSpace.md,
+            ),
+            child: _actionBar(),
+          ),
       ],
     );
   }
@@ -593,7 +607,9 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
               children: [
                 Icon(
                   selected ? TvIcons.checked : TvIcons.unchecked,
-                  color: selected ? OmniColors.accent : OmniColors.muted,
+                  color: selected
+                      ? OmniPalette.of(context).accent
+                      : OmniColors.muted,
                   fill: selected ? 1 : 0,
                   semanticLabel: selected ? 'Selected' : 'Not selected',
                 ),
@@ -677,7 +693,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(icon, size: 20, color: color),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: OmniSpace.xs / 2),
                   Text(label, style: OmniText.caption.copyWith(color: color)),
                 ],
               ),
@@ -687,12 +703,13 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
       );
     }
 
+    final palette = OmniPalette.of(context);
     return Material(
       key: const ValueKey('select-bar'),
-      color: OmniColors.sheet,
+      color: palette.sheet,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: OmniColors.line),
+        borderRadius: BorderRadius.circular(OmniRadii.card),
+        side: BorderSide(color: palette.line),
       ),
       elevation: 6,
       child: Padding(
@@ -804,15 +821,16 @@ class _Breadcrumbs extends StatelessWidget {
                         OmniSpace.target,
                         OmniSpace.target,
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: OmniSpace.sm,
+                      ),
                       foregroundColor: i == crumbs.length - 1
                           ? OmniColors.text
                           : OmniColors.muted,
                       disabledForegroundColor: i == crumbs.length - 1
                           ? OmniColors.text
                           : OmniColors.muted,
-                      textStyle: TextStyle(
-                        fontSize: 12,
+                      textStyle: OmniText.caption.copyWith(
                         fontWeight: i == crumbs.length - 1
                             ? FontWeight.w700
                             : FontWeight.w400,

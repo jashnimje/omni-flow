@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'buttons.dart';
 
 /// A yes or no question, true when the user picks [action]. [destructive]
-/// draws the action red, for a step that deletes or cannot be undone, and
-/// [body] says what is lost.
+/// fills the action red ([OmniButtonKind.destructive]), for a step that
+/// deletes or cannot be undone, and [body] says what is lost.
 Future<bool> confirm(
   BuildContext context, {
   required String title,
@@ -27,7 +27,9 @@ Future<bool> confirm(
             key: const ValueKey('confirm'),
             label: action,
             expand: false,
-            kind: destructive ? OmniButtonKind.danger : OmniButtonKind.primary,
+            kind: destructive
+                ? OmniButtonKind.destructive
+                : OmniButtonKind.primary,
             onPressed: () => Navigator.of(context).pop(true),
           ),
         ],

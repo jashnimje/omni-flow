@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../state/clock.dart' show hour12Provider;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -169,7 +172,7 @@ class _AutomationInsightsState extends ConsumerState<AutomationInsights> {
               key: ValueKey('skip-$i'),
               icon: Symbols.block_rounded,
               title: s.text,
-              subtitle: whenText(s.at),
+              subtitle: whenText(s.at, hour12: ref.watch(hour12Provider)),
             ),
         const OmniSectionHeader('History'),
         if (versions == null)

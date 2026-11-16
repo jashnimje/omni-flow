@@ -2,6 +2,7 @@
 library;
 
 export 'src/api/command_bar.dart';
+export 'src/api/clock_words.dart';
 export 'src/api/local_client.dart'
     show
         EngineConnection,

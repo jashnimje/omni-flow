@@ -78,56 +78,47 @@ class _HostKeySheetState extends ConsumerState<_HostKeySheet> {
     final offered = key?['offered'] as String?;
     final matches = key?['matches'] == true;
     final changed = pinned != null && offered != null && !matches;
-    return OmniSheet(
+    final canTrust = offered != null && !matches;
+    return SheetTemplate(
       title: 'SSH host key',
       subtitle:
           'How OmniFlow knows it is talking to ${widget.device.name} and '
           'not another computer.',
-      children: [
-        if (key == null && _error == null)
-          const Padding(
-            padding: EdgeInsets.all(OmniSpace.lg),
-            child: Center(child: CircularProgressIndicator()),
+      state: key != null
+          ? OmniLoad.data(error: _error, onRetry: _busy ? null : _look)
+          : _error != null
+          ? OmniLoad.error(_error!, _busy ? null : _look)
+          : const OmniLoad.loading(),
+      primaryLabel: canTrust ? 'Trust the key it offers now' : null,
+      primaryKey: const ValueKey('hostkey-accept'),
+      onPrimary: canTrust && !_busy ? () => _accept(offered) : null,
+      secondaryLabel: 'Check again',
+      onSecondary: _busy ? null : _look,
+      children: (context) => [
+        if (changed)
+          const OmniBanner.warning(
+            'The key changed since OmniFlow first met it, so commands to '
+            'it are stopped.',
+            key: ValueKey('hostkey-changed'),
+          )
+        else if (matches)
+          const OmniBanner.info(
+            'The key is the one OmniFlow trusts.',
+            key: ValueKey('hostkey-ok'),
           ),
-        if (_error case final e?) OmniBanner.error(e),
-        if (key != null) ...[
-          if (changed)
-            const OmniBanner.warning(
-              'The key changed since OmniFlow first met it, so commands to '
-              'it are stopped.',
-              key: ValueKey('hostkey-changed'),
-            )
-          else if (matches)
-            const OmniBanner.info(
-              'The key is the one OmniFlow trusts.',
-              key: ValueKey('hostkey-ok'),
-            ),
-          if (key['error'] case final String e)
-            OmniBanner.error('It did not answer: $e'),
-          OmniListRow(
-            key: const ValueKey('hostkey-pinned'),
-            title: 'Trusted',
-            subtitle: pinned ?? 'None yet: the next connection trusts it',
-          ),
-          OmniListRow(
-            key: const ValueKey('hostkey-offered'),
-            title: 'Offered now',
-            subtitle: offered ?? 'Unknown',
-          ),
-          const SizedBox(height: OmniSpace.md),
-          if (offered != null && !matches)
-            OmniButton(
-              key: const ValueKey('hostkey-accept'),
-              label: 'Trust the key it offers now',
-              onPressed: _busy ? null : () => _accept(offered),
-            ),
-          OmniButton.ghost(
-            key: const ValueKey('hostkey-again'),
-            label: 'Check again',
-            icon: OmniIcons.retry,
-            onPressed: _busy ? null : _look,
-          ),
-        ],
+        if (key!['error'] case final String e)
+          OmniBanner.error('It did not answer: $e'),
+        OmniListRow(
+          key: const ValueKey('hostkey-pinned'),
+          title: 'Trusted',
+          subtitle: pinned ?? 'None yet: the next connection trusts it',
+        ),
+        OmniListRow(
+          key: const ValueKey('hostkey-offered'),
+          title: 'Offered now',
+          subtitle: offered ?? 'Unknown',
+          divider: false,
+        ),
       ],
     );
   }

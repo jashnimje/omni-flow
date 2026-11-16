@@ -196,54 +196,55 @@ class EnergyPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final summary = ref.watch(energySummaryProvider).value;
-    return OmniPage(
+    final read = ref.watch(energySummaryProvider);
+    final summary = read.value;
+    return DetailPage(
+      key: const ValueKey('energy-page'),
       title: 'Energy',
-      body: ListView(
-        key: const ValueKey('energy-page'),
-        children: [
-          if (summary == null || summary.devices.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: OmniSpace.md),
-              child: Text(
-                'No plug reports its power use yet. Shelly Plus, Shelly Gen1 '
-                'and Tuya plugs that measure power show here once read.',
-                style: OmniText.caption,
-              ),
-            )
-          else ...[
-            OmniHeroCard(
-              title: summary.todayLine(),
-              subtitle:
-                  '${EnergySummary.kwh(summary.weekKwh)} in the last 7 days'
-                  '${summary.money(summary.weekCost) == null ? '' : ', ${summary.money(summary.weekCost)}'}',
-            ),
-            const OmniSectionHeader('By plug'),
-            for (final d in summary.devices)
-              OmniListRow(
-                key: ValueKey('energy-row-${d.id}'),
-                icon: OmniIcons.plug,
-                title: d.name,
-                subtitle: [
-                  '${EnergySummary.kwh(d.weekKwh)} this week',
-                  if (d.watts != null) '${d.watts!.round()} W now',
-                ].join(' · '),
-                value: EnergySummary.kwh(d.todayKwh),
-              ),
-          ],
-          const OmniSectionHeader('Price'),
-          OmniListRow(
-            key: const ValueKey('energy-price'),
-            icon: OmniIcons.edit,
-            title: 'Price of one kWh',
-            subtitle: summary?.perKwh == null
-                ? 'Set it to see what your plugs cost'
-                : summary!.money(summary.perKwh),
-            chevron: true,
-            onTap: () => editEnergyPrice(context, ref, summary),
+      state: read.hasValue ? const OmniLoad.data() : const OmniLoad.loading(),
+      children: (context) => [
+        if (summary == null || summary.devices.isEmpty)
+          const OmniEmptyState(
+            key: ValueKey('energy-none'),
+            icon: OmniIcons.plug,
+            title: 'No plug reports its power use yet',
+            message:
+                'Shelly Plus, Shelly Gen1 and Tuya plugs that measure '
+                'power show here once read.',
+            compact: true,
+          )
+        else ...[
+          OmniHeroCard(
+            title: summary.todayLine(),
+            subtitle:
+                '${EnergySummary.kwh(summary.weekKwh)} in the last 7 days'
+                '${summary.money(summary.weekCost) == null ? '' : ', ${summary.money(summary.weekCost)}'}',
           ),
+          const OmniSectionHeader('By plug'),
+          for (final d in summary.devices)
+            OmniListRow(
+              key: ValueKey('energy-row-${d.id}'),
+              icon: OmniIcons.plug,
+              title: d.name,
+              subtitle: [
+                '${EnergySummary.kwh(d.weekKwh)} this week',
+                if (d.watts != null) '${d.watts!.round()} W now',
+              ].join(' · '),
+              value: EnergySummary.kwh(d.todayKwh),
+            ),
         ],
-      ),
+        const OmniSectionHeader('Price'),
+        OmniListRow(
+          key: const ValueKey('energy-price'),
+          icon: OmniIcons.edit,
+          title: 'Price of one kWh',
+          subtitle: summary?.perKwh == null
+              ? 'Set it to see what your plugs cost'
+              : summary!.money(summary.perKwh),
+          chevron: true,
+          onTap: () => editEnergyPrice(context, ref, summary),
+        ),
+      ],
     );
   }
 }
@@ -258,53 +259,44 @@ Future<void> editEnergyPrice(
     text: summary?.perKwh == null ? '' : '${summary!.perKwh}',
   );
   final symbol = TextEditingController(text: summary?.currency ?? '');
-  final saved = await showDialog<bool>(
-    context: context,
-    // The fields are read below, before the dialog's exit ends and these
-    // go with it.
-    builder: (context) => Owning(
+  // The fields are read when Save is tapped, before the sheet's exit ends
+  // and these go with it.
+  final saved = await SheetTemplate.show<({double? value, String money})>(
+    context,
+    builder: (sheet) => Owning(
       [price, symbol],
-      child: AlertDialog(
-        title: const Text('Price of one kWh'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const ValueKey('energy-price-value'),
-              controller: price,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Price, such as 8.5',
-              ),
-            ),
-            TextField(
-              key: const ValueKey('energy-price-currency'),
-              controller: symbol,
-              decoration: const InputDecoration(
-                labelText: 'Money symbol, such as ₹ or \$',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+      child: SheetTemplate(
+        title: 'Price of one kWh',
+        primaryLabel: 'Save',
+        primaryKey: const ValueKey('energy-price-save'),
+        onPrimary: () => Navigator.of(sheet).pop((
+          value: double.tryParse(price.text.trim().replaceAll(',', '.')),
+          money: symbol.text.trim(),
+        )),
+        secondaryLabel: 'Cancel',
+        onSecondary: () => Navigator.of(sheet).pop(),
+        children: (context) => [
+          TextField(
+            key: const ValueKey('energy-price-value'),
+            controller: price,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Price, such as 8.5'),
           ),
-          TextButton(
-            key: const ValueKey('energy-price-save'),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Save'),
+          const SizedBox(height: OmniSpace.md),
+          TextField(
+            key: const ValueKey('energy-price-currency'),
+            controller: symbol,
+            decoration: const InputDecoration(
+              labelText: 'Money symbol, such as ₹ or \$',
+            ),
           ),
         ],
       ),
     ),
   );
-  final value = double.tryParse(price.text.trim().replaceAll(',', '.'));
-  final money = symbol.text.trim();
-  if (saved != true) return;
+  if (saved == null) return;
+  final (:value, :money) = saved;
   final r = await callEngine(
     ref,
     SmartHomeCalls.energyPriceSet,

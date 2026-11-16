@@ -140,65 +140,76 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
       for (final n in names)
         if (isSystemVariable(n)) n,
     ];
-    return OmniPage(
+    return ListPage(
       title: 'Variables',
-      body: ListView(
-        children: [
-          if (_error case final e?)
-            OmniBanner.error(e, actionLabel: 'Try again', onAction: _load)
-          else if (vars == null)
-            const OmniListSkeleton(rows: 3, label: 'Loading variables')
-          else ...[
-            const Text(
-              'Values automations set for each other to check. Change one '
-              'that is stuck, or clear it.',
-              style: OmniText.caption,
-            ),
-            const SizedBox(height: OmniSpace.md),
-            if (own.isEmpty)
-              const OmniEmptyState(
-                key: ValueKey('vars-empty'),
-                icon: OmniIcons.level,
-                title: 'No variables yet',
-                message: 'A rule\'s "Set a variable" step makes one.',
-              ),
-            for (final n in own)
-              OmniListRow(
-                key: ValueKey('var-$n'),
-                icon: OmniIcons.level,
-                title: '\$$n',
-                subtitle: valueText(vars[n]),
-                onTap: () => _edit(name: n, value: vars[n]),
-                trailing: IconButton(
-                  key: ValueKey('var-clear-$n'),
-                  tooltip: 'Clear \$$n',
-                  icon: const Icon(OmniIcons.delete, color: OmniColors.muted),
-                  onPressed: () => _remove(n),
-                ),
-              ),
-            if (system.isNotEmpty) ...[
-              const OmniSectionHeader('Set by OmniFlow'),
-              for (final n in system)
-                OmniListRow(
-                  key: ValueKey('var-$n'),
-                  icon: OmniIcons.info,
-                  title: '\$$n',
-                  subtitle: valueText(vars[n]),
-                ),
-            ],
-          ],
-          const SizedBox(height: OmniSpace.xl),
-        ],
+      actions: [
+        if (vars != null)
+          OmniIconAction(
+            key: const ValueKey('var-add'),
+            icon: OmniIcons.add,
+            label: 'Add a variable',
+            onPressed: () => _edit(),
+          ),
+      ],
+      state: OmniLoad.flags(
+        loading: vars == null,
+        error: _error,
+        onRetry: _load,
       ),
-      floatingActionButton: vars == null
-          ? null
-          : FloatingActionButton.extended(
-              key: const ValueKey('var-add'),
-              heroTag: null,
+      children: (context) => [
+        const Text(
+          'Values automations set for each other to check. Change one '
+          'that is stuck, or clear it.',
+          style: OmniText.caption,
+        ),
+        const SizedBox(height: OmniSpace.md),
+        if (own.isEmpty && system.isEmpty)
+          OmniEmptyState(
+            key: const ValueKey('vars-empty'),
+            icon: OmniIcons.level,
+            title: 'No variables yet',
+            message: 'A rule\'s "Set a variable" step makes one.',
+            action: OmniButton.ghost(
+              label: 'Add a variable',
+              icon: OmniIcons.add,
+              expand: false,
               onPressed: () => _edit(),
-              icon: const Icon(OmniIcons.add),
-              label: const Text('Add'),
             ),
+          )
+        else if (own.isEmpty)
+          const OmniEmptyState(
+            key: ValueKey('vars-empty'),
+            icon: OmniIcons.level,
+            title: 'None of your own yet',
+            message:
+                'A rule\'s "Set a variable" step makes one, or add one with +.',
+            compact: true,
+          ),
+        for (final n in own)
+          OmniListRow(
+            key: ValueKey('var-$n'),
+            icon: OmniIcons.level,
+            title: '\$$n',
+            subtitle: valueText(vars![n]),
+            onTap: () => _edit(name: n, value: vars[n]),
+            trailing: OmniIconAction(
+              key: ValueKey('var-clear-$n'),
+              icon: OmniIcons.delete,
+              label: 'Clear \$$n',
+              onPressed: () => _remove(n),
+            ),
+          ),
+        if (system.isNotEmpty) ...[
+          const OmniSectionHeader('Set by OmniFlow'),
+          for (final n in system)
+            OmniListRow(
+              key: ValueKey('var-$n'),
+              icon: OmniIcons.info,
+              title: '\$$n',
+              subtitle: valueText(vars![n]),
+            ),
+        ],
+      ],
     );
   }
 }

@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'tokens.dart';
 
-enum OmniButtonKind { primary, ghost, danger }
+enum OmniButtonKind { primary, ghost, danger, destructive }
 
-/// The full-width buttons of the mockups: [OmniButtonKind.primary] (accent),
-/// ghost (outlined) and danger (red outline, for Reject and Remove).
+/// The full-width buttons of the mockups: [OmniButtonKind.primary] (the
+/// Appearance accent), ghost (outlined), danger (red outline, for Reject
+/// and Remove in a page) and destructive (filled red, the action of a
+/// confirm that deletes).
 class OmniButton extends StatelessWidget {
   const OmniButton({
     super.key,
@@ -32,6 +34,14 @@ class OmniButton extends StatelessWidget {
     this.expand = true,
   }) : kind = OmniButtonKind.danger;
 
+  const OmniButton.destructive({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.expand = true,
+  }) : kind = OmniButtonKind.destructive;
+
   final String label;
 
   /// Null shows the button disabled.
@@ -51,15 +61,17 @@ class OmniButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Text(label);
+    final palette = OmniPalette.of(context);
+    final filled = kind == OmniButtonKind.primary;
     final button = switch (kind) {
-      OmniButtonKind.primary => FilledButton.icon(
+      OmniButtonKind.primary || OmniButtonKind.destructive => FilledButton.icon(
         onPressed: onPressed,
         icon: icon == null ? null : Icon(icon, size: 20),
         label: text,
         style: FilledButton.styleFrom(
-          backgroundColor: OmniColors.accent,
-          foregroundColor: OmniColors.accentInk,
-          disabledBackgroundColor: OmniColors.raised,
+          backgroundColor: filled ? palette.accent : OmniColors.bad,
+          foregroundColor: filled ? palette.onAccent : OmniColors.onBad,
+          disabledBackgroundColor: palette.raised,
           disabledForegroundColor: OmniColors.muted,
           minimumSize: _size,
           padding: _padding,
@@ -78,7 +90,7 @@ class OmniButton extends StatelessWidget {
           side: BorderSide(
             color: kind == OmniButtonKind.danger
                 ? OmniColors.badLine
-                : OmniColors.line,
+                : palette.line,
           ),
           minimumSize: _size,
           padding: _padding,
@@ -122,7 +134,7 @@ class OmniIconAction extends StatelessWidget {
     ),
     icon: Icon(
       icon,
-      color: selected ? OmniColors.accent : color,
+      color: selected ? OmniPalette.of(context).accent : color,
       fill: selected ? 1 : 0,
       semanticLabel: label,
     ),

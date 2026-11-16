@@ -394,7 +394,7 @@ class RulesCoreCommands {
     final r = Map<String, Object?>.from(rule);
     switch (r['type']) {
       case 'time_window':
-        return 'it was not between ${r['start']} and ${r['end']}';
+        return 'it was not between ${w.clock(r['start'])} and ${w.clock(r['end'])}';
       case 'days':
         return 'it was not ${(r['days'] as List).join(', ')}';
       case 'people':

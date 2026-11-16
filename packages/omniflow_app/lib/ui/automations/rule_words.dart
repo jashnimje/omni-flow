@@ -336,6 +336,12 @@ class RuleWords {
   String _label(String id, String key) =>
       (thing(id)?.labelOf(key) ?? key).replaceAll('.', ' ').toLowerCase();
 
+  /// A power reading with a fixed set of values (a TV's on, asleep or
+  /// off), which reads as the thing itself: "Living room TV is asleep".
+  bool _isPowerChoice(String id, String key) =>
+      (thing(id)?.valuesOf(key).isNotEmpty ?? false) &&
+      _label(id, key).trim() == 'power';
+
   /// " temperature" after a thing's name, or nothing when the thing reports
   /// one value only ("Room temperature goes above 28 °C").
   String _keyWords(String id, String key) {
@@ -422,6 +428,8 @@ class RuleWords {
         false => '$name turns off',
         _ => '$name turns on or off',
       },
+      OnMode.change when t.to is String && _isPowerChoice(t.thing, t.key) =>
+        t.to == 'asleep' ? '$name falls asleep' : '$name turns ${t.to}',
       OnMode.change =>
         t.hasTo
             ? '$name${_keyWords(t.thing, t.key)} changes to ${valueText(t.to, unit: unit)}'
@@ -524,6 +532,11 @@ class RuleWords {
     if (th?.isOnOff(key) == true && c.value is bool) {
       final on = (c.op == '==') == (c.value == true);
       return '$name is ${on ? 'on' : 'off'}';
+    }
+    if (c.value is String &&
+        (c.op == '==' || c.op == '!=') &&
+        _isPowerChoice(id, key)) {
+      return '$name ${_op(c.op)} ${c.value}';
     }
     if (key == 'app' && c.op == '==' && c.value is String) {
       return '$name is on ${appName(c.value as String)}';

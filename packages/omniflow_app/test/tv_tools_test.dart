@@ -88,6 +88,7 @@ void main() {
       1,
     );
     await tapKey(tester, 'tv-process-stop-com.netflix.ninja');
+    await tapKey(tester, 'confirm');
     expect(argsOf(engine, 'tv.app').last, containsPair('action', 'stop'));
     await tester.ensureVisible(find.byKey(const ValueKey('tv-reboot')));
     await tapKey(tester, 'tv-reboot');

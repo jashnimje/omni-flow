@@ -5,6 +5,7 @@ import 'package:omniflow_engine/omniflow_engine.dart'
 
 import '../../api/engine_calls.dart';
 import '../../api/plain_error.dart';
+import '../../state/clock.dart' show hour12Provider;
 import '../../state/providers.dart';
 import '../design/design.dart';
 import 'diagram/run_view.dart' show DryRunDiagram;
@@ -50,7 +51,9 @@ String _failureText(String raw) =>
     plainWords(plainError('device_error', raw)).text;
 
 /// What a node did, or in a dry run would do, in plain words.
-String? _detail(RunNode n, {required bool dry}) {
+/// [goesOn] is whether the run went past [n]: a check that does not hold
+/// stops a rule, but in an if it takes the otherwise way instead.
+String? _detail(RunNode n, {required bool dry, bool goesOn = false}) {
   if (n.error case final e?) {
     final plain = _failureText(e);
     return dry ? 'would fail: $plain' : plain;
@@ -63,8 +66,9 @@ String? _detail(RunNode n, {required bool dry}) {
       return dry ? 'pretended it happened' : 'started this run';
     case NodeCategory.condition:
       return switch (n.port) {
-        'true' => 'holds${dry ? ' now' : ''}',
-        'false' => 'does not hold${dry ? ' now' : ''}, so it stops here',
+        'true' => 'holds',
+        'false' when goesOn => 'does not hold, so it goes the other way',
+        'false' => 'does not hold, so it stops here',
         _ => null,
       };
     case NodeCategory.action:
@@ -112,15 +116,26 @@ class RunNodeRows extends StatelessWidget {
             key: ValueKey('node-$i'),
             leading: _Dot(_color(_category(n.type))),
             title: n.label ?? labels[n.node] ?? n.type.replaceAll('_', ' '),
-            subtitle: _detail(n, dry: dry),
+            subtitle: _detail(n, dry: dry, goesOn: i < run.steps.length - 1),
             subtitleLines: 3,
-            trailing: _verdict(n, dry: dry),
+            trailing: _verdict(
+              context,
+              n,
+              dry: dry,
+              goesOn: i < run.steps.length - 1,
+            ),
           ),
       ],
     );
   }
 
-  static Widget _verdict(RunNode n, {required bool dry}) {
+  static Widget _verdict(
+    BuildContext context,
+    RunNode n, {
+    required bool dry,
+    bool goesOn = false,
+  }) {
+    final accent = OmniPalette.of(context).accent;
     final c = _category(n.type);
     if (n.error != null) {
       return const Icon(
@@ -135,30 +150,34 @@ class RunNodeRows extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            pass ? OmniIcons.check : AutomationIcons.stop,
+            pass
+                ? OmniIcons.check
+                : goesOn
+                ? OmniIcons.branch
+                : AutomationIcons.stop,
             size: 18,
-            color: pass ? OmniColors.accent : OmniColors.warn,
+            color: pass ? accent : OmniColors.warn,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: OmniSpace.xs),
           Text(
-            pass ? 'pass' : 'stops',
+            pass
+                ? 'pass'
+                : goesOn
+                ? 'other way'
+                : 'stops',
             style: OmniText.number.copyWith(
-              color: pass ? OmniColors.accent : OmniColors.warn,
+              color: pass ? accent : OmniColors.warn,
             ),
           ),
         ],
       );
     }
     if (c == NodeCategory.trigger || !dry) {
-      return const Icon(
-        OmniIcons.check,
-        color: OmniColors.accent,
-        semanticLabel: 'Done',
-      );
+      return Icon(OmniIcons.check, color: accent, semanticLabel: 'Done');
     }
-    return const Icon(
+    return Icon(
       AutomationIcons.send,
-      color: OmniColors.accent,
+      color: accent,
       semanticLabel: 'Would run',
     );
   }
@@ -198,7 +217,10 @@ class RunRow extends StatelessWidget {
     final failed = raw == null ? null : _failureText(raw);
     final steps = stepsOf(run);
     return OmniListRow(
-      title: whenText(run.startedAt),
+      title: whenText(
+        run.startedAt,
+        hour12: ProviderScope.containerOf(context).read(hour12Provider),
+      ),
       subtitle: run.ok
           ? [
               '$steps ${steps == 1 ? 'step' : 'steps'}',
@@ -207,7 +229,7 @@ class RunRow extends StatelessWidget {
           : failed ?? run.outcome,
       trailing: Icon(
         run.ok ? OmniIcons.check : AutomationIcons.fail,
-        color: run.ok ? OmniColors.accent : OmniColors.bad,
+        color: run.ok ? OmniPalette.of(context).accent : OmniColors.bad,
         semanticLabel: run.ok ? 'Worked' : 'Failed',
       ),
       onTap: onTap,
@@ -324,94 +346,85 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
   Widget build(BuildContext context) {
     final dry = _dry;
     final runs = _runs;
-    return OmniPage(
+    final canRun = _dryDone && widget.id != null && !widget.unsaved;
+    return DetailPage(
       title: '${widget.name} · test',
       actions: widget.actions,
-      body: ListView(
-        children: [
-          ?widget.header,
-          if (_dryFailure != null)
-            OmniBanner.error(
-              'The test could not run: ${_dryFailure!.message}',
-              actionLabel: 'Try again',
-              onAction: () {
-                setState(() {
-                  _dryFailure = null;
-                  _dryDone = false;
-                });
-                _load();
-              },
-            )
-          else if (!_dryDone)
-            const Padding(
-              padding: EdgeInsets.all(OmniSpace.xl),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else ...[
-            const OmniBanner.info(
-              'Nothing was sent. This is what would happen now.',
-              key: ValueKey('dry-run-banner'),
-            ),
-            if (dry == null || dry.steps.isEmpty)
-              const OmniEmptyState(
-                icon: OmniIcons.info,
-                title: 'Nothing would run',
-                message: 'Its trigger did not lead to any step.',
-              )
-            else ...[
-              // The same run twice: on the diagram, then step by step.
-              DryRunDiagram(run: dry, rule: widget.rule, id: widget.id),
-              RunNodeRows(key: const ValueKey('dry-run'), run: dry),
-            ],
-            const SizedBox(height: OmniSpace.md),
-            if (widget.id == null || widget.unsaved)
-              Text(
-                widget.id == null
-                    ? 'Save it to run it for real.'
-                    : 'Save your changes to run this version for real.',
-                key: ValueKey('save-to-run'),
-                style: OmniText.caption,
-              )
-            else
-              OmniButton(
+      bottom: canRun
+          ? OmniActionBar(
+              primary: OmniButton(
                 key: const ValueKey('run-now'),
                 label: _running ? 'Running…' : 'Run it now for real',
                 onPressed: _running ? null : _runNow,
               ),
+            )
+          : null,
+      children: (context) => [
+        ?widget.header,
+        if (_dryFailure != null)
+          OmniErrorBanner(
+            'The test could not run: ${_dryFailure!.message}',
+            onRetry: () {
+              setState(() {
+                _dryFailure = null;
+                _dryDone = false;
+              });
+              _load();
+            },
+          )
+        else if (!_dryDone)
+          const OmniListSkeleton(rows: 3, label: 'Testing it')
+        else ...[
+          const OmniBanner.info(
+            'Nothing was sent. This is what would happen.',
+            key: ValueKey('dry-run-banner'),
+          ),
+          if (dry == null || dry.steps.isEmpty)
+            const OmniEmptyState(
+              icon: OmniIcons.info,
+              title: 'Nothing would run',
+              message: 'Its trigger did not lead to any step.',
+              compact: true,
+            )
+          else ...[
+            // The same run twice: on the diagram, then step by step.
+            DryRunDiagram(run: dry, rule: widget.rule, id: widget.id),
+            RunNodeRows(key: const ValueKey('dry-run'), run: dry),
           ],
-          if (widget.id != null) ...[
-            const OmniSectionHeader('Last runs'),
-            if (_runsFailure != null)
-              OmniBanner.error(
-                'The run log did not load. ${_runsFailure!.message}',
-                actionLabel: 'Try again',
-                onAction: _load,
-              )
-            else if (runs == null)
-              const Padding(
-                padding: EdgeInsets.all(OmniSpace.lg),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (runs.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: OmniSpace.md),
-                child: Text(
-                  'It has not run yet. Runs show here, newest first.',
-                  key: ValueKey('no-runs'),
-                  style: OmniText.caption,
-                ),
-              )
-            else
-              for (final (i, r) in runs.indexed)
-                RunRow(
-                  key: ValueKey('run-$i'),
-                  run: r,
-                  onTap: () => _openRun(r),
-                ),
-          ],
-          const SizedBox(height: OmniSpace.xl),
+          if (widget.id == null || widget.unsaved)
+            Padding(
+              padding: const EdgeInsets.only(top: OmniSpace.md),
+              child: Text(
+                widget.id == null
+                    ? 'Save it to run it for real.'
+                    : 'Save your changes to run this version for real.',
+                key: const ValueKey('save-to-run'),
+                style: OmniText.caption,
+              ),
+            ),
         ],
-      ),
+        if (widget.id != null) ...[
+          const OmniSectionHeader('Last runs'),
+          if (_runsFailure != null)
+            OmniErrorBanner(
+              'The run log did not load. ${_runsFailure!.message}',
+              onRetry: _load,
+            )
+          else if (runs == null)
+            const OmniListSkeleton(rows: 3, label: 'Loading the runs')
+          else if (runs.isEmpty)
+            const OmniEmptyState(
+              key: ValueKey('no-runs'),
+              icon: OmniIcons.time,
+              title: 'It has not run yet',
+              message: 'Runs show here, newest first.',
+              compact: true,
+            )
+          else
+            for (final (i, r) in runs.indexed)
+              RunRow(key: ValueKey('run-$i'), run: r, onTap: () => _openRun(r)),
+        ],
+      ],
     );
   }
 }
@@ -444,7 +457,21 @@ class _RunPageState extends ConsumerState<RunPage> {
   Map<String, String> _labels = const {};
   var _loading = false;
   var _missing = false;
+  var _rerunning = false;
   ApiFailure? _failure;
+
+  /// Runs the automation again and shows that run in place of this one.
+  Future<void> _runAgain() async {
+    setState(() => _rerunning = true);
+    final reply = await ref
+        .read(engineApiProvider)
+        .runAutomation(widget.automationId);
+    if (!mounted) return;
+    setState(() {
+      _rerunning = false;
+      if (reply.value?.firstOrNull case final run?) _run = run;
+    });
+  }
 
   @override
   void initState() {
@@ -487,47 +514,49 @@ class _RunPageState extends ConsumerState<RunPage> {
         run?.steps.where((n) => n.error != null).firstOrNull?.error ??
         run?.reason;
     final failed = raw == null ? null : _failureText(raw);
-    return OmniPage(
-      title: '${_name ?? widget.automationId} · run',
-      body: ListView(
-        children: [
-          if (_failure != null)
-            OmniBanner.error(
-              'This run did not load. ${_failure!.message}',
-              actionLabel: 'Try again',
-              onAction: _load,
-            )
-          else if (_missing)
-            const OmniEmptyState(
-              key: ValueKey('run-missing'),
-              icon: OmniIcons.info,
-              title: 'This run is no longer in the log',
-              message: 'The log keeps the newest runs only.',
-            )
-          else if (run == null || _loading && run.steps.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(OmniSpace.xl),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else ...[
-            if (run.ok)
-              OmniBanner.info(
-                'Ran ${whenInline(run.startedAt)}'
-                '${run.duration == null ? '' : ' in ${tookText(run.duration!)}'}. '
-                'Each step and what it did.',
-              )
-            else
-              OmniBanner.error(
-                'This run failed${failed == null ? '' : ': $failed'}. '
-                'Steps after a failed one still run unless the automation stops at '
-                'the first failure.',
+    final failure = _failure;
+    return DetailPage(
+      // The name, never the id, until the automation is read.
+      title: '${_name ?? 'Automation'} · run',
+      state: failure != null
+          ? OmniLoad.error('This run did not load. ${failure.message}', _load)
+          : _missing
+          ? const OmniLoad.empty()
+          : run == null || _loading && run.steps.isEmpty
+          ? const OmniLoad.loading()
+          : const OmniLoad.data(),
+      // A failed run can be tried again from here.
+      bottom: run != null && !run.ok
+          ? OmniActionBar(
+              primary: OmniButton(
+                key: const ValueKey('run-again'),
+                label: _rerunning ? 'Running…' : 'Run it again',
+                onPressed: _rerunning ? null : _runAgain,
               ),
-            DryRunDiagram(run: run, id: widget.automationId),
-            RunNodeRows(run: run, labels: _labels),
-          ],
-          const SizedBox(height: OmniSpace.xl),
-        ],
+            )
+          : null,
+      notFound: const OmniEmptyState(
+        key: ValueKey('run-missing'),
+        icon: OmniIcons.info,
+        title: 'This run is no longer in the log',
+        message: 'The log keeps the newest runs only.',
       ),
+      children: (context) => [
+        if (run!.ok)
+          OmniBanner.info(
+            'Ran ${whenInline(run.startedAt, hour12: ref.watch(hour12Provider))}'
+            '${run.duration == null ? '' : ' in ${tookText(run.duration!)}'}. '
+            'Each step and what it did.',
+          )
+        else
+          OmniBanner.error(
+            'This run failed${failed == null ? '' : ': $failed'}. '
+            'Steps after a failed one still run unless the automation stops at '
+            'the first failure.',
+          ),
+        DryRunDiagram(run: run, id: widget.automationId),
+        RunNodeRows(run: run, labels: _labels),
+      ],
     );
   }
 }

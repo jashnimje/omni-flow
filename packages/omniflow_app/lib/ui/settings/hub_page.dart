@@ -45,17 +45,23 @@ class HomeRunsOnRow extends ConsumerWidget {
 class HubPage extends ConsumerWidget {
   const HubPage({super.key});
 
+  static const title = 'Home runs on';
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(homeModeProvider);
-    return OmniPage(
-      title: 'Home runs on',
-      body: switch (mode.value) {
-        null => const Center(child: CircularProgressIndicator()),
-        HomeMode.phone => const _HubSetup(),
-        HomeMode.hub => const _HubStatus(),
-      },
-    );
+    return switch (mode.value) {
+      null => DetailPage(
+        title: HubPage.title,
+        state: OmniLoad.of(
+          mode,
+          onRetry: () => ref.invalidate(homeModeProvider),
+        ),
+        children: (_) => const [],
+      ),
+      HomeMode.phone => const _HubSetup(),
+      HomeMode.hub => const _HubStatus(),
+    };
   }
 }
 
@@ -69,20 +75,21 @@ class _HubStatus extends ConsumerWidget {
     final clients = ref.watch(hubClientsProvider);
     final connected = link?.connected == true;
     final since = link?.connectedSince?.toLocal();
-    return ListView(
+    return DetailPage(
       key: const ValueKey('hub-status'),
-      children: [
-        OmniHeroCard(
-          key: const ValueKey('hub-status-hero'),
-          title: switch (link?.state) {
-            HubLinkState.connected => 'Connected to the Mac mini hub',
-            HubLinkState.versionMismatch => 'The hub and app versions differ',
-            HubLinkState.unreachable => 'Hub not reachable',
-            _ => 'Connecting to the hub',
-          },
-          subtitle: link?.reason,
-          tone: connected ? HeroTone.accent : HeroTone.problem,
-        ),
+      title: HubPage.title,
+      hero: OmniHeroCard(
+        key: const ValueKey('hub-status-hero'),
+        title: switch (link?.state) {
+          HubLinkState.connected => 'Connected to the Mac mini hub',
+          HubLinkState.versionMismatch => 'The hub and app versions differ',
+          HubLinkState.unreachable => 'Hub not reachable',
+          _ => 'Connecting to the hub',
+        },
+        subtitle: link?.reason,
+        tone: connected ? HeroTone.accent : HeroTone.problem,
+      ),
+      children: (context) => [
         const OmniSectionHeader('Hub'),
         OmniListRow(
           key: const ValueKey('hub-address'),
@@ -128,18 +135,23 @@ class _HubStatus extends ConsumerWidget {
               ),
           ],
           AsyncData(value: final list?) when list.isEmpty => [
-            const Text('No phone is connected.', style: OmniText.caption),
+            const OmniEmptyState(
+              icon: OmniIcons.phone,
+              title: 'No phone is connected',
+              compact: true,
+            ),
           ],
           AsyncLoading() => [
-            const Text('Asking the hub', style: OmniText.caption),
+            const OmniListSkeleton(rows: 1, label: 'Asking the hub'),
           ],
           _ => [
-            Text(
-              connected
-                  ? 'This hub does not list its phones.'
-                  : 'Shown once the hub is reachable.',
+            OmniEmptyState(
               key: const ValueKey('hub-clients-none'),
-              style: OmniText.caption,
+              icon: OmniIcons.phone,
+              title: connected
+                  ? 'This hub does not list its phones'
+                  : 'Shown once the hub is reachable',
+              compact: true,
             ),
           ],
         },
@@ -229,6 +241,7 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
   String? _offered;
   var _busy = false;
   String? _problem;
+  var _step = 1;
 
   @override
   void initState() {
@@ -323,8 +336,8 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
               e.appVersion ?? '',
             ),
             'not_allowed' =>
-              'The Mac mini did not let this phone in. Run the line above '
-                  'on it, then check again.',
+              'The Mac mini did not let this phone in. Go back, run the '
+                  'allow line on it, then check again.',
             'host_key' =>
               'The Mac mini offered a different host key just now. Check '
                   'the fingerprint again.',
@@ -347,163 +360,213 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
     final key = _key;
     final offered = _offered;
     final fingerprint = offered?.split(' ').last;
+    final phone = hubPhoneName(_phone.text);
+    void go(int step) => setState(() {
+      _step = step;
+      _problem = null;
+    });
     return Owning(
       [_host, _port, _user, _phone],
-      child: ListView(
+      child: StepFlow(
         key: const ValueKey('hub-setup'),
-        children: [
-          const OmniHeroCard(
-            title: 'This phone runs the home',
-            subtitle:
-                'Or a Mac mini can run it for every phone in the house, with '
-                'this phone as its screen and its sensors.',
-            tone: HeroTone.plain,
-          ),
-          const OmniSectionHeader('1. Find the hub'),
-          OmniButton.ghost(
-            key: const ValueKey('hub-look'),
-            label: _looking ? 'Looking' : 'Look on this Wi-Fi',
-            icon: OmniIcons.search,
-            onPressed: _looking ? null : _look,
-          ),
-          if (_found case final found? when found.isNotEmpty)
-            for (final (i, hub) in found.indexed)
-              OmniListRow(
-                key: ValueKey('hub-found-$i'),
-                icon: OmniIcons.computer,
-                title: '${hub['name'] ?? hub['host']}',
-                subtitle: '${hub['host']}:${hub['port'] ?? 22}',
-                onTap: () => _pick(hub),
-              ),
-          if (_lookedWithoutLuck)
-            const Text(
-              'No Mac was found. Type its address below. It is in System '
-              'Settings, General, Sharing, Remote Login.',
-              key: ValueKey('hub-none-found'),
-              style: OmniText.caption,
-            ),
-          const SizedBox(height: OmniSpace.md),
-          TextField(
-            key: const ValueKey('hub-host'),
-            controller: _host,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            decoration: const InputDecoration(
-              labelText: 'Mac mini address',
-              helperText: 'Like mac-mini.local, an IP, or its Tailscale name',
-            ),
-          ),
-          TextField(
-            key: const ValueKey('hub-port'),
-            controller: _port,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'SSH port'),
-          ),
-          TextField(
-            key: const ValueKey('hub-user'),
-            controller: _user,
-            autocorrect: false,
-            decoration: const InputDecoration(
-              labelText: 'Your user name on the Mac mini',
-            ),
-          ),
-          TextField(
-            key: const ValueKey('hub-phone'),
-            controller: _phone,
-            autocorrect: false,
-            decoration: const InputDecoration(
-              labelText: 'A name for this phone',
-              helperText: 'Starts with a letter, then letters, digits or _, like jade_pixel',
-            ),
-          ),
-          const OmniSectionHeader('2. Let this phone in'),
-          if (key == null)
-            OmniButton.ghost(
-              key: const ValueKey('hub-make-key'),
-              label: 'Make this phone\'s key',
-              icon: OmniIcons.permissions,
-              onPressed: hubPhoneName(_phone.text).isEmpty ? null : _makeKey,
-            )
-          else ...[
-            const Text(
-              'Run this on the Mac mini, in Terminal:',
-              style: OmniText.caption,
-            ),
-            const SizedBox(height: OmniSpace.sm),
-            SelectableText(
-              hubAllowLine(hubPhoneName(_phone.text), key),
-              key: const ValueKey('hub-allow-line'),
-              style: OmniText.mono,
-            ),
-            const SizedBox(height: OmniSpace.sm),
-            OmniButton.ghost(
-              key: const ValueKey('hub-copy'),
-              label: 'Copy',
-              icon: Icons.copy_rounded,
-              expand: false,
-              onPressed: () async {
-                await Clipboard.setData(
-                  ClipboardData(
-                    text: hubAllowLine(hubPhoneName(_phone.text), key),
-                  ),
-                );
-                showMessage('Copied');
-              },
-            ),
-          ],
-          const OmniSectionHeader('3. Check it is your Mac mini'),
-          if (offered == null)
-            OmniButton(
-              key: const ValueKey('hub-check'),
-              label: _busy ? 'Connecting' : 'Connect',
-              onPressed: settings == null || key == null || _busy
-                  ? null
-                  : _check,
-            )
-          else ...[
-            const Text(
-              'The Mac mini says its key is:',
-              style: OmniText.caption,
-            ),
-            const SizedBox(height: OmniSpace.sm),
-            SelectableText(
-              fingerprint ?? offered,
-              key: const ValueKey('hub-fingerprint'),
-              style: OmniText.mono,
-            ),
-            const SizedBox(height: OmniSpace.sm),
-            const Text(
-              'Run omni hub fingerprint on the Mac mini. Does it show the '
-              'same?',
-              style: OmniText.body,
-            ),
-            const SizedBox(height: OmniSpace.md),
-            OmniButton(
-              key: const ValueKey('hub-matches'),
-              label: _busy ? 'Connecting' : 'It matches',
-              icon: OmniIcons.check,
-              onPressed: _busy ? null : _matched,
-            ),
-            const SizedBox(height: OmniSpace.sm),
-            OmniButton.ghost(
-              key: const ValueKey('hub-no-match'),
-              label: 'It does not match',
-              onPressed: _busy
-                  ? null
-                  : () => setState(() {
-                      _offered = null;
-                      _problem =
-                          'Something else answered at that address. Do not '
-                          'connect. Check the address is the Mac mini.';
-                    }),
-            ),
-          ],
-          if (_problem case final problem?) ...[
-            const SizedBox(height: OmniSpace.md),
+        title: HubPage.title,
+        close: false,
+        count: 3,
+        current: _step,
+        heading: switch (_step) {
+          1 => 'Find the hub',
+          2 => 'Let this phone in',
+          _ => 'Check it is your Mac mini',
+        },
+        why: switch (_step) {
+          1 =>
+            'The phone and the Mac mini need to be on the same Wi-Fi, or '
+                'on Tailscale.',
+          2 => 'The Mac mini lets in only the phones you allow.',
+          _ => 'So this phone talks to your Mac mini and nothing else.',
+        },
+        banners: [
+          if (_problem case final problem?)
             OmniBanner.error(problem, key: const ValueKey('hub-problem')),
-          ],
         ],
+        onBack: _step == 1 ? null : () => go(_step - 1),
+        primaryKey: switch (_step) {
+          2 when key == null => const ValueKey('hub-make-key'),
+          3 when offered == null => const ValueKey('hub-check'),
+          3 => const ValueKey('hub-matches'),
+          _ => null,
+        },
+        primaryLabel: switch (_step) {
+          2 when key == null => 'Make this phone\'s key',
+          3 when offered == null => _busy ? 'Connecting' : 'Connect',
+          3 => _busy ? 'Connecting' : 'It matches',
+          _ => 'Next',
+        },
+        onPrimary: switch (_step) {
+          1 => settings == null ? null : () => go(2),
+          2 when key == null => phone.isEmpty ? null : _makeKey,
+          2 => () => go(3),
+          3 when offered == null =>
+            settings == null || key == null || _busy ? null : _check,
+          _ => _busy ? null : _matched,
+        },
+        missing: switch (_step) {
+          1 =>
+            'Type the Mac mini address, your user name and a name for this '
+                'phone.',
+          2 => 'Give this phone a name first.',
+          _ => null,
+        },
+        children: (context) => switch (_step) {
+          1 => _findStep(),
+          2 => _allowStep(key),
+          _ => _checkStep(offered, fingerprint),
+        },
       ),
     );
   }
+
+  List<Widget> _findStep() => [
+    const OmniHeroCard(
+      title: 'This phone runs the home',
+      subtitle:
+          'Or a Mac mini can run it for every phone in the house, with '
+          'this phone as its screen and its sensors.',
+      tone: HeroTone.plain,
+    ),
+    const SizedBox(height: OmniSpace.md),
+    OmniButton.ghost(
+      key: const ValueKey('hub-look'),
+      label: _looking ? 'Looking' : 'Look on this Wi-Fi',
+      icon: OmniIcons.search,
+      onPressed: _looking ? null : _look,
+    ),
+    if (_found case final found? when found.isNotEmpty)
+      for (final (i, hub) in found.indexed)
+        OmniListRow(
+          key: ValueKey('hub-found-$i'),
+          icon: OmniIcons.computer,
+          title: '${hub['name'] ?? hub['host']}',
+          subtitle: '${hub['host']}:${hub['port'] ?? 22}',
+          onTap: () => _pick(hub),
+        ),
+    if (_lookedWithoutLuck)
+      const OmniEmptyState(
+        key: ValueKey('hub-none-found'),
+        icon: OmniIcons.computer,
+        title: 'No Mac was found',
+        message:
+            'Type its address below. It is in System Settings, General, '
+            'Sharing, Remote Login.',
+        compact: true,
+      ),
+    const SizedBox(height: OmniSpace.md),
+    TextField(
+      key: const ValueKey('hub-host'),
+      controller: _host,
+      keyboardType: TextInputType.url,
+      autocorrect: false,
+      decoration: const InputDecoration(
+        labelText: 'Mac mini address',
+        helperText: 'Like mac-mini.local, an IP, or its Tailscale name',
+      ),
+    ),
+    const SizedBox(height: OmniSpace.md),
+    TextField(
+      key: const ValueKey('hub-port'),
+      controller: _port,
+      keyboardType: TextInputType.number,
+      decoration: const InputDecoration(labelText: 'SSH port'),
+    ),
+    const SizedBox(height: OmniSpace.md),
+    TextField(
+      key: const ValueKey('hub-user'),
+      controller: _user,
+      autocorrect: false,
+      decoration: const InputDecoration(
+        labelText: 'Your user name on the Mac mini',
+      ),
+    ),
+    const SizedBox(height: OmniSpace.md),
+    TextField(
+      key: const ValueKey('hub-phone'),
+      controller: _phone,
+      autocorrect: false,
+      decoration: const InputDecoration(
+        labelText: 'A name for this phone',
+        helperText:
+            'Starts with a letter, then letters, digits or _, like '
+            'jade_pixel',
+      ),
+    ),
+  ];
+
+  List<Widget> _allowStep(HubKey? key) => [
+    if (key == null)
+      const Text(
+        'OmniFlow makes a key for this phone. Only its public half leaves '
+        'the phone.',
+        style: OmniText.body,
+      )
+    else ...[
+      const Text(
+        'Run this on the Mac mini, in Terminal:',
+        style: OmniText.caption,
+      ),
+      const SizedBox(height: OmniSpace.sm),
+      SelectableText(
+        hubAllowLine(hubPhoneName(_phone.text), key),
+        key: const ValueKey('hub-allow-line'),
+        style: OmniText.mono,
+      ),
+      const SizedBox(height: OmniSpace.sm),
+      OmniButton.ghost(
+        key: const ValueKey('hub-copy'),
+        label: 'Copy',
+        icon: Icons.copy_rounded,
+        expand: false,
+        onPressed: () async {
+          await Clipboard.setData(
+            ClipboardData(text: hubAllowLine(hubPhoneName(_phone.text), key)),
+          );
+          showMessage('Copied');
+        },
+      ),
+    ],
+  ];
+
+  List<Widget> _checkStep(String? offered, String? fingerprint) => [
+    if (offered == null)
+      const Text(
+        'Connect asks the Mac mini for its key, so you can check it first.',
+        style: OmniText.body,
+      )
+    else ...[
+      const Text('The Mac mini says its key is:', style: OmniText.caption),
+      const SizedBox(height: OmniSpace.sm),
+      SelectableText(
+        fingerprint ?? offered,
+        key: const ValueKey('hub-fingerprint'),
+        style: OmniText.mono,
+      ),
+      const SizedBox(height: OmniSpace.sm),
+      const Text(
+        'Run omni hub fingerprint on the Mac mini. Does it show the same?',
+        style: OmniText.body,
+      ),
+      const SizedBox(height: OmniSpace.md),
+      OmniButton.ghost(
+        key: const ValueKey('hub-no-match'),
+        label: 'It does not match',
+        onPressed: _busy
+            ? null
+            : () => setState(() {
+                _offered = null;
+                _problem =
+                    'Something else answered at that address. Do not '
+                    'connect. Check the address is the Mac mini.';
+              }),
+      ),
+    ],
+  ];
 }

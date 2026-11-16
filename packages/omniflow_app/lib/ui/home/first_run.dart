@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../design/design.dart';
@@ -81,61 +82,94 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
     ),
   );
 
+  /// A full screen with no way back: the intro step of the first run.
+  /// The choices scroll, and Get started stays pinned above the system
+  /// bar, so it is never below the fold.
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: ListView(
-        key: const ValueKey('first-run'),
-        padding: const EdgeInsets.fromLTRB(14, 40, 14, 24),
-        children: [
-          const OmniEmptyState(
-            icon: AreaIcons.flash,
-            title: 'Connect anything to anything',
-            message:
-                'OmniFlow runs on this phone. It finds your lights, plugs, '
-                'TVs and boards on your Wi-Fi, and runs your automations even '
-                'when the screen is off.',
-            padding: EdgeInsets.fromLTRB(18, 30, 18, 24),
-            iconColor: OmniColors.accent,
-            large: true,
-          ),
-          _choice(
-            id: 'find',
-            icon: OmniIcons.wifi,
-            title: 'Find devices on Wi-Fi',
-            why: 'needs nearby devices and location',
-            value: _find,
-            onChanged: (v) => setState(() => _find = v),
-          ),
-          _choice(
-            id: 'home',
-            icon: OmniIcons.home,
-            title: 'Know when I am home',
-            why: 'uses your home Wi-Fi name',
-            value: _home,
-            onChanged: (v) => setState(() => _home = v),
-          ),
-          _choice(
-            id: 'background',
-            icon: OmniIcons.notifications,
-            title: 'Keep running in the background',
-            why: 'a small notification shows it is on',
-            value: _background,
-            onChanged: (v) => setState(() => _background = v),
-          ),
-          const SizedBox(height: OmniSpace.lg),
-          OmniButton(
-            key: const ValueKey('first-run-start'),
-            label: 'Get started',
-            onPressed: _busy ? null : _start,
-          ),
-          const SizedBox(height: OmniSpace.sm),
-          const Text(
-            'You can change any of these later in Settings, This phone.',
-            textAlign: TextAlign.center,
-            style: OmniText.caption,
-          ),
-        ],
+  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+    value: omniSystemBars,
+    child: Scaffold(
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: ListView(
+                key: const ValueKey('first-run'),
+                padding: const EdgeInsets.fromLTRB(
+                  OmniSpace.screen,
+                  OmniSpace.xxl,
+                  OmniSpace.screen,
+                  OmniSpace.lg,
+                ),
+                children: [
+                  OmniEmptyState(
+                    icon: AreaIcons.flash,
+                    title: 'Connect anything to anything',
+                    message:
+                        'OmniFlow runs on this phone. It finds your lights, '
+                        'plugs, TVs and boards on your Wi-Fi, and runs your '
+                        'automations even when the screen is off.',
+                    padding: const EdgeInsets.fromLTRB(
+                      OmniSpace.lg,
+                      OmniSpace.xl,
+                      OmniSpace.lg,
+                      OmniSpace.xl,
+                    ),
+                    iconColor: OmniPalette.of(context).accent,
+                    large: true,
+                  ),
+                  _choice(
+                    id: 'find',
+                    icon: OmniIcons.wifi,
+                    title: 'Find devices on Wi-Fi',
+                    why: 'needs nearby devices and location',
+                    value: _find,
+                    onChanged: (v) => setState(() => _find = v),
+                  ),
+                  _choice(
+                    id: 'home',
+                    icon: OmniIcons.home,
+                    title: 'Know when I am home',
+                    why: 'uses your home Wi-Fi name',
+                    value: _home,
+                    onChanged: (v) => setState(() => _home = v),
+                  ),
+                  _choice(
+                    id: 'background',
+                    icon: OmniIcons.notifications,
+                    title: 'Keep running in the background',
+                    why: 'a small notification shows it is on',
+                    value: _background,
+                    onChanged: (v) => setState(() => _background = v),
+                  ),
+                  const SizedBox(height: OmniSpace.sm),
+                  const Text(
+                    'You can change any of these later in Settings, This '
+                    'phone.',
+                    textAlign: TextAlign.center,
+                    style: OmniText.caption,
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                OmniSpace.screen,
+                OmniSpace.sm,
+                OmniSpace.screen,
+                OmniSpace.md,
+              ),
+              child: OmniActionBar(
+                primary: OmniButton(
+                  key: const ValueKey('first-run-start'),
+                  label: 'Get started',
+                  onPressed: _busy ? null : _start,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );

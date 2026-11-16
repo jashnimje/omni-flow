@@ -72,44 +72,37 @@ class ShakeSceneRow extends ConsumerWidget {
     final api = EngineApi(client);
     final scenes = (await api.scenes()).or(const <Scene>[]);
     if (!context.mounted) return;
-    final picked = await showOmniSheet<String>(
+    const why =
+        'Shake the phone firmly twice to run it. OmniFlow uses the motion '
+        'sensor only while this is on.';
+    final picked = await showPickerSheet<String>(
       context,
-      builder: (context) => OmniSheet(
-        title: 'Shake to run a scene',
-        subtitle:
-            'Shake the phone firmly twice to run it. OmniFlow uses the motion '
-            'sensor only while this is on.',
-        children: [
-          OmniListRow(
-            key: const ValueKey('shake-scene-off'),
-            icon: Symbols.block_rounded,
+      title: 'Shake to run a scene',
+      subtitle: scenes.isEmpty
+          ? '$why No scenes yet. Make one in Automations, then come back.'
+          : why,
+      selected: current ?? '',
+      sections: [
+        const PickerSection([
+          PickerItem(
+            key: ValueKey('shake-scene-off'),
+            value: '',
             title: 'Off',
-            trailing: current == null
-                ? const Icon(Symbols.check_rounded)
-                : null,
-            onTap: () => Navigator.of(context).pop(''),
+            icon: Symbols.block_rounded,
           ),
-          if (scenes.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(OmniSpace.md),
-              child: Text(
-                'No scenes yet. Make one in Automations, then come back.',
-                style: OmniText.caption,
-              ),
-            ),
-          for (final s in scenes)
-            if (s.id case final sid?)
-              OmniListRow(
-                key: ValueKey('shake-scene-$sid'),
-                icon: OmniIcons.automations,
-                title: s.name,
-                trailing: current == sid
-                    ? const Icon(Symbols.check_rounded)
-                    : null,
-                onTap: () => Navigator.of(context).pop(sid),
-              ),
-        ],
-      ),
+        ]),
+        if (scenes.isNotEmpty)
+          PickerSection(title: 'Scenes', [
+            for (final s in scenes)
+              if (s.id case final sid?)
+                PickerItem(
+                  key: ValueKey('shake-scene-$sid'),
+                  value: sid,
+                  title: s.name,
+                  icon: OmniIcons.automations,
+                ),
+          ]),
+      ],
     );
     if (picked == null) return;
     final phone = await ref.read(thisPhoneIdProvider.future);

@@ -91,6 +91,7 @@ void main() {
     expect(find.textContaining('Developer options'), findsOneWidget);
     expect(find.textContaining('Pair device with pairing code'), findsWidgets);
     expect(engine.callsOf('android.find'), hasLength(1));
+    await tapKey(tester, 'phone-next');
     expect(find.byKey(const ValueKey('phone-found-0')), findsOneWidget);
     expect(find.textContaining('ready to pair'), findsOneWidget);
   });
@@ -99,6 +100,7 @@ void main() {
       'connect port, and the code is never shown again', (tester) async {
     final engine = _engine();
     await pumpScreen(tester, engine, const AddPhonePage());
+    await tapKey(tester, 'phone-next');
     await tapKey(tester, 'phone-found-0');
     await _enterCode(tester, _code);
 
@@ -134,6 +136,7 @@ void main() {
   ) async {
     final engine = _engine();
     await pumpScreen(tester, engine, const AddPhonePage());
+    await tapKey(tester, 'phone-next');
     await tapKey(tester, 'phone-found-0');
     await _enterCode(tester, '000000');
     expect(find.byKey(const ValueKey('phone-error')), findsOneWidget);
@@ -145,6 +148,7 @@ void main() {
   testWidgets('a code that is not six digits is not sent', (tester) async {
     final engine = _engine();
     await pumpScreen(tester, engine, const AddPhonePage());
+    await tapKey(tester, 'phone-next');
     await tapKey(tester, 'phone-found-0');
     await _enterCode(tester, '123');
     expect(find.textContaining('six digits'), findsOneWidget);
@@ -171,6 +175,7 @@ void main() {
       },
     };
     await pumpScreen(tester, engine, const AddPhonePage());
+    await tapKey(tester, 'phone-next');
     expect(find.textContaining('cannot look for phones yet'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('phone-host')),
@@ -193,6 +198,7 @@ void main() {
     final engine = _engine();
     engine.answers['android.find'] = {'ok': true, 'phones': const []};
     await pumpScreen(tester, engine, const AddPhonePage());
+    await tapKey(tester, 'phone-next');
     await tester.enterText(
       find.byKey(const ValueKey('phone-host')),
       '192.168.1.80',
@@ -221,6 +227,7 @@ void main() {
     await pumpScreen(tester, engine, const AddPhonePage());
     await tester.tap(find.text('Port 5555'));
     await tester.pumpAndSettle();
+    await tapKey(tester, 'phone-next');
     await tester.enterText(
       find.byKey(const ValueKey('phone-classic-host')),
       '192.168.1.90',

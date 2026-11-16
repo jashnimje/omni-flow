@@ -99,12 +99,12 @@ class RoomTile extends ConsumerWidget {
   );
 
   Future<void> _brightness(BuildContext context, WidgetRef ref) =>
-      showOmniSheet<void>(
+      SheetTemplate.show<void>(
         context,
-        builder: (context) => OmniSheet(
+        builder: (context) => SheetTemplate(
           title: '${room.name} lights',
           subtitle: 'One brightness for every light in the room.',
-          children: [
+          children: (context) => [
             OmniLabelledSlider(
               key: ValueKey('room-brightness-${room.id}'),
               label: 'Brightness',

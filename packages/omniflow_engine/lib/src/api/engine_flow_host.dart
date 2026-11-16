@@ -1,8 +1,12 @@
+import 'dart:io' show SocketException;
+
 import 'engine_core.dart';
 import 'rules_host.dart';
+import '../dag/error_text.dart';
 import '../dag/flow_engine.dart';
 import '../dag/web_request.dart';
 import '../storage/database.dart';
+import '../transports/udp_transport.dart' show TransportTimeoutException;
 
 /// What the flow engine reaches through the engine: devices, the stored
 /// globals and run log, and the event stream.
@@ -30,13 +34,16 @@ class EngineFlowHost with EngineRulesHost implements FlowHost {
         await DriftDeviceStore(_core.db).get(deviceId) == null) {
       return builtIn(capabilityId, params, by: flowId);
     }
-    return (await _core.devices.invoke(
+    return _plain(
       deviceId,
-      capabilityId,
-      params,
-      allowPairing: false,
-      by: flowId,
-    )).reply.json;
+      () async => (await _core.devices.invoke(
+        deviceId,
+        capabilityId,
+        params,
+        allowPairing: false,
+        by: flowId,
+      )).reply.json,
+    );
   }
 
   @override
@@ -44,13 +51,36 @@ class EngineFlowHost with EngineRulesHost implements FlowHost {
     String deviceId,
     String capabilityId, {
     String? flowId,
-  }) async => (await _core.devices.toggle(
+  }) => _plain(
     deviceId,
-    capabilityId,
-    // A flow runs unattended, so it never puts a pairing prompt on a TV.
-    allowPairing: false,
-    by: flowId,
-  )).reply.json;
+    () async => (await _core.devices.toggle(
+      deviceId,
+      capabilityId,
+      // A flow runs unattended, so it never puts a pairing prompt on a TV.
+      allowPairing: false,
+      by: flowId,
+    )).reply.json,
+  );
+
+  /// Runs [send], and turns a device that did not answer into plain words
+  /// ("Desk lamp did not answer. Is it switched on?"), with the address
+  /// and retry count only in the failure's details. The run tile, the
+  /// notification and Needs you show the words.
+  Future<Map<String, Object?>?> _plain(
+    String deviceId,
+    Future<Map<String, Object?>?> Function() send,
+  ) async {
+    try {
+      return await send();
+    } catch (e) {
+      if (e is! TransportTimeoutException && e is! SocketException) rethrow;
+      final name = (await DriftDeviceStore(_core.db).get(deviceId))?.name;
+      throw PlainStepFailure(
+        '${name ?? deviceId} did not answer. Is it switched on?',
+        withoutTypeName('$e'),
+      );
+    }
+  }
 
   @override
   Future<void> saveGlobal(String name, Object? value) =>

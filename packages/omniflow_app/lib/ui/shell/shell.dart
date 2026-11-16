@@ -299,7 +299,7 @@ class _OmniShellState extends ConsumerState<OmniShell> {
       maxScaleFactor: _maxLabelScale,
       child: NavigationBar(
         key: const ValueKey('shell-tabs'),
-        height: 48 + label,
+        height: OmniSpace.target + label,
         selectedIndex: tab.index,
         animationDuration: OmniMotion.of(context, OmniMotion.slow),
         onDestinationSelected: _select,

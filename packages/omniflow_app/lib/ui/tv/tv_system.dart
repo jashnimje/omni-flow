@@ -137,14 +137,23 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
   }
 
   Future<void> _stopApp(TvProcess p) async {
+    final name = appNameOf(p.package, label: tv.appLabels[p.package]);
+    final ok = await confirm(
+      context,
+      title: 'Stop $name?',
+      body:
+          'It closes at once and anything not saved in it is lost. A system '
+          'app may start again by itself.',
+      action: 'Stop',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
     final r = await tv.call(
       TvCalls.app,
       TvCalls.appArgs(tv.id, p.package, AppAction.stop),
     );
     if (r['ok'] == true) {
-      showMessage(
-        'Stopped ${appNameOf(p.package, label: tv.appLabels[p.package])}',
-      );
+      showMessage('Stopped $name');
       await _read();
     }
   }
@@ -207,15 +216,9 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
                   Text(value, style: OmniText.caption),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: OmniSpace.xs),
               ExcludeSemantics(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: fraction?.clamp(0.0, 1.0),
-                    minHeight: 6,
-                  ),
-                ),
+                child: OmniProgressBar(value: fraction?.clamp(0.0, 1.0)),
               ),
             ],
           ),
@@ -230,15 +233,12 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
     final memFree = s?.memoryAvailableKb;
     return ListView(
       key: const ValueKey('tv-system'),
-      padding: OmniSpace.screenPadding,
+      padding: omniBodyPadding(OmniInsets.bottom(context)),
       children: [
         if (_error case final e?)
-          OmniBanner.error(e, actionLabel: 'Try again', onAction: _read)
+          OmniErrorBanner(e, onRetry: _read)
         else if (s == null)
-          const Padding(
-            padding: EdgeInsets.all(OmniSpace.xl),
-            child: Center(child: CircularProgressIndicator()),
-          )
+          OmniListSkeleton(label: 'Reading the ${tv.noun}')
         else ...[
           const OmniSectionHeader('How it is doing'),
           OmniCard(
@@ -304,9 +304,13 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
         ],
         const OmniSectionHeader('Running apps'),
         if (apps == null && _error == null)
-          const SizedBox(height: 40)
+          const OmniListSkeleton(rows: 2, label: 'Reading the running apps')
         else if (apps != null && apps.isEmpty)
-          const Text('Nothing else is running.', style: OmniText.caption)
+          const OmniEmptyState(
+            icon: OmniIcons.system,
+            title: 'Nothing else is running',
+            compact: true,
+          )
         else
           for (final p in apps ?? const <TvProcess>[])
             OmniListRow(
@@ -318,6 +322,7 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
               trailing: TextButton(
                 key: ValueKey('tv-process-stop-${p.package}'),
                 onPressed: () => _stopApp(p),
+                style: TextButton.styleFrom(foregroundColor: OmniColors.bad),
                 child: const Text('Stop'),
               ),
             ),

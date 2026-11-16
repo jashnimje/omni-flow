@@ -29,58 +29,54 @@ class AppearancePage extends ConsumerWidget {
     final notifier = ref.read(appearanceProvider.notifier);
     void pick(ColourSource source) =>
         notifier.change(appearance.copyWith(colours: source));
-    return OmniPage(
+    return FormPage.instant(
       title: 'Appearance',
-      body: ListView(
-        key: const ValueKey('appearance-list'),
-        padding: EdgeInsets.only(bottom: OmniInsets.bottom(context)),
-        children: [
-          const OmniSectionHeader('Colours'),
-          _Choice(
-            key: const ValueKey('appearance-teal'),
-            title: 'Teal',
-            subtitle: 'The OmniFlow colours',
-            swatch: OmniColors.accent,
-            selected: appearance.colours == ColourSource.teal,
-            onTap: () => pick(ColourSource.teal),
+      children: (context) => [
+        const OmniSectionHeader('Colours'),
+        _Choice(
+          key: const ValueKey('appearance-teal'),
+          title: 'Teal',
+          subtitle: 'The OmniFlow colours',
+          swatch: OmniColors.accent,
+          selected: appearance.colours == ColourSource.teal,
+          onTap: () => pick(ColourSource.teal),
+        ),
+        _Choice(
+          key: const ValueKey('appearance-wallpaper'),
+          title: 'Wallpaper colours',
+          subtitle: switch (wallpaper) {
+            AsyncData(value: null) =>
+              'This phone does not share its wallpaper colours, so '
+                  'OmniFlow stays teal. It needs Android 12 or later.',
+            _ => 'Takes its colours from your wallpaper',
+          },
+          swatch: wallpaper?.value?.primary,
+          selected: appearance.colours == ColourSource.wallpaper,
+          onTap: () => pick(ColourSource.wallpaper),
+        ),
+        const OmniSectionHeader('Background'),
+        OmniListRow(
+          key: const ValueKey('appearance-pure-black'),
+          icon: OmniIcons.screen,
+          title: 'Pure black',
+          subtitle: 'Black screens, which use less power on OLED phones',
+          divider: false,
+          semanticLabel:
+              'Pure black, ${appearance.pureBlack ? 'on' : 'off'}. '
+              'Black screens, which use less power on OLED phones',
+          onTap: () => notifier.change(
+            appearance.copyWith(pureBlack: !appearance.pureBlack),
           ),
-          _Choice(
-            key: const ValueKey('appearance-wallpaper'),
-            title: 'Wallpaper colours',
-            subtitle: switch (wallpaper) {
-              AsyncData(value: null) =>
-                'This phone does not share its wallpaper colours, so '
-                    'OmniFlow stays teal. It needs Android 12 or later.',
-              _ => 'Takes its colours from your wallpaper',
-            },
-            swatch: wallpaper?.value?.primary,
-            selected: appearance.colours == ColourSource.wallpaper,
-            onTap: () => pick(ColourSource.wallpaper),
-          ),
-          const OmniSectionHeader('Background'),
-          OmniListRow(
-            key: const ValueKey('appearance-pure-black'),
-            icon: OmniIcons.screen,
-            title: 'Pure black',
-            subtitle: 'Black screens, which use less power on OLED phones',
-            divider: false,
-            semanticLabel:
-                'Pure black, ${appearance.pureBlack ? 'on' : 'off'}. '
-                'Black screens, which use less power on OLED phones',
-            onTap: () => notifier.change(
-              appearance.copyWith(pureBlack: !appearance.pureBlack),
-            ),
-            trailing: ExcludeSemantics(
-              child: Switch(
-                key: const ValueKey('appearance-pure-black-switch'),
-                value: appearance.pureBlack,
-                onChanged: (v) =>
-                    notifier.change(appearance.copyWith(pureBlack: v)),
-              ),
+          trailing: ExcludeSemantics(
+            child: Switch(
+              key: const ValueKey('appearance-pure-black-switch'),
+              value: appearance.pureBlack,
+              onChanged: (v) =>
+                  notifier.change(appearance.copyWith(pureBlack: v)),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

@@ -108,8 +108,7 @@ class OmniBanner extends StatelessWidget {
                         Expanded(
                           child: Text(
                             message,
-                            style: TextStyle(
-                              fontSize: 12,
+                            style: OmniText.caption.copyWith(
                               color: fg,
                               height: 1.4,
                             ),
@@ -137,8 +136,7 @@ class OmniBanner extends StatelessWidget {
                     foregroundColor: fg,
                     minimumSize: const Size(OmniSpace.target, OmniSpace.target),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    textStyle: const TextStyle(
-                      fontSize: 12,
+                    textStyle: OmniText.labelMedium.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -153,7 +151,8 @@ class OmniBanner extends StatelessWidget {
 }
 
 /// What a screen shows when it has nothing: a big muted icon, a title, a
-/// line on why, and an [action] (an Add button).
+/// line on why, and an [action] (an Add button). [compact] is the "nothing
+/// matches" of a filtered list or a sheet: less padding and no icon.
 class OmniEmptyState extends StatelessWidget {
   const OmniEmptyState({
     super.key,
@@ -161,48 +160,101 @@ class OmniEmptyState extends StatelessWidget {
     required this.title,
     this.message,
     this.action,
-    this.padding = const EdgeInsets.symmetric(horizontal: 18, vertical: 40),
+    this.padding,
     this.iconColor = OmniColors.muted,
     this.large = false,
+    this.compact = false,
   });
 
   final IconData icon;
   final String title;
   final String? message;
   final Widget? action;
-  final EdgeInsetsGeometry padding;
+
+  /// Defaults to 40 above and below, or 16 when [compact].
+  final EdgeInsetsGeometry? padding;
   final Color iconColor;
 
-  /// A welcome screen's title at screen-title size (22/650) instead of 17/600.
+  /// A welcome screen's title at screen-title size (22) instead of 16.
   final bool large;
+
+  /// Smaller padding and no icon, for a filter that matches nothing.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: padding,
+    padding:
+        padding ??
+        EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: compact ? OmniSpace.lg : OmniSpace.xxl,
+        ),
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 40, color: iconColor),
-        const SizedBox(height: OmniSpace.sm),
-        Text(
-          title,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: large ? 22 : 17,
-            fontWeight: large ? FontWeight.w700 : FontWeight.w600,
-            color: OmniColors.text,
+        if (!compact) ...[
+          Icon(icon, size: 40, color: iconColor),
+          const SizedBox(height: OmniSpace.sm),
+        ],
+        Semantics(
+          header: !compact,
+          child: Text(
+            title,
+            textAlign: TextAlign.center,
+            style: large
+                ? OmniText.screenTitle.copyWith(fontWeight: FontWeight.w700)
+                : OmniText.titleMedium,
           ),
         ),
         if (message != null) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: OmniSpace.xs),
           Text(
             message!,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 14, color: OmniColors.muted),
+            style: OmniText.body.copyWith(color: OmniColors.muted),
           ),
         ],
         if (action != null) ...[const SizedBox(height: OmniSpace.lg), action!],
       ],
+    ),
+  );
+}
+
+/// A page that could not open at all: the error icon, what happened, and
+/// Try again. A page that has something to show keeps it and puts an
+/// [OmniBanner.error] above it instead.
+class OmniErrorState extends StatelessWidget {
+  const OmniErrorState({
+    super.key,
+    this.title = 'This did not open',
+    this.message,
+    this.onRetry,
+    this.retryLabel = 'Try again',
+  });
+
+  final String title;
+  final String? message;
+  final VoidCallback? onRetry;
+  final String retryLabel;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    container: true,
+    child: OmniEmptyState(
+      icon: OmniIcons.error,
+      iconColor: OmniColors.bad,
+      title: title,
+      message: message,
+      action: onRetry == null
+          ? null
+          : OmniButton.ghost(
+              key: const ValueKey('omni-retry'),
+              label: retryLabel,
+              icon: OmniIcons.retry,
+              expand: false,
+              onPressed: onRetry,
+            ),
     ),
   );
 }

@@ -57,9 +57,9 @@ class TokenController extends TextEditingController {
       spans.add(
         TextSpan(
           text: m.group(0),
-          style: const TextStyle(
-            color: OmniColors.onAccentSoft,
-            backgroundColor: OmniColors.accentSoft,
+          style: TextStyle(
+            color: OmniPalette.of(context).onAccentSoft,
+            backgroundColor: OmniPalette.of(context).accentSoft,
           ),
         ),
       );
@@ -211,12 +211,16 @@ class TokenChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
     final chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: OmniSpace.sm,
+        vertical: OmniSpace.xs,
+      ),
       decoration: BoxDecoration(
-        color: OmniColors.accentSoft,
+        color: palette.accentSoft,
         borderRadius: BorderRadius.circular(OmniRadii.chip),
-        border: Border.all(color: OmniColors.accentLine),
+        border: Border.all(color: palette.accentLine),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -224,15 +228,12 @@ class TokenChip extends StatelessWidget {
           Icon(
             onTap == null ? AutomationIcons.variable : Symbols.add_rounded,
             size: 14,
-            color: OmniColors.onAccentSoft,
+            color: palette.onAccentSoft,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: OmniSpace.xs),
           Text(
             label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: OmniColors.onAccentSoft,
-            ),
+            style: OmniText.caption.copyWith(color: palette.onAccentSoft),
           ),
         ],
       ),

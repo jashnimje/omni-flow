@@ -846,9 +846,12 @@ void main() {
       await tapKey(tester, 'room-field');
       await tester.tap(find.text('New room').last);
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const ValueKey('ask-text')), 'Study');
+      await tester.enterText(
+        find.byKey(const ValueKey('prompt-field')),
+        'Study',
+      );
       await tester.pump();
-      await tapKey(tester, 'ask-text-ok');
+      await tapKey(tester, 'prompt-save');
       expect(engine.callsOf('room.save').single.$2, {'name': 'Study'});
       expect((await container.read(roomsProvider.future)).map((r) => r.name), [
         'Living room',

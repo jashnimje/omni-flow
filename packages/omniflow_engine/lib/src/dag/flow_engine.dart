@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'aligned_times.dart';
-import 'as_if.dart' show asIfEffects;
+import 'as_if.dart' show asIfClock, asIfEffects;
 import 'asks.dart';
 import 'canonical.dart';
 import 'conditions.dart';
@@ -401,7 +401,7 @@ class FlowEngine implements FlowEffects, PeopleSource {
   ) => FlowRunner(
     flow,
     asIfEffects(this, msg),
-    clock: InstantFlowClock(at),
+    clock: InstantFlowClock(asIfClock(msg, at)),
   ).fire(triggerId, msg, dryRun: true);
 
   // FlowEffects ---------------------------------------------------------------

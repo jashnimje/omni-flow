@@ -85,7 +85,8 @@ class AwayLightingPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final view = ref.watch(awayLightProvider).value;
+    final loaded = ref.watch(awayLightProvider);
+    final view = loaded.value;
     final lights = [
       for (final j in ref.watch(devicesProvider).value ?? const <Json>[])
         if (isSmartLight(DeviceView(j)) ||
@@ -100,74 +101,78 @@ class AwayLightingPage extends ConsumerWidget {
         if (a.at.isAfter(now)) a,
     ];
     String time(DateTime t) => TimeOfDay.fromDateTime(t).format(context);
-    return OmniPage(
+    return FormPage.instant(
       title: 'Away lighting',
-      body: ListView(
-        key: const ValueKey('away-lighting-page'),
-        children: [
+      state: OmniLoad.of(loaded),
+      children: (context) => [
+        OmniListRow(
+          key: const ValueKey('away-enabled'),
+          title: 'Away lighting',
+          subtitle: view?.status ?? 'Loading',
+          subtitleLines: 2,
+          trailing: LabelledSwitch(
+            value: view?.enabled ?? false,
+            label: 'Away lighting',
+            onChanged: view == null ? null : (on) => _set(ref, on: on),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: OmniSpace.xs),
+          child: Text(
+            'While everyone is away, the lights you pick turn on and off as '
+            'they did on the same day last week, each up to 20 minutes '
+            'earlier or later. It stops the moment someone gets home.',
+            style: OmniText.caption,
+          ),
+        ),
+        const OmniSectionHeader('Lights to use'),
+        if (lights.isEmpty)
+          const OmniEmptyState(
+            icon: OmniIcons.light,
+            title: 'No lights added yet',
+            compact: true,
+          ),
+        for (final l in lights)
           OmniListRow(
-            key: const ValueKey('away-enabled'),
-            title: 'Away lighting',
-            subtitle: view?.status ?? 'Loading',
-            subtitleLines: 2,
-            trailing: LabelledSwitch(
-              value: view?.enabled ?? false,
-              label: 'Away lighting',
-              onChanged: view == null ? null : (on) => _set(ref, on: on),
+            key: ValueKey('away-light-${l.id}'),
+            icon: OmniIcons.light,
+            title: l.name,
+            subtitle: l.room,
+            trailing: Checkbox(
+              value: picked.contains(l.id),
+              semanticLabel: 'Use ${l.name}',
+              onChanged: view == null
+                  ? null
+                  : (on) => _set(
+                      ref,
+                      lights: [
+                        for (final p in picked)
+                          if (p != l.id) p,
+                        if (on == true) l.id,
+                      ],
+                    ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: OmniSpace.xs),
-            child: Text(
-              'While everyone is away, the lights you pick turn on and off as '
-              'they did on the same day last week, each up to 20 minutes '
-              'earlier or later. It stops the moment someone gets home.',
-              style: OmniText.caption,
-            ),
+        const OmniSectionHeader('Tonight'),
+        if (tonight.isEmpty)
+          OmniEmptyState(
+            key: const ValueKey('away-tonight-empty'),
+            icon: OmniIcons.time,
+            title: picked.isEmpty ? 'Nothing planned yet' : 'Nothing to replay',
+            message: picked.isEmpty
+                ? 'Pick lights to see what would happen tonight.'
+                : 'These lights did not change on this day last week, or '
+                      'not later than now.',
+            compact: true,
           ),
-          const OmniSectionHeader('Lights to use'),
-          if (lights.isEmpty)
-            const Text('No lights added yet.', style: OmniText.caption),
-          for (final l in lights)
-            OmniListRow(
-              key: ValueKey('away-light-${l.id}'),
-              icon: OmniIcons.light,
-              title: l.name,
-              subtitle: l.room,
-              trailing: Checkbox(
-                value: picked.contains(l.id),
-                semanticLabel: 'Use ${l.name}',
-                onChanged: view == null
-                    ? null
-                    : (on) => _set(
-                        ref,
-                        lights: [
-                          for (final p in picked)
-                            if (p != l.id) p,
-                          if (on == true) l.id,
-                        ],
-                      ),
-              ),
-            ),
-          const OmniSectionHeader('Tonight'),
-          if (tonight.isEmpty)
-            Text(
-              picked.isEmpty
-                  ? 'Pick lights to see what would happen tonight.'
-                  : 'Nothing to replay: these lights did not change on this '
-                        'day last week, or not later than now.',
-              key: const ValueKey('away-tonight-empty'),
-              style: OmniText.caption,
-            ),
-          for (final (i, a) in tonight.indexed)
-            OmniListRow(
-              key: ValueKey('away-action-$i'),
-              icon: OmniIcons.time,
-              title: '${a.name} ${a.on ? 'on' : 'off'}',
-              value: time(a.at),
-            ),
-        ],
-      ),
+        for (final (i, a) in tonight.indexed)
+          OmniListRow(
+            key: ValueKey('away-action-$i'),
+            icon: OmniIcons.time,
+            title: '${a.name} ${a.on ? 'on' : 'off'}',
+            value: time(a.at),
+          ),
+      ],
     );
   }
 }

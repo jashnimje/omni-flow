@@ -80,12 +80,11 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
     switch (cap['type']) {
       case 'toggle':
         if (!known) {
-          return ListTile(
+          return OmniListRow(
             key: key,
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            title: label,
-            subtitle: const Text('-'),
+            icon: OmniIcons.forCapability('toggle'),
+            title: '${cap['label']}',
+            subtitle: 'Not read yet',
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -152,21 +151,41 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
           for (final e in params.entries)
             e.key: Map<String, Object?>.from(e.value as Map),
         };
+        final name = '${cap['label']}';
         if (inputs.isNotEmpty) {
-          return ParamsForm(
+          return OmniListRow(
             key: key,
-            label: '${cap['label']}',
-            params: inputs,
-            onSubmit: _invoke,
+            icon: OmniIcons.forCapability('action'),
+            title: name,
+            subtitle: [for (final k in inputs.keys) _words(k)].join(', '),
+            chevron: true,
+            onTap: () => SheetTemplate.show<void>(
+              context,
+              builder: (sheet) => SheetTemplate(
+                title: name,
+                children: (_) => [
+                  ParamsForm(
+                    label: name,
+                    heading: false,
+                    params: inputs,
+                    onSubmit: (values) async {
+                      final ok = await _invoke(values);
+                      if (ok && sheet.mounted) Navigator.of(sheet).pop();
+                      return ok;
+                    },
+                  ),
+                ],
+              ),
+            ),
           );
         }
-        return Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton(
-            key: key,
-            onPressed: () => _invoke(const {}),
-            child: label,
-          ),
+        return OmniListRow(
+          key: key,
+          icon: OmniIcons.forCapability('action'),
+          title: name,
+          value: 'Run',
+          semanticLabel: 'Run $name',
+          onTap: () => _invoke(const {}),
         );
       case 'dpad_remote':
         final keys = (valueParam['values'] as List? ?? const []).cast<String>();
@@ -217,12 +236,10 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
           ),
         );
       case 'event':
-        return ListTile(
+        return OmniListRow(
           key: key,
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          title: label,
-          subtitle: const Text('Something it does. Use it in an automation'),
+          icon: OmniIcons.forCapability('event'),
+          title: '${cap['label']}',
         );
       default:
         return ListTile(
@@ -246,7 +263,11 @@ class ParamsForm extends StatefulWidget {
     required this.onSubmit,
     this.submitLabel,
     this.initial = const {},
+    this.heading = true,
   });
+
+  /// Shows [label] above the fields. Off inside a sheet titled with it.
+  final bool heading;
 
   final String label;
   final Map<String, Json> params;
@@ -330,10 +351,11 @@ class _ParamsFormState extends State<ParamsForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(widget.label),
-        ),
+        if (widget.heading)
+          Padding(
+            padding: const EdgeInsets.only(top: OmniSpace.sm),
+            child: Text(widget.label),
+          ),
         for (final e in widget.params.entries)
           if (_text[e.key] case final c?)
             TextField(
@@ -382,11 +404,11 @@ class _ParamsFormState extends State<ParamsForm> {
               value: _choice[e.key] == true,
               onChanged: (v) => setState(() => _choice[e.key] = v),
             ),
-        const SizedBox(height: 8),
-        OutlinedButton(
+        const SizedBox(height: OmniSpace.md),
+        OmniButton(
           key: ValueKey('params-run-${widget.label}'),
+          label: widget.submitLabel ?? widget.label,
           onPressed: values == null ? null : () => widget.onSubmit(values),
-          child: Text(widget.submitLabel ?? 'Send ${widget.label}'),
         ),
       ],
     );

@@ -18,6 +18,15 @@ class StartOptions extends StatelessWidget {
     key: const ValueKey('start-options'),
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      const OmniSectionHeader('Start here'),
+      OmniListRow(
+        key: const ValueKey('empty-setup'),
+        icon: OmniIcons.home,
+        title: 'Set up your home',
+        subtitle: 'Who you are, where home is, how the phone knows',
+        chevron: true,
+        onTap: () => openHomeSetup(context),
+      ),
       const OmniSectionHeader('Moving from another phone?'),
       OmniListRow(
         key: const ValueKey('empty-restore'),
@@ -34,14 +43,6 @@ class StartOptions extends StatelessWidget {
         subtitle: 'Use the home a computer at home already runs',
         chevron: true,
         onTap: () => _push(context, const HubPage()),
-      ),
-      OmniListRow(
-        key: const ValueKey('empty-setup'),
-        icon: OmniIcons.home,
-        title: 'Set up your home',
-        subtitle: 'Who you are, where home is, how the phone knows',
-        chevron: true,
-        onTap: () => openHomeSetup(context),
       ),
     ],
   );

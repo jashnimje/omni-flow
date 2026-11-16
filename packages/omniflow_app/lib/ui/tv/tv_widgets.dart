@@ -110,7 +110,9 @@ class AppBadge extends StatelessWidget {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: colour,
-          borderRadius: BorderRadius.circular(size >= 40 ? 10 : 9),
+          borderRadius: BorderRadius.circular(
+            size >= 40 ? OmniRadii.iconBox : OmniShape.sm,
+          ),
         ),
         child: Text(
           name.isEmpty ? '?' : name.characters.first.toUpperCase(),
@@ -143,7 +145,7 @@ class TvKeyButton extends StatelessWidget {
     this.onLongPress,
     this.showLabel = true,
     this.text,
-    this.background = OmniColors.card,
+    this.background,
     this.foreground = OmniColors.text,
     this.height = OmniSpace.target,
   });
@@ -159,12 +161,15 @@ class TvKeyButton extends StatelessWidget {
   /// A shorter word drawn instead of [label] ("Vol −"), which is still
   /// what is read out.
   final String? text;
-  final Color background;
+
+  /// Defaults to the Appearance card colour.
+  final Color? background;
   final Color foreground;
   final double height;
 
   @override
   Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
     final radius = BorderRadius.circular(OmniRadii.button);
     final enabled = onTap != null;
     final fg = enabled ? foreground : OmniColors.muted;
@@ -179,10 +184,10 @@ class TvKeyButton extends StatelessWidget {
         message: label,
         excludeFromSemantics: true,
         child: Material(
-          color: background,
+          color: background ?? palette.card,
           shape: RoundedRectangleBorder(
             borderRadius: radius,
-            side: const BorderSide(color: OmniColors.line),
+            side: BorderSide(color: palette.line),
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -192,19 +197,19 @@ class TvKeyButton extends StatelessWidget {
               height: height,
               child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: OmniSpace.sm),
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (icon != null) Icon(icon, size: 20, color: fg),
-                        if (icon != null && showLabel) const SizedBox(width: 6),
+                        if (icon != null && showLabel)
+                          const SizedBox(width: OmniSpace.sm),
                         if (showLabel || icon == null)
                           Text(
                             text ?? label,
-                            style: TextStyle(
-                              fontSize: 13,
+                            style: OmniText.body.copyWith(
                               color: fg,
                               fontWeight: FontWeight.w500,
                             ),
@@ -321,53 +326,36 @@ String progressLabel(String op) => switch (op) {
   _ => 'Working',
 };
 
-/// A list that failed to load: what happened, and Try again.
+/// A list that failed to load: the template's error banner, with what
+/// could not be read from which device ([noun] is "TV" or "phone").
 class TvLoadError extends StatelessWidget {
   const TvLoadError({
     super.key,
     required this.what,
     required this.reason,
+    required this.noun,
     this.onRetry,
   });
 
   /// "The apps", "The settings": what could not be read.
   final String what;
   final String reason;
+  final String noun;
   final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: OmniSpace.md),
-    child: OmniBanner.error(
-      '$what could not be read from the TV: $reason',
-      actionLabel: onRetry == null ? null : 'Try again',
-      onAction: onRetry,
+    child: OmniErrorBanner(
+      '$what could not be read from the $noun: $reason',
+      onRetry: onRetry,
     ),
   );
 }
 
-/// A centred spinner while a list loads.
-class TvLoading extends StatelessWidget {
-  const TvLoading({super.key, required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: OmniSpace.xl),
-    child: Center(
-      child: Semantics(
-        label: label,
-        child: const SizedBox.square(
-          dimension: 28,
-          child: CircularProgressIndicator(strokeWidth: 2.5),
-        ),
-      ),
-    ),
-  );
-}
-
-/// Asks for one line of text, null when the user cancels.
+/// Asks for one line of text (or a few with [multiline]) in a sheet,
+/// null when the user cancels. The keys `ask-text` and `ask-text-ok` are
+/// the field and the action.
 Future<String?> askText(
   BuildContext context, {
   required String title,
@@ -376,9 +364,9 @@ Future<String?> askText(
   required String action,
   String? Function(String text)? validate,
   bool multiline = false,
-}) => showDialog<String>(
-  context: context,
-  builder: (_) => _TextDialog(
+}) => SheetTemplate.show<String>(
+  context,
+  builder: (_) => _TextSheet(
     title: title,
     label: label,
     initial: initial,
@@ -388,8 +376,8 @@ Future<String?> askText(
   ),
 );
 
-class _TextDialog extends StatefulWidget {
-  const _TextDialog({
+class _TextSheet extends StatefulWidget {
+  const _TextSheet({
     required this.title,
     required this.label,
     required this.initial,
@@ -406,10 +394,10 @@ class _TextDialog extends StatefulWidget {
   final bool multiline;
 
   @override
-  State<_TextDialog> createState() => _TextDialogState();
+  State<_TextSheet> createState() => _TextSheetState();
 }
 
-class _TextDialogState extends State<_TextDialog> {
+class _TextSheetState extends State<_TextSheet> {
   late final _text = TextEditingController(text: widget.initial);
 
   @override
@@ -421,28 +409,28 @@ class _TextDialogState extends State<_TextDialog> {
   @override
   Widget build(BuildContext context) {
     final error = widget.validate?.call(_text.text);
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(
-        key: const ValueKey('ask-text'),
-        controller: _text,
-        autofocus: true,
-        minLines: 1,
-        maxLines: widget.multiline ? 4 : 1,
-        decoration: InputDecoration(labelText: widget.label, errorText: error),
-        onChanged: (_) => setState(() {}),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          key: const ValueKey('ask-text-ok'),
-          onPressed: error == null
-              ? () => Navigator.of(context).pop(_text.text)
-              : null,
-          child: Text(widget.action),
+    void save() => Navigator.of(context).pop(_text.text);
+    return SheetTemplate(
+      title: widget.title,
+      primaryLabel: widget.action,
+      primaryKey: const ValueKey('ask-text-ok'),
+      onPrimary: error == null ? save : null,
+      children: (context) => [
+        TextField(
+          key: const ValueKey('ask-text'),
+          controller: _text,
+          autofocus: true,
+          minLines: 1,
+          maxLines: widget.multiline ? 4 : 1,
+          textInputAction: widget.multiline
+              ? TextInputAction.newline
+              : TextInputAction.done,
+          onSubmitted: widget.multiline || error != null ? null : (_) => save(),
+          decoration: InputDecoration(
+            labelText: widget.label,
+            errorText: error,
+          ),
+          onChanged: (_) => setState(() {}),
         ),
       ],
     );
