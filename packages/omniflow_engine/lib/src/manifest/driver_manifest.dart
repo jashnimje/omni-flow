@@ -184,11 +184,24 @@ class SettingSpec {
     required this.label,
     this.secret = false,
     this.help,
+    this.pattern,
+    this.patternWords,
   });
 
   final String key;
   final String label;
   final bool secret;
+
+  /// A regular expression the whole value must match, checked when it is
+  /// stored, with [patternWords] saying in plain words what fits.
+  final RegExp? pattern;
+  final String? patternWords;
+
+  /// Why [value] does not fit [pattern], or null when it fits.
+  String? problemWith(String value) =>
+      pattern == null || pattern!.hasMatch(value)
+      ? null
+      : '$label must be ${patternWords ?? 'in the right format'}';
 
   /// What the setting is and where to find it, in plain words. The first
   /// sentence shows under the field, the whole text in its help sheet.
@@ -405,12 +418,29 @@ class DriverManifest {
       if (help != null && help.trim().isEmpty) {
         issues.add('$path.help', 'must not be empty');
       }
+      RegExp? pattern;
+      final rawPattern = setting['pattern'];
+      if (rawPattern != null) {
+        try {
+          pattern = rawPattern is String
+              ? RegExp('^(?:$rawPattern)\$')
+              : (throw const FormatException('must be a string'));
+        } on FormatException catch (e) {
+          issues.add(
+            '$path.pattern',
+            'is not a regular expression: ${e.message}',
+          );
+        }
+      }
+      final patternWords = issues.optionalString(setting, 'patternWords', path);
       settings.add(
         SettingSpec(
           key: key,
           label: setting['label'] is String ? setting['label'] as String : key,
           secret: setting['secret'] == true,
           help: help == null || help.trim().isEmpty ? null : help.trim(),
+          pattern: pattern,
+          patternWords: patternWords,
         ),
       );
     }

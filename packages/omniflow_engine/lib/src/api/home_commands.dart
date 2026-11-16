@@ -1,48 +1,70 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'houses.dart';
 import 'mode_commands.dart' show HomeFile;
 import 'stored_flows.dart';
 import '../dag/sun.dart';
 
-/// Where home is, kept in `home.json` next to the database. One location
-/// for the whole home, not one per place: places are found by Wi-Fi and
-/// BLE, a person may count another place as home, and a sun rule needs no
-/// place at all.
+/// Where a house is, kept in `home.json` next to the database: the
+/// top-level `location` for the first house, and each other house's in its
+/// own section. One location per house, not one per place: places are
+/// found by Wi-Fi and BLE, a person may count another place as home, and a
+/// sun rule needs no place at all.
 class HomeLocationStore {
-  HomeLocationStore(Directory home)
-    : _file = File('${home.path}/home.json'),
-      _writer = HomeFile(home);
+  HomeLocationStore(this._home);
 
-  final File _file;
-  final HomeFile _writer;
+  final Directory _home;
 
-  Future<HomeLocation?> read() async {
+  HomeFile _file(String house) => HomeFile.house(_home, house);
+
+  Future<HomeLocation?> read([String house = firstHouseId]) async {
     try {
-      final json = jsonDecode(await _file.readAsString());
-      if (json is Map) return homeLocationOf(json['location']);
-    } on FileSystemException {
-      // Never set.
-    } on FormatException {
-      // A damaged file counts as not set, so sun rules wait for the user.
+      return homeLocationOf((await _file(house).read())['location']);
     } on ApiError {
-      // The same.
+      // A damaged entry counts as not set, so sun rules wait for the user.
     }
     return null;
   }
 
   /// Keeps the other keys `home.json` holds (the house mode, the alerts),
   /// through the one [HomeFile] writer.
-  Future<void> write(HomeLocation? location) {
+  Future<void> write(HomeLocation? location, [String house = firstHouseId]) {
     final json = homeLocationJson(location);
+    final file = _file(house);
     return json == null
-        ? _writer.update(const {}, remove: const ['location'])
-        : _writer.update({'location': json});
+        ? file.update(const {}, remove: const ['location'])
+        : file.update({'location': json});
+  }
+
+  /// Reads where every house other than the first is, into the flow
+  /// engine, and keeps it so as houses are added: a new house has no
+  /// location, so its sun rules never borrow the first house's.
+  Future<void> openHouses(EngineCore core) async {
+    Future<void> load() async {
+      final ids = {for (final h in core.houses.all) h.id}..remove(firstHouseId);
+      core.flows.houseLocations.removeWhere((k, _) => !ids.contains(k));
+      for (final id in ids) {
+        if (core.flows.houseLocations.containsKey(id)) continue;
+        core.flows.houseLocations[id] = await read(id);
+      }
+      core.flows.rescheduleSun();
+    }
+
+    await load();
+    core.events
+        .where((e) => e['event'] == housesChangedEvent)
+        .listen((_) => core.track(load()));
   }
 }
+
+/// Where [house] is, as the flow engine has it.
+HomeLocation? houseLocation(EngineCore core, String house) =>
+    house == firstHouseId
+    ? core.flows.homeLocation
+    : core.flows.houseLocations[house];
 
 /// [location] as `{latitude, longitude}`, or null.
 Map<String, Object?>? homeLocationJson(HomeLocation? location) =>
@@ -82,23 +104,33 @@ class HomeCommands {
     'home.location.set': set,
   };
 
-  Future<Map<String, Object?>> get(Map<String, Object?> _) async =>
-      _reply(_core.flows.homeLocation);
+  /// `{house?}`: where the house is, the first house when none is named.
+  Future<Map<String, Object?>> get(Map<String, Object?> args) async {
+    final house = _core.houses.target(args);
+    return {..._reply(houseLocation(_core, house)), 'house': house};
+  }
 
-  /// `{latitude, longitude}`, north and east positive.
+  /// `{latitude, longitude, house?}`, north and east positive.
   Future<Map<String, Object?>> set(Map<String, Object?> args) async {
     final location = homeLocationOf({
       'latitude': args['latitude'],
       'longitude': args['longitude'],
     });
-    await apply(location);
-    return _reply(location);
+    final house = _core.houses.target(args);
+    await apply(location, house: house);
+    return {..._reply(location), 'house': house};
   }
 
-  /// Saves [location] and moves the running sun triggers to it.
-  Future<void> apply(HomeLocation? location) async {
-    await store.write(location);
-    _core.flows.homeLocation = location;
+  /// Saves [location] as [house]'s and moves its running sun triggers.
+  Future<void> apply(HomeLocation? location, {String? house}) async {
+    final id = house ?? _core.houses.defaultId;
+    await store.write(location, id);
+    if (id == firstHouseId) {
+      _core.flows.homeLocation = location;
+    } else {
+      _core.flows.houseLocations[id] = location;
+      _core.flows.rescheduleSun();
+    }
     await _stored.reloadFlows();
   }
 

@@ -71,7 +71,25 @@ class CapabilitySpec {
     this.values = const [],
     this.derive = const [],
     this.highRisk = false,
+    this.zeroTurnsOff = false,
   });
+
+  /// Set in the manifest for a light's brightness or colour, whose device
+  /// refuses zero (a WiZ bulb takes dimming 10 to 100 and never an all-zero
+  /// colour): a value of 0, or r, g and b all 0, turns the device's `power`
+  /// off instead.
+  final bool zeroTurnsOff;
+
+  /// Whether [params] ask for zero, which [zeroTurnsOff] sends as off.
+  bool asksForZero(Map<String, Object?> params) {
+    if (!zeroTurnsOff) return false;
+    if (type == CapabilityType.colorRgb) {
+      return ['r', 'g', 'b'].every((k) => params[k] is num) &&
+          ['r', 'g', 'b'].every((k) => (params[k] as num) <= 0);
+    }
+    final value = params['value'];
+    return value is num && value <= 0;
+  }
 
   /// Set in the manifest for a capability that acts on a person (a
   /// full-screen message on their phone, a link opened, the ringer
@@ -266,6 +284,16 @@ class CapabilitySpec {
     if (highRisk != null && highRisk is! bool) {
       issues.add('$path.highRisk', 'must be true or false');
     }
+    final zeroTurnsOff = map['zeroTurnsOff'];
+    if (zeroTurnsOff != null &&
+        (zeroTurnsOff is! bool ||
+            (type != CapabilityType.level &&
+                type != CapabilityType.colorRgb))) {
+      issues.add(
+        '$path.zeroTurnsOff',
+        'is true or false, for a level or a colour',
+      );
+    }
     if (issues.issues.length > before || id == null || type == null) {
       return null;
     }
@@ -281,6 +309,7 @@ class CapabilitySpec {
       values: values,
       derive: List.unmodifiable(derive),
       highRisk: highRisk == true,
+      zeroTurnsOff: zeroTurnsOff == true,
     );
   }
 
@@ -336,9 +365,14 @@ class CapabilitySpec {
     if (issues.isNotEmpty) throw ValidationException('params for $id', issues);
     // 80.0 from a slider or a scaled link renders as "80.0", which a device
     // taking whole numbers refuses.
+    // A clamping param is brought inside its range and rounded.
     return Map.unmodifiable({
       for (final MapEntry(:key, :value) in input.entries)
-        key: params[key]!.integer && value is double ? value.round() : value,
+        key: params[key]!.clamp
+            ? params[key]!.fit(value)
+            : params[key]!.integer && value is double
+            ? value.round()
+            : value,
     });
   }
 }

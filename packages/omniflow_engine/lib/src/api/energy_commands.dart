@@ -2,6 +2,7 @@ import 'api_error.dart';
 import 'away_lighting.dart' show dayKey;
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'houses.dart' show firstHouseId;
 import 'smart_lights.dart';
 import '../devices/device_service.dart';
 import '../storage/database.dart';
@@ -203,15 +204,25 @@ class EnergyCommands {
   final EngineCore _core;
   final JsonFileStore _store;
   final meter = EnergyMeter();
+
+  /// The first house's price, kept where it was before houses.
   double? perKwh;
   String currency = '';
+
+  /// Each other house's price, by house id.
+  final prices = <String, ({double? perKwh, String currency})>{};
   var _dirty = false;
 
   Map<String, CommandHandler> get commands => {
     'energy.summary': summary,
-    'energy.price': (_) async => _price(),
+    'energy.price': (args) async => _price(_core.houses.target(args)),
     'energy.price.set': setPrice,
   };
+
+  ({double? perKwh, String currency}) _priceOf(String house) =>
+      house == firstHouseId
+      ? (perKwh: perKwh, currency: currency)
+      : prices[house] ?? (perKwh: null, currency: '');
 
   Future<void> load() async {
     final json = await _store.read();
@@ -220,6 +231,17 @@ class EnergyCommands {
     if (price is Map) {
       perKwh = _number(price['perKwh']);
       currency = price['currency'] is String ? price['currency'] as String : '';
+    }
+    final others = json['prices'];
+    if (others is Map) {
+      for (final e in others.entries) {
+        final p = e.value;
+        if (p is! Map) continue;
+        prices['${e.key}'] = (
+          perKwh: _number(p['perKwh']),
+          currency: p['currency'] is String ? p['currency'] as String : '',
+        );
+      }
     }
   }
 
@@ -230,6 +252,11 @@ class EnergyCommands {
     await _store.write({
       ...meter.toJson(),
       'price': {'perKwh': ?perKwh, 'currency': currency},
+      if (prices.isNotEmpty)
+        'prices': {
+          for (final e in prices.entries)
+            e.key: {'perKwh': ?e.value.perKwh, 'currency': e.value.currency},
+        },
     });
   }
 
@@ -247,10 +274,13 @@ class EnergyCommands {
     _dirty = true;
   }
 
-  Map<String, Object?> _price() => {'perKwh': perKwh, 'currency': currency};
+  Map<String, Object?> _price(String house) {
+    final p = _priceOf(house);
+    return {'perKwh': p.perKwh, 'currency': p.currency};
+  }
 
-  /// `{perKwh, currency?}`: the price of one kWh, and the money symbol
-  /// shown with it. A null price takes it away.
+  /// `{perKwh, currency?, house?}`: the price of one kWh in the house, and
+  /// the money symbol shown with it. A null price takes it away.
   Future<Map<String, Object?>> setPrice(Map<String, Object?> args) async {
     final price = args['perKwh'];
     if (price != null && (price is! num || price < 0 || price > 1000)) {
@@ -260,19 +290,29 @@ class EnergyCommands {
     if (symbol != null && symbol.trim().length > 5) {
       throw ApiError('invalid', 'currency must be a short symbol, such as \$');
     }
-    perKwh = (price as num?)?.toDouble();
-    if (symbol != null) currency = symbol.trim();
+    final house = _core.houses.target(args);
+    final value = (price as num?)?.toDouble();
+    if (house == firstHouseId) {
+      perKwh = value;
+      if (symbol != null) currency = symbol.trim();
+    } else {
+      prices[house] = (
+        perKwh: value,
+        currency: symbol?.trim() ?? _priceOf(house).currency,
+      );
+    }
     _dirty = true;
     await flush();
-    return _price();
+    return _price(house);
   }
 
-  double? _cost(double kwh) => perKwh == null ? null : _round(kwh * perKwh!, 2);
-
-  /// `{days?}` (1 to 31, default 7): per plug, watts now, today's kWh, the
-  /// last [days] days' kWh (a week by default), and the totals, with cost
-  /// where a price is set.
+  /// `{days?, house?}` (1 to 31, default 7): per plug, watts now, today's
+  /// kWh, the last [days] days' kWh (a week by default), and the totals,
+  /// with cost where a price is set. Given a house, its plugs at its price.
   Future<Map<String, Object?>> summary(Map<String, Object?> args) async {
+    final house = _core.houses.resolve(args['house']);
+    final price = _priceOf(house ?? _core.houses.defaultId).perKwh;
+    double? cost(double kwh) => price == null ? null : _round(kwh * price, 2);
     final count = optIntArg(args, 'days') ?? 7;
     if (count < 1 || count > 31) {
       throw ApiError('invalid', 'days must be 1 to 31');
@@ -291,6 +331,7 @@ class EnergyCommands {
     var totalWeek = 0.0;
     final rows = <Map<String, Object?>>[];
     for (final d in await DriftDeviceStore(_core.db).all()) {
+      if (house != null && !_core.houses.thingIn(d.id, house)) continue;
       final reading = energyReading(d.driverId, d.state);
       if (reading == null && !meter.days.containsKey(d.id)) continue;
       final kwhToday = meter.on(d.id, today);
@@ -304,8 +345,8 @@ class EnergyCommands {
         'watts': ?reading?.watts,
         'todayKwh': _round(kwhToday),
         'weekKwh': _round(kwhWeek),
-        'todayCost': ?_cost(kwhToday),
-        'weekCost': ?_cost(kwhWeek),
+        'todayCost': ?cost(kwhToday),
+        'weekCost': ?cost(kwhWeek),
         'days': [
           for (final day in dates)
             {'date': dayKey(day), 'kwh': _round(meter.on(d.id, day))},
@@ -320,10 +361,10 @@ class EnergyCommands {
       'total': {
         'todayKwh': _round(totalToday),
         'weekKwh': _round(totalWeek),
-        'todayCost': ?_cost(totalToday),
-        'weekCost': ?_cost(totalWeek),
+        'todayCost': ?cost(totalToday),
+        'weekCost': ?cost(totalWeek),
       },
-      'price': _price(),
+      'price': _price(house ?? _core.houses.defaultId),
     };
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:omniflow_engine/omniflow_engine.dart' show thingIdFor;
 
 import '../../api/engine_calls.dart' show DeviceView;
+import '../../state/house.dart' show houseShownProvider, newHomePlace;
 import '../../state/providers.dart';
 import '../add/add_page.dart' show openAddThing;
 import '../automations/automations_state.dart';
@@ -21,16 +22,22 @@ enum SetupStep { you, home, presence, device, automation }
 /// location, a Wi-Fi network at the home place, a device, an automation.
 /// Nothing is stored about the setup, so it resumes where the home stands.
 class SetupProgress {
-  const SetupProgress(this.done);
+  const SetupProgress(this.done, [this.steps = SetupStep.values]);
 
   final Set<SetupStep> done;
 
-  int get count => done.length;
-  bool get complete => done.length == SetupStep.values.length;
+  /// The steps this setup goes through: all of them for the first run,
+  /// fewer for a house added later.
+  final List<SetupStep> steps;
+
+  int get count => steps.where(done.contains).length;
+  bool get complete => count == steps.length;
 
   /// The first step not done, or null when all are.
-  SetupStep? get next =>
-      SetupStep.values.where((s) => !done.contains(s)).firstOrNull;
+  SetupStep? get next => steps.where((s) => !done.contains(s)).firstOrNull;
+
+  /// The same progress over [only].
+  SetupProgress over(List<SetupStep> only) => SetupProgress(done, only);
 }
 
 final setupProgressProvider = Provider.autoDispose<SetupProgress?>((ref) {
@@ -54,19 +61,26 @@ final setupProgressProvider = Provider.autoDispose<SetupProgress?>((ref) {
   });
 });
 
-/// Opens the home setup on its first open step, or on [start].
-Future<void> openHomeSetup(BuildContext context, {SetupStep? start}) =>
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(builder: (_) => HomeSetupPage(start: start)),
-    );
+/// Opens the home setup on its first open step, or on [start]. A house
+/// added later goes through only [steps].
+Future<void> openHomeSetup(
+  BuildContext context, {
+  SetupStep? start,
+  List<SetupStep> steps = SetupStep.values,
+}) => Navigator.of(context, rootNavigator: true).push(
+  MaterialPageRoute<void>(
+    builder: (_) => HomeSetupPage(start: start, steps: steps),
+  ),
+);
 
 /// A short setup for a fresh phone: who you are, where home is, how the
 /// phone knows you are home, then a first device and a first automation.
 /// Every step can be skipped, and Settings opens it again where it stopped.
 class HomeSetupPage extends ConsumerStatefulWidget {
-  const HomeSetupPage({super.key, this.start});
+  const HomeSetupPage({super.key, this.start, this.steps = SetupStep.values});
 
   final SetupStep? start;
+  final List<SetupStep> steps;
 
   @override
   ConsumerState<HomeSetupPage> createState() => _HomeSetupPageState();
@@ -96,19 +110,20 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
   }
 
   void _go(SetupStep? from) {
-    final i = from == null ? -1 : SetupStep.values.indexOf(from);
+    final steps = widget.steps;
+    final i = from == null ? -1 : steps.indexOf(from);
     setState(() {
-      if (i + 1 >= SetupStep.values.length) {
+      if (i + 1 >= steps.length) {
         _finished = true;
       } else {
-        _step = SetupStep.values[i + 1];
+        _step = steps[i + 1];
       }
     });
   }
 
   void _back(SetupStep step) {
-    final i = SetupStep.values.indexOf(step);
-    if (i > 0) setState(() => _step = SetupStep.values[i - 1]);
+    final i = widget.steps.indexOf(step);
+    if (i > 0) setState(() => _step = widget.steps[i - 1]);
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -147,7 +162,7 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
   /// Makes [ssid] the home place's Wi-Fi.
   Future<void> _useWifi(String ssid) => _run(() async {
     final zones = ref.read(zonesProvider).value ?? const <Json>[];
-    final zone = homeZone(zones) ?? const {'id': 'home', 'name': 'Home'};
+    final zone = homeZone(zones) ?? newHomePlace(ref.read(houseShownProvider));
     final wifi = zone['wifi'] is Map
         ? Map<String, Object?>.from(zone['wifi'] as Map)
         : <String, Object?>{};
@@ -178,10 +193,13 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
 
   @override
   Widget build(BuildContext context) {
-    final progress = ref.watch(setupProgressProvider);
+    final progress = ref.watch(setupProgressProvider)?.over(widget.steps);
     final step = _current(progress);
+    final house = ref.watch(houseShownProvider);
     return OmniPage(
-      title: 'Set up your home',
+      title: widget.steps.length < SetupStep.values.length && house != null
+          ? 'Set up ${house.name}'
+          : 'Set up your home',
       actions: [
         TextButton(
           key: const ValueKey('setup-not-now'),
@@ -211,7 +229,7 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
                   const SizedBox(height: OmniSpace.sm),
                   Row(
                     children: [
-                      if (step != SetupStep.values.first)
+                      if (step != widget.steps.first)
                         TextButton(
                           key: const ValueKey('setup-back'),
                           onPressed: _busy ? null : () => _back(step),
@@ -409,7 +427,7 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
       p.complete ? 'Your home is set up' : 'That is all for now',
       p.complete
           ? 'You can change any of it in Settings.'
-          : 'You did ${p.count} of ${SetupStep.values.length}. Settings, '
+          : 'You did ${p.count} of ${p.steps.length}. Settings, '
                 'Set up your home picks up where you stopped.',
     ),
     OmniButton(
@@ -428,8 +446,9 @@ class _StepBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = SetupStep.values.length;
-    final at = step == null ? total : SetupStep.values.indexOf(step!) + 1;
+    final steps = progress.steps;
+    final total = steps.length;
+    final at = step == null ? total : steps.indexOf(step!) + 1;
     return Semantics(
       label: step == null
           ? '${progress.count} of $total steps done'
@@ -446,7 +465,7 @@ class _StepBar extends StatelessWidget {
           const SizedBox(height: 6),
           Row(
             children: [
-              for (final s in SetupStep.values) ...[
+              for (final s in steps) ...[
                 Expanded(
                   child: Container(
                     height: 4,
@@ -460,7 +479,7 @@ class _StepBar extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (s != SetupStep.values.last) const SizedBox(width: 4),
+                if (s != steps.last) const SizedBox(width: 4),
               ],
             ],
           ),

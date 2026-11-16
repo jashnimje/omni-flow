@@ -23,6 +23,7 @@ ApiError apiErrorOf(Object e) => switch (e) {
   DeviceNotFoundException() => ApiError('not_found', e.message),
   TransportTimeoutException() => ApiError('timeout', e.message),
   PairingRequiredException() => ApiError('needs_user', e.message),
+  SecretNeededException() => ApiError('needs_user', e.message),
   TvCertificateMismatchException() => ApiError(
     'certificate_mismatch',
     e.message,

@@ -283,7 +283,10 @@ void main() {
     testWidgets('greets the person and says what is on', (tester) async {
       await pump(tester, engine);
       expect(find.textContaining(', Jade'), findsOneWidget);
-      expect(find.text('Home · 1 automation active'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('home-status'))).data,
+        'Home',
+      );
       expect(find.text('You are home'), findsOneWidget);
       expect(find.text('Netflix playing'), findsOneWidget);
       expect(find.text('Hall bulb offline'), findsOneWidget);
@@ -411,7 +414,8 @@ void main() {
       engine.delay = const Duration(seconds: 30);
       await pump(tester, engine);
       expect(find.byType(OmniTileSkeleton), findsWidgets);
-      await tester.pump(const Duration(seconds: 31));
+      // The house in view is read first, then the list.
+      await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
       expect(find.byType(OmniTileSkeleton), findsNothing);
       expect(find.byKey(const ValueKey('tile-desk_lamp')), findsWidgets);

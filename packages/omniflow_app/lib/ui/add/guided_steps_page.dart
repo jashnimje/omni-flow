@@ -493,6 +493,28 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
             step.instruction ?? 'Enter what ${widget.name} needs to answer.',
       ),
       for (final k in step.keys) _keyField(k, secret: true),
+      for (final k in step.keys)
+        for (final other in step.sameAs[k.key] ?? const [])
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+            child: OmniButton.ghost(
+              key: ValueKey('setup-same-${k.key}-${other.id}'),
+              label: 'Use the same ${k.label} as ${other.name}',
+              onPressed: _busy
+                  ? null
+                  : () => _run(() async {
+                      final copied = await _api.copySecret(
+                        widget.id,
+                        k.key,
+                        other.id,
+                      );
+                      final failed = copied.failure;
+                      return failed != null
+                          ? Reply<NextStep>.failed(failed)
+                          : _api.nextStep(widget.id);
+                    }),
+            ),
+          ),
       OmniButton(
         key: const ValueKey('setup-secret-save'),
         label: 'Save',

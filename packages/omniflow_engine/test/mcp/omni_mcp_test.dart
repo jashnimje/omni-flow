@@ -319,7 +319,12 @@ void _tools({required bool viaHub}) {
       final listed = body(await call('list_tags'));
       expect(listed['ok'], isTrue, reason: '$listed');
       expect(listed['tags'], [
-        {'id': 'front_door', 'name': 'Front door', 'uid': '04A22B1C'},
+        {
+          'id': 'front_door',
+          'name': 'Front door',
+          'uid': '04A22B1C',
+          'house': 'home',
+        },
       ]);
       final tools = (await client.listTools()).tools.map((t) => t.name);
       expect(tools.where((t) => t.contains('tag') || t.contains('nfc')), [
@@ -500,7 +505,12 @@ void _tools({required bool viaHub}) {
       expect((plug['error'] as Map)['message'], isNot(contains('device pair')));
 
       final bulb = body(await call('pair_device', {'deviceId': 'desk_lamp'}));
-      expect((bulb['error'] as Map)['type'], 'invalid');
+      // A WiZ bulb needs no pairing, only the home key on newer firmware.
+      expect((bulb['error'] as Map)['type'], 'needs_user');
+      expect(
+        (bulb['error'] as Map)['message'],
+        contains('omni secret set desk_lamp signingKey'),
+      );
     },
   );
 

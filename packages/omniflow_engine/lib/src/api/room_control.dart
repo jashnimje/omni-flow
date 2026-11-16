@@ -109,7 +109,17 @@ class RoomControl {
       final manifest = _manifest(d);
       final spec = manifest?.capability(capability);
       if (manifest == null || spec == null) continue;
-      final sent = value is! num
+      // A room at 0 % turns its lights off: most lights' lowest brightness
+      // is above zero, and a WiZ bulb refuses dimming below 10.
+      final power = manifest.capability('power');
+      final off =
+          value is num &&
+          value <= 0 &&
+          _isBrightness(spec) &&
+          power?.type == CapabilityType.toggle;
+      final sent = off
+          ? const <String, Object?>{'value': false}
+          : value is! num
           ? params
           : _isBrightness(spec)
           ? {...params, 'value': percentToDevice(spec, value)}
@@ -134,7 +144,7 @@ class RoomControl {
       try {
         final result = await _core.devices.invoke(
           d.id,
-          capability,
+          off ? power!.id : capability,
           sent,
           allowPairing: false,
           by: callerOf(args),

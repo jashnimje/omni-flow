@@ -8,11 +8,25 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.8.0';
+const appVersion = '0.9.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.9.0',
+    date: '17 Nov 2026',
+    notes: [
+      'Houses: keep each home on its own, with its own devices, rooms, '
+          'automations, scenes, mode and location. Switch at the top of Home, '
+          'or let OmniFlow switch when you arrive.',
+      'Your home becomes the first house. Rename it from the switcher.',
+      'A calmer Home: no streaks or scores in the way. Your activity is in '
+          'Settings.',
+      'WiZ lights on newer firmware: add your WiZ home key once on the '
+          "light's page, and values always fit what the bulb takes.",
+    ],
+  ),
   (
     version: '0.8.0',
     date: '14 Nov 2026',

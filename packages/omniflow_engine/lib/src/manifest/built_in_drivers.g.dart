@@ -634,7 +634,11 @@ const builtInDriverSources = <String, String>{
   "name": "Philips WiZ Light (local UDP)",
   "category": "lighting",
   "icon": "lightbulb",
-  "transport": { "type": "udp", "port": 38899, "listenPort": 38900, "payload": "json", "matchMethod": true },
+  "transport": { "type": "udp", "port": 38899, "listenPort": 38900, "payload": "json", "matchMethod": true, "pilot": "wiz" },
+  "settings": [
+    { "key": "signingKey", "label": "WiZ home key", "secret": true, "pattern": "[0-9a-fA-F]{32}", "patternWords": "32 characters, the digits 0 to 9 and the letters a to f", "help": "Newer WiZ firmware only takes commands signed with your WiZ home's key, 32 characters of digits and the letters a to f. One key covers every bulb in the same WiZ home.\nOpen the WiZ app, go to the settings of your home, and look for the option to export the home for local integration (the exact menu name differs between app versions). It saves or shares a small file. Open it and copy the value of udp_signing_key, without the quotes, and paste it here.\nOlder bulbs do not need it. OmniFlow asks for it when a bulb refuses commands without it. The key stays on this phone." }
+  ],
+  "setup": ["secret:signingKey?"],
   "discovery": [
     {
       "method": "udp_broadcast",
@@ -644,7 +648,12 @@ const builtInDriverSources = <String, String>{
       "idJsonPath": "$.result.mac"
     }
   ],
-  "statePush": { "method": "syncPilot", "jsonPath": "$.params" },
+  "statePush": {
+    "method": "syncPilot",
+    "jsonPath": "$.params",
+    "exclusive": [["temp"], ["r", "g", "b", "c", "w"], ["sceneId", "speed"]],
+    "historyKeys": ["state", "dimming", "temp", "r", "g", "b", "c", "w", "sceneId", "speed"]
+  },
   "statePoll": { "intervalSeconds": 60, "command": { "method": "getPilot", "params": {} }, "jsonPath": "$.result" },
   "reliability": { "timeoutMs": 500, "retries": 2 },
   "capabilities": [
@@ -659,7 +668,8 @@ const builtInDriverSources = <String, String>{
       "id": "brightness",
       "type": "level",
       "label": "Brightness",
-      "params": { "value": { "type": "number", "integer": true, "min": 10, "max": 100, "unit": "%" } },
+      "zeroTurnsOff": true,
+      "params": { "value": { "type": "number", "integer": true, "clamp": true, "min": 10, "max": 100, "unit": "%" } },
       "command": { "id": 1, "method": "setPilot", "params": { "state": true, "dimming": "{{value}}" } },
       "stateJsonPath": "$.dimming"
     },
@@ -668,8 +678,8 @@ const builtInDriverSources = <String, String>{
       "type": "color_temp",
       "label": "White temperature",
       "params": {
-        "value": { "type": "number", "integer": true, "min": 2200, "max": 6500, "unit": "K" },
-        "brightness": { "type": "number", "integer": true, "min": 10, "max": 100, "optional": true }
+        "value": { "type": "number", "integer": true, "clamp": true, "min": 2200, "max": 6500, "unit": "K" },
+        "brightness": { "type": "number", "integer": true, "clamp": true, "min": 10, "max": 100, "optional": true }
       },
       "command": {
         "id": 1,
@@ -682,7 +692,13 @@ const builtInDriverSources = <String, String>{
       "id": "rgb",
       "type": "color_rgb",
       "label": "Colour",
-      "params": { "brightness": { "type": "number", "integer": true, "min": 10, "max": 100, "optional": true } },
+      "zeroTurnsOff": true,
+      "params": {
+        "r": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255 },
+        "g": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255 },
+        "b": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255 },
+        "brightness": { "type": "number", "integer": true, "clamp": true, "min": 10, "max": 100, "optional": true }
+      },
       "command": {
         "id": 1,
         "method": "setPilot",

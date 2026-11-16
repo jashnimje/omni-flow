@@ -8,6 +8,7 @@ import '../transports/host_exec.dart';
 import '../transports/ssh_executor.dart';
 import '../transports/udp_transport.dart';
 import 'device.dart';
+import 'wiz_pilot.dart';
 
 /// What a channel needs to deliver one rendered command.
 class ChannelRequest {
@@ -62,6 +63,15 @@ class PairingRequiredException extends CommandFailedException {
       );
 }
 
+/// The device refuses commands until the user stores the secret setting
+/// [secretKey] (a WiZ bulb whose firmware wants signed writes).
+class SecretNeededException extends CommandFailedException {
+  SecretNeededException(super.message, {required this.secretKey});
+
+  /// The secret setting to store, never its value.
+  final String secretKey;
+}
+
 /// Delivers a command over one transport type.
 abstract interface class DriverChannel {
   Future<ChannelReply> send(ChannelRequest request);
@@ -76,16 +86,63 @@ abstract interface class DriverChannel {
 /// a fixed id (WiZ), `"matchMethod": true` accepts only a reply whose
 /// `method` is the command's. A reply with an `error` field, or with
 /// `"event": "error"`, fails the command.
+///
+/// With `"pilot": "wiz"` a write is fitted to what the bulb takes
+/// ([fitWizPilot]) and, when the device has a `signingKey` secret, signed
+/// as WiZ firmware that answers `"env": "pro"` wants. An error reply is
+/// put in plain words and is never retried.
 class UdpJsonChannel implements DriverChannel {
-  UdpJsonChannel(this._udp, {this._renderer = const TemplateRenderer()});
+  UdpJsonChannel(
+    this._udp, {
+    this._renderer = const TemplateRenderer(),
+    this._secrets,
+    DateTime Function()? clock,
+    this.onWarning,
+  }) : _clock = clock ?? DateTime.now;
 
   final UdpTransport _udp;
   final TemplateRenderer _renderer;
+  final SecretStore? _secrets;
+  final DateTime Function() _clock;
+
+  /// Told about something worth logging that does not fail the command
+  /// (a signed reply whose hmac does not match).
+  final void Function(String deviceId, String message)? onWarning;
   var _nextId = 0;
+
+  /// Devices whose last reply said `"env": "pro"`, or did not.
+  final _pro = <String, bool>{};
 
   @override
   Future<ChannelReply> send(ChannelRequest request) async {
     var payload = _renderer.render(request.command, request.context);
+    final wiz = isWizPilot(request.manifest) && payload is Map;
+    final name = request.device.name.isEmpty
+        ? request.device.id
+        : request.device.name;
+    final bulb = wiz ? WizBulb.of(request.device) : null;
+    String? key;
+    if (wiz) {
+      payload = fitWizPilot(Map<String, Object?>.from(payload), bulb, name);
+      final stored = await _secrets?.read(
+        deviceSecretKey(request.device.id, wizSigningKey),
+      );
+      key = stored != null && wizKeyPattern.hasMatch(stored.trim())
+          ? stored.trim()
+          : null;
+    }
+    final sent = payload;
+    final sign =
+        key != null &&
+        isWizWrite((payload as Map)['method']) &&
+        _pro[request.device.id] != false;
+    if (sign) {
+      payload = signWizRequest(
+        Map<String, Object?>.from(payload),
+        key,
+        timestamp: _clock().millisecondsSinceEpoch ~/ 1000,
+      );
+    }
     final port = request.device.port ?? request.manifest.transport.port;
     if (port == null) throw ArgumentError('no port for ${request.device.id}');
     final options = request.manifest.transport.options;
@@ -104,18 +161,44 @@ class UdpJsonChannel implements DriverChannel {
     final reply = await _udp.request(
       InternetAddress(request.device.host),
       port,
-      utf8.encode(jsonEncode(payload)),
+      utf8.encode(wiz ? wizJson(payload) : jsonEncode(payload)),
       timeout: Duration(milliseconds: reliability.timeoutMs),
       retries: reliability.retries,
       accept: id == null && method == null
           ? null
           : (d) {
               final json = _tryJson(d.text);
+              // Some firmware leaves the method out of an error reply, and
+              // waiting past it would turn a refusal into a timeout.
               return (id == null || json?['id'] == id) &&
-                  (method == null || json?['method'] == method);
+                  (method == null ||
+                      json?['method'] == method ||
+                      (json?['error'] != null && json?['method'] == null));
             },
     );
     final decoded = _tryJson(reply.text);
+    if (wiz && decoded != null) {
+      // Older firmware answers without "env": "pro" and takes writes unsigned.
+      if (isWizWrite((sent as Map)['method'])) {
+        _pro[request.device.id] = decoded['env'] == 'pro';
+      }
+      if (key != null && wizReplyVerified(decoded, key) == false) {
+        onWarning?.call(
+          request.device.id,
+          'the reply from $name is signed with another key',
+        );
+      }
+      if (decoded['error'] != null) {
+        throw wizErrorOf(
+          decoded['error'],
+          Map<String, Object?>.from(sent),
+          bulb,
+          name,
+          signed: sign,
+          pro: decoded['env'] == 'pro',
+        );
+      }
+    }
     if (decoded != null && decoded['error'] != null) {
       throw CommandFailedException(
         '${request.device.id} replied with error ${jsonEncode(decoded['error'])}',

@@ -25,6 +25,7 @@ class ParamSpec {
     this.values = const [],
     this.pattern,
     this.integer = false,
+    this.clamp = false,
   });
 
   final ParamType type;
@@ -39,6 +40,20 @@ class ParamSpec {
 
   /// For a number param, whether it must be a whole number.
   final bool integer;
+
+  /// For a number param, whether a value outside [min] to [max] is brought
+  /// inside it (and rounded when [integer]) instead of refused, for a
+  /// light, where 5 % on a bulb whose lowest is 10 % should give 10 %.
+  final bool clamp;
+
+  /// [value] brought inside the range and rounded, when this param clamps.
+  Object? fit(Object? value) {
+    if (!clamp || value is! num || !value.isFinite) return value;
+    num v = value;
+    if (min != null && v < min!) v = min!;
+    if (max != null && v > max!) v = max!;
+    return integer ? v.round() : v;
+  }
 
   static ParamSpec? parse(Object? json, String path, IssueCollector issues) {
     if (json is! Map) {
@@ -99,6 +114,10 @@ class ParamSpec {
     if (integer != null && (integer is! bool || type != ParamType.number)) {
       issues.add('$path.integer', 'is true or false, for a number param');
     }
+    final clamp = map['clamp'];
+    if (clamp != null && (clamp is! bool || type != ParamType.number)) {
+      issues.add('$path.clamp', 'is true or false, for a number param');
+    }
     return ParamSpec(
       type: type,
       min: min is num ? min : null,
@@ -108,6 +127,7 @@ class ParamSpec {
       values: values,
       pattern: pattern,
       integer: integer == true,
+      clamp: clamp == true,
     );
   }
 
@@ -116,6 +136,7 @@ class ParamSpec {
     switch (type) {
       case ParamType.number:
         if (value is! num) return 'must be a number';
+        if (clamp) return value.isFinite ? null : 'must be a number';
         if (integer && value != value.roundToDouble()) {
           return 'must be a whole number';
         }

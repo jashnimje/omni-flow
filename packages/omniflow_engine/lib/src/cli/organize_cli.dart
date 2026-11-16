@@ -180,12 +180,13 @@ Command<int> sceneCommand() =>
 /// `omni device organize`: a device's name, room, favourite mark and order.
 Command<int> deviceOrganizeCommand() => _Verb(
   'organize',
-  'Rename a device, move it to a room, star it or place it: '
-      'omni device organize desk_lamp --room Study --favourite',
+  'Rename a device, move it to a room or another house, star it or place '
+      'it: omni device organize desk_lamp --room Study --favourite',
   'device.organize',
   (a) {
     final args = <String, Object?>{'id': _one(a, 'ID')};
     if (a.option('name') != null) args['name'] = a.option('name');
+    if (a.option('move-to') != null) args['moveTo'] = a.option('move-to');
     if (a.flag('no-room')) {
       args['room'] = null;
     } else if (a.option('room') != null) {
@@ -205,6 +206,12 @@ Command<int> deviceOrganizeCommand() => _Verb(
   usageLine: 'ID',
   options: (p) => p
     ..addOption('name')
+    ..addOption(
+      'move-to',
+      help:
+          'Move it to another house. Automations in its old house that use '
+          'it are turned off.',
+    )
     ..addOption('room', help: 'A room id or name. A new name adds the room.')
     ..addFlag('no-room', negatable: false, help: 'Take it out of its room.')
     ..addFlag('favourite', help: 'Star it on the home screen, or not.')

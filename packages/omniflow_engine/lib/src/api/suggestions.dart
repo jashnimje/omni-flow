@@ -326,10 +326,16 @@ class SuggestionCommands {
   Future<_DismissedStore> _dismissed() async =>
       _store ??= _DismissedStore(await _file());
 
-  Future<Map<String, Object?>> list(Map<String, Object?> _) async {
+  /// `{house?}`: habits of one house's things (and the people, whom every
+  /// house shares), or of every thing.
+  Future<Map<String, Object?>> list(Map<String, Object?> args) async {
     final now = _clock();
     final db = _core.db;
-    final devices = await DriftDeviceStore(db).all();
+    final house = _core.houses.resolve(args['house']);
+    final devices = [
+      for (final d in await DriftDeviceStore(db).all())
+        if (house == null || _core.houses.thingIn(d.id, house)) d,
+    ];
     final manifests = {
       for (final d in devices) d.id: manifestFor(_core.registry, d),
     };

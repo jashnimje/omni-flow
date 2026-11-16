@@ -206,6 +206,27 @@ class FlowEngine implements FlowEffects, PeopleSource {
   /// Moves home, and reschedules every running sun trigger to it.
   set homeLocation(HomeLocation? home) {
     _home = home;
+    rescheduleSun();
+  }
+
+  /// Where each house is that keeps its own location, by house id. A null
+  /// entry is a house with no location yet, whose sun triggers wait.
+  final houseLocations = <String, HomeLocation?>{};
+
+  /// Each flow's house, by flow id, for the location its sun triggers use.
+  final flowHouses = <String, String>{};
+
+  /// Where the flow [flowId] runs its sun triggers: its house's location
+  /// when that house keeps one, else [homeLocation].
+  HomeLocation? locationOf(String flowId) {
+    final house = flowHouses[flowId];
+    return house != null && houseLocations.containsKey(house)
+        ? houseLocations[house]
+        : _home;
+  }
+
+  /// Arms every running sun trigger again, after a location moved.
+  void rescheduleSun() {
     if (!_timersOn) return;
     for (final r in _runners.values) {
       if (r.flow.nodes.any((n) => n.type == 'sun')) _startTimers(r);
@@ -275,7 +296,7 @@ class FlowEngine implements FlowEffects, PeopleSource {
     final now = _clock.now();
     for (final n in runner.flow.nodes) {
       if (n.type == 'time_of_day' || n.type == 'sun') {
-        consider(_dailyTime(n, now));
+        consider(_dailyTime(n, now, flowId: flowId));
       } else if (n.type == 'interval' &&
           (n.config['offsetSeconds'] != null || n.config['between'] != null)) {
         try {
@@ -881,7 +902,12 @@ class FlowEngine implements FlowEffects, PeopleSource {
   /// When the daily trigger [n] fires next after [now], or with [previous]
   /// when it last fired at or before [now]. Null when it never does: a sun
   /// trigger with no home set, or a polar night or day.
-  DateTime? _dailyTime(NodeSpec n, DateTime now, {bool previous = false}) {
+  DateTime? _dailyTime(
+    NodeSpec n,
+    DateTime now, {
+    bool previous = false,
+    String? flowId,
+  }) {
     final days = (n.config['days'] as List?)?.cast<String>();
     if (n.type == 'time_of_day') {
       final at = n.config['at'] as String;
@@ -889,7 +915,7 @@ class FlowEngine implements FlowEffects, PeopleSource {
           ? previousTimeOfDay(now, at, days: days)
           : nextTimeOfDay(now, at, days: days);
     }
-    final home = _home;
+    final home = flowId == null ? _home : locationOf(flowId);
     final event = SunEvent.parse(n.config['event']);
     if (home == null || event == null) return null;
     final offset = (n.config['offsetMinutes'] as int?) ?? 0;
@@ -906,7 +932,7 @@ class FlowEngine implements FlowEffects, PeopleSource {
 
   void _scheduleDaily(FlowRunner r, NodeSpec n) {
     _catchUp(r, n);
-    final next = _dailyTime(n, _clock.now());
+    final next = _dailyTime(n, _clock.now(), flowId: r.flow.id);
     if (next == null) return;
     late final Timer timer;
     void go() {
@@ -938,10 +964,12 @@ class FlowEngine implements FlowEffects, PeopleSource {
   void _catchUp(FlowRunner r, NodeSpec n) {
     final key = '${r.flow.id}/${n.id}';
     final now = _clock.now();
-    final last = _dailyTime(n, now, previous: true);
+    final last = _dailyTime(n, now, previous: true, flowId: r.flow.id);
     // A sun trigger with no home yet has nothing to catch up, and may once
     // home is set.
-    if (last == null && n.type == 'sun' && _home == null) return;
+    if (last == null && n.type == 'sun' && locationOf(r.flow.id) == null) {
+      return;
+    }
     if (!_caughtUp.add(key)) return;
     if (now.difference(_openedAt) > const Duration(minutes: 1)) return;
     if (last == null || now.difference(last) > catchUpWindow) return;

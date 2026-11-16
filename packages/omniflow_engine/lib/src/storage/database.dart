@@ -42,6 +42,10 @@ class Devices extends Table {
   /// The device's place among its room's devices, lowest first.
   IntColumn get position => integer().nullable()();
 
+  /// The house it is in. Null for a person or a phone, which every house
+  /// shares, and for a thing added since the last command stamped one.
+  TextColumn get house => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -52,6 +56,24 @@ class Rooms extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
   IntColumn get position => integer().withDefault(const Constant(0))();
+
+  /// The house the room is in.
+  TextColumn get house => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// The houses a home is split into, such as a main home and a work home,
+/// in the order the switcher lists them.
+@DataClassName('HouseRow')
+class HouseRecords extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  IntColumn get position => integer().withDefault(const Constant(0))();
+
+  @override
+  String get tableName => 'houses';
 
   @override
   Set<Column> get primaryKey => {id};
@@ -97,6 +119,9 @@ class Flows extends Table {
   TextColumn get specJson => text().nullable()();
   DateTimeColumn get updatedAt => dateTime()();
 
+  /// The house the automation, scene or link belongs to.
+  TextColumn get house => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -115,6 +140,10 @@ class GlobalVariables extends Table {
   TextColumn get name => text()();
   TextColumn get valueJson => text()();
   DateTimeColumn get updatedAt => dateTime()();
+
+  /// The house a variable set by hand belongs to. Null for one a rule or
+  /// the engine set, which every house sees.
+  TextColumn get house => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {name};
@@ -157,6 +186,7 @@ class ExecutionLog extends Table {
     BoardDescribes,
     Rooms,
     DeviceHistory,
+    HouseRecords,
   ],
 )
 class OmniDatabase extends _$OmniDatabase {
@@ -169,7 +199,7 @@ class OmniDatabase extends _$OmniDatabase {
   factory OmniDatabase.memory() => OmniDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   /// The key version 2 kept the trust mark under, inside the flow JSON.
   static const legacyTrustedKey = '_trusted';
@@ -207,6 +237,22 @@ class OmniDatabase extends _$OmniDatabase {
       }
       if (from < 6 && !await _hasColumn('driver_manifests', 'by_agent')) {
         await m.addColumn(driverManifests, driverManifests.byAgent);
+      }
+      // Houses. The engine makes the first house and puts every record in
+      // it when it opens (houseMigration), so this only adds the columns.
+      if (from < 7) {
+        await m.createTable(houseRecords);
+        final columns = <(TableInfo, GeneratedColumn)>[
+          (devices, devices.house),
+          (rooms, rooms.house),
+          (flows, flows.house),
+          (globalVariables, globalVariables.house),
+        ];
+        for (final (table, column) in columns) {
+          if (!await _hasColumn(table.actualTableName, 'house')) {
+            await m.addColumn(table, column);
+          }
+        }
       }
     },
   );

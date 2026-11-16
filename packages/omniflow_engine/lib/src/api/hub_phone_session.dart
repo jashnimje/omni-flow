@@ -95,6 +95,8 @@ const _phoneExtra = {
   'automation.unremove',
   'backup.auto.get',
   'backup.auto.set',
+  // Removing a house, which the app offers in its house list.
+  'house.remove',
 };
 
 final _denied = withAndroidNames(_phoneDenied);

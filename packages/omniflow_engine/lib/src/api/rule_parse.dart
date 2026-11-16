@@ -2,6 +2,8 @@ import 'api_error.dart';
 import 'automation_commands.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'home_commands.dart' show houseLocation;
+import 'houses.dart';
 import 'nfc_tags.dart' show nfcTagDriverId;
 import 'things_runtime.dart' show personDriverId, placeDriverId, phoneDriverId;
 import '../dag/rules.dart';
@@ -120,7 +122,10 @@ class RuleParseCommands {
   Future<Map<String, Object?>> parse(Map<String, Object?> args) async {
     final text = args['text'];
     if (text is! String) throw ApiError('invalid', 'text must be a sentence');
-    final result = await _parser.parse(text, await home());
+    final result = await _parser.parse(
+      text,
+      await home(house: _core.houses.resolve(args['house'])),
+    );
     final words = await _automations.sentenceContext();
     var spec = result.spec;
     var problem = result.problem;
@@ -149,9 +154,18 @@ class RuleParseCommands {
     };
   }
 
-  /// This home as the parser reads it.
-  Future<ParseHome> home() async {
-    final devices = await DriftDeviceStore(_core.db).all();
+  /// This home as the parser reads it: given [house], only its things,
+  /// rooms and automations (and the people, whom every house shares), and
+  /// where it is.
+  Future<ParseHome> home({String? house}) async {
+    final houses = _core.houses;
+    final devices = [
+      for (final d in await DriftDeviceStore(_core.db).all())
+        if (house == null || houses.thingIn(d.id, house)) d,
+    ];
+    final roomHouses = house == null
+        ? const <String, String>{}
+        : await houses.housesOf(HouseKind.room);
     final context = await _automations.ruleContext();
     return ParseHome(
       things: [
@@ -166,15 +180,21 @@ class RuleParseCommands {
           ),
       ],
       rooms: {
-        for (final r in await DriftRoomStore(_core.db).all()) r.id: r.name,
+        for (final r in await DriftRoomStore(_core.db).all())
+          if (house == null || (roomHouses[r.id] ?? house) == house)
+            r.id: r.name,
       },
       automations: {
         for (final f in await DriftFlowStore(_core.db).all())
-          '${f.json['id']}': '${f.json['name'] ?? f.json['id']}',
+          if (house == null ||
+              (houses.flowHouses['${f.json['id']}'] ?? house) == house)
+            '${f.json['id']}': '${f.json['name'] ?? f.json['id']}',
       },
       person: context.person,
       homePlace: context.personHome,
-      location: _core.flows.homeLocation,
+      location: house == null
+          ? _core.flows.homeLocation
+          : houseLocation(_core, house),
     );
   }
 }

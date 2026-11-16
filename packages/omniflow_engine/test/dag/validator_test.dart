@@ -259,7 +259,7 @@ void main() {
         nodesOf(json)[2]['config'] = {
           'deviceId': 'desk_lamp',
           'capabilityId': 'color_temp',
-          'params': {'value': 9000, 'colour': 'red'},
+          'params': {'value': 'hot', 'colour': 'red'},
         };
         nodesOf(json)[3]['config'] = {
           'deviceId': 'mac_mini',
@@ -267,7 +267,7 @@ void main() {
           'params': {},
         };
         final got = issues(json).join('\n');
-        expect(got, contains('params.value: must be at most 6500'));
+        expect(got, contains('params.value: must be a number'));
         expect(got, contains('params.colour: is not a param of color_temp'));
         expect(got, contains('mac_mini has no capability fly'));
       },

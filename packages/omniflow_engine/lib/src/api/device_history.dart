@@ -32,9 +32,14 @@ class DeviceHistoryLog {
     final after = e.device.state;
     _last[id] = after;
     final at = DateTime.now().toUtc();
+    // A driver whose pushes carry chatter (a WiZ heartbeat's rssi and
+    // timestamps every few seconds) lists in `statePush.historyKeys` the
+    // keys worth a history entry. The rest stay in state only.
+    final only = _core.registry[e.device.driverId]?.statePush?['historyKeys'];
     final entries = [
       for (final key in {...before.keys, ...after.keys})
-        if (canonicalJson(before[key]) != canonicalJson(after[key]))
+        if ((only is! List || only.contains(key)) &&
+            canonicalJson(before[key]) != canonicalJson(after[key]))
           HistoryEntry(at, key, after[key], by: e.by),
     ];
     if (entries.isEmpty) return;

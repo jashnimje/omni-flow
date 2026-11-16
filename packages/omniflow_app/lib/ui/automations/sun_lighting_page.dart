@@ -14,7 +14,7 @@ import '../settings/home_location_page.dart' show openHomeLocation;
 final sunlightProvider = FutureProvider.autoDispose<SunlightView?>((ref) async {
   try {
     final r = await ref
-        .read(engineClientProvider)
+        .watch(engineClientProvider)
         .call(SmartHomeCalls.sunlightGet, const {});
     return r['ok'] == true ? SunlightView.of(r) : null;
   } on Object {

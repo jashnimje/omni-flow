@@ -16,8 +16,8 @@ import 'package:omniflow_app/ui/home/run_section.dart';
 import 'fake_engine.dart';
 import 'screen_harness.dart';
 
-/// Home's fun touches: the today card, Your home, celebrations, Surprise
-/// me and the springy run tiles. The engine answers follow `home.stats`.
+/// The fun touches: Home's hero without numbers, Your activity,
+/// celebrations (off by default), Surprise me and the springy run tiles. The engine answers follow `home.stats`.
 
 Map<String, Object?> statsReply({
   int runsToday = 12,
@@ -123,32 +123,26 @@ void main() {
   });
 
   group('the hero', () {
-    testWidgets('shows today\'s three numbers and opens Your home', (
+    testWidgets('keeps the greeting and status, with no numbers', (
       tester,
     ) async {
       final engine = FakeEngine()..answers['home.stats'] = statsReply();
       await pumpScreen(tester, engine, const _CardPage());
       expect(find.text('Good evening, Jade'), findsOneWidget);
       expect(find.text('Home mode'), findsOneWidget);
-      String numberOf(String key) => tester
-          .widgetList<Text>(
-            find.descendant(
-              of: find.byKey(ValueKey(key)),
-              matching: find.byType(Text),
-            ),
-          )
-          .map((t) => t.data)
-          .join(' ');
-      expect(numberOf('home-today-ran'), '12 ran today');
-      expect(numberOf('home-today-taps'), '34 taps saved');
-      expect(numberOf('home-today-streak'), '3 day streak');
-      expect(
-        find.bySemanticsLabel(RegExp('12 automations ran.*3 days in a row')),
-        findsOneWidget,
-      );
-      await tester.tap(find.byKey(const ValueKey('home-today')));
-      await tester.pumpAndSettle();
-      expect(find.text('Your home'), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-today')), findsNothing);
+      expect(find.textContaining('ran today'), findsNothing);
+      expect(engine.callsOf('home.stats'), isEmpty);
+    });
+  });
+
+  group('Your activity', () {
+    testWidgets('shows the week, the busiest automation and achievements', (
+      tester,
+    ) async {
+      final engine = FakeEngine()..answers['home.stats'] = statsReply();
+      await pumpScreen(tester, engine, const YourHomePage());
+      expect(find.text('Your activity'), findsOneWidget);
       expect(find.byKey(const ValueKey('your-home-busiest')), findsOneWidget);
       expect(find.textContaining('ran 14 times'), findsOneWidget);
       expect(find.text('Earned 10 Nov 2026'), findsOneWidget);
@@ -159,34 +153,20 @@ void main() {
       );
     });
 
-    testWidgets('shows only the greeting when the engine has no numbers', (
-      tester,
-    ) async {
-      final engine = FakeEngine()
-        ..answers['home.stats'] = {
-          'ok': false,
-          'error': {'type': 'failed', 'message': 'no'},
-        };
-      await pumpScreen(tester, engine, const _CardPage());
-      expect(find.byKey(const ValueKey('home-today')), findsNothing);
-      expect(find.text('Good evening, Jade'), findsOneWidget);
-    });
-
     testWidgets('a run that finishes reads the numbers again', (tester) async {
       final engine = FakeEngine()..answers['home.stats'] = statsReply();
-      await pumpScreen(tester, engine, const _CardPage());
+      await pumpScreen(tester, engine, const YourHomePage());
       final before = engine.callsOf('home.stats').length;
       engine.answers['home.stats'] = statsReply(runsToday: 13);
       engine.eventsOut.add({'event': 'run.finished', 'flow': 'evening'});
       await tester.pump(HomeStatsNotifier.settle);
       await tester.pumpAndSettle();
       expect(engine.callsOf('home.stats').length, before + 1);
-      expect(find.text('13'), findsOneWidget);
     });
   });
 
   group('celebrations', () {
-    testWidgets('a newly earned achievement bursts confetti and says so', (
+    testWidgets('a newly earned achievement bursts confetti when on', (
       tester,
     ) async {
       final engine = FakeEngine()
@@ -194,10 +174,10 @@ void main() {
       await pumpScreen(
         tester,
         engine,
-        const _CardPage(),
+        const YourHomePage(),
         settle: false,
         overrides: [
-          funPrefsStoreProvider.overrideWithValue(MemoryFunPrefsStore()),
+          funPrefsStoreProvider.overrideWithValue(MemoryFunPrefsStore(true)),
         ],
       );
       for (var i = 0; i < 4; i++) {
@@ -210,13 +190,35 @@ void main() {
       expect(find.byKey(const ValueKey('confetti')), findsNothing);
     });
 
+    testWidgets('celebrations are off by default: only the message', (
+      tester,
+    ) async {
+      final engine = FakeEngine()
+        ..answers['home.stats'] = statsReply(newly: ['first_automation']);
+      await pumpScreen(
+        tester,
+        engine,
+        const YourHomePage(),
+        settle: false,
+        overrides: [
+          funPrefsStoreProvider.overrideWithValue(MemoryFunPrefsStore()),
+        ],
+      );
+      for (var i = 0; i < 4; i++) {
+        await tester.pump();
+      }
+      expect(find.byKey(const ValueKey('confetti')), findsNothing);
+      expect(find.text('You earned First automation'), findsWidgets);
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('celebrations off keeps only the message', (tester) async {
       final engine = FakeEngine()
         ..answers['home.stats'] = statsReply(newly: ['first_automation']);
       await pumpScreen(
         tester,
         engine,
-        const _CardPage(),
+        const YourHomePage(),
         settle: false,
         overrides: [
           funPrefsStoreProvider.overrideWithValue(MemoryFunPrefsStore(false)),
@@ -238,10 +240,13 @@ void main() {
         Builder(
           builder: (context) => MediaQuery(
             data: MediaQuery.of(context).copyWith(disableAnimations: true),
-            child: const _CardPage(),
+            child: const YourHomePage(),
           ),
         ),
         settle: false,
+        overrides: [
+          funPrefsStoreProvider.overrideWithValue(MemoryFunPrefsStore(true)),
+        ],
       );
       await tester.pump();
       await tester.pump();
@@ -264,7 +269,7 @@ void main() {
       final row = find.byKey(const ValueKey('celebrations-switch'));
       await tester.tap(find.descendant(of: row, matching: find.byType(Switch)));
       await tester.pumpAndSettle();
-      expect(prefs.celebrations, isFalse);
+      expect(prefs.celebrations, isTrue);
     });
   });
 

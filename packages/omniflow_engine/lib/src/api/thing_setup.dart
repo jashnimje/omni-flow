@@ -1,6 +1,7 @@
 import 'engine_core.dart' show pairingPrompt;
 import '../devices/board.dart' show isBoardDriver;
 import '../devices/device.dart';
+import '../devices/device_service.dart' show setupNeedsSetting;
 import '../devices/http_channel.dart' show hueUsernameSecret;
 import '../devices/tv/tizen_protocol.dart';
 import '../devices/tv/webos_protocol.dart';
@@ -37,15 +38,33 @@ String? pairingProofSecret(DriverManifest manifest) {
 /// A pair step is done when the secret pairing stores is there. A driver
 /// whose pairing stores none (ADB) counts as paired once the device has
 /// answered, or when [pairedHere] says this engine paired it.
+///
+/// An optional step whose key the device's `setupNeeds` setting lists is
+/// required: the device refused commands without it (a WiZ bulb whose
+/// firmware wants the home key). A secret key that one of [siblings] (the
+/// other devices on the same driver) already has carries `sameAs`, its
+/// `{id, name}` list, for `secret.set {from}`.
 Future<Map<String, Object?>> nextSetupStep(
   Device device,
   DriverManifest manifest,
   SecretStore secrets, {
   bool pairedHere = false,
+  List<Device> siblings = const [],
 }) async {
-  Future<bool> hasSecret(String key) async {
-    final value = await secrets.read(deviceSecretKey(device.id, key));
+  Future<bool> secretOf(String deviceId, String key) async {
+    final value = await secrets.read(deviceSecretKey(deviceId, key));
     return value != null && value.isNotEmpty;
+  }
+
+  Future<bool> hasSecret(String key) => secretOf(device.id, key);
+  final needs = device.settings[setupNeedsSetting];
+  final sameAs = <String, List<Map<String, Object?>>>{};
+  for (final s in manifest.setup) {
+    if (s.kind != SetupKind.secret || siblings.isEmpty) continue;
+    sameAs[s.key!] = [
+      for (final d in siblings)
+        if (await secretOf(d.id, s.key!)) {'id': d.id, 'name': d.name},
+    ];
   }
 
   Future<bool> done(SetupStep step) async => switch (step.kind) {
@@ -57,7 +76,16 @@ Future<Map<String, Object?>> nextSetupStep(
     SetupKind.configure => settingPresent(device.settings, step.key!),
   };
 
-  final steps = manifest.setup;
+  final steps = [
+    for (final s in manifest.setup)
+      s.optional && needs is List && needs.contains(s.key)
+          ? SetupStep(s.kind, key: s.key)
+          : s,
+  ];
+  Map<String, Object?> keyJson(SetupStep s) => {
+    ..._keyJson(manifest, s),
+    if (sameAs[s.key] case final list? when list.isNotEmpty) 'sameAs': list,
+  };
   final open = [for (final s in steps) !await done(s)];
   final remaining = [
     for (var i = 0; i < steps.length; i++)
@@ -71,7 +99,7 @@ Future<Map<String, Object?>> nextSetupStep(
   if (first == null) {
     final optional = [
       for (var i = 0; i < steps.length; i++)
-        if (open[i]) _keyJson(manifest, steps[i]),
+        if (open[i]) keyJson(steps[i]),
     ];
     return {
       'step': 'done',
@@ -104,7 +132,7 @@ Future<Map<String, Object?>> nextSetupStep(
   }
   final keys = [
     for (var i = from; i <= to; i++)
-      if (open[i]) _keyJson(manifest, steps[i]),
+      if (open[i]) keyJson(steps[i]),
   ];
   final secret = step.kind == SetupKind.secret;
   return {

@@ -455,6 +455,15 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _houseMeta = const VerificationMeta('house');
+  @override
+  late final GeneratedColumn<String> house = GeneratedColumn<String>(
+    'house',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -469,6 +478,7 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
     lastSeen,
     favourite,
     position,
+    house,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -562,6 +572,12 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
         position.isAcceptableOrUnknown(data['position']!, _positionMeta),
       );
     }
+    if (data.containsKey('house')) {
+      context.handle(
+        _houseMeta,
+        house.isAcceptableOrUnknown(data['house']!, _houseMeta),
+      );
+    }
     return context;
   }
 
@@ -619,6 +635,10 @@ class $DevicesTable extends Devices with TableInfo<$DevicesTable, DeviceRow> {
         DriftSqlType.int,
         data['${effectivePrefix}position'],
       ),
+      house: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}house'],
+      ),
     );
   }
 
@@ -645,6 +665,10 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
 
   /// The device's place among its room's devices, lowest first.
   final int? position;
+
+  /// The house it is in. Null for a person or a phone, which every house
+  /// shares, and for a thing added since the last command stamped one.
+  final String? house;
   const DeviceRow({
     required this.id,
     required this.name,
@@ -658,6 +682,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     this.lastSeen,
     required this.favourite,
     this.position,
+    this.house,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -684,6 +709,9 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     if (!nullToAbsent || position != null) {
       map['position'] = Variable<int>(position);
     }
+    if (!nullToAbsent || house != null) {
+      map['house'] = Variable<String>(house);
+    }
     return map;
   }
 
@@ -707,6 +735,9 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       position: position == null && nullToAbsent
           ? const Value.absent()
           : Value(position),
+      house: house == null && nullToAbsent
+          ? const Value.absent()
+          : Value(house),
     );
   }
 
@@ -728,6 +759,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       lastSeen: serializer.fromJson<DateTime?>(json['lastSeen']),
       favourite: serializer.fromJson<bool>(json['favourite']),
       position: serializer.fromJson<int?>(json['position']),
+      house: serializer.fromJson<String?>(json['house']),
     );
   }
   @override
@@ -746,6 +778,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       'lastSeen': serializer.toJson<DateTime?>(lastSeen),
       'favourite': serializer.toJson<bool>(favourite),
       'position': serializer.toJson<int?>(position),
+      'house': serializer.toJson<String?>(house),
     };
   }
 
@@ -762,6 +795,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     Value<DateTime?> lastSeen = const Value.absent(),
     bool? favourite,
     Value<int?> position = const Value.absent(),
+    Value<String?> house = const Value.absent(),
   }) => DeviceRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -775,6 +809,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     lastSeen: lastSeen.present ? lastSeen.value : this.lastSeen,
     favourite: favourite ?? this.favourite,
     position: position.present ? position.value : this.position,
+    house: house.present ? house.value : this.house,
   );
   DeviceRow copyWithCompanion(DevicesCompanion data) {
     return DeviceRow(
@@ -792,6 +827,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
       lastSeen: data.lastSeen.present ? data.lastSeen.value : this.lastSeen,
       favourite: data.favourite.present ? data.favourite.value : this.favourite,
       position: data.position.present ? data.position.value : this.position,
+      house: data.house.present ? data.house.value : this.house,
     );
   }
 
@@ -809,7 +845,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
           ..write('stateJson: $stateJson, ')
           ..write('lastSeen: $lastSeen, ')
           ..write('favourite: $favourite, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('house: $house')
           ..write(')'))
         .toString();
   }
@@ -828,6 +865,7 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
     lastSeen,
     favourite,
     position,
+    house,
   );
   @override
   bool operator ==(Object other) =>
@@ -844,7 +882,8 @@ class DeviceRow extends DataClass implements Insertable<DeviceRow> {
           other.stateJson == this.stateJson &&
           other.lastSeen == this.lastSeen &&
           other.favourite == this.favourite &&
-          other.position == this.position);
+          other.position == this.position &&
+          other.house == this.house);
 }
 
 class DevicesCompanion extends UpdateCompanion<DeviceRow> {
@@ -860,6 +899,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
   final Value<DateTime?> lastSeen;
   final Value<bool> favourite;
   final Value<int?> position;
+  final Value<String?> house;
   final Value<int> rowid;
   const DevicesCompanion({
     this.id = const Value.absent(),
@@ -874,6 +914,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     this.lastSeen = const Value.absent(),
     this.favourite = const Value.absent(),
     this.position = const Value.absent(),
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DevicesCompanion.insert({
@@ -889,6 +930,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     this.lastSeen = const Value.absent(),
     this.favourite = const Value.absent(),
     this.position = const Value.absent(),
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -907,6 +949,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     Expression<DateTime>? lastSeen,
     Expression<bool>? favourite,
     Expression<int>? position,
+    Expression<String>? house,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -922,6 +965,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
       if (lastSeen != null) 'last_seen': lastSeen,
       if (favourite != null) 'favourite': favourite,
       if (position != null) 'position': position,
+      if (house != null) 'house': house,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -939,6 +983,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     Value<DateTime?>? lastSeen,
     Value<bool>? favourite,
     Value<int?>? position,
+    Value<String?>? house,
     Value<int>? rowid,
   }) {
     return DevicesCompanion(
@@ -954,6 +999,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
       lastSeen: lastSeen ?? this.lastSeen,
       favourite: favourite ?? this.favourite,
       position: position ?? this.position,
+      house: house ?? this.house,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -997,6 +1043,9 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
+    if (house.present) {
+      map['house'] = Variable<String>(house.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1018,6 +1067,7 @@ class DevicesCompanion extends UpdateCompanion<DeviceRow> {
           ..write('lastSeen: $lastSeen, ')
           ..write('favourite: $favourite, ')
           ..write('position: $position, ')
+          ..write('house: $house, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1126,6 +1176,15 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _houseMeta = const VerificationMeta('house');
+  @override
+  late final GeneratedColumn<String> house = GeneratedColumn<String>(
+    'house',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1136,6 +1195,7 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
     source,
     specJson,
     updatedAt,
+    house,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1200,6 +1260,12 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('house')) {
+      context.handle(
+        _houseMeta,
+        house.isAcceptableOrUnknown(data['house']!, _houseMeta),
+      );
+    }
     return context;
   }
 
@@ -1241,6 +1307,10 @@ class $FlowsTable extends Flows with TableInfo<$FlowsTable, FlowRow> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      house: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}house'],
+      ),
     );
   }
 
@@ -1271,6 +1341,9 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
   /// is its own spec.
   final String? specJson;
   final DateTime updatedAt;
+
+  /// The house the automation, scene or link belongs to.
+  final String? house;
   const FlowRow({
     required this.id,
     required this.flowJson,
@@ -1280,6 +1353,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     required this.source,
     this.specJson,
     required this.updatedAt,
+    this.house,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1294,6 +1368,9 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       map['spec_json'] = Variable<String>(specJson);
     }
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || house != null) {
+      map['house'] = Variable<String>(house);
+    }
     return map;
   }
 
@@ -1309,6 +1386,9 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
           ? const Value.absent()
           : Value(specJson),
       updatedAt: Value(updatedAt),
+      house: house == null && nullToAbsent
+          ? const Value.absent()
+          : Value(house),
     );
   }
 
@@ -1326,6 +1406,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       source: serializer.fromJson<String>(json['source']),
       specJson: serializer.fromJson<String?>(json['specJson']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      house: serializer.fromJson<String?>(json['house']),
     );
   }
   @override
@@ -1340,6 +1421,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       'source': serializer.toJson<String>(source),
       'specJson': serializer.toJson<String?>(specJson),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'house': serializer.toJson<String?>(house),
     };
   }
 
@@ -1352,6 +1434,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     String? source,
     Value<String?> specJson = const Value.absent(),
     DateTime? updatedAt,
+    Value<String?> house = const Value.absent(),
   }) => FlowRow(
     id: id ?? this.id,
     flowJson: flowJson ?? this.flowJson,
@@ -1361,6 +1444,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     source: source ?? this.source,
     specJson: specJson.present ? specJson.value : this.specJson,
     updatedAt: updatedAt ?? this.updatedAt,
+    house: house.present ? house.value : this.house,
   );
   FlowRow copyWithCompanion(FlowsCompanion data) {
     return FlowRow(
@@ -1372,6 +1456,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
       source: data.source.present ? data.source.value : this.source,
       specJson: data.specJson.present ? data.specJson.value : this.specJson,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      house: data.house.present ? data.house.value : this.house,
     );
   }
 
@@ -1385,7 +1470,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
           ..write('trusted: $trusted, ')
           ..write('source: $source, ')
           ..write('specJson: $specJson, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('house: $house')
           ..write(')'))
         .toString();
   }
@@ -1400,6 +1486,7 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
     source,
     specJson,
     updatedAt,
+    house,
   );
   @override
   bool operator ==(Object other) =>
@@ -1412,7 +1499,8 @@ class FlowRow extends DataClass implements Insertable<FlowRow> {
           other.trusted == this.trusted &&
           other.source == this.source &&
           other.specJson == this.specJson &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.house == this.house);
 }
 
 class FlowsCompanion extends UpdateCompanion<FlowRow> {
@@ -1424,6 +1512,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
   final Value<String> source;
   final Value<String?> specJson;
   final Value<DateTime> updatedAt;
+  final Value<String?> house;
   final Value<int> rowid;
   const FlowsCompanion({
     this.id = const Value.absent(),
@@ -1434,6 +1523,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     this.source = const Value.absent(),
     this.specJson = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   FlowsCompanion.insert({
@@ -1445,6 +1535,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     this.source = const Value.absent(),
     this.specJson = const Value.absent(),
     required DateTime updatedAt,
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        flowJson = Value(flowJson),
@@ -1458,6 +1549,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     Expression<String>? source,
     Expression<String>? specJson,
     Expression<DateTime>? updatedAt,
+    Expression<String>? house,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1469,6 +1561,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
       if (source != null) 'source': source,
       if (specJson != null) 'spec_json': specJson,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (house != null) 'house': house,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1482,6 +1575,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     Value<String>? source,
     Value<String?>? specJson,
     Value<DateTime>? updatedAt,
+    Value<String?>? house,
     Value<int>? rowid,
   }) {
     return FlowsCompanion(
@@ -1493,6 +1587,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
       source: source ?? this.source,
       specJson: specJson ?? this.specJson,
       updatedAt: updatedAt ?? this.updatedAt,
+      house: house ?? this.house,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1524,6 +1619,9 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (house.present) {
+      map['house'] = Variable<String>(house.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1541,6 +1639,7 @@ class FlowsCompanion extends UpdateCompanion<FlowRow> {
           ..write('source: $source, ')
           ..write('specJson: $specJson, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('house: $house, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1790,8 +1889,17 @@ class $GlobalVariablesTable extends GlobalVariables
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _houseMeta = const VerificationMeta('house');
   @override
-  List<GeneratedColumn> get $columns => [name, valueJson, updatedAt];
+  late final GeneratedColumn<String> house = GeneratedColumn<String>(
+    'house',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [name, valueJson, updatedAt, house];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -1828,6 +1936,12 @@ class $GlobalVariablesTable extends GlobalVariables
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('house')) {
+      context.handle(
+        _houseMeta,
+        house.isAcceptableOrUnknown(data['house']!, _houseMeta),
+      );
+    }
     return context;
   }
 
@@ -1849,6 +1963,10 @@ class $GlobalVariablesTable extends GlobalVariables
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      house: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}house'],
+      ),
     );
   }
 
@@ -1862,10 +1980,15 @@ class GlobalRow extends DataClass implements Insertable<GlobalRow> {
   final String name;
   final String valueJson;
   final DateTime updatedAt;
+
+  /// The house a variable set by hand belongs to. Null for one a rule or
+  /// the engine set, which every house sees.
+  final String? house;
   const GlobalRow({
     required this.name,
     required this.valueJson,
     required this.updatedAt,
+    this.house,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1873,6 +1996,9 @@ class GlobalRow extends DataClass implements Insertable<GlobalRow> {
     map['name'] = Variable<String>(name);
     map['value_json'] = Variable<String>(valueJson);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || house != null) {
+      map['house'] = Variable<String>(house);
+    }
     return map;
   }
 
@@ -1881,6 +2007,9 @@ class GlobalRow extends DataClass implements Insertable<GlobalRow> {
       name: Value(name),
       valueJson: Value(valueJson),
       updatedAt: Value(updatedAt),
+      house: house == null && nullToAbsent
+          ? const Value.absent()
+          : Value(house),
     );
   }
 
@@ -1893,6 +2022,7 @@ class GlobalRow extends DataClass implements Insertable<GlobalRow> {
       name: serializer.fromJson<String>(json['name']),
       valueJson: serializer.fromJson<String>(json['valueJson']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      house: serializer.fromJson<String?>(json['house']),
     );
   }
   @override
@@ -1902,20 +2032,27 @@ class GlobalRow extends DataClass implements Insertable<GlobalRow> {
       'name': serializer.toJson<String>(name),
       'valueJson': serializer.toJson<String>(valueJson),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'house': serializer.toJson<String?>(house),
     };
   }
 
-  GlobalRow copyWith({String? name, String? valueJson, DateTime? updatedAt}) =>
-      GlobalRow(
-        name: name ?? this.name,
-        valueJson: valueJson ?? this.valueJson,
-        updatedAt: updatedAt ?? this.updatedAt,
-      );
+  GlobalRow copyWith({
+    String? name,
+    String? valueJson,
+    DateTime? updatedAt,
+    Value<String?> house = const Value.absent(),
+  }) => GlobalRow(
+    name: name ?? this.name,
+    valueJson: valueJson ?? this.valueJson,
+    updatedAt: updatedAt ?? this.updatedAt,
+    house: house.present ? house.value : this.house,
+  );
   GlobalRow copyWithCompanion(GlobalVariablesCompanion data) {
     return GlobalRow(
       name: data.name.present ? data.name.value : this.name,
       valueJson: data.valueJson.present ? data.valueJson.value : this.valueJson,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      house: data.house.present ? data.house.value : this.house,
     );
   }
 
@@ -1924,37 +2061,42 @@ class GlobalRow extends DataClass implements Insertable<GlobalRow> {
     return (StringBuffer('GlobalRow(')
           ..write('name: $name, ')
           ..write('valueJson: $valueJson, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('house: $house')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(name, valueJson, updatedAt);
+  int get hashCode => Object.hash(name, valueJson, updatedAt, house);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is GlobalRow &&
           other.name == this.name &&
           other.valueJson == this.valueJson &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.house == this.house);
 }
 
 class GlobalVariablesCompanion extends UpdateCompanion<GlobalRow> {
   final Value<String> name;
   final Value<String> valueJson;
   final Value<DateTime> updatedAt;
+  final Value<String?> house;
   final Value<int> rowid;
   const GlobalVariablesCompanion({
     this.name = const Value.absent(),
     this.valueJson = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   GlobalVariablesCompanion.insert({
     required String name,
     required String valueJson,
     required DateTime updatedAt,
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : name = Value(name),
        valueJson = Value(valueJson),
@@ -1963,12 +2105,14 @@ class GlobalVariablesCompanion extends UpdateCompanion<GlobalRow> {
     Expression<String>? name,
     Expression<String>? valueJson,
     Expression<DateTime>? updatedAt,
+    Expression<String>? house,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (name != null) 'name': name,
       if (valueJson != null) 'value_json': valueJson,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (house != null) 'house': house,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1977,12 +2121,14 @@ class GlobalVariablesCompanion extends UpdateCompanion<GlobalRow> {
     Value<String>? name,
     Value<String>? valueJson,
     Value<DateTime>? updatedAt,
+    Value<String?>? house,
     Value<int>? rowid,
   }) {
     return GlobalVariablesCompanion(
       name: name ?? this.name,
       valueJson: valueJson ?? this.valueJson,
       updatedAt: updatedAt ?? this.updatedAt,
+      house: house ?? this.house,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1999,6 +2145,9 @@ class GlobalVariablesCompanion extends UpdateCompanion<GlobalRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (house.present) {
+      map['house'] = Variable<String>(house.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2011,6 +2160,7 @@ class GlobalVariablesCompanion extends UpdateCompanion<GlobalRow> {
           ..write('name: $name, ')
           ..write('valueJson: $valueJson, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('house: $house, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2721,8 +2871,17 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, RoomRow> {
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _houseMeta = const VerificationMeta('house');
   @override
-  List<GeneratedColumn> get $columns => [id, name, position];
+  late final GeneratedColumn<String> house = GeneratedColumn<String>(
+    'house',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, position, house];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -2754,6 +2913,12 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, RoomRow> {
         position.isAcceptableOrUnknown(data['position']!, _positionMeta),
       );
     }
+    if (data.containsKey('house')) {
+      context.handle(
+        _houseMeta,
+        house.isAcceptableOrUnknown(data['house']!, _houseMeta),
+      );
+    }
     return context;
   }
 
@@ -2775,6 +2940,10 @@ class $RoomsTable extends Rooms with TableInfo<$RoomsTable, RoomRow> {
         DriftSqlType.int,
         data['${effectivePrefix}position'],
       )!,
+      house: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}house'],
+      ),
     );
   }
 
@@ -2788,13 +2957,24 @@ class RoomRow extends DataClass implements Insertable<RoomRow> {
   final String id;
   final String name;
   final int position;
-  const RoomRow({required this.id, required this.name, required this.position});
+
+  /// The house the room is in.
+  final String? house;
+  const RoomRow({
+    required this.id,
+    required this.name,
+    required this.position,
+    this.house,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
     map['position'] = Variable<int>(position);
+    if (!nullToAbsent || house != null) {
+      map['house'] = Variable<String>(house);
+    }
     return map;
   }
 
@@ -2803,6 +2983,9 @@ class RoomRow extends DataClass implements Insertable<RoomRow> {
       id: Value(id),
       name: Value(name),
       position: Value(position),
+      house: house == null && nullToAbsent
+          ? const Value.absent()
+          : Value(house),
     );
   }
 
@@ -2815,6 +2998,7 @@ class RoomRow extends DataClass implements Insertable<RoomRow> {
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       position: serializer.fromJson<int>(json['position']),
+      house: serializer.fromJson<String?>(json['house']),
     );
   }
   @override
@@ -2824,19 +3008,27 @@ class RoomRow extends DataClass implements Insertable<RoomRow> {
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'position': serializer.toJson<int>(position),
+      'house': serializer.toJson<String?>(house),
     };
   }
 
-  RoomRow copyWith({String? id, String? name, int? position}) => RoomRow(
+  RoomRow copyWith({
+    String? id,
+    String? name,
+    int? position,
+    Value<String?> house = const Value.absent(),
+  }) => RoomRow(
     id: id ?? this.id,
     name: name ?? this.name,
     position: position ?? this.position,
+    house: house.present ? house.value : this.house,
   );
   RoomRow copyWithCompanion(RoomsCompanion data) {
     return RoomRow(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
       position: data.position.present ? data.position.value : this.position,
+      house: data.house.present ? data.house.value : this.house,
     );
   }
 
@@ -2845,37 +3037,42 @@ class RoomRow extends DataClass implements Insertable<RoomRow> {
     return (StringBuffer('RoomRow(')
           ..write('id: $id, ')
           ..write('name: $name, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('house: $house')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, position);
+  int get hashCode => Object.hash(id, name, position, house);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is RoomRow &&
           other.id == this.id &&
           other.name == this.name &&
-          other.position == this.position);
+          other.position == this.position &&
+          other.house == this.house);
 }
 
 class RoomsCompanion extends UpdateCompanion<RoomRow> {
   final Value<String> id;
   final Value<String> name;
   final Value<int> position;
+  final Value<String?> house;
   final Value<int> rowid;
   const RoomsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.position = const Value.absent(),
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   RoomsCompanion.insert({
     required String id,
     required String name,
     this.position = const Value.absent(),
+    this.house = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name);
@@ -2883,12 +3080,14 @@ class RoomsCompanion extends UpdateCompanion<RoomRow> {
     Expression<String>? id,
     Expression<String>? name,
     Expression<int>? position,
+    Expression<String>? house,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
       if (position != null) 'position': position,
+      if (house != null) 'house': house,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2897,12 +3096,14 @@ class RoomsCompanion extends UpdateCompanion<RoomRow> {
     Value<String>? id,
     Value<String>? name,
     Value<int>? position,
+    Value<String?>? house,
     Value<int>? rowid,
   }) {
     return RoomsCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
       position: position ?? this.position,
+      house: house ?? this.house,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2919,6 +3120,9 @@ class RoomsCompanion extends UpdateCompanion<RoomRow> {
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
+    if (house.present) {
+      map['house'] = Variable<String>(house.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2931,6 +3135,7 @@ class RoomsCompanion extends UpdateCompanion<RoomRow> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('position: $position, ')
+          ..write('house: $house, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3333,6 +3538,262 @@ class DeviceHistoryCompanion extends UpdateCompanion<HistoryRow> {
   }
 }
 
+class $HouseRecordsTable extends HouseRecords
+    with TableInfo<$HouseRecordsTable, HouseRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $HouseRecordsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, position];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'houses';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<HouseRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  HouseRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return HouseRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
+      )!,
+    );
+  }
+
+  @override
+  $HouseRecordsTable createAlias(String alias) {
+    return $HouseRecordsTable(attachedDatabase, alias);
+  }
+}
+
+class HouseRow extends DataClass implements Insertable<HouseRow> {
+  final String id;
+  final String name;
+  final int position;
+  const HouseRow({
+    required this.id,
+    required this.name,
+    required this.position,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['position'] = Variable<int>(position);
+    return map;
+  }
+
+  HouseRecordsCompanion toCompanion(bool nullToAbsent) {
+    return HouseRecordsCompanion(
+      id: Value(id),
+      name: Value(name),
+      position: Value(position),
+    );
+  }
+
+  factory HouseRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return HouseRow(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      position: serializer.fromJson<int>(json['position']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'position': serializer.toJson<int>(position),
+    };
+  }
+
+  HouseRow copyWith({String? id, String? name, int? position}) => HouseRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    position: position ?? this.position,
+  );
+  HouseRow copyWithCompanion(HouseRecordsCompanion data) {
+    return HouseRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      position: data.position.present ? data.position.value : this.position,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HouseRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('position: $position')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, position);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is HouseRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.position == this.position);
+}
+
+class HouseRecordsCompanion extends UpdateCompanion<HouseRow> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<int> position;
+  final Value<int> rowid;
+  const HouseRecordsCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.position = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  HouseRecordsCompanion.insert({
+    required String id,
+    required String name,
+    this.position = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name);
+  static Insertable<HouseRow> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<int>? position,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (position != null) 'position': position,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  HouseRecordsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<int>? position,
+    Value<int>? rowid,
+  }) {
+    return HouseRecordsCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      position: position ?? this.position,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HouseRecordsCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('position: $position, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$OmniDatabase extends GeneratedDatabase {
   _$OmniDatabase(QueryExecutor e) : super(e);
   $OmniDatabaseManager get managers => $OmniDatabaseManager(this);
@@ -3349,6 +3810,7 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
   late final $BoardDescribesTable boardDescribes = $BoardDescribesTable(this);
   late final $RoomsTable rooms = $RoomsTable(this);
   late final $DeviceHistoryTable deviceHistory = $DeviceHistoryTable(this);
+  late final $HouseRecordsTable houseRecords = $HouseRecordsTable(this);
   late final Index deviceHistoryDevice = Index(
     'device_history_device',
     'CREATE INDEX device_history_device ON device_history (device_id, id)',
@@ -3367,6 +3829,7 @@ abstract class _$OmniDatabase extends GeneratedDatabase {
     boardDescribes,
     rooms,
     deviceHistory,
+    houseRecords,
     deviceHistoryDevice,
   ];
 }
@@ -3578,6 +4041,7 @@ typedef $$DevicesTableCreateCompanionBuilder = DevicesCompanion Function({
   Value<DateTime?> lastSeen,
   Value<bool> favourite,
   Value<int?> position,
+  Value<String?> house,
   Value<int> rowid,
 });
 typedef $$DevicesTableUpdateCompanionBuilder = DevicesCompanion Function({
@@ -3593,6 +4057,7 @@ typedef $$DevicesTableUpdateCompanionBuilder = DevicesCompanion Function({
   Value<DateTime?> lastSeen,
   Value<bool> favourite,
   Value<int?> position,
+  Value<String?> house,
   Value<int> rowid,
 });
 
@@ -3662,6 +4127,11 @@ class $$DevicesTableFilterComposer
 
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get house => $composableBuilder(
+    column: $table.house,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3734,6 +4204,11 @@ class $$DevicesTableOrderingComposer
     column: $table.position,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get house => $composableBuilder(
+    column: $table.house,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$DevicesTableAnnotationComposer
@@ -3782,6 +4257,9 @@ class $$DevicesTableAnnotationComposer
 
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<String> get house =>
+      $composableBuilder(column: $table.house, builder: (column) => column);
 }
 
 class $$DevicesTableTableManager
@@ -3824,6 +4302,7 @@ class $$DevicesTableTableManager
                 Value<DateTime?> lastSeen = const Value.absent(),
                 Value<bool> favourite = const Value.absent(),
                 Value<int?> position = const Value.absent(),
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DevicesCompanion(
                 id: id,
@@ -3838,6 +4317,7 @@ class $$DevicesTableTableManager
                 lastSeen: lastSeen,
                 favourite: favourite,
                 position: position,
+                house: house,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3854,6 +4334,7 @@ class $$DevicesTableTableManager
                 Value<DateTime?> lastSeen = const Value.absent(),
                 Value<bool> favourite = const Value.absent(),
                 Value<int?> position = const Value.absent(),
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DevicesCompanion.insert(
                 id: id,
@@ -3868,6 +4349,7 @@ class $$DevicesTableTableManager
                 lastSeen: lastSeen,
                 favourite: favourite,
                 position: position,
+                house: house,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -3910,6 +4392,7 @@ typedef $$FlowsTableCreateCompanionBuilder = FlowsCompanion Function({
   Value<String> source,
   Value<String?> specJson,
   required DateTime updatedAt,
+  Value<String?> house,
   Value<int> rowid,
 });
 typedef $$FlowsTableUpdateCompanionBuilder = FlowsCompanion Function({
@@ -3921,6 +4404,7 @@ typedef $$FlowsTableUpdateCompanionBuilder = FlowsCompanion Function({
   Value<String> source,
   Value<String?> specJson,
   Value<DateTime> updatedAt,
+  Value<String?> house,
   Value<int> rowid,
 });
 
@@ -3969,6 +4453,11 @@ class $$FlowsTableFilterComposer extends Composer<_$OmniDatabase, $FlowsTable> {
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get house => $composableBuilder(
+    column: $table.house,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4021,6 +4510,11 @@ class $$FlowsTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get house => $composableBuilder(
+    column: $table.house,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$FlowsTableAnnotationComposer
@@ -4055,6 +4549,9 @@ class $$FlowsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get house =>
+      $composableBuilder(column: $table.house, builder: (column) => column);
 }
 
 class $$FlowsTableTableManager
@@ -4093,6 +4590,7 @@ class $$FlowsTableTableManager
                 Value<String> source = const Value.absent(),
                 Value<String?> specJson = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => FlowsCompanion(
                 id: id,
@@ -4103,6 +4601,7 @@ class $$FlowsTableTableManager
                 source: source,
                 specJson: specJson,
                 updatedAt: updatedAt,
+                house: house,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4115,6 +4614,7 @@ class $$FlowsTableTableManager
                 Value<String> source = const Value.absent(),
                 Value<String?> specJson = const Value.absent(),
                 required DateTime updatedAt,
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => FlowsCompanion.insert(
                 id: id,
@@ -4125,6 +4625,7 @@ class $$FlowsTableTableManager
                 source: source,
                 specJson: specJson,
                 updatedAt: updatedAt,
+                house: house,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -4296,6 +4797,7 @@ typedef $$GlobalVariablesTableCreateCompanionBuilder =
       required String name,
       required String valueJson,
       required DateTime updatedAt,
+      Value<String?> house,
       Value<int> rowid,
     });
 typedef $$GlobalVariablesTableUpdateCompanionBuilder =
@@ -4303,6 +4805,7 @@ typedef $$GlobalVariablesTableUpdateCompanionBuilder =
       Value<String> name,
       Value<String> valueJson,
       Value<DateTime> updatedAt,
+      Value<String?> house,
       Value<int> rowid,
     });
 
@@ -4327,6 +4830,11 @@ class $$GlobalVariablesTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get house => $composableBuilder(
+    column: $table.house,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4354,6 +4862,11 @@ class $$GlobalVariablesTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get house => $composableBuilder(
+    column: $table.house,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$GlobalVariablesTableAnnotationComposer
@@ -4373,6 +4886,9 @@ class $$GlobalVariablesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get house =>
+      $composableBuilder(column: $table.house, builder: (column) => column);
 }
 
 class $$GlobalVariablesTableTableManager
@@ -4411,11 +4927,13 @@ class $$GlobalVariablesTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String> valueJson = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => GlobalVariablesCompanion(
                 name: name,
                 valueJson: valueJson,
                 updatedAt: updatedAt,
+                house: house,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4423,11 +4941,13 @@ class $$GlobalVariablesTableTableManager
                 required String name,
                 required String valueJson,
                 required DateTime updatedAt,
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => GlobalVariablesCompanion.insert(
                 name: name,
                 valueJson: valueJson,
                 updatedAt: updatedAt,
+                house: house,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -4863,12 +5383,14 @@ typedef $$RoomsTableCreateCompanionBuilder = RoomsCompanion Function({
   required String id,
   required String name,
   Value<int> position,
+  Value<String?> house,
   Value<int> rowid,
 });
 typedef $$RoomsTableUpdateCompanionBuilder = RoomsCompanion Function({
   Value<String> id,
   Value<String> name,
   Value<int> position,
+  Value<String?> house,
   Value<int> rowid,
 });
 
@@ -4892,6 +5414,11 @@ class $$RoomsTableFilterComposer extends Composer<_$OmniDatabase, $RoomsTable> {
 
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get house => $composableBuilder(
+    column: $table.house,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4919,6 +5446,11 @@ class $$RoomsTableOrderingComposer
     column: $table.position,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get house => $composableBuilder(
+    column: $table.house,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$RoomsTableAnnotationComposer
@@ -4938,6 +5470,9 @@ class $$RoomsTableAnnotationComposer
 
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<String> get house =>
+      $composableBuilder(column: $table.house, builder: (column) => column);
 }
 
 class $$RoomsTableTableManager
@@ -4971,11 +5506,13 @@ class $$RoomsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<int> position = const Value.absent(),
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => RoomsCompanion(
                 id: id,
                 name: name,
                 position: position,
+                house: house,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4983,11 +5520,13 @@ class $$RoomsTableTableManager
                 required String id,
                 required String name,
                 Value<int> position = const Value.absent(),
+                Value<String?> house = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => RoomsCompanion.insert(
                 id: id,
                 name: name,
                 position: position,
+                house: house,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5243,6 +5782,174 @@ typedef $$DeviceHistoryTableProcessedTableManager =
       HistoryRow,
       PrefetchHooks Function()
     >;
+typedef $$HouseRecordsTableCreateCompanionBuilder =
+    HouseRecordsCompanion Function({
+      required String id,
+      required String name,
+      Value<int> position,
+      Value<int> rowid,
+    });
+typedef $$HouseRecordsTableUpdateCompanionBuilder =
+    HouseRecordsCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<int> position,
+      Value<int> rowid,
+    });
+
+class $$HouseRecordsTableFilterComposer
+    extends Composer<_$OmniDatabase, $HouseRecordsTable> {
+  $$HouseRecordsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$HouseRecordsTableOrderingComposer
+    extends Composer<_$OmniDatabase, $HouseRecordsTable> {
+  $$HouseRecordsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$HouseRecordsTableAnnotationComposer
+    extends Composer<_$OmniDatabase, $HouseRecordsTable> {
+  $$HouseRecordsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+}
+
+class $$HouseRecordsTableTableManager
+    extends
+        RootTableManager<
+          _$OmniDatabase,
+          $HouseRecordsTable,
+          HouseRow,
+          $$HouseRecordsTableFilterComposer,
+          $$HouseRecordsTableOrderingComposer,
+          $$HouseRecordsTableAnnotationComposer,
+          $$HouseRecordsTableCreateCompanionBuilder,
+          $$HouseRecordsTableUpdateCompanionBuilder,
+          (
+            HouseRow,
+            BaseReferences<_$OmniDatabase, $HouseRecordsTable, HouseRow>,
+          ),
+          HouseRow,
+          PrefetchHooks Function()
+        > {
+  $$HouseRecordsTableTableManager(_$OmniDatabase db, $HouseRecordsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$HouseRecordsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$HouseRecordsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$HouseRecordsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<int> position = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => HouseRecordsCompanion(
+                id: id,
+                name: name,
+                position: position,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                Value<int> position = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => HouseRecordsCompanion.insert(
+                id: id,
+                name: name,
+                position: position,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$HouseRecordsTable, HouseRow>(table),
+                  BaseReferences<_$OmniDatabase, $HouseRecordsTable, HouseRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$HouseRecordsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OmniDatabase,
+      $HouseRecordsTable,
+      HouseRow,
+      $$HouseRecordsTableFilterComposer,
+      $$HouseRecordsTableOrderingComposer,
+      $$HouseRecordsTableAnnotationComposer,
+      $$HouseRecordsTableCreateCompanionBuilder,
+      $$HouseRecordsTableUpdateCompanionBuilder,
+      (HouseRow, BaseReferences<_$OmniDatabase, $HouseRecordsTable, HouseRow>),
+      HouseRow,
+      PrefetchHooks Function()
+    >;
 
 class $OmniDatabaseManager {
   final _$OmniDatabase _db;
@@ -5265,4 +5972,6 @@ class $OmniDatabaseManager {
       $$RoomsTableTableManager(_db, _db.rooms);
   $$DeviceHistoryTableTableManager get deviceHistory =>
       $$DeviceHistoryTableTableManager(_db, _db.deviceHistory);
+  $$HouseRecordsTableTableManager get houseRecords =>
+      $$HouseRecordsTableTableManager(_db, _db.houseRecords);
 }

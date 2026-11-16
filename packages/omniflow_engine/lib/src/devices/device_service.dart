@@ -10,6 +10,7 @@ import '../transports/udp_transport.dart';
 import 'board.dart';
 import 'channels.dart';
 import 'device.dart';
+import 'wiz_pilot.dart' show isWizPilot;
 
 /// A JSONPath naming one top-level key: `$.dimming` or `$['1']`.
 final _topLevelKey = RegExp(
@@ -21,6 +22,10 @@ String? stateKeyOf(String? jsonPath) {
   final m = jsonPath == null ? null : _topLevelKey.firstMatch(jsonPath);
   return m == null ? null : (m.group(1) ?? m.group(2));
 }
+
+/// The device setting listing the secret settings a device refused commands
+/// without (a WiZ bulb's home key), which makes those setup steps required.
+const setupNeedsSetting = 'setupNeeds';
 
 class DeviceNotFoundException implements Exception {
   DeviceNotFoundException(this.message);
@@ -158,21 +163,51 @@ class DeviceService {
         '${device.id}.${capability.id} is a ${capability.type.wireName} and takes no command',
       );
     }
+    final power = manifest.capability('power');
+    if (capability.asksForZero(params) &&
+        power != null &&
+        power.type == CapabilityType.toggle) {
+      return _invoke(
+        device,
+        manifest,
+        power,
+        {'value': false},
+        allowPairing: allowPairing,
+        by: by,
+      );
+    }
     final validated = capability.validateParams(params);
-    final (current, reply) = await _sendHealing(
-      device,
-      manifest,
-      capability.command,
-      {
+    final (Device, ChannelReply) sent;
+    try {
+      sent = await _sendHealing(device, manifest, capability.command, {
         ...capability.withDerived(validated, device.settings),
         'value': ?capability.toDevice(validated['value']),
-      },
-      allowPairing: allowPairing,
-    );
+      }, allowPairing: allowPairing);
+    } on SecretNeededException catch (e) {
+      await _markNeeds(device, e.secretKey);
+      rethrow;
+    }
+    final (current, reply) = sent;
     final state = _optimisticState(current.state, capability, validated);
     final updated = current.copyWith(state: state, lastSeen: _clock());
     await _save(updated, by: by);
     return InvokeResult(updated, reply);
+  }
+
+  /// Records in the device's [setupNeedsSetting] that it refuses commands
+  /// until the secret setting [key] is stored, so its setup asks for it.
+  Future<void> _markNeeds(Device device, String key) async {
+    final current = await this.device(device.id) ?? device;
+    final needs = current.settings[setupNeedsSetting];
+    if (needs is List && needs.contains(key)) return;
+    await _save(
+      current.copyWith(
+        settings: {
+          ...current.settings,
+          setupNeedsSetting: [...?(needs is List ? needs : null), key],
+        },
+      ),
+    );
   }
 
   /// Runs the driver's poll command and replaces the device state with what
@@ -288,8 +323,25 @@ class DeviceService {
         if (method != null && message['method'] != method) return null;
         final pushed = _extractObject(message, push['jsonPath'] as String?);
         if (pushed == null) return null;
+        // `exclusive` lists key groups only one of which holds at a time (a
+        // WiZ bulb is in white, colour or a scene): a push with keys of one
+        // group drops the other groups' stale keys.
+        final state = {...device.state};
+        final groups = push['exclusive'];
+        if (groups is List) {
+          final lists = [
+            for (final g in groups)
+              if (g is List) g,
+          ];
+          for (final group in lists) {
+            if (!group.any(pushed.containsKey)) continue;
+            for (final other in lists) {
+              if (!identical(other, group)) other.forEach(state.remove);
+            }
+          }
+        }
         final updated = device.copyWith(
-          state: {...device.state, ..._readBack(manifest, pushed)},
+          state: {...state, ..._readBack(manifest, pushed)},
           lastSeen: _clock(),
         );
         await _save(updated);
@@ -389,9 +441,11 @@ class DeviceService {
   /// Whether a device may follow a discovery reply to a new address
   /// unchecked. Any LAN host can copy the id a device announces, so only a
   /// driver without secrets moves blindly. A Tuya local key only encrypts
-  /// and never goes on the wire, so a Tuya device moves too.
+  /// and never goes on the wire, so a Tuya device moves too, and so does a
+  /// WiZ bulb, whose home key only signs.
   static bool _healsBlind(DriverManifest manifest) =>
       manifest.transport.type == TransportType.tuya ||
+      isWizPilot(manifest) ||
       !manifest.settings.any((s) => s.secret);
 
   /// Writes the commanded value into state where the capability reads it,

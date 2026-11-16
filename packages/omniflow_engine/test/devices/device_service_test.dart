@@ -64,7 +64,7 @@ void main() {
   test('invalid params never reach the channel', () async {
     await store.put(lamp());
     await expectLater(
-      service().invoke('desk_lamp', 'brightness', {'value': 5}),
+      service().invoke('desk_lamp', 'brightness', {'value': 'dim'}),
       throwsA(isA<ValidationException>()),
     );
     expect(channel.requests, isEmpty);

@@ -10,14 +10,21 @@ import '../api/engine_client.dart';
 import '../nfc/nfc.dart';
 import '../service/phone_files.dart';
 import '../api/screen_calls.dart';
+import 'house.dart' show scopedEngine;
 
 export '../api/engine_calls.dart' show Json;
 export '../service/phone_files.dart' show PhoneFiles, PickedFile;
 
-/// Overridden in main() with the real engine, and in tests with a fake.
-final engineClientProvider = Provider<EngineClient>(
-  (ref) => throw UnimplementedError('override engineClientProvider'),
+/// The connection to the engine. Overridden in main() with the real
+/// engine, and in tests with a fake. Screens use [engineClientProvider].
+final engineConnectionProvider = Provider<EngineClient>(
+  (ref) => throw UnimplementedError('override engineConnectionProvider'),
 );
+
+/// The engine as screens see it: every list, create and save is about the
+/// house in view (lib/state/house.dart), and whatever reads it reads again
+/// when that house changes.
+final engineClientProvider = Provider<EngineClient>(scopedEngine);
 
 /// Why the hub did not start at launch, or null when it runs.
 final hubErrorProvider = Provider<String?>((ref) => null);

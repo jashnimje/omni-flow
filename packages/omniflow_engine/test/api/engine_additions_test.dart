@@ -161,8 +161,15 @@ void main() {
           'name': 'Living room',
           'order': 0,
           'deviceCount': 1,
+          'house': 'home',
         },
-        {'id': 'study', 'name': 'study', 'order': 1, 'deviceCount': 1},
+        {
+          'id': 'study',
+          'name': 'study',
+          'order': 1,
+          'deviceCount': 1,
+          'house': 'home',
+        },
       ]);
       final lamp = await device('lamp');
       expect(
@@ -844,7 +851,13 @@ void main() {
     addTearDown(reopened.close);
     final rooms = await reopened.handle('room.list', {});
     expect(rooms['rooms'], [
-      {'id': 'study', 'name': 'Study', 'order': 0, 'deviceCount': 1},
+      {
+        'id': 'study',
+        'name': 'Study',
+        'order': 0,
+        'deviceCount': 1,
+        'house': 'home',
+      },
     ]);
     final lamp =
         (await reopened.handle('device.get', {'id': 'lamp'}))['device'] as Map;

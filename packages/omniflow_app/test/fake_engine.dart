@@ -136,7 +136,7 @@ Future<void> pumpApp(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        engineClientProvider.overrideWithValue(engine),
+        engineConnectionProvider.overrideWithValue(engine),
         hubErrorProvider.overrideWithValue(hubError),
         ...overrides,
       ],

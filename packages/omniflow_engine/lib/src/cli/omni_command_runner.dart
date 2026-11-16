@@ -23,6 +23,7 @@ import 'add_cli.dart';
 import 'hub_cli.dart';
 import 'one_shot.dart';
 import 'house_cli.dart';
+import 'house_view.dart';
 import 'organize_cli.dart';
 import 'parity_cli.dart';
 import 'rule_cli.dart';
@@ -88,6 +89,14 @@ class OmniCommandRunner extends CommandRunner<int> {
         valueHelp: 'FILE',
         help:
             'The SSH private key for --hub, allowed there with omni hub allow.',
+      )
+      ..addOption(
+        'house',
+        valueHelp: 'ID',
+        help:
+            'The house to list and add in. Defaults to omni house use, '
+            'else the only house; with several and none chosen, lists show '
+            'every house.',
       );
     addCommand(
       _Group('agent', 'What AI agents may do through MCP.', [
@@ -283,6 +292,7 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(weatherCommand());
     addCommand(sunlightCommand());
     addCommand(awayCommand());
+    addCommand(houseCommand());
     String id(List<String> rest) => _one(rest, 'ID');
     addCommand(
       _Group('flow', 'Validate, save, run and inspect flows.', [
@@ -662,9 +672,13 @@ class OmniCommandRunner extends CommandRunner<int> {
       _Group('secret', 'Store device and web secrets in the keychain.', [
         _ApiCommand(
           'set',
-          'Store a secret setting, read from stdin: omni secret set plug localKey < key.txt',
+          'Store a secret setting, read from stdin: omni secret set plug localKey < key.txt. '
+              'A third name copies that device\'s instead: omni secret set lamp signingKey kitchen',
           'secret.set',
           (rest, runner) async {
+            if (rest.length == 3) {
+              return {'deviceId': rest[0], 'key': rest[1], 'from': rest[2]};
+            }
             if (rest.length != 2) {
               throw UsageException(
                 'needs DEVICE and KEY',
@@ -678,7 +692,7 @@ class OmniCommandRunner extends CommandRunner<int> {
               'value': value.replaceFirst(RegExp(r'\r?\n$'), ''),
             };
           },
-          usage: 'DEVICE KEY',
+          usage: 'DEVICE KEY [FROM_DEVICE]',
         ),
         _ApiCommand(
           'set-web',
@@ -726,7 +740,13 @@ class OmniCommandRunner extends CommandRunner<int> {
 
   /// The running hub when one answers on [socketPath], else the engine
   /// opened here (with [tap], for commands that show packets).
-  Future<EngineConnection> connect({PacketTap? tap}) async {
+  Future<EngineConnection> connect({PacketTap? tap}) async =>
+      HouseViewConnection(
+        await _connect(tap: tap),
+        house: _globals?.option('house') ?? readCliHouse(home),
+      );
+
+  Future<EngineConnection> _connect({PacketTap? tap}) async {
     if (_globals?['phone'] case final String phone) {
       return AdbPhoneConnection(serial: phone == 'usb' ? null : phone);
     }
@@ -1280,7 +1300,9 @@ class _Watch extends Command<int> {
     final wizPort = _port(a, 'wiz-port', usage);
     final seconds = _seconds(a, usage);
     final packets = a.flag('packets');
-    final connection = await omni.connect(tap: packets ? PacketTap() : null);
+    final connection = withoutHouseView(
+      await omni.connect(tap: packets ? PacketTap() : null),
+    );
     if (connection is! InProcessConnection) {
       return _watchHub(omni, connection, packets, seconds);
     }

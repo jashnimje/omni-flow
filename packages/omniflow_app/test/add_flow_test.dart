@@ -167,6 +167,8 @@ void main() {
       await pumpScreen(tester, engine, const AddPage(), settle: false);
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.byKey(const ValueKey('add-looking')), findsOneWidget);
+      // The house in view is read first, then the search.
+      await tester.pump(const Duration(milliseconds: 500));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('add-looking')), findsNothing);
       expect(engine.callsOf('thing.add').single.$2, isEmpty);

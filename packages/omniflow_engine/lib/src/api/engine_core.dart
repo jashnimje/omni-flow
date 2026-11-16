@@ -3,6 +3,7 @@ import 'dart:async';
 import 'api_error.dart';
 import 'error_of.dart';
 import 'device_history.dart';
+import 'houses.dart';
 import '../dag/canonical.dart';
 import '../dag/flow_engine.dart';
 import '../devices/adb/adb_channel.dart';
@@ -169,6 +170,9 @@ class EngineCore {
   /// Every device's state changes. The engine feeds it device events.
   late final history = DeviceHistoryLog(this);
 
+  /// The houses, each record's house, and the house view of commands.
+  late final houses = Houses(this);
+
   /// Each room's name by id, so device JSON names the room without a read.
   final roomNames = <String, String>{};
 
@@ -195,6 +199,7 @@ class EngineCore {
         'roomId': d.room,
         'room': roomNames[d.room] ?? d.room,
       },
+      'house': ?houses.thingHouses[d.id],
       'favourite': d.favourite,
       'order': ?d.order,
       if (d.stableId != null) 'stableId': d.stableId,
@@ -208,6 +213,25 @@ class EngineCore {
       'settings': d.settings,
       'state': d.state,
       if (d.lastSeen != null) 'lastSeen': d.lastSeen!.toIso8601String(),
+      'problem': ?_setupProblem(d, manifest),
+    };
+  }
+
+  /// What a device refuses commands without (its `setupNeeds`), as
+  /// `{message, keys, action: "setup"}` for the device page.
+  static Map<String, Object?>? _setupProblem(Device d, DriverManifest? m) {
+    final needs = d.settings[setupNeedsSetting];
+    if (needs is! List || needs.isEmpty || m == null) return null;
+    final labels = [
+      for (final key in needs)
+        m.settings.where((s) => s.key == key).firstOrNull?.label ?? '$key',
+    ];
+    return {
+      'message':
+          '${d.name} does not take commands until you add its '
+          '${labels.join(' and ')}',
+      'keys': needs,
+      'action': 'setup',
     };
   }
 }

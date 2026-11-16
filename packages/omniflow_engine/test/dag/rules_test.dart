@@ -339,7 +339,7 @@ void main() {
           'then': [
             {
               'do': 'lamp.brightness',
-              'params': {'value': 900},
+              'params': {'value': 'full'},
             },
             'lamp.launch=true',
             {

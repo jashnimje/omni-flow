@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
+import '../add/guided_steps_page.dart' show openSetup;
 import '../design/design.dart';
 import 'capability_control.dart' show CapabilityControl, isHighRiskCapability;
 import 'device_controls.dart';
@@ -116,6 +117,15 @@ class DevicePage extends ConsumerWidget {
         key: ValueKey('device-page-$id'),
         padding: const EdgeInsets.only(top: OmniSpace.xs),
         children: [
+          // What the engine says the device refuses commands without (a
+          // WiZ bulb's home key), with the setup step that asks for it.
+          if (d.json['problem'] case {'message': final String message})
+            OmniBanner.warning(
+              message,
+              key: ValueKey('device-problem-$id'),
+              actionLabel: 'Add it',
+              onAction: () => openSetup(context, d.json),
+            ),
           if (!d.online)
             OfflineHelp(device: d)
           else ...[

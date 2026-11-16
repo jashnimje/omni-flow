@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'houses.dart' show firstHouseId;
 import 'error_of.dart';
 import 'smart_lights.dart';
 import '../devices/device.dart';
@@ -91,9 +92,17 @@ List<AwayAction> dueActions(
 /// lights replay last week's same weekday, and it stops the moment someone
 /// gets home.
 class AwayLighting {
-  AwayLighting(this._core, this._store, this._call);
+  AwayLighting(
+    this._core,
+    this._store,
+    this._call, {
+    this.house = firstHouseId,
+  });
 
   final EngineCore _core;
+
+  /// The house whose lights these are and whose people count.
+  final String house;
   final JsonFileStore _store;
 
   /// Runs another engine command, to read the house mode where it exists.
@@ -292,9 +301,10 @@ class AwayLighting {
         if (d.driverId == 'person') d,
     ];
     if (people.isEmpty) return null;
-    return people.every((p) => p.state['home'] == false)
-        ? 'everyone_away'
-        : null;
+    // Nobody is at this house: not home there, and at none of its places.
+    return people.any((p) => _core.houses.personIn(p, house))
+        ? null
+        : 'everyone_away';
   }
 
   /// Runs from the engine's minute tick while the hub runs.

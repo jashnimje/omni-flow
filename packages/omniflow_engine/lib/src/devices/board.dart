@@ -5,6 +5,7 @@ import '../manifest/param_spec.dart';
 import '../manifest/validation.dart';
 import 'channels.dart';
 import 'device.dart';
+import 'wiz_pilot.dart' show isWizPilot, wizManifestFor;
 
 /// What a board pin is used for, as the firmware names it.
 enum PinMode {
@@ -291,9 +292,11 @@ List<String>? periphTypesOf(Map<String, Object?> describe) {
 /// reported an NFC reader in its `periph` setting. Once the board has
 /// reported its peripherals, `ir_nec` and `ir_code` need `ir` among them
 /// and `rf_send` needs `rf`, so a flow cannot use a transmitter the board
-/// lacks. Null when the driver is unknown.
+/// lacks. A WiZ bulb's are narrowed to what it said it is
+/// ([wizManifestFor]). Null when the driver is unknown.
 DriverManifest? manifestFor(DriverRegistry registry, Device device) {
   final base = registry[device.driverId];
+  if (isWizPilot(base)) return wizManifestFor(base!, device);
   if (base == null || !isBoardDriver(base)) return base;
   final pins = boardPinsOf(device, base);
   final periph = device.settings['periph'];

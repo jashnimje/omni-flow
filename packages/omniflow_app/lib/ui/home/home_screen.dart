@@ -106,9 +106,6 @@ class _Overview extends ConsumerWidget {
     final drivers = ref.watch(driversProvider).value ?? const {};
     final now = DateTime.now();
     final name = person?.name;
-    final active = summaries
-        ?.where((a) => a.enabled && a.approved && !a.isScene)
-        .length;
     final shown = watchPresence(ref, all);
     final status = [
       switch (shown) {
@@ -118,7 +115,6 @@ class _Overview extends ConsumerWidget {
       },
       if (ref.watch(houseModeProvider).value?.name case final mode?)
         '$mode mode',
-      if (active != null) '$active automation${active == 1 ? '' : 's'} active',
     ].whereType<String>().join(' · ');
     final offline = tiles?.where((d) => !d.online).toList() ?? const [];
     final title = name == null ? greeting(now) : '${greeting(now)}, $name';

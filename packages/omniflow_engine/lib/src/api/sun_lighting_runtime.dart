@@ -1,9 +1,13 @@
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'home_commands.dart' show houseLocation;
+import 'houses.dart' show firstHouseId;
+import '../dag/sun.dart' show HomeLocation;
 import 'error_of.dart';
 import 'smart_lights.dart';
 import 'sun_lighting.dart';
+import '../devices/board.dart' show manifestFor;
 import '../devices/device.dart';
 import '../devices/device_service.dart';
 import '../manifest/capability.dart';
@@ -17,10 +21,16 @@ typedef SunTarget = ({bool room, SunCurve curve});
 /// followed light that is on is brought to the curve. A light someone
 /// changes by hand is left alone for [sunlightPause].
 class SunLighting {
-  SunLighting(this._core, this._store);
+  SunLighting(this._core, this._store, {this.house = firstHouseId});
 
   final EngineCore _core;
   final JsonFileStore _store;
+
+  /// The house whose lights these are: the curve follows the sun where it
+  /// is.
+  final String house;
+
+  HomeLocation? get _location => houseLocation(_core, house);
 
   final targets = <String, SunTarget>{};
   final _paused = <String, DateTime>{};
@@ -60,7 +70,8 @@ class SunLighting {
     },
   });
 
-  LightParts? _partsOf(Device d) => lightPartsOf(_core.registry[d.driverId]);
+  LightParts? _partsOf(Device d) =>
+      lightPartsOf(manifestFor(_core.registry, d));
 
   /// `{targets: [id], enabled, minK?, maxK?, minBrightness?,
   /// maxBrightness?}`: a target is a light's id or a room's id.
@@ -76,7 +87,7 @@ class SunLighting {
     }
     // The curve follows the sun at home, so it cannot start before home
     // has a place on the map. The app, the CLI and an agent all hear this.
-    if (enabled && _core.flows.homeLocation == null) {
+    if (enabled && _location == null) {
       throw ApiError(
         'invalid',
         'Follow the sun needs to know where home is. Set it in Settings, '
@@ -115,7 +126,7 @@ class SunLighting {
     final now = DateTime.now();
     final target = optStringArg(args, 'target');
     final devices = await DriftDeviceStore(_core.db).all();
-    final home = _core.flows.homeLocation;
+    final home = _location;
     final curve = targets[target]?.curve ?? const SunCurve();
     return {
       'targets': [
@@ -167,7 +178,7 @@ class SunLighting {
   /// Brings every followed light that is on, and not paused, to the curve.
   Future<Map<String, Object?>> apply(DateTime now, {String? only}) async {
     _lastApply = now;
-    final home = _core.flows.homeLocation;
+    final home = _location;
     if (home == null) {
       return {
         'applied': const [],

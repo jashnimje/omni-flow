@@ -31,7 +31,7 @@ final energySummaryProvider = FutureProvider.autoDispose<EnergySummary?>((
   ref.onDispose(again.cancel);
   try {
     final r = await ref
-        .read(engineClientProvider)
+        .watch(engineClientProvider)
         .call(SmartHomeCalls.energySummary, const {});
     return r['ok'] == true ? EnergySummary.of(r) : null;
   } on Object {

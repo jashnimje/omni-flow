@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:mcp_dart/mcp_dart.dart';
 
 import '../api/agent_policy.dart';
+import '../api/houses.dart' show houseViewCommands;
 import '../api/local_client.dart';
 import '../api/omni_engine.dart';
 import '../version.dart';
@@ -51,6 +52,19 @@ McpServer createOmniMcpServer(OmniEngine engine) =>
 /// register a driver that runs host commands at all. Pairing a device and
 /// trusting an SSH host key are the user's steps: an invoke never starts a
 /// pairing prompt, and the tools for both refuse with `needs_user`.
+/// The zone key the tool's `house` travels under to [asAgent].
+const _houseKey = #omniflowMcpHouse;
+
+/// Tools that never read or make anything in a house.
+const _houseless = {
+  'register_custom_driver_manifest',
+  'trust_ssh_host_key',
+  'pair_device',
+  'sniff_live_packets',
+  'generate_mcu_firmware',
+  'device_history',
+};
+
 McpServer createOmniMcpServerFor(EngineConnection engine) {
   final server = McpServer(
     const Implementation(name: 'omniflow', version: omniflowEngineVersion),
@@ -74,12 +88,68 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
   final freeObject = JsonSchema.object(additionalProperties: true);
 
   /// A command under the agent's access level, as omniflow_call sends it.
+  ///
+  /// The tool's `house`, when it gave one, goes with every command that
+  /// lists or makes something, so the agent works in that house.
   Future<Map<String, Object?>> asAgent(
     String command,
     Map<String, Object?> args,
-  ) => engine.handle('agent.call', {'command': command, 'args': args});
+  ) {
+    final house = Zone.current[_houseKey];
+    return engine.handle('agent.call', {
+      'command': command,
+      'args':
+          house is String &&
+              (houseViewCommands.contains(command) ||
+                  command == 'agent.describe') &&
+              !args.containsKey('house')
+          ? {...args, 'house': house}
+          : args,
+    });
+  }
 
-  server.registerTool(
+  /// Registers a tool that also takes an optional `house`, except the TV
+  /// tools and those that never touch a house.
+  void tool(
+    String name, {
+    required String description,
+    required JsonObject inputSchema,
+    required ToolFunction callback,
+  }) {
+    if (name.startsWith('tv_') || _houseless.contains(name)) {
+      server.registerTool(
+        name,
+        description: description,
+        inputSchema: inputSchema,
+        callback: callback,
+      );
+      return;
+    }
+    server.registerTool(
+      name,
+      description: description,
+      inputSchema: JsonObject(
+        properties: {
+          ...?inputSchema.properties,
+          'house': JsonSchema.string(
+            description:
+                'The house to work in, by id or name (house.list). Left out, '
+                'lists show every house and new things go in the first.',
+          ),
+        },
+        required: inputSchema.required,
+        additionalProperties: inputSchema.additionalProperties,
+        dependentRequired: inputSchema.dependentRequired,
+        extra: inputSchema.extra,
+      ),
+      callback: (args, extra) => runZoned(
+        () => callback(args, extra),
+        zoneValues: {_houseKey: args['house']},
+      ),
+    );
+  }
+
+  tool(
     'discover_devices_and_capabilities',
     description:
         'Lists every device with its driver, current state and the capabilities it accepts, '
@@ -93,7 +163,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'invoke_device_capability',
     description:
         'Runs one capability on one device now, for example a lamp brightness.',
@@ -149,7 +219,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     },
   );
 
-  server.registerTool(
+  tool(
     'register_custom_driver_manifest',
     description:
         'Validates and stores a .omni_driver.json manifest (schema v1). '
@@ -201,7 +271,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     },
   );
 
-  server.registerTool(
+  tool(
     'deploy_automation_flow_dag',
     description:
         'Validates and saves a flow (schema v1). Every validation issue comes back at once. '
@@ -216,7 +286,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         reply(await asAgent('flow.save', {'flow': args['flow']})),
   );
 
-  server.registerTool(
+  tool(
     'link_devices',
     description:
         'Connects two devices in one step, saved as a flow. mode "toggle": each time from turns on '
@@ -240,7 +310,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     callback: (args, _) async => reply(await asAgent('link.create', args)),
   );
 
-  server.registerTool(
+  tool(
     'describe_omniflow',
     description:
         'Start here. Everything set up in OmniFlow in one reply: every thing (devices, the '
@@ -254,7 +324,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     callback: (_, _) async => reply(await asAgent('agent.describe', {})),
   );
 
-  server.registerTool(
+  tool(
     'omniflow_call',
     description:
         'Sends one OmniFlow core API command, the same one the app and the omni CLI use, so '
@@ -281,7 +351,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'create_rule',
     description:
         'Saves a rule: when any trigger fires, only if every condition holds, run the steps in '
@@ -353,7 +423,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'find_things',
     description:
         'Looks for devices on the local network at once (UDP broadcast, mDNS, Tuya broadcasts, '
@@ -376,7 +446,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'next_setup_step',
     description:
         'What a device still needs before it works: pair (the user at the device), secret '
@@ -390,7 +460,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         reply(await asAgent('thing.next', {'id': args['deviceId']})),
   );
 
-  server.registerTool(
+  tool(
     'configure_board_pins',
     description:
         'Names the pins of an OmniFlow board device and sets them up on the board. pins maps a '
@@ -412,7 +482,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'describe_board',
     description:
         'What an OmniFlow board offers: each GPIO with its capabilities (in, pullup, out, pwm, '
@@ -426,7 +496,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         reply(await asAgent('board.describe', {'id': args['deviceId']})),
   );
 
-  server.registerTool(
+  tool(
     'pair_device',
     description:
         'Pairing a TV, a Hue bridge or a Home Assistant token is done by the user, because it '
@@ -468,7 +538,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     },
   );
 
-  server.registerTool(
+  tool(
     'trust_ssh_host_key',
     description:
         'Accepting or clearing a host\'s SSH host key is a trust decision for the user. This '
@@ -486,7 +556,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'list_flows',
     description:
         'Lists flows with whether they are enabled, approved and running.',
@@ -494,7 +564,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     callback: (_, _) async => reply(await asAgent('flow.list', {})),
   );
 
-  server.registerTool(
+  tool(
     'list_automations',
     description:
         'Lists every rule, link, scene and flow with its sentence in plain words, whether it is '
@@ -517,7 +587,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'list_rule_templates',
     description:
         'Lists the rule templates (${templateWords()}) with their placeholders. With id and '
@@ -533,14 +603,14 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'list_scenes',
     description: 'Lists scenes: named sets of device actions run together.',
     inputSchema: JsonSchema.object(),
     callback: (_, _) async => reply(await asAgent('scene.list', {})),
   );
 
-  server.registerTool(
+  tool(
     'save_scene',
     description:
         'Saves a scene: {name, icon?, actions: [{do: "thing.action", params?}] or shorthand '
@@ -564,7 +634,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'run_scene',
     description: 'Runs an approved scene now.',
     inputSchema: JsonSchema.object(
@@ -575,7 +645,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         reply(await asAgent('scene.run', {'id': args['id']})),
   );
 
-  server.registerTool(
+  tool(
     'list_rooms',
     description:
         'Lists the rooms in the user\'s order, with how many devices each has.',
@@ -583,7 +653,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     callback: (_, _) async => reply(await asAgent('room.list', {})),
   );
 
-  server.registerTool(
+  tool(
     'organize_device',
     description:
         'Renames a device, moves it to a room (an id or name; a new name adds the room; "" '
@@ -608,7 +678,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'device_history',
     description:
         'A device\'s recent state changes, newest first: when, which key, the value, and by '
@@ -634,7 +704,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
 
   // Read only: naming, writing or scanning a tag stays with the user, so
   // agent-written text never names a tag or fakes a scan.
-  server.registerTool(
+  tool(
     'list_tags',
     description:
         'Lists the NFC tags the user has named, with their ids, for rules that start '
@@ -644,7 +714,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     callback: (_, _) async => reply(await asAgent('tag.list', {})),
   );
 
-  server.registerTool(
+  tool(
     'simulate_flow_dry_run',
     description:
         'Runs a saved flow without sending anything and returns the trace of every node. '
@@ -668,7 +738,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     ),
   );
 
-  server.registerTool(
+  tool(
     'sniff_live_packets',
     description:
         'Captures packets the engine sends and receives for a few seconds (1 to 10). They carry '
@@ -702,7 +772,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     },
   );
 
-  server.registerTool(
+  tool(
     'generate_mcu_firmware',
     description:
         'How to put OmniFlow on a board. Every board runs the same firmware (firmware/omniflow_node), '

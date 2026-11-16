@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/house.dart' show houseShownProvider, newHomePlace;
 import '../../state/providers.dart';
 import '../add/add_by_hand_page.dart';
 import '../design/design.dart';
@@ -79,7 +80,6 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
   }
 
   static const _keep = Object();
-  static const Json _newHome = {'id': 'home', 'name': 'Home'};
 
   Future<void> _setNetwork(Json zone, String ssid, bool on) async {
     final ssids = {
@@ -163,7 +163,9 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
     final currentSsid = phone?.state['wifi_ssid'];
     // With no place answering yet, the first Wi-Fi or beacon saved makes
     // the home place (zone.save keeps a bare place named home, if one).
-    final zone = homeZone(zones.value ?? const []) ?? _newHome;
+    final zone =
+        homeZone(zones.value ?? const []) ??
+        newHomePlace(ref.watch(houseShownProvider));
     final title = '${zone['name'] ?? 'Home'}';
     final wifi = zone['wifi'] is Map ? zone['wifi'] as Map : const {};
     final ssids = (wifi['ssids'] as List? ?? const []).cast<String>();

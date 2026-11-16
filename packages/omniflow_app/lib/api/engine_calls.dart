@@ -181,6 +181,13 @@ abstract final class EngineCalls {
     'value': value,
   };
 
+  /// Copies the secret [key] that the thing [from] keeps.
+  static Json secretFromArgs(String id, String key, String from) => {
+    'deviceId': id,
+    'key': key,
+    'from': from,
+  };
+
   static Json configureArgs(String id, Json settings) => {
     'id': id,
     'settings': settings,
@@ -216,6 +223,7 @@ class NextStep {
     this.remaining = const [],
     this.method,
     this.help = const {},
+    this.sameAs = const {},
   });
 
   /// A step this app does not know is shown as done, so the user is never
@@ -251,6 +259,15 @@ class NextStep {
             if (k['key'] is String && k['help'] is String)
               k['key'] as String: k['help'] as String,
       },
+      sameAs: {
+        for (final k in (map['keys'] as List? ?? const []).whereType<Map>())
+          if (k['key'] is String && k['sameAs'] is List)
+            k['key'] as String: [
+              for (final d in (k['sameAs'] as List).whereType<Map>())
+                if (d['id'] is String)
+                  (id: d['id'] as String, name: '${d['name'] ?? d['id']}'),
+            ],
+      },
     );
   }
 
@@ -260,6 +277,10 @@ class NextStep {
 
   /// How a pair step pairs: `adb`, `tv`, `hue_bridge` or `secret`.
   final String? method;
+
+  /// Per secret key, the other things on the same driver that already
+  /// have it (one WiZ home key covers every bulb in that home).
+  final Map<String, List<({String id, String name})>> sameAs;
 
   final NextKind kind;
   final String? instruction;
@@ -1271,6 +1292,13 @@ class EngineApi {
   Future<Reply<void>> setSecret(String id, String key, String value) => _call(
     EngineCalls.secretSet,
     EngineCalls.secretArgs(id, key, value),
+    (_) {},
+  );
+
+  /// Stores for [id] the same secret [key] the thing [from] has.
+  Future<Reply<void>> copySecret(String id, String key, String from) => _call(
+    EngineCalls.secretSet,
+    EngineCalls.secretFromArgs(id, key, from),
     (_) {},
   );
 

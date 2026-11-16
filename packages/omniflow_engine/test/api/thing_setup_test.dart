@@ -133,7 +133,7 @@ void main() {
       ]);
       expect(setupOf('omniflow_board'), ['configure:pins']);
       expect(setupOf('zigbee2mqtt_device').first, 'configure:friendlyName');
-      expect(setupOf('philips_wiz_udp'), isEmpty);
+      expect(setupOf('philips_wiz_udp'), ['secret:signingKey?']);
       expect(setupOf('shelly_plus_switch'), isEmpty);
       for (final m in registry.all) {
         final secrets = {

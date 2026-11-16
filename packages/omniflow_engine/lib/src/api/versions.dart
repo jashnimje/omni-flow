@@ -240,9 +240,14 @@ class RemovedAutomation {
     required this.record,
     required this.removedAt,
     required this.versions,
+    this.house,
   });
 
   final FlowRecord record;
+
+  /// The house it was removed from, which it goes back to. Null for one
+  /// removed before houses.
+  final String? house;
   final DateTime removedAt;
   final List<AutomationVersion> versions;
 
@@ -257,6 +262,7 @@ class RemovedAutomation {
     'removedAt': removedAt.toUtc().toIso8601String(),
     'keptUntil': keptUntil.toUtc().toIso8601String(),
     'versions': versions.length,
+    'house': ?house,
   };
 }
 
@@ -279,8 +285,9 @@ class RemovedAutomationStore {
   Future<void> add(
     FlowRecord record,
     List<AutomationVersion> versions,
-    DateTime at,
-  ) async {
+    DateTime at, {
+    String? house,
+  }) async {
     await _ensure();
     await _db.customStatement(
       'INSERT OR REPLACE INTO $_table (flow_id, removed_at, record_json, '
@@ -295,6 +302,7 @@ class RemovedAutomationStore {
           'trusted': record.trusted,
           'source': record.source,
           'spec': ?record.spec,
+          'house': ?house,
         }),
         jsonEncode([for (final v in versions) v.fullJson()]),
       ],
@@ -342,6 +350,7 @@ class RemovedAutomationStore {
             : Map<String, Object?>.from(j['spec'] as Map),
       ),
       removedAt: DateTime.parse(r.read<String>('removed_at')),
+      house: j['house'] is String ? j['house'] as String : null,
       versions: [
         for (final v in (jsonDecode(
           r.read<String>('versions_json'),

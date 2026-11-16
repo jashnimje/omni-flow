@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'api_error.dart';
 import 'engine_core.dart';
-import 'house_things.dart' show builtInThings;
+import 'house_things.dart' show builtInThings, reservedThingIds;
+import 'home_commands.dart' show houseLocation;
+import 'houses.dart';
 import 'things_runtime.dart';
 import '../dag/canonical.dart';
 import '../dag/flow.dart';
@@ -225,6 +227,13 @@ class StoredFlows {
   Future<void> reloadFlows() async {
     final (records, specs, issues) = await stored();
     final risky = await highRiskFlows(specs.values);
+    final houses = await _core.houses.housesOf(HouseKind.flow);
+    _core.houses.flowHouses
+      ..clear()
+      ..addAll(houses);
+    _flows.flowHouses
+      ..clear()
+      ..addAll(houses);
     final load = <FlowSpec>[];
     for (final r in records) {
       final spec = specs[r.json['id']];
@@ -241,7 +250,9 @@ class StoredFlows {
         );
         _core.emit({'event': 'flow.approvalRevoked', 'flow': spec.id});
       }
-      if (r.enabled && approved) load.add(spec);
+      if (r.enabled && approved) {
+        load.add(_inHouse(spec, r, houses[spec.id] ?? firstHouseId));
+      }
     }
     for (final e in _flows.load(load).entries) {
       final migration = _migrationErrors[e.key];
@@ -256,6 +267,42 @@ class StoredFlows {
     _core.setIssues('flow', issues);
   }
 
+  /// [spec] as it runs in [house]: the house mode and the timers it names
+  /// are that house's own, so Mumbai's rules never see Bangalore's mode.
+  /// The stored flow keeps the plain ids.
+  FlowSpec _inHouse(FlowSpec spec, FlowRecord r, String house) {
+    if (house == firstHouseId ||
+        !reservedThingIds.any((t) => mentionsThing(r.json['nodes'], t))) {
+      return spec;
+    }
+    try {
+      return FlowSpec.parse(localizeHouseThings(flowJsonOf(r), house));
+    } catch (_) {
+      return spec;
+    }
+  }
+
+  /// [value] with each reference to a built-in thing turned into the id
+  /// [houseThingId] gives it in [house].
+  static Object? localizeHouseThings(Object? value, String house) {
+    String local(String id) =>
+        reservedThingIds.contains(id) ? houseThingId(id, house) : id;
+    return switch (value) {
+      Map m => {
+        for (final e in m.entries)
+          '${e.key}': switch ((e.key, e.value)) {
+            ('deviceId' || 'thing', final String id) => local(id),
+            ('state', final String s) when s.contains('.') =>
+              '${local(s.substring(0, s.indexOf('.')))}'
+                  '${s.substring(s.indexOf('.'))}',
+            (_, final v) => localizeHouseThings(v, house),
+          },
+      },
+      List l => [for (final v in l) localizeHouseThings(v, house)],
+      _ => value,
+    };
+  }
+
   /// What a flow may name. [homeLocationSet] says whether home will have a
   /// location, for an import that brings one; else the engine's own.
   Future<FlowReferences> references({bool? homeLocationSet}) async {
@@ -264,13 +311,21 @@ class StoredFlows {
         d.id: manifestFor(_registry, d),
     };
     for (final id in _core.builtInThings.keys) {
-      devices.putIfAbsent(id, () => builtInThings[id]);
+      // A house's own copy (house_mode__mumbai) is not one a flow names.
+      if (builtInThings[id] case final m?) devices.putIfAbsent(id, () => m);
     }
     final all = await DriftDeviceStore(_db).all();
     final states = {for (final d in all) d.id: d.state};
     final (_, specs, _) = await stored();
     return FlowReferences(
-      homeLocationSet: homeLocationSet ?? _flows.homeLocation != null,
+      // A sun rule needs the location of the house it is saved in.
+      homeLocationSet:
+          homeLocationSet ??
+          houseLocation(
+                _core,
+                _core.houses.commandHouse ?? _core.houses.defaultId,
+              ) !=
+              null,
       devices: devices.keys.toSet(),
       people: {
         for (final d in all)

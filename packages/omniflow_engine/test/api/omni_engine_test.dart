@@ -173,7 +173,7 @@ void main() {
       final result = await engine.handle('device.invoke', {
         'id': 'lamp',
         'capability': 'color_temp',
-        'params': {'value': 9000, 'colour': 'red'},
+        'params': {'value': 'hot', 'colour': 'red'},
       });
       expect((result['error'] as Map)['type'], 'invalid');
       expect(((result['error'] as Map)['issues'] as List), hasLength(2));

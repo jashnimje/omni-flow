@@ -75,15 +75,21 @@ void main() {
       });
     });
 
-    test(
-      'brightness below the bulb minimum is rejected before anything is sent',
-      () {
-        expect(
-          () => wiz.capability('brightness')!.validateParams({'value': 5}),
-          throwsA(isA<ValidationException>()),
-        );
-      },
-    );
+    test('brightness outside what a bulb takes is brought inside it, and zero '
+        'turns it off', () {
+      final brightness = wiz.capability('brightness')!;
+      expect(brightness.validateParams({'value': 5}), {'value': 10});
+      expect(brightness.validateParams({'value': 140.2}), {'value': 100});
+      expect(brightness.asksForZero({'value': 0}), isTrue);
+      expect(
+        wiz.capability('rgb')!.asksForZero({'r': 0, 'g': 0, 'b': 0}),
+        isTrue,
+      );
+      expect(
+        () => brightness.validateParams({'value': 'lots'}),
+        throwsA(isA<ValidationException>()),
+      );
+    });
   });
 
   group('user manifests', () {

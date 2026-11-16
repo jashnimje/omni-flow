@@ -14,6 +14,8 @@ abstract interface class FunPrefsStore {
 class FileFunPrefsStore implements FunPrefsStore {
   const FileFunPrefsStore();
 
+  static const _key = 'celebrationsOn';
+
   Future<File> _file() async =>
       File('${(await getApplicationSupportDirectory()).path}/fun_prefs.json');
 
@@ -21,9 +23,9 @@ class FileFunPrefsStore implements FunPrefsStore {
   Future<bool?> readCelebrations() async {
     try {
       final json = jsonDecode(await (await _file()).readAsString());
-      return json is Map && json['celebrations'] is bool
-          ? json['celebrations'] as bool
-          : null;
+      // Only a choice made since celebrations became opt-in counts. The
+      // old key was written while they were on by default.
+      return json is Map && json[_key] is bool ? json[_key] as bool : null;
     } on Object {
       // Never set, damaged, or no storage here (tests): the default.
       return null;
@@ -33,7 +35,7 @@ class FileFunPrefsStore implements FunPrefsStore {
   @override
   Future<void> writeCelebrations(bool on) async {
     try {
-      await (await _file()).writeAsString(jsonEncode({'celebrations': on}));
+      await (await _file()).writeAsString(jsonEncode({_key: on}));
     } on Object {
       // Kept for this session only: harmless.
     }
@@ -57,7 +59,8 @@ final funPrefsStoreProvider = Provider<FunPrefsStore>(
   (ref) => const FileFunPrefsStore(),
 );
 
-/// Celebrations are on until the user turns them off.
+/// Celebrations are off until the user turns them on, in Settings, Your
+/// activity.
 class CelebrationsNotifier extends Notifier<bool> {
   late Future<void> _loaded;
 
@@ -66,7 +69,7 @@ class CelebrationsNotifier extends Notifier<bool> {
     _loaded = ref.read(funPrefsStoreProvider).readCelebrations().then((on) {
       if (on != null && ref.mounted) state = on;
     });
-    return true;
+    return false;
   }
 
   /// The choice once the stored one is read.

@@ -88,7 +88,7 @@ void main() {
 
       await ok('tag.save', {'id': 'front_door', 'name': 'Door', 'uid': null});
       expect((await ok('tag.list', {}))['tags'], [
-        {'id': 'front_door', 'name': 'Door'},
+        {'id': 'front_door', 'name': 'Door', 'house': 'home'},
       ]);
     });
 
@@ -125,6 +125,7 @@ void main() {
           'id': 'a',
           'name': 'a',
           'uid': '04A22B1C',
+          'house': 'home',
         });
         final shared = {
           'driver': 'nfc_tag',

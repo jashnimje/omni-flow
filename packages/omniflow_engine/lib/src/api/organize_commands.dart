@@ -1,6 +1,7 @@
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'houses.dart';
 import '../storage/database.dart';
 
 final _roomId = RegExp(r'^[a-z][a-z0-9_]*$');
@@ -40,15 +41,26 @@ class OrganizeCommands {
     };
   }
 
-  /// `{id?, name, order?}`: renames or moves a room, or adds one. A new
-  /// room with no id gets one from its name, and with no order goes last.
+  /// `{id?, name, order?, house?}`: renames or moves a room, or adds one.
+  /// A new room with no id gets one from its name, and with no order goes
+  /// last. Two houses may each have a room of the same name.
   Future<Map<String, Object?>> save(Map<String, Object?> args) async {
     final name = stringArg(args, 'name').trim();
     if (name.isEmpty) throw ApiError('invalid', 'name is required');
     final id = optStringArg(args, 'id');
     final order = optIntArg(args, 'order');
-    final rooms = await _rooms.all();
-    final existing = rooms.where((r) => r.id == id).firstOrNull;
+    final all = await _rooms.all();
+    final roomHouses = await _core.houses.housesOf(HouseKind.room);
+    // A room saved over keeps its house, whatever house the client shows.
+    final house =
+        (id == null ? null : roomHouses[id]) ??
+        _core.houses.resolve(args['house']) ??
+        _core.houses.defaultId;
+    final rooms = [
+      for (final r in all)
+        if ((roomHouses[r.id] ?? house) == house) r,
+    ];
+    final existing = all.where((r) => r.id == id).firstOrNull;
     final same = rooms
         .where((r) => r.id != id && _sameName(r.name, name))
         .firstOrNull;
@@ -59,11 +71,14 @@ class OrganizeCommands {
       throw ApiError('invalid', 'a room id is lower snake case, like study');
     }
     final room = Room(
-      id: id ?? uniqueRoomId(name, {for (final r in rooms) r.id}),
+      id: id ?? uniqueRoomId(name, {for (final r in all) r.id}),
       name: name,
       order: order ?? existing?.order ?? _nextOrder(rooms),
     );
     await _rooms.put(room);
+    if (existing == null) {
+      await _core.houses.put(HouseKind.room, room.id, house);
+    }
     await _core.loadRooms();
     return {'room': await _roomJson(room)};
   }
@@ -113,12 +128,21 @@ class OrganizeCommands {
     return list(const {});
   }
 
-  /// `{id, name?, room?, favourite?, order?}`: changes only the keys given.
-  /// `room` is a room id or name, a new name adds the room, and null takes
-  /// the device out of its room. `order: null` clears its place.
+  /// `{id, name?, room?, favourite?, order?, moveTo?}`: changes only the
+  /// keys given. `room` is a room id or name, a new name adds the room, and
+  /// null takes the device out of its room. `order: null` clears its place.
+  /// `moveTo` moves the device to that house: automations of the old house
+  /// that use it are turned off, as removing it does, and come back in
+  /// `turnedOff`. The `house` every command may carry is the client's view
+  /// and never moves a device.
   Future<Map<String, Object?>> organize(Map<String, Object?> args) async {
     final id = stringArg(args, 'id');
     await _core.device(id);
+    final houses = _core.houses;
+    final target = houses.resolve(args['moveTo']);
+    final turnedOff = target == null
+        ? const <String>[]
+        : await houses.moveThing(id, target);
     final name = optStringArg(args, 'name')?.trim();
     if (name != null && name.isEmpty) {
       throw ApiError('invalid', 'name cannot be empty');
@@ -129,7 +153,11 @@ class OrganizeCommands {
     }
     final order = optIntArg(args, 'order');
     final room = args.containsKey('room')
-        ? await resolveRoom(_core, optStringArg(args, 'room'))
+        ? await resolveRoom(
+            _core,
+            optStringArg(args, 'room'),
+            house: houses.thingHouses[id] ?? houses.defaultId,
+          )
         : null;
     final updated = await _core.devices.updateDevice(
       id,
@@ -140,7 +168,10 @@ class OrganizeCommands {
             order: args.containsKey('order') ? order : d.order,
           ),
     );
-    return {'device': _core.deviceJson(updated)};
+    return {
+      'device': _core.deviceJson(updated),
+      if (target != null) 'turnedOff': turnedOff,
+    };
   }
 
   Future<Map<String, Object?>> _roomJson(Room r) async => {
@@ -161,23 +192,37 @@ int _nextOrder(List<Room> rooms) => rooms.isEmpty
     ? 0
     : rooms.map((r) => r.order).reduce((a, b) => a > b ? a : b) + 1;
 
-/// The id of the room [value] names: a room id, or a room name (any case).
-/// A name no room has adds that room last. Null or blank is no room.
-Future<String?> resolveRoom(EngineCore core, String? value) async {
+/// The id of the room [value] names: a room id, or a room name (any case)
+/// among [house]'s rooms. A name no room has adds that room last, in
+/// [house]. Null or blank is no room. [house] defaults to the house the
+/// command names, else the first house.
+Future<String?> resolveRoom(
+  EngineCore core,
+  String? value, {
+  String? house,
+}) async {
   final text = value?.trim();
   if (text == null || text.isEmpty) return null;
+  final houses = core.houses;
+  final into = house ?? houses.commandHouse ?? houses.defaultId;
   final store = DriftRoomStore(core.db);
-  final rooms = await store.all();
+  final all = await store.all();
+  final roomHouses = await houses.housesOf(HouseKind.room);
+  final rooms = [
+    for (final r in all)
+      if ((roomHouses[r.id] ?? into) == into) r,
+  ];
   final match =
       rooms.where((r) => r.id == text).firstOrNull ??
       rooms.where((r) => _sameName(r.name, text)).firstOrNull;
   if (match != null) return match.id;
   final room = Room(
-    id: uniqueRoomId(text, {for (final r in rooms) r.id}),
+    id: uniqueRoomId(text, {for (final r in all) r.id}),
     name: text,
     order: _nextOrder(rooms),
   );
   await store.put(room);
+  await houses.put(HouseKind.room, room.id, into);
   await core.loadRooms();
   return room.id;
 }

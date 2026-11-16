@@ -161,7 +161,7 @@ void main() {
       ]);
       expect(await DriftGlobalStore(db).all(), {'HomeMode': 'home'});
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 6);
+      expect(version.read<int>('user_version'), 7);
     },
   );
 
@@ -211,7 +211,7 @@ void main() {
         'board': 'esp32',
       });
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 6);
+      expect(version.read<int>('user_version'), 7);
     },
   );
 
@@ -277,7 +277,7 @@ void main() {
       expect((r.enabled, r.approved, r.trusted), (true, false, true));
     }
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 6);
+    expect(version.read<int>('user_version'), 7);
   });
 
   test('a v4 database turns each room name into a room record the devices '
@@ -369,7 +369,7 @@ void main() {
       'by': 'user',
     });
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 6);
+    expect(version.read<int>('user_version'), 7);
   });
 
   test('a v5 database gains the agent mark on its drivers, once', () async {

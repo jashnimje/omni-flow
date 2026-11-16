@@ -156,10 +156,7 @@ void main() {
       await pumpHome(tester, engine);
       expect(find.byKey(const ValueKey('home-hero')), findsOneWidget);
       expect(find.textContaining(', Jade'), findsOneWidget);
-      expect(
-        find.text('Home · Home mode · 1 automation active'),
-        findsOneWidget,
-      );
+      expect(find.text('Home · Home mode'), findsOneWidget);
       final hero = tester.getTopLeft(find.byKey(const ValueKey('home-hero')));
       final chip = tester.getTopLeft(find.byKey(const ValueKey('mode-chip')));
       expect(hero.dy, lessThan(chip.dy));
@@ -481,7 +478,7 @@ void main() {
     });
   });
 
-  testWidgets('a semantics dump keeps the hero numbers as one button', (
+  testWidgets('a semantics dump has the greeting as a header, no numbers', (
     tester,
   ) async {
     final handle = tester.ensureSemantics();
@@ -497,14 +494,11 @@ void main() {
       engine,
       const Scaffold(body: HomeHero(title: 'Good morning')),
     );
+    expect(find.bySemanticsLabel(RegExp('automations ran')), findsNothing);
     expect(
-      find.bySemanticsLabel(RegExp('2 automations ran. Saved you 5 taps')),
-      findsOneWidget,
+      tester.getSemantics(find.text('Good morning')),
+      isSemantics(isHeader: true),
     );
-    final node = tester.getSemantics(
-      find.bySemanticsLabel(RegExp('2 automations ran')),
-    );
-    expect(node, isSemantics(isButton: true));
     handle.dispose();
   });
 }

@@ -18,7 +18,7 @@ Future<void> pumpPage(
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [engineClientProvider.overrideWithValue(engine)],
+      overrides: [engineConnectionProvider.overrideWithValue(engine)],
       child: MaterialApp(
         theme: omniTheme(),
         scaffoldMessengerKey: messengerKey,

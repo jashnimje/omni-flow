@@ -1,4 +1,5 @@
 import '../api/local_client.dart';
+import 'house_view.dart' show withoutHouseView;
 
 /// How long a one-shot command waits for the automations its own change
 /// triggered before it closes the engine it opened.
@@ -17,8 +18,8 @@ Future<void> closeOneShot(
   Duration limit = oneShotFlowLimit,
 }) async {
   try {
-    if (connection is InProcessConnection) {
-      await connection.engine.flows.settle(limit: limit);
+    if (withoutHouseView(connection) case final InProcessConnection c) {
+      await c.engine.flows.settle(limit: limit);
     }
   } finally {
     await connection.close();

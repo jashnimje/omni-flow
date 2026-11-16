@@ -62,7 +62,11 @@ List<Map<String, Object?>> capturedActions(
   final white = temp == null ? null : read(temp);
   if (temp != null && white is num) {
     out.add(step(temp, {'value': _fit(temp, white)}));
-  } else if (rgb != null && ['r', 'g', 'b'].every((k) => state[k] is num)) {
+  } else if (rgb != null &&
+      ['r', 'g', 'b'].every((k) => state[k] is num) &&
+      // A WiZ bulb on its white channels reports r, g and b all 0, which
+      // as a colour would turn it off.
+      ['r', 'g', 'b'].any((k) => (state[k] as num) > 0)) {
     out.add(
       step(rgb, {
         for (final k in ['r', 'g', 'b'])

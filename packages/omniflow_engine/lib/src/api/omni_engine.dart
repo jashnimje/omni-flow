@@ -53,6 +53,7 @@ import '../devices/mqtt_channel.dart';
 import '../devices/serial_channel.dart';
 import '../devices/tuya_channel.dart';
 import '../devices/tv/tv_channel.dart';
+import '../devices/wiz_learner.dart';
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../manifest/validation.dart' show ValidationIssue;
@@ -104,6 +105,9 @@ class OmniEngine {
       _core.events.listen(_addCommands.observe),
     ]);
     devices.events.listen(_core.history.record);
+    devices.events.listen(
+      WizLearner(devices, _core.registry, track: _core.track).observe,
+    );
     devices.events.listen(
       (e) => _core.emit({
         'event': 'device.stateChanged',
@@ -160,7 +164,7 @@ class OmniEngine {
         tuya: tuyaDiscovery ?? TuyaDiscovery(tap: tap),
         mdns: mdns,
       );
-      final udpJson = UdpJsonChannel(udp);
+      final udpJson = UdpJsonChannel(udp, secrets: secrets);
       final mqtt = MqttChannel(secrets, tap: tap);
       final boardChannel = BoardChannel(udp: udpJson, serial: serial);
       final http = HttpChannel(tap: tap, secrets: secrets);
@@ -245,6 +249,14 @@ class OmniEngine {
       await built._smartHome.load();
       built._closers.add(built._smartHome.close);
       engine._core.issues['driver'] = driverIssues;
+      // Houses first: the first house holds every record before anything
+      // reads them by house.
+      final houses = engine._core.houses
+        ..householdPerson = engine._things.householdPerson
+        ..reloadFlows = engine._stored.reloadFlows;
+      await houses.open();
+      engine._closers.add(houses.close);
+      await engine._homeLocation.openHouses(engine._core);
       engine._core.agentDrivers.addAll(await DriftManifestStore(db).byAgent());
       await engine._core.loadRooms();
       await engine._core.history.seed();
@@ -563,25 +575,33 @@ class OmniEngine {
       );
     },
     // Everything an agent needs to plan a change, in one reply.
-    'agent.describe': (_) async {
+    'agent.describe': (args) async {
+      // Given a house, everything as that house sees it.
+      final view = {'house': ?args['house']};
       Future<Object?> read(String command, [String? key]) async {
-        final r = await handle(command, const {});
+        final r = await handle(command, view);
         if (r['ok'] != true) return {'error': r['error']};
         return key == null ? ({...r}..remove('ok')) : r[key];
       }
 
-      final automations = await handle('automation.list', const {});
+      final automations = await handle('automation.list', view);
       return {
         'engine': await read('engine.status'),
         'agentAccess': await read('agent.access'),
         'things': await read('device.list', 'devices'),
+        'houses': await read('house.list', 'houses'),
         'rooms': await read('room.list', 'rooms'),
         'places': await read('zone.list'),
         'tags': await read('tag.list'),
         'scenes': await read('scene.list'),
         'variables': await read('var.list'),
         // Whether sun rules can be saved, without saying where home is.
-        'homeLocationSet': flows.homeLocation != null,
+        'homeLocationSet':
+            houseLocation(
+              _core,
+              _core.houses.resolve(args['house']) ?? _core.houses.defaultId,
+            ) !=
+            null,
         'automations': [
           for (final a in (automations['automations'] as List? ?? const []))
             if (a is Map)
@@ -707,6 +727,7 @@ class OmniEngine {
     'device.hostkey': _hostKeyCommands.hostKey,
     'device.history': _core.history.history,
     ..._organizeCommands.commands,
+    ..._core.houses.commands,
     ..._house.commands,
     'presence.set': _stateCommands.presenceSet,
     ..._homeCommands.commands,
@@ -751,7 +772,11 @@ class OmniEngine {
       return _failure(ApiError('unknown_command', 'no command $command'));
     }
     try {
-      final result = {'ok': true, ...await handler(args)};
+      // In the house the command names: lists keep to it, saves stay in it.
+      final result = {
+        'ok': true,
+        ...await _core.houses.scoped(command, args, handler),
+      };
       if (automationChangeCommands.contains(command)) {
         _core.emit({
           'event': automationChangedEvent,

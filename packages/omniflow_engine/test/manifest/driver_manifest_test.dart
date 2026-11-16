@@ -310,7 +310,7 @@ void main() {
           expect(text, contains('params.brightness: must be a number'));
         }
         expect(
-          () => colorTemp.validateParams({'value': 9000}),
+          () => colorTemp.validateParams({'value': 'hot'}),
           throwsA(isA<ValidationException>()),
         );
       },
@@ -321,8 +321,19 @@ void main() {
           .capability('brightness')!;
       final sent = brightness.validateParams({'value': 80.0});
       expect(sent['value'], isA<int>().having((v) => v, 'value', 80));
+      // WiZ brightness clamps, so a fraction is rounded instead.
+      expect(brightness.validateParams({'value': 50.5}), {'value': 51});
+      final whole = CapabilitySpec(
+        id: 'dim',
+        type: CapabilityType.level,
+        label: 'Dim',
+        params: const {
+          'value': ParamSpec(type: ParamType.number, integer: true, max: 100),
+        },
+        command: const {},
+      );
       expect(
-        () => brightness.validateParams({'value': 50.5}),
+        () => whole.validateParams({'value': 50.5}),
         throwsA(
           isA<ValidationException>().having(
             (e) => '${e.issues}',

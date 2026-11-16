@@ -3,6 +3,7 @@ import 'dart:async';
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'houses.dart' show firstHouseId;
 import 'mode_commands.dart' show HomeFile;
 import '../devices/device.dart';
 import '../storage/database.dart';
@@ -24,9 +25,20 @@ class HouseAlerts {
     this._file, {
     this.every = const Duration(minutes: 1),
     bool Function()? hubRunning,
+    this.house = firstHouseId,
   }) : _hubRunning = hubRunning ?? _always;
 
   final EngineCore _core;
+
+  /// The house whose things these alerts watch. A thing every house shares
+  /// (a phone) is the first house's to alert on, so it is told once.
+  final String house;
+
+  bool _owns(String id) {
+    final h = _core.houses.thingHouses[id];
+    return h == null ? house == _core.houses.defaultId : h == house;
+  }
+
   final HomeFile _file;
   final bool Function() _hubRunning;
 
@@ -89,6 +101,7 @@ class HouseAlerts {
     'battery': battery,
     'offlineMinutes': offlineAfter.inMinutes,
     'lowBatteryPercent': lowBattery,
+    'house': house,
   };
 
   Future<Map<String, Object?>> get(Map<String, Object?> _) async => _json();
@@ -142,6 +155,7 @@ class HouseAlerts {
     final since = _pollingSince ??= now;
     var changed = false;
     for (final d in await DriftDeviceStore(_core.db).all()) {
+      if (!_owns(d.id)) continue;
       final window = _core.onlineWindowOf(d);
       if (window == null) continue;
       final seen = d.lastSeen;
@@ -174,7 +188,7 @@ class HouseAlerts {
     if (device is! Map) return;
     final id = device['id'];
     final state = device['state'];
-    if (id is! String || state is! Map) return;
+    if (id is! String || state is! Map || !_owns(id)) return;
     final level = state['battery'];
     if (level is! num) return;
     if (level >= _batteryBack) {

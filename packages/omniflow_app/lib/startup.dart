@@ -170,7 +170,7 @@ class _LauncherState extends State<Launcher> {
       if (snap.data case final started?) {
         return ProviderScope(
           overrides: [
-            engineClientProvider.overrideWithValue(started.client),
+            engineConnectionProvider.overrideWithValue(started.client),
             hubErrorProvider.overrideWithValue(started.hubError),
             ...widget.platform,
           ],

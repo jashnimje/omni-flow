@@ -7,6 +7,8 @@ import 'command_args.dart';
 import 'energy_commands.dart';
 import 'engine_core.dart';
 import 'error_of.dart';
+import 'home_commands.dart' show houseLocation;
+import 'houses.dart';
 import 'smart_lights.dart';
 import 'sun_lighting_runtime.dart';
 import 'weather.dart';
@@ -24,17 +26,22 @@ typedef EngineCall = Future<Map<String, Object?>> Function(
 /// lights that follow the sun, away lighting and energy. Each keeps its
 /// settings in a small file next to the database, and their timed work
 /// runs once a minute while the hub runs.
+///
+/// Sun-following lights and away lighting are each house's own: one of
+/// each per house, chosen by a command's `house` (the first house when it
+/// names none), with the first house in the files named as before houses
+/// and each other house in `sunlight.<house>.json` and
+/// `awaylight.<house>.json`. Energy keeps one meter, with a price per house.
 class SmartHome {
   SmartHome(
     this._core,
     Directory home, {
     required this.hubRunning,
-    required EngineCall call,
+    required this._call,
     WeatherSource? weather,
-  }) : _call = call,
+  }) : _home = home,
        weather = weather ?? weatherSourceOverride ?? WeatherSource() {
-    sun = SunLighting(_core, JsonFileStore(home, 'sunlight.json'));
-    away = AwayLighting(_core, JsonFileStore(home, 'awaylight.json'), call);
+    _openHouse(firstHouseId);
     energy = EnergyCommands(_core, JsonFileStore(home, 'energy.json'));
     _subscription = _core.devices.events.listen(_observe, onDone: _stop);
     _timer = Timer.periodic(const Duration(minutes: 1), (_) {
@@ -46,12 +53,63 @@ class SmartHome {
   static WeatherSource? weatherSourceOverride;
 
   final EngineCore _core;
+  final Directory _home;
   final bool Function() hubRunning;
   final EngineCall _call;
   final WeatherSource weather;
-  late final SunLighting sun;
-  late final AwayLighting away;
+  final _suns = <String, SunLighting>{};
+  final _aways = <String, AwayLighting>{};
+  StreamSubscription<Map<String, Object?>>? _houses;
   late final EnergyCommands energy;
+
+  /// The first house's sun-following lights, as before houses.
+  SunLighting get sun => sunOf(firstHouseId);
+
+  /// The first house's away lighting, as before houses.
+  AwayLighting get away => awayOf(firstHouseId);
+
+  SunLighting sunOf(String house) => _suns[house] ?? _suns.values.first;
+
+  AwayLighting awayOf(String house) => _aways[house] ?? _aways.values.first;
+
+  static String _fileOf(String name, String house) =>
+      house == firstHouseId ? '$name.json' : '$name.$house.json';
+
+  /// Makes [house]'s sun lighting and away lighting, unless it has them.
+  bool _openHouse(String house) {
+    if (_suns.containsKey(house)) return false;
+    _suns[house] = SunLighting(
+      _core,
+      JsonFileStore(_home, _fileOf('sunlight', house)),
+      house: house,
+    );
+    _aways[house] = AwayLighting(
+      _core,
+      JsonFileStore(_home, _fileOf('awaylight', house)),
+      (command, args) => _call(command, {...args, 'house': house}),
+      house: house,
+    );
+    return true;
+  }
+
+  /// Opens every house's helpers, and those of a house added later.
+  Future<void> _loadHouses() async {
+    final ids = {for (final h in _core.houses.all) h.id};
+    for (final gone in _suns.keys.where((k) => !ids.contains(k)).toList()) {
+      if (gone == firstHouseId) continue;
+      _suns.remove(gone);
+      await _aways.remove(gone)?.flush();
+    }
+    for (final id in ids) {
+      if (_openHouse(id)) {
+        await _suns[id]!.load();
+        await _aways[id]!.load();
+      }
+    }
+  }
+
+  /// The house a command names, or the first house.
+  String _houseOf(Map<String, Object?> args) => _core.houses.target(args);
   late final StreamSubscription<DeviceStateChanged> _subscription;
   late final Timer _timer;
   final _seen = <String, Map<String, Object?>>{};
@@ -62,11 +120,26 @@ class SmartHome {
     await sun.load();
     await away.load();
     await energy.load();
+    await _loadHouses();
+    _houses = _core.events
+        .where((e) => e['event'] == housesChangedEvent)
+        .listen((_) => _core.track(_loadHouses()));
   }
 
   Map<String, CommandHandler> get commands => {
-    ...sun.commands,
-    ...away.commands,
+    for (final name in sun.commands.keys)
+      name: (args) async {
+        final house = _houseOf(args);
+        final targets = args['targets'] ?? args['target'];
+        await _core.houses.checkNames({'things': targets}, house);
+        return sunOf(house).commands[name]!(args);
+      },
+    for (final name in away.commands.keys)
+      name: (args) async {
+        final house = _houseOf(args);
+        await _core.houses.checkNames({'things': args['lights']}, house);
+        return awayOf(house).commands[name]!(args);
+      },
     ...energy.commands,
     'weather.add': addWeather,
     'weather.refresh': refreshWeather,
@@ -77,8 +150,12 @@ class SmartHome {
     final before = _seen[e.device.id];
     _seen[e.device.id] = e.device.state;
     energy.observe(e, now);
-    sun.observe(e, now, hubRunning: hubRunning());
-    away.observe(e, before);
+    for (final sun in _suns.values) {
+      sun.observe(e, now, hubRunning: hubRunning());
+    }
+    for (final away in _aways.values) {
+      away.observe(e, before);
+    }
   }
 
   void _stop() => _timer.cancel();
@@ -91,8 +168,12 @@ class SmartHome {
     _weatherNext.remove(id);
     energy.meter.forget(id);
     await energy.forgetSaved();
-    await sun.forgetTarget(id);
-    await away.forgetLight(id);
+    for (final sun in _suns.values) {
+      await sun.forgetTarget(id);
+    }
+    for (final away in _aways.values) {
+      await away.forgetLight(id);
+    }
   }
 
   /// Stops the minute tick and saves what is not saved yet, as the engine
@@ -100,13 +181,16 @@ class SmartHome {
   Future<void> close() async {
     _timer.cancel();
     await _subscription.cancel();
+    await _houses?.cancel();
     await _flush();
   }
 
   Future<void> _flush() async {
     try {
       await energy.flush();
-      await away.flush();
+      for (final away in _aways.values) {
+        await away.flush();
+      }
     } on FileSystemException {
       // The home folder went away with the engine.
     }
@@ -120,8 +204,8 @@ class SmartHome {
     try {
       for (final step in [
         () => _weatherDue(now),
-        () => sun.tick(now),
-        () => away.tick(now),
+        for (final sun in _suns.values) () => sun.tick(now),
+        for (final away in _aways.values) () => away.tick(now),
         () => energy.flush(),
       ]) {
         try {
@@ -155,7 +239,11 @@ class SmartHome {
   }
 
   Future<Device> _refreshOne(Device d, DateTime now) async {
-    final home = _core.flows.homeLocation;
+    // The weather where the thing's own house is.
+    final home = houseLocation(
+      _core,
+      _core.houses.thingHouses[d.id] ?? _core.houses.defaultId,
+    );
     if (home == null) {
       _weatherNext[d.id] = now.add(weatherRetry);
       if (d.state['problem'] == weatherNeedsHome) return d;
@@ -205,9 +293,11 @@ class SmartHome {
     return {'weather': out};
   }
 
-  /// `{name?, room?}`: adds the weather at home as a thing, then reads it.
+  /// `{name?, room?, house?}`: adds the weather at the house as a thing,
+  /// then reads it.
   Future<Map<String, Object?>> addWeather(Map<String, Object?> args) async {
-    if (_core.flows.homeLocation == null) {
+    final house = _houseOf(args);
+    if (houseLocation(_core, house) == null) {
       throw ApiError(
         'invalid',
         'Weather needs to know where home is. Set it in Settings, Home '
@@ -218,6 +308,7 @@ class SmartHome {
       'driver': weatherDriverId,
       'name': optStringArg(args, 'name') ?? 'Weather at home',
       'room': ?optStringArg(args, 'room'),
+      'house': house,
     });
     if (added['ok'] != true) {
       final error = added['error'] as Map? ?? const {};

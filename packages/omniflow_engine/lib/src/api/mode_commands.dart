@@ -6,6 +6,7 @@ import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'house_things.dart';
+import 'houses.dart' show firstHouseId, houseThingId;
 import 'things_runtime.dart' show personDriverId;
 import '../storage/database.dart';
 
@@ -14,15 +15,46 @@ import '../storage/database.dart';
 /// Every writer of one file, in any instance, waits on one lock, and each
 /// write goes through its own temporary file.
 class HomeFile {
-  HomeFile(Directory home) : _file = File('${home.absolute.path}/home.json');
+  HomeFile(Directory home)
+    : _file = File('${home.absolute.path}/home.json'),
+      _house = null;
+
+  /// The part of `home.json` that is [house]'s own: the top-level keys for
+  /// the first house, as before houses, and `houses.<id>` for each other.
+  HomeFile.house(Directory home, String house)
+    : _file = File('${home.absolute.path}/home.json'),
+      _house = house == firstHouseId ? null : house;
 
   final File _file;
+  final String? _house;
+
+  /// The key holding each house's own section.
+  static const housesKey = 'houses';
 
   /// The last write queued per file path, shared by every instance.
   static final _locks = <String, Future<void>>{};
   static var _temps = 0;
 
   Future<Map<String, Object?>> read() async {
+    final root = await _readRoot();
+    final house = _house;
+    if (house == null) return root;
+    final sections = root[housesKey];
+    final section = sections is Map ? sections[house] : null;
+    return section is Map ? Map<String, Object?>.from(section) : {};
+  }
+
+  /// Drops [house]'s section, for a removed house.
+  Future<void> forget(String house) => HomeFile._root(_file)._write((json) {
+    final sections = json[housesKey];
+    if (sections is Map) {
+      json[housesKey] = {...sections}..remove(house);
+    }
+  });
+
+  HomeFile._root(this._file) : _house = null;
+
+  Future<Map<String, Object?>> _readRoot() async {
     try {
       final json = jsonDecode(await _file.readAsString());
       if (json is Map) return Map<String, Object?>.from(json);
@@ -39,13 +71,30 @@ class HomeFile {
   Future<void> update(
     Map<String, Object?> values, {
     Iterable<String> remove = const [],
-  }) {
+  }) => _write((root) {
+    final house = _house;
+    final sections = root[housesKey];
+    final json = house == null
+        ? root
+        : {
+            if (sections is Map && sections[house] is Map)
+              ...Map<String, Object?>.from(sections[house] as Map),
+          };
+    json.addAll(values);
+    for (final key in remove) {
+      json.remove(key);
+    }
+    if (house != null) {
+      root[housesKey] = {if (sections is Map) ...sections, house: json};
+    }
+  });
+
+  /// Changes the whole file with [change], one write at a time.
+  Future<void> _write(void Function(Map<String, Object?> root) change) {
     final path = _file.path;
     final next = (_locks[path] ?? Future<void>.value()).then((_) async {
-      final json = {...await read(), ...values};
-      for (final key in remove) {
-        json.remove(key);
-      }
+      final json = await _readRoot();
+      change(json);
       final temp = File('$path.$pid.${_temps++}.tmp');
       try {
         await temp.writeAsString(jsonEncode(json), flush: true);
@@ -72,10 +121,16 @@ class HomeFile {
 /// start on it and check it. With `followPresence` on, the mode goes to
 /// Away when the last person leaves and to Home when someone gets back.
 class HouseModes {
-  HouseModes(this._core, this._file);
+  HouseModes(this._core, this._file, {this.house = firstHouseId});
 
   final EngineCore _core;
   final HomeFile _file;
+
+  /// The house whose mode this is.
+  final String house;
+
+  /// The id rules of [house] know the mode thing by.
+  String get thing => houseThingId(houseModeThing, house);
 
   static const _maxCustom = 20;
 
@@ -113,7 +168,7 @@ class HouseModes {
     _sub = null;
   }
 
-  void _seed() => _core.flows.deviceStates[houseModeThing] = {'mode': _mode};
+  void _seed() => _core.flows.deviceStates[thing] = {'mode': _mode};
 
   List<String> get _ids => [
     ...builtInModes,
@@ -133,6 +188,7 @@ class HouseModes {
         {'id': houseIdOf(c), 'name': c, 'builtIn': false},
     ],
     'followPresence': _followPresence,
+    'house': house,
   };
 
   Future<Map<String, Object?>> get(Map<String, Object?> _) async => _json();
@@ -210,15 +266,13 @@ class HouseModes {
     _seed();
     _core.emit({
       'event': 'home.modeChanged',
+      'house': house,
       'mode': id,
       'name': _nameOf(id),
       'previous': previous,
       'by': by,
     });
-    _core.raiseEvent(houseModeThing, 'changed', {
-      'mode': id,
-      'previous': previous,
-    });
+    _core.raiseEvent(thing, 'changed', {'mode': id, 'previous': previous});
     return _json();
   }
 
@@ -236,9 +290,13 @@ class HouseModes {
     return setMode(mode, by: by ?? 'automation');
   }
 
+  /// Whether anyone is in this house: at home, when their home place is in
+  /// it, or at any place of it.
   Future<bool> _peopleHome() async {
     for (final d in await DriftDeviceStore(_core.db).all()) {
-      if (d.driverId == personDriverId && d.state['home'] == true) return true;
+      if (d.driverId == personDriverId && _core.houses.personIn(d, house)) {
+        return true;
+      }
     }
     return false;
   }

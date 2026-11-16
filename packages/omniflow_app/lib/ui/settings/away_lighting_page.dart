@@ -13,7 +13,7 @@ import '../home/energy_card.dart';
 final awayLightProvider = FutureProvider.autoDispose<AwayLightView?>((
   ref,
 ) async {
-  final client = ref.read(engineClientProvider);
+  final client = ref.watch(engineClientProvider);
   try {
     final settings = await client.call(SmartHomeCalls.awaylightGet, const {});
     if (settings['ok'] != true) return null;

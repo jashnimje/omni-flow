@@ -22,7 +22,10 @@ Future<void> pumpScreen(
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [engineClientProvider.overrideWithValue(engine), ...overrides],
+      overrides: [
+        engineConnectionProvider.overrideWithValue(engine),
+        ...overrides,
+      ],
       child: MaterialApp(
         theme: omniTheme(),
         scaffoldMessengerKey: messengerKey,

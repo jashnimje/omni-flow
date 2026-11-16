@@ -11,7 +11,7 @@ void main() {
       FakeEngine.lamp(state: const {'state': false}),
     ];
     final container = ProviderContainer(
-      overrides: [engineClientProvider.overrideWithValue(engine)],
+      overrides: [engineConnectionProvider.overrideWithValue(engine)],
     );
     addTearDown(container.dispose);
     final loading = container.read(devicesProvider.future);
@@ -31,7 +31,7 @@ void main() {
       'error', () async {
     final engine = FakeEngine();
     final container = ProviderContainer(
-      overrides: [engineClientProvider.overrideWithValue(engine)],
+      overrides: [engineConnectionProvider.overrideWithValue(engine)],
     );
     addTearDown(container.dispose);
     expect(await container.read(devicesProvider.future), hasLength(1));
@@ -43,7 +43,7 @@ void main() {
     expect(container.read(devicesProvider).value, hasLength(1));
 
     final fresh = ProviderContainer(
-      overrides: [engineClientProvider.overrideWithValue(engine)],
+      overrides: [engineConnectionProvider.overrideWithValue(engine)],
       // Riverpod retries a failed load by itself: this is the first try.
       retry: (_, _) => null,
     );

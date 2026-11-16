@@ -7,6 +7,7 @@ import 'command_args.dart';
 import 'conflicts.dart';
 import 'engine_core.dart';
 import 'flow_commands.dart';
+import 'houses.dart' show HouseKind;
 import 'link_commands.dart';
 import 'versions.dart';
 import '../dag/people_triggers.dart' show personDriver;
@@ -135,11 +136,13 @@ class RulesCoreCommands {
       (args) => keepingVersionsOf(_core.db, () async {
         final id = stringArg(args, 'id');
         final record = await DriftFlowStore(_core.db).get(id);
+        final house = await _core.houses.houseOf(HouseKind.flow, id);
         final versions = await _versions.of(id);
         final removed = await remove(args);
         if (record == null || removed['removed'] != true) return removed;
         final now = DateTime.now();
-        await RemovedAutomationStore(_core.db).add(record, versions, now);
+        await RemovedAutomationStore(_core.db)
+            .add(record, versions, now, house: house);
         await _versions.removeOf(id);
         await TurnedOffByRemoval(_core.db).forgetFlow(id);
         final until = now.add(removedKeptFor);
@@ -162,12 +165,16 @@ class RulesCoreCommands {
   };
 
   /// `automation.removed`: the automations that can be put back.
-  Future<Map<String, Object?>> removedList(Map<String, Object?> _) async => {
+  /// `{house?}`: given a house, the ones removed from it.
+  Future<Map<String, Object?>> removedList(Map<String, Object?> args) async => {
     'removed': [
       for (final r in await RemovedAutomationStore(
         _core.db,
       ).all(DateTime.now()))
-        r.toJson(),
+        if (args['house'] == null ||
+            r.house == null ||
+            r.house == args['house'])
+          r.toJson(),
     ],
     'keptDays': removedKeptFor.inDays,
   };
@@ -202,6 +209,10 @@ class RulesCoreCommands {
           source: r.source,
           spec: r.spec,
         );
+        // Back into the house it was removed from, whatever house is shown.
+        if (removed.house case final h? when _core.houses.byId(h) != null) {
+          await _core.houses.put(HouseKind.flow, id, h);
+        }
         await _versions.putBack(removed.versions);
         await store.forget(id);
         var enabled = false;

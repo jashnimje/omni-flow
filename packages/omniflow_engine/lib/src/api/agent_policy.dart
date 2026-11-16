@@ -62,6 +62,8 @@ const _readCommands = {
   'home.stats',
   'hub.clients',
   'hub.discover',
+  // The houses a home is split into, with how much each holds.
+  'house.list',
   'link.list',
   'link.options',
   'room.list',
@@ -172,6 +174,10 @@ const _setupCommands = {
   'automation.unremove',
   'backup.auto.get',
   'backup.auto.set',
+  // Adding a house and naming it, as setting the home up does. Removing one
+  // is the user's.
+  'house.add',
+  'house.rename',
 };
 
 /// Why each command no agent may send is the user's alone.
@@ -226,6 +232,9 @@ const _userOnly = {
   'board.flash': 'writing firmware replaces what a board runs',
   'device.move':
       'pointing a device at a new address decides where its commands go',
+  'house.remove':
+      'removing a house deletes its rooms and settings, and only you '
+      'choose to',
   'config.import':
       'restoring a backup replaces the home, and only you choose to',
 };
@@ -368,6 +377,17 @@ const _agentTvAppActions = {'open', 'stop', 'info'};
 /// Null when an agent at [level] may send [command] with [args], else why
 /// not, for a `needs_user` reply. [onPhone] says the device [args] names is
 /// another person's phone over ADB rather than a TV.
+/// The commands whose `moveTo` moves a thing or an automation to another
+/// house.
+const houseMoveCommands = {
+  'device.organize',
+  'automation.save',
+  'flow.save',
+  'scene.save',
+  'scene.capture',
+  'link.create',
+};
+
 String? agentRefusal(
   String command,
   Map<String, Object?> args,
@@ -401,6 +421,10 @@ String? agentRefusal(
       reservedVariable(args['name'] ?? args['var'])) {
     return '${args['name'] ?? args['var']} is the engine\'s own: it says '
         'where you are, and only your phone sets it';
+  }
+  if (houseMoveCommands.contains(command) && args['moveTo'] != null) {
+    return 'moving a thing or an automation to another house is for the '
+        'user only: it can turn off the automations of the old house';
   }
   if (agentReadCommands.contains(command)) return null;
   if (agentSetupCommands.contains(command)) {

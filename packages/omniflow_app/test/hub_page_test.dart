@@ -158,7 +158,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            engineClientProvider.overrideWithValue(client),
+            engineConnectionProvider.overrideWithValue(client),
             ...overrides(),
           ],
           child: const OmniFlowApp(),
@@ -400,7 +400,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          engineClientProvider.overrideWithValue(FakeEngine()),
+          engineConnectionProvider.overrideWithValue(FakeEngine()),
           ...overrides(),
         ],
         child: MaterialApp(

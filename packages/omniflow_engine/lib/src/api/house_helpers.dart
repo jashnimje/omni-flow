@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'alerts.dart';
@@ -6,6 +7,7 @@ import 'automation_commands.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'house_things.dart';
+import 'houses.dart';
 import 'mode_commands.dart';
 import 'room_control.dart';
 import 'scene_capture.dart';
@@ -17,16 +19,20 @@ import 'timer_commands.dart';
 /// daily automatic backup. The
 /// engine opens them once its flows are loaded, so a timer that ended
 /// while it was closed starts its rules.
+///
+/// The mode and the alerts are each house's own: one [HouseModes] and one
+/// [HouseAlerts] per house, chosen by a command's `house` (the first house
+/// when it names none). The timers carry their house.
 class HouseHelpers {
   HouseHelpers._(
     this._core,
-    this.modes,
+    this._home,
     this.timers,
-    this.alerts,
     this._rooms,
     this._scenes,
-    this.backups,
-  );
+    this.backups, {
+    this._hubRunning,
+  });
 
   static Future<HouseHelpers> open(
     EngineCore core,
@@ -39,9 +45,8 @@ class HouseHelpers {
     final file = HomeFile(home);
     final helpers = HouseHelpers._(
       core,
-      HouseModes(core, file),
+      home,
       HouseTimers(core, home),
-      HouseAlerts(core, file, hubRunning: hubRunning),
       RoomControl(core, stored),
       SceneCapture(core, stored, automations),
       AutoBackup(
@@ -53,48 +58,130 @@ class HouseHelpers {
             () async => throw StateError('this engine cannot export'),
         hubRunning: hubRunning,
       ),
+      hubRunning: hubRunning,
     );
-    await helpers.modes.open();
-    await helpers.alerts.open();
+    await helpers._openHouses();
     await helpers.backups.open();
-    core.builtInThings[houseModeThing] = helpers.modes.invoke;
-    core.builtInThings[timersThing] = helpers.timers.invoke;
     await helpers.timers.open();
+    helpers._sub = core.events.listen((e) {
+      if (e['event'] == housesChangedEvent) {
+        core.track(helpers._openHouses());
+      }
+    });
     return helpers;
   }
 
   final EngineCore _core;
-  final HouseModes modes;
+  final Directory _home;
+  final bool Function()? _hubRunning;
   final HouseTimers timers;
-  final HouseAlerts alerts;
   final RoomControl _rooms;
   final SceneCapture _scenes;
+  StreamSubscription<Map<String, Object?>>? _sub;
+
+  /// Each house's mode, by house id.
+  final _modes = <String, HouseModes>{};
+
+  /// Each house's alerts, by house id.
+  final _alerts = <String, HouseAlerts>{};
 
   /// The daily backup into the engine home's `backups/`.
   final AutoBackup backups;
 
+  /// The mode of [house], or of the first house.
+  HouseModes modesOf([String? house]) =>
+      _modes[house ?? _core.houses.defaultId] ?? _modes.values.first;
+
+  HouseModes get modes => modesOf();
+
+  /// The alerts of [house], or of the first house.
+  HouseAlerts alertsOf([String? house]) =>
+      _alerts[house ?? _core.houses.defaultId] ?? _alerts.values.first;
+
+  HouseAlerts get alerts => alertsOf();
+
+  /// Opens the mode and the alerts of every house that has none yet, and
+  /// closes those of a removed house.
+  Future<void> _openHouses() async {
+    final ids = {for (final h in _core.houses.all) h.id};
+    if (ids.isEmpty) ids.add(firstHouseId);
+    for (final gone in _modes.keys.where((k) => !ids.contains(k)).toList()) {
+      await _modes.remove(gone)!.close();
+      await _alerts.remove(gone)?.close();
+      _core.builtInThings.remove(houseThingId(houseModeThing, gone));
+      _core.builtInThings.remove(houseThingId(timersThing, gone));
+      _core.flows.deviceStates.remove(houseThingId(houseModeThing, gone));
+    }
+    for (final id in ids) {
+      if (_modes.containsKey(id)) continue;
+      final file = HomeFile.house(_home, id);
+      final modes = _modes[id] = HouseModes(_core, file, house: id);
+      await modes.open();
+      final alerts = _alerts[id] = HouseAlerts(
+        _core,
+        file,
+        hubRunning: _hubRunning,
+        house: id,
+      );
+      await alerts.open();
+      _core.builtInThings[houseThingId(houseModeThing, id)] = modes.invoke;
+      _core.builtInThings[houseThingId(timersThing, id)] = (
+        capability,
+        params, {
+        by,
+      }) => timers.invoke(capability, params, by: by, house: id);
+    }
+    // The plain ids a flow names: its own house's thing, from the flow
+    // that runs the step.
+    _core.builtInThings[houseModeThing] = (capability, params, {by}) =>
+        modesOf(_houseOfFlow(by)).invoke(capability, params, by: by);
+    _core.builtInThings[timersThing] = (capability, params, {by}) =>
+        timers.invoke(capability, params, by: by, house: _houseOfFlow(by));
+  }
+
+  String _houseOfFlow(String? flowId) =>
+      (flowId == null ? null : _core.houses.flowHouses[flowId]) ??
+      _core.houses.defaultId;
+
+  HouseModes _modesFor(Map<String, Object?> args) =>
+      modesOf(_core.houses.resolve(args['house']));
+
+  HouseAlerts _alertsFor(Map<String, Object?> args) =>
+      alertsOf(_core.houses.resolve(args['house']));
+
   Map<String, CommandHandler> get commands => {
-    ...modes.commands,
+    'home.mode': (args) => _modesFor(args).get(args),
+    'home.mode.set': (args) => _modesFor(args).set(args),
     ...timers.commands,
-    ...alerts.commands,
+    'alerts.get': (args) => _alertsFor(args).get(args),
+    'alerts.set': (args) => _alertsFor(args).set(args),
     ..._rooms.commands,
     ..._scenes.commands,
     ...backups.commands,
   };
 
-  /// What a backup keeps of them under `home`.
-  Map<String, Object?> backupJson() => {
-    ...modes.backupJson(),
-    'alerts': {'offline': alerts.offline, 'battery': alerts.battery},
+  /// What a backup keeps of them under `home`: the first house's (or
+  /// [house]'s) settings, as before houses.
+  Map<String, Object?> backupJson([String? house]) {
+    final alerts = alertsOf(house);
+    return {
+      ...modesOf(house).backupJson(),
+      'alerts': {'offline': alerts.offline, 'battery': alerts.battery},
+    };
+  }
+
+  /// Each house's settings, by house id, for a backup of every house.
+  Map<String, Object?> housesBackupJson() => {
+    for (final id in _modes.keys) id: backupJson(id),
   };
 
-  /// Takes what a backup's `home` holds of them.
-  Future<void> restore(Object? home) async {
+  /// Takes what a backup's `home` holds of them, into [house].
+  Future<void> restore(Object? home, [String? house]) async {
     if (home is! Map) return;
-    await modes.restore(home);
+    await modesOf(house).restore(home);
     final saved = home['alerts'];
     if (saved is Map) {
-      await alerts.set({
+      await alertsOf(house).set({
         if (saved['offline'] is bool) 'offline': saved['offline'],
         if (saved['battery'] is bool) 'battery': saved['battery'],
       });
@@ -102,10 +189,15 @@ class HouseHelpers {
   }
 
   Future<void> close() async {
+    await _sub?.cancel();
     _core.builtInThings.clear();
     await timers.close();
-    await alerts.close();
+    for (final a in _alerts.values) {
+      await a.close();
+    }
     await backups.close();
-    await modes.close();
+    for (final m in _modes.values) {
+      await m.close();
+    }
   }
 }

@@ -372,7 +372,10 @@ class HomeStatsCommands {
 
   final EngineCore _core;
   final DateTime Function() _clock;
+
+  /// The whole home's record, and each house's, by house id.
   HomeStatsStore? _store;
+  final _houseStores = <String, HomeStatsStore>{};
 
   /// One call at a time, so two calls never count the same runs twice.
   Future<void> _turn = Future.value();
@@ -384,18 +387,31 @@ class HomeStatsCommands {
     if (days < 1 || days > 31) {
       throw ApiError('invalid', 'days must be 1 to 31');
     }
-    final result = _turn.then((_) => _stats(days));
+    final house = _core.houses.resolve(args['house']);
+    final result = _turn.then((_) => _stats(days, house));
     _turn = result.then<void>((_) {}, onError: (Object _) {});
     return result;
   }
 
-  Future<Map<String, Object?>> _stats(int days) async {
-    final store = _store ??= HomeStatsStore(await _statsFile());
+  /// The stats of the whole home, or with [house] of that house alone,
+  /// each with its own record of runs and achievements.
+  Future<Map<String, Object?>> _stats(int days, String? house) async {
+    final store = house == null
+        ? _store ??= HomeStatsStore(await _statsFile())
+        : _houseStores[house] ??= HomeStatsStore(
+            await _statsFile(name: 'stats.$house.json'),
+          );
     final record = await store.read();
     final now = _clock();
     final db = _core.db;
+    final houses = _core.houses;
 
-    final flowRecords = await DriftFlowStore(db).all();
+    final flowRecords = [
+      for (final f in await DriftFlowStore(db).all())
+        if (house == null ||
+            (houses.flowHouses['${f.json['id']}'] ?? house) == house)
+          f,
+    ];
     final flowNodes = {
       for (final f in flowRecords)
         '${f.json['id']}': {
@@ -433,6 +449,7 @@ class HomeStatsCommands {
         continue;
       }
       if (trace is! Map || trace['dryRun'] == true) continue;
+      if (house != null && !flowNodes.containsKey(trace['flow'])) continue;
       final run = _runOf(Map<String, Object?>.from(trace), flowNodes);
       if (run == null) continue;
       runs.add(run);
@@ -443,7 +460,10 @@ class HomeStatsCommands {
       ..runs += newRuns
       ..lastLogId = lastId;
 
-    final devices = await DriftDeviceStore(db).all();
+    final devices = [
+      for (final d in await DriftDeviceStore(db).all())
+        if (house == null || houses.thingIn(d.id, house)) d,
+    ];
     final things = [
       for (final d in devices) (id: d.id, kind: _kindOf(d.driverId)),
     ];
@@ -477,6 +497,7 @@ class HomeStatsCommands {
         'event': 'home.achievementEarned',
         'id': a.id,
         'title': a.title,
+        'house': ?house,
       });
     }
     return reply;
@@ -492,7 +513,7 @@ class HomeStatsCommands {
 
   /// The database's own file decides where `stats.json` goes, so it sits
   /// with the rest of the home. Null for a database in memory.
-  Future<File?> _statsFile() async {
+  Future<File?> _statsFile({String name = 'stats.json'}) async {
     try {
       final row = await _core.db
           .customSelect(
@@ -501,7 +522,7 @@ class HomeStatsCommands {
           .getSingleOrNull();
       final path = row?.read<String>('file') ?? '';
       if (path.isEmpty) return null;
-      return File('${File(path).parent.path}/stats.json');
+      return File('${File(path).parent.path}/$name');
     } catch (_) {
       return null;
     }

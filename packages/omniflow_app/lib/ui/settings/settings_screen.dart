@@ -3,13 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/appearance.dart';
+import '../../state/house.dart' show houseShownProvider;
+import '../../state/house_providers.dart' show houseModeProvider;
 import '../../state/providers.dart';
 import '../automations/scenes.dart' show ScenesPage;
 import '../boards/usb_board.dart' show showUsbBoardSheet;
 import '../design/design.dart';
 import '../devices/device_text.dart';
+import '../fun/your_home_page.dart' show YourHomePage;
 import '../home/home_data.dart';
 import '../home/home_presence.dart';
+import '../home/mode_picker.dart' show showModePicker;
 import '../shell/shell.dart';
 import '../tags/tags_page.dart' show TagsPage;
 import '../help/screen_help.dart';
@@ -55,6 +59,7 @@ final settingsPlaces = [
   SettingsPlace('Hubs', OmniIcons.hub, HubsPage.new),
   SettingsPlace('Home runs on', OmniIcons.server, HubPage.new),
   SettingsPlace('Backup and restore', OmniIcons.backup, BackupPage.new),
+  SettingsPlace('Your activity', OmniIcons.automations, YourHomePage.new),
   SettingsPlace('Variables', OmniIcons.level, VariablesPage.new),
   SettingsPlace('Developer', OmniIcons.developer, DeveloperScreen.new),
 ];
@@ -65,9 +70,10 @@ final engineStatusProvider = FutureProvider<Json>(
       (await ref.watch(engineApiProvider).engineStatus()).or(const {}),
 );
 
-/// 7.1: the home (places, rooms, tags, scenes), this phone (background
-/// running, permissions, hubs), what agents made that waits for approval,
-/// and the developer tools.
+/// 7.1: this house (places, location, mode, rooms, tags, alerts and the
+/// smart home settings, all for the house in view), this phone
+/// (background running, permissions, hubs), what agents made that waits
+/// for approval, your data and activity, and the developer tools.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -95,6 +101,8 @@ class SettingsScreen extends ConsumerWidget {
     final tags = devices.where((d) => d.driver == 'nfc_tag').length;
     final waiting = summaries?.where((a) => a.needsApproval).toList();
     final shell = ref.read(shellControllerProvider);
+    final house = ref.watch(houseShownProvider);
+    final mode = ref.watch(houseModeProvider).value;
     return OmniTabPage(
       title: 'Settings',
       actions: const [ScreenHelpButton(HelpScreen.settings)],
@@ -102,7 +110,7 @@ class SettingsScreen extends ConsumerWidget {
         key: const ValueKey('settings-list'),
         padding: EdgeInsets.only(bottom: OmniInsets.bottom(context)),
         children: [
-          const OmniSectionHeader('Your home'),
+          OmniSectionHeader('This house', trailingText: house?.name),
           const HomeSetupRow(),
           OmniListRow(
             key: const ValueKey('settings-places'),
@@ -118,6 +126,17 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _push(context, const PlacesPage()),
           ),
           const HomeLocationRow(),
+          if (mode != null)
+            OmniListRow(
+              key: const ValueKey('settings-mode'),
+              icon: OmniIcons.home,
+              title: 'House mode',
+              subtitle: mode.followPresence
+                  ? '${mode.name} · follows who is home'
+                  : mode.name,
+              chevron: true,
+              onTap: () => showModePicker(context, ref),
+            ),
           OmniListRow(
             key: const ValueKey('settings-rooms'),
             icon: OmniIcons.room,
@@ -229,6 +248,14 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: 'Keep a copy of the whole home in a file',
             chevron: true,
             onTap: () => _push(context, const BackupPage()),
+          ),
+          OmniListRow(
+            key: const ValueKey('settings-activity'),
+            icon: OmniIcons.automations,
+            title: 'Your activity',
+            subtitle: 'What ran this week, your streak and achievements',
+            chevron: true,
+            onTap: () => _push(context, const YourHomePage()),
           ),
           const OmniSectionHeader('Advanced'),
           OmniListRow(

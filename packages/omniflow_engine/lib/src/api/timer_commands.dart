@@ -6,6 +6,7 @@ import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'house_things.dart';
+import 'houses.dart' show firstHouseId, houseThingId;
 
 /// One named timer. A running timer keeps when it ends, so it survives a
 /// restart and the app counts down from it. A paused one keeps what is left.
@@ -16,9 +17,13 @@ class HouseTimer {
     required this.durationMs,
     this.endsAt,
     this.leftMs,
+    this.house = firstHouseId,
   });
 
   final String id;
+
+  /// The house it runs in. A timer kept before houses is the first house's.
+  final String house;
   final String name;
   final int durationMs;
 
@@ -41,6 +46,7 @@ class HouseTimer {
     'state': paused ? 'paused' : 'running',
     if (endsAt != null) 'endsAt': endsAt!.toUtc().toIso8601String(),
     'remainingMs': remainingMs(now),
+    'house': house,
   };
 
   static HouseTimer? fromJson(Object? json) {
@@ -60,6 +66,7 @@ class HouseTimer {
       durationMs: duration,
       endsAt: ends,
       leftMs: ends == null ? left as int : null,
+      house: json['house'] is String ? json['house'] as String : firstHouseId,
     );
   }
 }
@@ -97,7 +104,7 @@ class HouseTimers {
       final json = jsonDecode(await _file.readAsString());
       for (final t in (json is Map ? json['timers'] as List? : null) ?? []) {
         if (HouseTimer.fromJson(t) case final timer?) {
-          _timers[timer.id] = timer;
+          _timers[_key(timer.house, timer.id)] = timer;
         }
       }
     } on FileSystemException {
@@ -118,20 +125,25 @@ class HouseTimers {
     await _lastWrite;
   }
 
-  List<Map<String, Object?>> _list() {
+  static String _key(String house, String id) => '$house/$id';
+
+  List<Map<String, Object?>> _list([String? house]) {
     final now = _now();
-    final timers = _timers.values.toList()
-      ..sort((a, b) => a.remainingMs(now).compareTo(b.remainingMs(now)));
+    final timers =
+        _timers.values.where((t) => house == null || t.house == house).toList()
+          ..sort((a, b) => a.remainingMs(now).compareTo(b.remainingMs(now)));
     return [for (final t in timers) t.toJson(now)];
   }
 
-  Future<Map<String, Object?>> list(Map<String, Object?> _) async => {
-    'timers': _list(),
+  /// `{house?}`: the timers of one house, or of every house.
+  Future<Map<String, Object?>> list(Map<String, Object?> args) async => {
+    'timers': _list(_core.houses.resolve(args['house'])),
   };
 
   HouseTimer _named(Map<String, Object?> args) {
     final name = stringArg(args, 'name');
-    final timer = _timers[houseIdOf(name)];
+    final timer =
+        _timers[_key(_core.houses.target(args), houseIdOf(name) ?? '')];
     if (timer == null) throw ApiError('not_found', 'no timer called $name');
     return timer;
   }
@@ -150,7 +162,10 @@ class HouseTimers {
     if (ms is! int || ms < 1000 || ms > timerMaxMs) {
       throw ApiError('invalid', 'ms must be 1000 to $timerMaxMs (a day)');
     }
-    if (!_timers.containsKey(id) && _timers.length >= _max) {
+    final house = _core.houses.target(args);
+    final key = _key(house, id);
+    if (!_timers.containsKey(key) &&
+        _timers.values.where((t) => t.house == house).length >= _max) {
       throw ApiError('invalid', 'at most $_max timers run at once');
     }
     final timer = HouseTimer(
@@ -158,8 +173,9 @@ class HouseTimers {
       name: name,
       durationMs: ms,
       endsAt: _now().add(Duration(milliseconds: ms)),
+      house: house,
     );
-    _timers[id] = timer;
+    _timers[key] = timer;
     _schedule(timer);
     await _changed();
     return {'timer': timer.toJson(_now())};
@@ -167,8 +183,8 @@ class HouseTimers {
 
   Future<Map<String, Object?>> cancel(Map<String, Object?> args) async {
     final timer = _named(args);
-    _timers.remove(timer.id);
-    _alarms.remove(timer.id)?.cancel();
+    _timers.remove(_key(timer.house, timer.id));
+    _alarms.remove(_key(timer.house, timer.id))?.cancel();
     await _changed();
     return {'cancelled': timer.id};
   }
@@ -179,7 +195,7 @@ class HouseTimers {
       timer
         ..leftMs = timer.remainingMs(_now())
         ..endsAt = null;
-      _alarms.remove(timer.id)?.cancel();
+      _alarms.remove(_key(timer.house, timer.id))?.cancel();
       await _changed();
     }
     return {'timer': timer.toJson(_now())};
@@ -197,21 +213,24 @@ class HouseTimers {
     return {'timer': timer.toJson(_now())};
   }
 
-  /// A timer step from a flow: `timers.start {name, ms}` and the others.
+  /// A timer step from a flow: `timers.start {name, ms}` and the others,
+  /// on the timers of the flow's [house].
   Future<Map<String, Object?>?> invoke(
     String capability,
     Map<String, Object?> params, {
     String? by,
+    String house = firstHouseId,
   }) => switch (capability) {
-    'start' => start(params),
-    'cancel' => cancel(params),
-    'pause' => pause(params),
-    'resume' => resume(params),
+    'start' => start({...params, 'house': house}),
+    'cancel' => cancel({...params, 'house': house}),
+    'pause' => pause({...params, 'house': house}),
+    'resume' => resume({...params, 'house': house}),
     _ => throw ApiError('invalid', 'timers have no action $capability'),
   };
 
   void _schedule(HouseTimer t) {
-    _alarms.remove(t.id)?.cancel();
+    final key = _key(t.house, t.id);
+    _alarms.remove(key)?.cancel();
     final ends = t.endsAt;
     if (ends == null) return;
     final left = ends.difference(_now());
@@ -219,16 +238,25 @@ class HouseTimers {
       _core.track(_end(t));
       return;
     }
-    _alarms[t.id] = Timer(left, () => _core.track(_end(t)));
+    _alarms[key] = Timer(left, () => _core.track(_end(t)));
   }
 
   Future<void> _end(HouseTimer t) async {
-    if (!identical(_timers[t.id], t)) return;
-    _timers.remove(t.id);
-    _alarms.remove(t.id);
+    final key = _key(t.house, t.id);
+    if (!identical(_timers[key], t)) return;
+    _timers.remove(key);
+    _alarms.remove(key);
     await _changed();
-    _core.raiseEvent(timersThing, 'ended', {'timer': t.id, 'name': t.name});
-    _core.emit({'event': 'timer.ended', 'timer': t.id, 'name': t.name});
+    _core.raiseEvent(houseThingId(timersThing, t.house), 'ended', {
+      'timer': t.id,
+      'name': t.name,
+    });
+    _core.emit({
+      'event': 'timer.ended',
+      'timer': t.id,
+      'name': t.name,
+      'house': t.house,
+    });
     _core.emit({
       'event': 'flow.announce',
       'type': 'notify',

@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../design/design.dart';
 import 'breathing_mark.dart';
 import 'fun_prefs.dart';
+import 'home_today_card.dart' show listenForAchievements;
 import 'home_stats.dart';
 import 'week_bars.dart';
 
@@ -12,17 +13,19 @@ void openYourHome(BuildContext context) =>
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const YourHomePage()));
 
-/// Your home: the week in numbers and bars, the streak, the busiest
-/// automation, every achievement, and the Celebrations switch.
+/// Settings, Your activity: the week in numbers and bars, the streak, the
+/// busiest automation, every achievement, and the Celebrations switch. An
+/// achievement earned while it is open is celebrated here, never on Home.
 class YourHomePage extends ConsumerWidget {
   const YourHomePage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    listenForAchievements(context, ref);
     final stats = ref.watch(homeStatsProvider);
     final celebrations = ref.watch(celebrationsProvider);
     return OmniPage(
-      title: 'Your home',
+      title: 'Your activity',
       body: switch (stats) {
         AsyncData(value: final s?) => ListView(
           key: const ValueKey('your-home'),

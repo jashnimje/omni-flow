@@ -259,15 +259,22 @@ class FlowCommands {
   };
 
   /// Reads a typed command against the stored devices and flows.
+  /// `{text, house?}`: given a house, only its things and automations
+  /// answer to the words.
   Future<Map<String, Object?>> interpret(Map<String, Object?> args) async {
+    final houses = _core.houses;
+    final house = houses.resolve(args['house']);
     final devices = [
       for (final d in await DriftDeviceStore(_db).all())
-        if (manifestFor(_core.registry, d) case final manifest?)
-          CommandDevice(d.id, d.name, manifest),
+        if (house == null || houses.thingIn(d.id, house))
+          if (manifestFor(_core.registry, d) case final manifest?)
+            CommandDevice(d.id, d.name, manifest),
     ];
     final flowList = [
       for (final f in await DriftFlowStore(_db).all())
-        CommandFlow(f.json['id'] as String, f.json['name'] as String),
+        if (house == null ||
+            (houses.flowHouses[f.json['id']] ?? house) == house)
+          CommandFlow(f.json['id'] as String, f.json['name'] as String),
     ];
     return interpretCommand(
       stringArg(args, 'text'),

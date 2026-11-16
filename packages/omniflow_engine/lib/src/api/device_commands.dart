@@ -265,11 +265,15 @@ class DeviceCommands {
   Future<Map<String, Object?>> _nextFor(
     Device device,
     DriverManifest manifest,
-  ) => nextSetupStep(
+  ) async => nextSetupStep(
     device,
     manifest,
     _core.secrets,
     pairedHere: _pairedHere.contains(device.id),
+    siblings: [
+      for (final d in await DriftDeviceStore(_db).all())
+        if (d.driverId == device.driverId && d.id != device.id) d,
+    ],
   );
 
   /// `thing.next {id, paired?}`: the setup step [id] is on now, so a client
@@ -535,16 +539,49 @@ class DeviceCommands {
     final device = await _core.device(stringArg(args, 'deviceId'));
     final key = stringArg(args, 'key');
     final manifest = _registry[device.driverId]!;
-    if (!manifest.settings.any((s) => s.key == key && s.secret)) {
+    final spec = manifest.settings
+        .where((s) => s.key == key && s.secret)
+        .firstOrNull;
+    if (spec == null) {
       throw ApiError(
         'invalid',
         '$key is not a secret setting of ${manifest.id}',
       );
     }
-    await _core.secrets.write(
-      deviceSecretKey(device.id, key),
-      stringArg(args, 'value'),
-    );
+    // `from: <device id>` copies the key another device of the same driver
+    // keeps (one WiZ home key covers every bulb in that home).
+    final from = optStringArg(args, 'from');
+    final String value;
+    if (from != null) {
+      final other = await _core.device(from);
+      final copied = other.driverId == device.driverId
+          ? await _core.secrets.read(deviceSecretKey(from, key))
+          : null;
+      if (copied == null || copied.isEmpty) {
+        throw ApiError('invalid', '${other.name} has no ${spec.label} stored');
+      }
+      value = copied;
+    } else {
+      value = spec.pattern == null
+          ? stringArg(args, 'value')
+          : stringArg(args, 'value').trim();
+    }
+    if (spec.problemWith(value) case final problem?) {
+      throw ApiError('invalid', problem);
+    }
+    await _core.secrets.write(deviceSecretKey(device.id, key), value);
+    final needs = device.settings[setupNeedsSetting];
+    if (needs is List && needs.contains(key)) {
+      await _devices.updateDevice(device.id, (d) {
+        final left = [...(d.settings[setupNeedsSetting] as List? ?? const [])]
+          ..remove(key);
+        final settings = {...d.settings};
+        left.isEmpty
+            ? settings.remove(setupNeedsSetting)
+            : settings[setupNeedsSetting] = left;
+        return d.copyWith(settings: settings);
+      });
+    }
     // The broker connection read the old password, so it reconnects now.
     if (manifest.transport.type == TransportType.mqtt) {
       await _core.mqtt.resetBroker(device, manifest);

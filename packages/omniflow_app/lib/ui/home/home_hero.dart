@@ -2,15 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../design/design.dart';
-import '../fun/home_stats.dart';
-import '../fun/home_today_card.dart';
-import '../fun/your_home_page.dart';
+import 'house_switcher.dart';
 
 /// The top of Home (look B in docs/ui/home-modern-mockups.html): the
-/// greeting, a line with presence, the house mode and what is active, and
-/// today's numbers, in one gradient card with the accent glowing in its
-/// corner. A tap opens Your home. The numbers show once the engine has
-/// them.
+/// greeting, the house in view and one line with presence and the house
+/// mode, in one gradient card with the accent glowing in its corner. The
+/// numbers, the streak and achievements are in Settings, Your activity.
 class HomeHero extends ConsumerWidget {
   const HomeHero({super.key, required this.title, this.subtitle});
 
@@ -23,11 +20,8 @@ class HomeHero extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    listenForAchievements(context, ref);
-    final stats = ref.watch(homeStatsProvider).value;
     final palette = OmniPalette.of(context);
     final radius = BorderRadius.circular(OmniRadii.hero);
-    void open() => openYourHome(context);
     return Padding(
       padding: const EdgeInsets.only(top: OmniSpace.xs, bottom: OmniSpace.md),
       child: DecoratedBox(
@@ -68,53 +62,39 @@ class HomeHero extends ConsumerWidget {
                   ),
                 ),
               ),
-              InkWell(
-                excludeFromSemantics: true,
-                onTap: open,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    OmniSpace.lg,
-                    OmniSpace.lg,
-                    OmniSpace.lg,
-                    14,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Semantics(
-                        header: true,
-                        child: Text(
-                          title,
-                          key: const ValueKey('home-greeting'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: OmniText.largeTitle,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  OmniSpace.lg,
+                  OmniSpace.lg,
+                  OmniSpace.lg,
+                  14,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const HouseSwitcher(),
+                    Semantics(
+                      header: true,
+                      child: Text(
+                        title,
+                        key: const ValueKey('home-greeting'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: OmniText.largeTitle,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        key: const ValueKey('home-status'),
+                        style: OmniText.caption.copyWith(
+                          color: palette.onAccentSoft,
                         ),
                       ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle!,
-                          key: const ValueKey('home-status'),
-                          style: OmniText.caption.copyWith(
-                            color: palette.onAccentSoft,
-                          ),
-                        ),
-                      ],
-                      if (stats != null) ...[
-                        const SizedBox(height: OmniSpace.md),
-                        Semantics(
-                          container: true,
-                          button: true,
-                          label: todaySpoken(stats),
-                          hint: 'Opens Your home',
-                          onTap: open,
-                          child: HomeTodayNumbers(stats: stats),
-                        ),
-                      ],
                     ],
-                  ),
+                  ],
                 ),
               ),
             ],

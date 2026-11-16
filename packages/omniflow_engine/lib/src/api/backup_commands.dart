@@ -6,6 +6,7 @@ import 'command_args.dart';
 import 'engine_core.dart';
 import 'home_commands.dart';
 import 'house_helpers.dart';
+import 'houses.dart';
 import 'stored_flows.dart';
 import 'thing_setup.dart';
 import 'versions.dart' show keepingVersionsOf;
@@ -68,18 +69,40 @@ class BackupCommands {
 
   OmniDatabase get _db => _core.db;
 
+  /// The house a running import replaces and restores into, or null for a
+  /// backup of every house, which restores each record into its own.
+  String? _scope;
+
   Map<String, CommandHandler> get commands => {
     'config.export': export,
     'config.import': import,
   };
 
-  Future<Map<String, Object?>> export(Map<String, Object?> _) async {
+  /// `{house?}`: the whole home, or one house. A backup of one house holds
+  /// its things (with the people and phones every house shares), rooms,
+  /// automations, variables and settings, and says which house it was. A
+  /// backup of every house gives each record its `house`, lists the houses,
+  /// and keeps each house's settings under `houseSettings`. Either reads
+  /// back on an engine from before houses, as the first house's home.
+  Future<Map<String, Object?>> export(Map<String, Object?> args) async {
+    final houses = _core.houses;
+    final only = houses.resolve(args['house']);
+    final roomHouses = await houses.housesOf(HouseKind.room);
+    final variableHouses = await houses.housesOf(HouseKind.variable);
+    bool inHouse(String? of) => only == null || (of ?? only) == only;
     final skipped = <String>[];
     final things = <Map<String, Object?>>[];
     for (final d in await DriftDeviceStore(_db).all()) {
+      if (only != null && !houses.thingIn(d.id, only)) continue;
       final json = _thingJson(d);
-      json == null ? skipped.add(d.id) : things.add(json);
+      json == null
+          ? skipped.add(d.id)
+          : things.add({
+              ...json,
+              if (only == null) 'house': ?houses.thingHouses[d.id],
+            });
     }
+    final settingsHouse = only ?? houses.defaultId;
     return {
       'backup': {
         'schema': backupSchema,
@@ -91,21 +114,46 @@ class BackupCommands {
             jsonDecode(json),
         ],
         'rooms': [
-          for (final r in await DriftRoomStore(_db).all()) _roomJson(r),
+          for (final r in await DriftRoomStore(_db).all())
+            if (inHouse(roomHouses[r.id]))
+              {..._roomJson(r), if (only == null) 'house': ?roomHouses[r.id]},
         ],
         'things': things,
         'automations': [
-          for (final r in await DriftFlowStore(_db).all()) _automationJson(r),
+          for (final r in await DriftFlowStore(_db).all())
+            if (inHouse(houses.flowHouses['${r.json['id']}']))
+              {
+                ..._automationJson(r),
+                if (only == null)
+                  'house': ?houses.flowHouses['${r.json['id']}'],
+              },
         ],
-        'variables': await _userVariables(),
-        'home': {
-          'location': ?homeLocationJson(_core.flows.homeLocation),
-          ...?house?.backupJson(),
+        'variables': {
+          for (final e in (await _userVariables()).entries)
+            if (inHouse(variableHouses[e.key])) e.key: e.value,
+        },
+        'home': _homeJson(settingsHouse),
+        if (only != null)
+          'house': {'id': only, 'name': houses.nameOf(only)}
+        else ...{
+          'houses': [for (final h in houses.all) h.toJson()],
+          'houseSettings': {for (final h in houses.all) h.id: _homeJson(h.id)},
+          'variableHouses': {
+            for (final e in variableHouses.entries)
+              if (!reservedVariable(e.key)) e.key: e.value,
+          },
         },
       },
       if (skipped.isNotEmpty) 'skipped': skipped,
     };
   }
+
+  /// What a backup keeps of [house]'s settings: where it is, its mode and
+  /// its alerts.
+  Map<String, Object?> _homeJson(String house) => {
+    'location': ?homeLocationJson(houseLocation(_core, house)),
+    ...?this.house?.backupJson(house),
+  };
 
   /// A thing as a backup keeps it: no state, no secret, and null when its
   /// driver is gone, since then which settings are secret is unknown.
@@ -154,10 +202,14 @@ class BackupCommands {
       if (!reservedVariable(e.key)) e.key: e.value,
   };
 
-  /// `{backup, mode?: merge | replace, dryRun?}`. Checks the whole backup
-  /// first and changes nothing when any part is wrong. Merge keeps what the
-  /// backup does not name, replace makes the home exactly the backup.
-  /// Keeps the version of every automation the import replaces.
+  /// `{backup, mode?: merge | replace, dryRun?, house?}`. Checks the whole
+  /// backup first and changes nothing when any part is wrong. Merge keeps
+  /// what the backup does not name, replace makes the house exactly the
+  /// backup. `house` is the house it restores into, the first house by
+  /// default; a backup of every house with no `house` restores each record
+  /// into its own house, adding the houses it names, and replace then
+  /// makes the whole home the backup. A backup from before houses reads as
+  /// one house. Keeps the version of every automation the import replaces.
   Future<Map<String, Object?>> import(Map<String, Object?> args) =>
       args['dryRun'] == true
       ? _import(args)
@@ -171,6 +223,9 @@ class BackupCommands {
     }
     final dryRun = args['dryRun'] == true;
     final replace = mode == 'replace';
+    final into = _core.houses.resolve(args['house']);
+    final everyHouse = into == null && backup['houses'] is List;
+    _scope = everyHouse ? null : into ?? _core.houses.defaultId;
     final plan = await _plan(backup, replace: replace);
 
     final registered = <String>[];
@@ -185,7 +240,7 @@ class BackupCommands {
     Map<String, Object?>? report;
     try {
       report = await _db.transaction(() async {
-        final result = await _write(plan, replace: replace);
+        final result = await _write(plan, replace: replace, backup: backup);
         if (dryRun) throw _Rollback(result);
         return result;
       });
@@ -201,11 +256,90 @@ class BackupCommands {
         }
       }
     }
+    await _core.houses.load();
     final result = report!;
     final held = _Held(result);
     if (!dryRun) await _settle(plan, held, replace: replace);
-    if (!dryRun) await house?.restore(backup['home']);
-    return {'dryRun': dryRun, 'mode': mode, 'applied': !dryRun, ...result};
+    if (!dryRun) await _restoreSettings(backup);
+    return {
+      'dryRun': dryRun,
+      'mode': mode,
+      'applied': !dryRun,
+      'house': ?_scope,
+      ...result,
+    };
+  }
+
+  /// Takes the mode and alerts a backup holds: into the house it restores
+  /// into, or for a backup of every house, each house's own.
+  Future<void> _restoreSettings(Map<String, Object?> backup) async {
+    final helpers = house;
+    if (helpers == null) return;
+    final scope = _scope;
+    if (scope != null) return helpers.restore(backup['home'], scope);
+    final each = backup['houseSettings'];
+    if (each is! Map) return helpers.restore(backup['home']);
+    for (final e in each.entries) {
+      final id = '${e.key}';
+      if (_core.houses.byId(id) == null) continue;
+      await helpers.restore(e.value, id);
+      final location = e.value is Map ? (e.value as Map)['location'] : null;
+      if (id != (_core.houses.defaultId) && location != null) {
+        try {
+          await _home.apply(homeLocationOf(location), house: id);
+        } on ApiError {
+          // A damaged location leaves that house's as it was.
+        }
+      }
+    }
+  }
+
+  /// Puts what the import wrote in its house: every record in the house it
+  /// restores into, or for a backup of every house each in the house it
+  /// names (made when missing), else the first house. People and phones
+  /// stay shared.
+  Future<void> _stampHouses(_Plan plan, Map<String, Object?> backup) async {
+    final houses = _core.houses;
+    final scope = _scope;
+    final known = {for (final h in houses.all) h.id};
+    if (scope == null) {
+      final listed = backup['houses'] as List;
+      var order = houses.all.isEmpty ? 0 : houses.all.last.order + 1;
+      for (final h in listed) {
+        if (h is! Map) continue;
+        final id = h['id'];
+        final name = h['name'];
+        if (id is! String || name is! String || known.contains(id)) continue;
+        if (!RegExp(r'^[a-z][a-z0-9_]{0,39}$').hasMatch(id)) continue;
+        await _db.customStatement(
+          'INSERT INTO houses (id, name, position) VALUES (?, ?, ?)',
+          [id, name.trim().isEmpty ? id : name.trim(), order++],
+        );
+        known.add(id);
+      }
+    }
+    String houseOf(Object? named) =>
+        scope ??
+        (named is String && known.contains(named) ? named : houses.defaultId);
+    for (final t in plan.things) {
+      final driver = t['driver'];
+      if (driver == personDriverId || driver == phoneDriverId) continue;
+      await houses.put(HouseKind.thing, '${t['id']}', houseOf(t['house']));
+    }
+    for (final r in plan.rooms) {
+      await houses.put(HouseKind.room, '${r['id']}', houseOf(r['house']));
+    }
+    for (final a in plan.automations) {
+      await houses.put(HouseKind.flow, '${a['id']}', houseOf(a['house']));
+    }
+    final variableHouses = backup['variableHouses'];
+    for (final name in plan.variables.keys) {
+      await houses.put(
+        HouseKind.variable,
+        name,
+        houseOf(variableHouses is Map ? variableHouses[name] : null),
+      );
+    }
   }
 
   static Object? _idOf(String json) {
@@ -498,7 +632,17 @@ class BackupCommands {
   Future<Map<String, Object?>> _write(
     _Plan plan, {
     required bool replace,
+    required Map<String, Object?> backup,
   }) async {
+    // A replace into one house removes only that house's records, and
+    // keeps the drivers and the people and phones the other houses use.
+    final scope = _scope;
+    final roomHouses = await _core.houses.housesOf(HouseKind.room);
+    final thingHouses = await _core.houses.housesOf(HouseKind.thing);
+    final flowHouses = await _core.houses.housesOf(HouseKind.flow);
+    final variableHouses = await _core.houses.housesOf(HouseKind.variable);
+    bool outside(Map<String, String> of, String id) =>
+        scope != null && of[id] != scope;
     final add = _Changes();
     final changed = _Changes();
     final same = _Changes();
@@ -533,7 +677,7 @@ class BackupCommands {
       await manifests.put(id, json, now);
       _core.agentDrivers.remove(id);
     }
-    if (replace) {
+    if (replace && scope == null) {
       for (final id in storedDrivers.keys) {
         if (plan.drivers.any((d) => d['id'] == id)) continue;
         await manifests.remove(id);
@@ -564,6 +708,7 @@ class BackupCommands {
     if (replace) {
       for (final id in storedRooms.keys) {
         if (plan.rooms.any((r) => r['id'] == id)) continue;
+        if (outside(roomHouses, id)) continue;
         await rooms.remove(id);
         removed.add('rooms', id);
       }
@@ -574,6 +719,7 @@ class BackupCommands {
     if (replace) {
       for (final id in storedThings.keys) {
         if (backupThingIds.contains(id)) continue;
+        if (outside(thingHouses, id)) continue;
         await devices.remove(id);
         await DriftHistoryStore(_db).removeDevice(id);
         await DriftBoardDescribeStore(_db).remove(id);
@@ -624,6 +770,7 @@ class BackupCommands {
     if (replace) {
       for (final id in storedFlows.keys) {
         if (plan.automations.any((a) => a['id'] == id)) continue;
+        if (outside(flowHouses, id)) continue;
         await flows.remove(id);
         removed.add('automations', id);
       }
@@ -673,6 +820,7 @@ class BackupCommands {
         if (reservedVariable(name) || plan.variables.containsKey(name)) {
           continue;
         }
+        if (outside(variableHouses, name)) continue;
         await globals.remove(name);
         removed.add('variables', name);
       }
@@ -694,11 +842,13 @@ class BackupCommands {
       same.add('variables', name);
     }
 
+    await _stampHouses(plan, backup);
+    final here = houseLocation(_core, scope ?? _core.houses.defaultId);
     final location = plan.locationGiven
         ? plan.location
         : replace
         ? null
-        : _core.flows.homeLocation;
+        : here;
 
     // Every automation is checked against the home the import makes: its
     // things, the other automations it runs, and the location it brings.
@@ -757,7 +907,7 @@ class BackupCommands {
       );
     }
 
-    final before = _core.flows.homeLocation;
+    final before = here;
     final locationChange =
         canonicalJson({'l': homeLocationJson(before)}) ==
             canonicalJson({'l': homeLocationJson(location)})
@@ -777,6 +927,7 @@ class BackupCommands {
       'waitForApproval': waiting,
       'needsSecrets': await _needsSecrets(plan),
       '_removed': removed.of('things'),
+      '_removedVariables': removed.of('variables'),
       '_changed': [...changed.of('things'), ...add.of('things')],
       '_drivers': removed.of('drivers'),
       '_location': homeLocationJson(location),
@@ -822,8 +973,10 @@ class BackupCommands {
       _core.registry.unregister(id);
     }
     await _core.loadRooms();
-    if (replace) {
+    if (replace && _scope == null) {
       _core.flows.globals.removeWhere((k, _) => !reservedVariable(k));
+    } else if (replace) {
+      held.removedVariables.forEach(_core.flows.globals.remove);
     }
     _core.flows.globals.addAll(plan.variables);
     for (final id in held.removedThings) {
@@ -834,7 +987,7 @@ class BackupCommands {
       if (held.changedThings.contains(d.id)) resetThing(d.id);
     }
     await _things.reload(quiet: true);
-    await _home.apply(held.location);
+    await _home.apply(held.location, house: _scope);
   }
 }
 
@@ -845,11 +998,14 @@ class _Held {
     : removedThings = (report.remove('_removed') as List).cast<String>(),
       changedThings = (report.remove('_changed') as List).cast<String>(),
       removedDrivers = (report.remove('_drivers') as List).cast<String>(),
+      removedVariables = (report.remove('_removedVariables') as List)
+          .cast<String>(),
       location = homeLocationOf(report.remove('_location'));
 
   final List<String> removedThings;
   final List<String> changedThings;
   final List<String> removedDrivers;
+  final List<String> removedVariables;
   final HomeLocation? location;
 }
 
