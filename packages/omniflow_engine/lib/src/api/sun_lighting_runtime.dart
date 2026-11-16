@@ -74,6 +74,16 @@ class SunLighting {
     if (enabled is! bool) {
       throw ApiError('invalid', 'enabled must be true or false');
     }
+    // The curve follows the sun at home, so it cannot start before home
+    // has a place on the map. The app, the CLI and an agent all hear this.
+    if (enabled && _core.flows.homeLocation == null) {
+      throw ApiError(
+        'invalid',
+        'Follow the sun needs to know where home is. Set it in Settings, '
+            'Your home, Home location (or omni home location set), then turn '
+            'it on',
+      );
+    }
     final devices = await DriftDeviceStore(_core.db).all();
     for (final id in ids.cast<String>()) {
       if (!enabled) {
@@ -281,5 +291,11 @@ class SunLighting {
     _paused.remove(id);
     _sent.remove(id);
     _seen.remove(id);
+  }
+
+  /// A removed light: forgotten, and no longer followed on its own.
+  Future<void> forgetTarget(String id) async {
+    forget(id);
+    if (targets.remove(id) != null) await _save();
   }
 }

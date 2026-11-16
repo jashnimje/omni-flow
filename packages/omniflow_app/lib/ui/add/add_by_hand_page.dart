@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import '../help/setting_help.dart' show settingHelpLine;
+import 'driver_kinds.dart';
 import 'guided_steps_page.dart';
 import 'room_field.dart';
 
@@ -17,10 +19,13 @@ String deviceIdFor(String name) => thingIdFor(name);
 /// address (a place or a person takes none), name it and put it in a room,
 /// then follow the steps the engine says come next.
 class AddByHandPage extends ConsumerStatefulWidget {
-  const AddByHandPage({super.key, this.driver});
+  const AddByHandPage({super.key, this.driver, this.kind});
 
   /// The driver picked when the page opens.
   final String? driver;
+
+  /// The kind of thing whose drivers the page opens on, such as lights.
+  final String? kind;
 
   @override
   ConsumerState<AddByHandPage> createState() => _AddByHandPageState();
@@ -29,6 +34,9 @@ class AddByHandPage extends ConsumerStatefulWidget {
 class _AddByHandPageState extends ConsumerState<AddByHandPage> {
   Reply<List<Json>>? _drivers;
   late String? _driver = widget.driver;
+
+  /// The kind picked on the first list (Lights, TVs), whose drivers show.
+  late String? _kind = widget.kind;
   List<Json>? _found;
   var _scanning = false;
   var _adding = false;
@@ -50,7 +58,24 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
 
   Future<void> _load() async {
     final drivers = await _quiet.drivers();
-    if (mounted) setState(() => _drivers = drivers);
+    if (!mounted) return;
+    setState(() => _drivers = drivers);
+    final kind = _pickedKind;
+    if (_driver == null && kind != null) {
+      final of = drivers.or(const []).where(kind.has).toList();
+      if (of.length == 1) _pickDriver(of.single);
+    }
+  }
+
+  int _driversOf(AddKind kind) =>
+      (_drivers?.value ?? const <Json>[]).where(kind.has).length;
+
+  /// Whether Back leaves the page rather than stepping back a list.
+  bool get _atStart {
+    if (widget.driver != null) return true;
+    final opened = addKinds.where((k) => k.id == widget.kind).firstOrNull;
+    if (_driver == null) return _kind == widget.kind;
+    return opened != null && _kind == opened.id && _driversOf(opened) < 2;
   }
 
   @override
@@ -168,17 +193,42 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
   Widget build(BuildContext context) {
     ref.watch(devicesProvider);
     final driver = _picked;
-    return OmniPage(
-      title: driver == null ? 'Add by hand' : 'Add ${driver['name']}',
-      bottom: driver == null
-          ? null
-          : OmniButton(
-              key: const ValueKey('add-save'),
-              label: _adding ? 'Adding' : 'Add',
-              onPressed: _ready ? _add : null,
-            ),
-      body: driver == null ? _driverList() : _form(driver),
+    final kind = _pickedKind;
+    return PopScope(
+      canPop: _atStart,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _back();
+      },
+      child: OmniPage(
+        title: driver != null
+            ? 'Add ${plainDriverName('${driver['name']}')}'
+            : kind != null
+            ? kind.title
+            : 'Add by hand',
+        bottom: driver == null
+            ? null
+            : OmniButton(
+                key: const ValueKey('add-save'),
+                label: _adding ? 'Adding' : 'Add',
+                onPressed: _ready ? _add : null,
+              ),
+        body: driver == null ? _driverList() : _form(driver),
+      ),
     );
+  }
+
+  /// Back steps out one list at a time: from the form to the kind's list
+  /// (or the first list, for a kind with one driver), then to the first.
+  void _back() {
+    final kind = _pickedKind;
+    setState(() {
+      if (_driver != null) {
+        _driver = null;
+        if (kind != null && _driversOf(kind) < 2) _kind = null;
+      } else {
+        _kind = null;
+      }
+    });
   }
 
   bool get _ready =>
@@ -187,29 +237,73 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
       _name.text.trim().isNotEmpty &&
       !_adding;
 
+  void _pickDriver(Json d) => setState(() {
+    _driver = '${d['id']}';
+    _found = null;
+    _stableId = null;
+  });
+
+  /// The drivers of [kind], or the kind's one driver straight away.
+  void _openKind(AddKind kind, List<Json> drivers) {
+    final of = drivers.where(kind.has).toList();
+    if (of.length == 1) {
+      setState(() => _kind = kind.id);
+      _pickDriver(of.single);
+      return;
+    }
+    setState(() => _kind = kind.id);
+  }
+
+  AddKind? get _pickedKind => addKinds.where((k) => k.id == _kind).firstOrNull;
+
   Widget _driverList() {
     final drivers = _drivers;
+    final all = drivers?.value ?? const <Json>[];
     final query = _search.text.trim().toLowerCase();
+    final kind = _pickedKind;
     final list = [
-      for (final d in drivers?.value ?? const <Json>[])
-        if (query.isEmpty ||
-            '${d['name']}'.toLowerCase().contains(query) ||
-            '${d['id']}'.contains(query))
+      for (final d in all)
+        if ((kind == null || kind.has(d)) &&
+            (query.isEmpty ||
+                '${d['name']}'.toLowerCase().contains(query) ||
+                '${d['id']}'.contains(query)))
           d,
     ]..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
+    final kinds = [
+      for (final k in addKinds)
+        if (all.any(k.has)) k,
+    ];
+    // The common kinds first, in plain words. Every driver, with its
+    // protocol in its name, sits under More kinds.
+    final showKinds = kind == null && query.isEmpty && kinds.isNotEmpty;
     return ListView(
       key: const ValueKey('add-drivers'),
       children: [
-        TextField(
-          key: const ValueKey('add-driver-search'),
-          controller: _search,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(OmniIcons.search),
-            hintText: 'Hue, Home Assistant, Tasmota, Mac…',
+        if (kind == null)
+          TextField(
+            key: const ValueKey('add-driver-search'),
+            controller: _search,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(OmniIcons.search),
+              hintText: 'Hue, Home Assistant, Tasmota, Mac…',
+            ),
+            onChanged: (_) => setState(() {}),
           ),
-          onChanged: (_) => setState(() {}),
-        ),
-        const OmniSectionHeader('What is it?'),
+        if (showKinds) ...[
+          const OmniSectionHeader('What is it?'),
+          for (final k in kinds)
+            OmniListRow(
+              key: ValueKey('kind-${k.id}'),
+              icon: k.icon,
+              title: k.title,
+              subtitle: k.subtitle,
+              chevron: true,
+              onTap: () => _openKind(k, all),
+            ),
+        ],
+        // A kind's list has its name as the page title already.
+        if (kind == null)
+          OmniSectionHeader(showKinds ? 'More kinds' : 'What is it?'),
         if (drivers == null)
           const Padding(
             padding: EdgeInsets.all(OmniSpace.xl),
@@ -231,18 +325,16 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
             OmniListRow(
               key: ValueKey('driver-${d['id']}'),
               icon: _driverIcon(d),
-              title: '${d['name']}',
+              title: kind == null
+                  ? '${d['name']}'
+                  : plainDriverName('${d['name']}'),
               subtitle: d['transport'] == 'virtual'
                   ? 'No address needed'
                   : d['builtIn'] == false
                   ? 'Your driver'
                   : null,
               chevron: true,
-              onTap: () => setState(() {
-                _driver = '${d['id']}';
-                _found = null;
-                _stableId = null;
-              }),
+              onTap: () => _pickDriver(d),
             ),
       ],
     );
@@ -256,10 +348,10 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
         OmniListRow(
           key: const ValueKey('add-driver'),
           icon: _driverIcon(driver),
-          title: '${driver['name']}',
+          title: plainDriverName('${driver['name']}'),
           subtitle: 'Tap to pick another kind',
           chevron: true,
-          onTap: () => setState(() => _driver = null),
+          onTap: _back,
         ),
         if (!_virtual) ...[
           const SizedBox(height: OmniSpace.sm),
@@ -324,7 +416,15 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
           TextField(
             key: ValueKey('add-setting-${f['key']}'),
             controller: _setting('${f['key']}'),
-            decoration: InputDecoration(labelText: '${f['label']}'),
+            // A long label wraps, so a setting never reads cut off.
+            decoration: InputDecoration(
+              label: Text('${f['label']}', maxLines: 3, softWrap: true),
+              helper: settingHelpLine(
+                settingKey: '${f['key']}',
+                label: '${f['label']}',
+                help: f['help'] as String?,
+              ),
+            ),
           ),
         ],
         if (_failure case final f?)

@@ -371,6 +371,15 @@ void main() {
           'driver': 'test_lamp',
           'room': 'study',
         });
+        // Follow the sun needs home on the map first.
+        expect(
+          (await error('sunlight.set', {
+            'targets': ['study'],
+            'enabled': true,
+          }))['message'],
+          contains('where home is'),
+        );
+        await ok('home.location.set', {'latitude': 51.5, 'longitude': -0.12});
         await ok('sunlight.set', {
           'targets': ['study'],
           'enabled': true,
@@ -501,7 +510,7 @@ void main() {
       expect(energyReading('philips_wiz_udp', {'state': true}), isNull);
     });
 
-    test('a counter wins, power is integrated where there is none, and a gap is not joined', () {
+    test('a counter wins, power is integrated where there is none, and a long gap is capped', () {
       final meter = EnergyMeter();
       final t = DateTime(2026, 11, 12, 10);
       meter.add('a', t, (watts: 100, counterKwh: 1.0));
@@ -517,11 +526,12 @@ void main() {
         counterKwh: null,
       ));
       expect(meter.on('b', t), closeTo(0.1, 1e-9));
-      meter.add('b', t.add(const Duration(hours: 1)), (
+      // A gap longer than an hour counts only its first hour.
+      meter.add('b', t.add(const Duration(hours: 4)), (
         watts: 1000,
         counterKwh: null,
       ));
-      expect(meter.on('b', t), closeTo(0.1, 1e-9));
+      expect(meter.on('b', t), closeTo(1.1, 1e-9));
 
       final late = DateTime(2026, 11, 12, 23, 55);
       meter.add('c', late, (watts: 600, counterKwh: null));

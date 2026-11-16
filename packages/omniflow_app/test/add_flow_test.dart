@@ -7,6 +7,7 @@ import 'package:omniflow_app/ui/add/add_page.dart';
 import 'package:omniflow_app/ui/add/guided_steps_page.dart';
 import 'package:omniflow_app/ui/add/pair_sheet.dart';
 import 'package:omniflow_app/ui/design/design.dart';
+import 'package:omniflow_app/ui/devices/open_device.dart' show DeviceRoute;
 import 'package:omniflow_app/ui/home/home_data.dart' show roomsProvider;
 import 'package:omniflow_app/ui/settings/places_page.dart';
 
@@ -127,6 +128,8 @@ const drivers = {
 };
 
 Future<void> tapKey(WidgetTester tester, String key) async {
+  await tester.ensureVisible(find.byKey(ValueKey(key)));
+  await tester.pumpAndSettle();
   await tester.tap(find.byKey(ValueKey(key)));
   await tester.pumpAndSettle();
 }
@@ -482,6 +485,13 @@ void main() {
       tester,
     ) async {
       await pumpScreen(tester, engine, steps(const NextStep(NextKind.done)));
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('setup-name'))).dy,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('setup-close'))).dy,
+        ),
+        reason: 'name and room come before Finish',
+      );
       await tester.enterText(
         find.byKey(const ValueKey('setup-name')),
         'Living room TV',
@@ -498,6 +508,11 @@ void main() {
       });
       expect(find.text('Added Living room TV'), findsOneWidget);
       expect(find.byType(GuidedStepsPage), findsNothing);
+      expect(
+        find.byType(DeviceRoute),
+        findsOneWidget,
+        reason: 'a new thing opens on its page',
+      );
     });
 
     testWidgets('optional keys on the done step are stored by their kind', (
@@ -539,7 +554,7 @@ void main() {
         'pw',
       );
       await tester.pump();
-      await tapKey(tester, 'setup-optional-save');
+      await tapKey(tester, 'setup-close');
       expect(engine.callsOf('secret.set').single.$2['key'], 'password');
       expect(engine.callsOf('thing.configure').single.$2, {
         'id': 'android_tv',
@@ -609,6 +624,100 @@ void main() {
       });
       expect(find.byType(GuidedStepsPage), findsOneWidget);
       expect(find.text('Press the link button on the bridge'), findsOneWidget);
+    });
+
+    testWidgets('the common kinds come first in plain words, the drivers '
+        'under More kinds', (tester) async {
+      await pumpScreen(tester, engine, const AddByHandPage());
+      final lights = tester.getTopLeft(
+        find.byKey(const ValueKey('kind-lights')),
+      );
+      final more = tester.getTopLeft(find.text('More kinds'));
+      expect(lights.dy, lessThan(more.dy));
+      expect(find.byKey(const ValueKey('kind-tvs')), findsOneWidget);
+      expect(find.byKey(const ValueKey('kind-boards')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('kind-speakers')),
+        findsNothing,
+        reason: 'only kinds a driver makes',
+      );
+      await tapKey(tester, 'kind-tvs');
+      expect(
+        find.text('Add Android TV'),
+        findsOneWidget,
+        reason: 'the one TV driver opens straight away',
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('kind-lights')), findsOneWidget);
+    });
+
+    testWidgets('a setting with help shows its first line and a ? sheet', (
+      tester,
+    ) async {
+      engine.answers['driver.list'] = {
+        'ok': true,
+        'drivers': [
+          {
+            'id': 'philips_hue_light',
+            'name': 'Philips Hue light',
+            'category': 'lighting',
+            'transport': 'http',
+            'settings': [
+              {
+                'key': 'lightId',
+                'label': 'Light number on the bridge',
+                'help':
+                    'The number the bridge gives the light. Open the Hue '
+                    'app to see it.',
+              },
+            ],
+          },
+        ],
+      };
+      await pumpScreen(
+        tester,
+        engine,
+        const AddByHandPage(driver: 'philips_hue_light'),
+      );
+      expect(
+        find.textContaining('The number the bridge gives the light'),
+        findsOneWidget,
+      );
+      await tapKey(tester, 'setting-help-open-lightId');
+      expect(find.byKey(const ValueKey('setting-help-sheet')), findsOneWidget);
+    });
+
+    testWidgets('a kind with a protocol in its name reads plainly', (
+      tester,
+    ) async {
+      engine.answers['driver.list'] = {
+        'ok': true,
+        'drivers': [
+          {
+            'id': 'lg_webos_tv',
+            'name': 'LG webOS TV (local SSAP over WebSocket)',
+            'category': 'media',
+            'icon': 'tv',
+            'transport': 'websocket',
+            'settings': <Object?>[],
+          },
+          {
+            'id': 'roku_ecp',
+            'name': 'Roku TV or streaming stick (local ECP over HTTP)',
+            'category': 'media',
+            'icon': 'tv',
+            'transport': 'http',
+            'settings': <Object?>[],
+          },
+        ],
+      };
+      await pumpScreen(tester, engine, const AddByHandPage(kind: 'tvs'));
+      expect(find.text('TVs'), findsOneWidget);
+      expect(find.text('LG webOS TV'), findsOneWidget);
+      expect(find.textContaining('SSAP'), findsNothing);
+      await tapKey(tester, 'driver-lg_webos_tv');
+      expect(find.text('Add LG webOS TV'), findsOneWidget);
     });
 
     testWidgets('a scan lists finds, a known one says which device has it, '

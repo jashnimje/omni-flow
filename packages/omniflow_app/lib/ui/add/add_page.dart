@@ -11,6 +11,7 @@ import '../design/design.dart';
 import '../tags/tags_page.dart' show showAddTagSheet;
 import 'add_by_hand_page.dart';
 import 'add_phone_page.dart';
+import 'driver_kinds.dart';
 import 'guided_steps_page.dart';
 import '../devices/weather_page.dart' show AddWeatherRow;
 
@@ -78,9 +79,12 @@ class _AddPageState extends ConsumerState<AddPage> {
     unawaited(_discover());
   }
 
-  Future<void> _byHand({String? driver}) => Navigator.of(context).push(
-    MaterialPageRoute<void>(builder: (_) => AddByHandPage(driver: driver)),
-  );
+  Future<void> _byHand({String? driver, String? kind}) => Navigator.of(context)
+      .push(
+        MaterialPageRoute<void>(
+          builder: (_) => AddByHandPage(driver: driver, kind: kind),
+        ),
+      );
 
   /// What a find needs before it works: pairing, a secret, or nothing.
   String? _needs(Json c) => switch (_drivers['${c['driver']}']?['pairing']) {
@@ -119,7 +123,7 @@ class _AddPageState extends ConsumerState<AddPage> {
     final others = [
       for (final m in find?.manual ?? const <Json>[])
         if (m['driver'] != 'place' && m['driver'] != 'nfc_tag')
-          _shortName('${m['name'] ?? m['driver']}'),
+          plainDriverName('${m['name'] ?? m['driver']}'),
     ];
     return OmniPage(
       title: 'Add',
@@ -201,6 +205,24 @@ class _AddPageState extends ConsumerState<AddPage> {
                 ),
             ],
             const OmniSectionHeader('Or add by hand'),
+            // The common kinds first, in plain words. Another phone has its
+            // own steps.
+            for (final k in addKinds)
+              if (k.id == 'phones' || _drivers.values.any(k.has))
+                OmniListRow(
+                  key: ValueKey(
+                    k.id == 'phones'
+                        ? 'add-another-phone'
+                        : 'manual-kind-${k.id}',
+                  ),
+                  icon: k.icon,
+                  title: k.title,
+                  subtitle: k.subtitle,
+                  chevron: true,
+                  onTap: () => k.id == 'phones'
+                      ? openAddPhone(context)
+                      : _byHand(kind: k.id),
+                ),
             OmniListRow(
               key: const ValueKey('manual-tag'),
               icon: OmniIcons.tag,
@@ -215,14 +237,6 @@ class _AddPageState extends ConsumerState<AddPage> {
               title: 'A place (home, office)',
               chevron: true,
               onTap: () => _byHand(driver: '${place?['driver'] ?? 'place'}'),
-            ),
-            OmniListRow(
-              key: const ValueKey('add-another-phone'),
-              icon: OmniIcons.phone,
-              title: 'Another phone',
-              subtitle: 'See and control an Android phone over Wi-Fi',
-              chevron: true,
-              onTap: () => openAddPhone(context),
             ),
             OmniListRow(
               key: const ValueKey('manual-usb-board'),
@@ -244,9 +258,9 @@ class _AddPageState extends ConsumerState<AddPage> {
             OmniListRow(
               key: const ValueKey('add-by-driver'),
               icon: OmniIcons.more,
-              title: 'Any driver',
+              title: 'More kinds',
               subtitle: others.isEmpty
-                  ? 'Pick what it is and type its address'
+                  ? 'Every driver, by its full name'
                   : '${others.take(4).join(', ')}…',
               chevron: true,
               onTap: _byHand,
@@ -279,11 +293,4 @@ class _RowSkeleton extends StatelessWidget {
       ),
     ),
   );
-}
-
-/// A driver name without its transport note: "LG webOS TV (local SSAP over
-/// WebSocket)" reads "LG webOS TV".
-String _shortName(String name) {
-  final cut = name.indexOf(' (');
-  return cut > 0 ? name.substring(0, cut) : name;
 }

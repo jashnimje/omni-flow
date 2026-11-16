@@ -16,6 +16,17 @@ typedef PostNotification = Future<void> Function({
   String? link,
 });
 
+/// A notification whose tap can open one of Android's settings pages
+/// ([AutomationNotifier.platformPost]'s `open`).
+typedef PostSettingsNotice = Future<void> Function({
+  required String channel,
+  required int id,
+  required String title,
+  String? body,
+  String? link,
+  String? open,
+});
+
 /// An automation's question as a notification: one action per answer in
 /// [actions], a reply box when [reply], or, with more answers than Android
 /// shows as actions, a tap that opens the list in [chooser].
@@ -79,6 +90,10 @@ typedef CancelNotification = Future<void> Function(int id);
 /// importance of a channel that already exists.
 const askChannel = 'questions';
 
+/// Device alerts (offline, back online, low battery) post here, apart from
+/// what automations say.
+const alertsChannel = 'alerts';
+
 /// Android shows at most three actions on a notification.
 const maxAskActions = 3;
 
@@ -104,7 +119,7 @@ class AutomationNotifier {
     CancelNotification? cancel,
     DateTime Function()? now,
     this._shows,
-  }) : _post = post ?? _platformPost,
+  }) : _post = post ?? platformPost,
        _postAsk = postAsk ?? _platformAsk,
        _cancel = cancel ?? _platformCancel,
        _now = now ?? DateTime.now;
@@ -130,17 +145,19 @@ class AutomationNotifier {
   /// posted twice.
   final _asks = <String>{};
   StreamSubscription<Map<String, Object?>>? _sub;
-  var _nextId = 1000;
 
   /// Automations whose failure was already posted, until a run goes well.
   final _failing = <String>{};
 
-  static Future<void> _platformPost({
+  /// Posts on the phone. [open] names a settings page a tap opens
+  /// (`location`, `alarms`) instead of the app.
+  static Future<void> platformPost({
     required String channel,
     required int id,
     required String title,
     String? body,
     String? link,
+    String? open,
   }) async {
     try {
       await _channel.invokeMethod<void>('post', {
@@ -149,6 +166,7 @@ class AutomationNotifier {
         'title': title,
         'body': ?body,
         'link': ?link,
+        'open': ?open,
       });
     } on MissingPluginException {
       // Not on the phone (tests, the desktop): nothing to show.
@@ -262,7 +280,65 @@ class AutomationNotifier {
     if (!_forHere(e)) return;
     final notice = noticeFor(e);
     if (notice == null || !_asks.add(notice.askId)) return;
-    await _postAsk(notice);
+    await _postAsk(
+      notice.body != null ? notice : await _withBody(notice, e['flow']),
+    );
+  }
+
+  /// An ask with no text of its own says which automation waits, and for
+  /// a plain Run or Not now, what each does, so its buttons have context.
+  Future<AskNotice> _withBody(AskNotice notice, Object? flow) async {
+    final name = flow == null ? null : await _nameOf('$flow');
+    final runOrNot =
+        notice.actions.length == 2 &&
+        notice.actions.first == 'Run' &&
+        notice.actions.last == 'Not now';
+    final body = switch ((name, runOrNot)) {
+      (final n?, true) => 'Tap Run to let $n go ahead, or Not now to skip it',
+      (final n?, false) => '$n is waiting for your answer',
+      (null, true) => 'Tap Run to let it go ahead, or Not now to skip it',
+      (null, false) => 'An automation is waiting for your answer',
+    };
+    return AskNotice(
+      id: notice.id,
+      askId: notice.askId,
+      title: notice.title,
+      body: body,
+      actions: notice.actions,
+      reply: notice.reply,
+      hint: notice.hint,
+      chooser: notice.chooser,
+      link: notice.link,
+      timeoutMs: notice.timeoutMs,
+    );
+  }
+
+  Future<String?> _nameOf(String flow) async {
+    try {
+      final got = await _engine.call('automation.get', {'id': flow});
+      return got['ok'] == true ? got['name'] as String? : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// A device alert, on its own channel so it mutes apart from what
+  /// automations say: one per device and kind, so "back online" replaces
+  /// "offline". The engine's words already say how long since it was last
+  /// heard from, so they are shown as sent.
+  Future<void> _alert(
+    String alert,
+    Map<String, Object?> e,
+    String title,
+  ) async {
+    final thing = '${e['thing'] ?? ''}';
+    final family = alert == 'battery' ? 'battery' : 'online';
+    await _post(
+      channel: alertsChannel,
+      id: 'alert/$thing/$family'.hashCode & 0x7fffffff,
+      title: title,
+      body: e['body'] as String?,
+    );
   }
 
   Future<void> stop() async {
@@ -285,12 +361,14 @@ class AutomationNotifier {
       case 'flow.announce':
         final title = '${e['title'] ?? ''}'.trim();
         if (title.isEmpty || !_forHere(e)) return;
+        if (e['alert'] case final String alert) return _alert(alert, e, title);
         // One notification per automation and title, updated in place, so
-        // a rule that fires often does not stack up to Android's limit.
+        // a rule that fires often, or a notice with no automation, does not
+        // stack up to Android's limit.
         final flow = e['flow'];
         await _post(
           channel: 'automations',
-          id: flow == null ? _nextId++ : '$flow/$title'.hashCode & 0x7fffffff,
+          id: '${flow ?? ''}/$title'.hashCode & 0x7fffffff,
           title: title,
           body: e['body'] as String?,
           link: flow == null ? null : automationLink('$flow'),

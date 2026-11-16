@@ -6,6 +6,7 @@ import '../../state/providers.dart';
 import '../automations/form_parts.dart';
 import '../automations/rule_words.dart' show valueText;
 import '../design/design.dart';
+import '../../api/screen_calls.dart';
 
 /// The values automations set for each other ($Away, $Mood), so one stuck
 /// at the wrong value can be seen, changed or cleared.
@@ -37,7 +38,7 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
   }
 
   Future<void> _load() async {
-    final r = await ref.read(engineClientProvider).call('var.list');
+    final r = await ref.read(engineClientProvider).call(VarCalls.list);
     if (!mounted) return;
     setState(() {
       if (r['ok'] == true && r['variables'] is Map) {
@@ -95,7 +96,7 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
       ],
     );
     if (picked == null || !mounted) return;
-    final r = await ref.read(engineClientProvider).call('var.set', {
+    final r = await ref.read(engineClientProvider).call(VarCalls.set, {
       'name': picked.$1,
       'value': picked.$2,
     });
@@ -116,7 +117,7 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
       destructive: true,
     );
     if (!ok || !mounted) return;
-    final r = await ref.read(engineClientProvider).call('var.remove', {
+    final r = await ref.read(engineClientProvider).call(VarCalls.remove, {
       'name': name,
     });
     if (!mounted) return;
@@ -146,10 +147,7 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
           if (_error case final e?)
             OmniBanner.error(e, actionLabel: 'Try again', onAction: _load)
           else if (vars == null)
-            const Padding(
-              padding: EdgeInsets.all(OmniSpace.xl),
-              child: Center(child: CircularProgressIndicator()),
-            )
+            const OmniListSkeleton(rows: 3, label: 'Loading variables')
           else ...[
             const Text(
               'Values automations set for each other to check. Change one '

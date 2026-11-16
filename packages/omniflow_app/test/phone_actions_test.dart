@@ -91,7 +91,11 @@ void main() {
         expect(hands.watched.single['shake'], isTrue);
         expect(hands.asked.single, ['gym']);
         await runner.sayReady();
-        expect(hands.watched, hasLength(1), reason: 'the same watch again');
+        // Sent on every ready, so a permission granted later in Settings
+        // starts the watch: the phone side registers only what is missing.
+        expect(hands.watched, hasLength(2));
+        expect(hands.watched.last, hands.watched.first);
+        expect(hands.asked, hasLength(1), reason: 'the calendar is not stale');
       },
     );
 

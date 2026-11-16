@@ -6,7 +6,7 @@
   "icon": "nfc",
   "transport": { "type": "virtual" },
   "settings": [
-    { "key": "uid", "label": "Tag UID, hex" }
+    { "key": "uid", "label": "Tag UID, hex", "help": "The tag's built-in serial number. OmniFlow reads it when you hold the phone to the tag, so you do not type it." }
   ],
   "capabilities": [
     { "id": "last_scanned", "type": "sensor", "label": "Last scanned", "stateJsonPath": "$.last_scanned" },

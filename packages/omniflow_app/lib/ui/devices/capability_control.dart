@@ -222,7 +222,7 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
           dense: true,
           contentPadding: EdgeInsets.zero,
           title: label,
-          subtitle: const Text('Something it does. Use it in a rule'),
+          subtitle: const Text('Something it does. Use it in an automation'),
         );
       default:
         return ListTile(

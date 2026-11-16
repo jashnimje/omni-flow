@@ -227,8 +227,16 @@ List<String> _list(String text) => [
 ];
 
 /// JSON when [text] is JSON (`true`, `80`, `{"app": "x"}`), else the text.
+/// On and yes are true, off and no are false, as the app reads them. A
+/// quoted `"on"` stays text.
 Object? _value(String text) {
   final t = text.trim();
+  switch (t.toLowerCase()) {
+    case 'on' || 'yes':
+      return true;
+    case 'off' || 'no':
+      return false;
+  }
   try {
     return jsonDecode(t);
   } on FormatException {

@@ -61,13 +61,16 @@ DateTime nextAlignedTime(
   final end = between == null ? 24 * 3600 : _minutes(between[1]) * 60;
   // The window's length; one that crosses midnight runs into the next day.
   final length = end > start ? end - start : end + 24 * 3600 - start;
+  // Now on the wall clock, in seconds from its own midnight. Slots are
+  // wall-clock seconds too, so a 23 or 25 hour day keeps them on the clock.
+  final wall = now.hour * 3600 + now.minute * 60 + now.second;
   // Yesterday's window may still be open after midnight.
   for (var day = -1; day <= 2; day++) {
     DateTime at(int second) =>
         DateTime(now.year, now.month, now.day + day, 0, 0, second);
     final first = start + offsetSeconds;
     // The pass at or after now, counted from this day's first time.
-    final since = now.difference(at(first)).inSeconds;
+    final since = wall - day * 24 * 3600 - first;
     var k = since < 0 ? 0 : since ~/ seconds;
     while (true) {
       final second = first + k * seconds;

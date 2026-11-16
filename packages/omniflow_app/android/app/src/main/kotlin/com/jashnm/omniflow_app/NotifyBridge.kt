@@ -5,7 +5,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import com.pravera.flutter_foreground_task.FlutterForegroundTaskLifecycleListener
@@ -15,9 +17,13 @@ import io.flutter.plugin.common.MethodChannel
 
 /**
  * The omniflow/notify method channel on the foreground service's engine:
- * a rule's notify step, a failed run and a question an automation asks
- * become real notifications, shown with the screen off and the app closed.
- * A tap opens the app.
+ * a rule's notify step, a failed run, a device alert and a question an
+ * automation asks become real notifications, shown with the screen off and
+ * the app closed. A tap opens the app.
+ *
+ * Every notification is posted under a tag (its channel, or the ask's), so
+ * ids only need to be unique within one kind and never collide across
+ * kinds, the service notification or the phone actions.
  */
 class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
     private val app = context.applicationContext
@@ -33,6 +39,7 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
                     call.argument<String>("title") ?: "OmniFlow",
                     call.argument<String>("body"),
                     call.argument<String>("link"),
+                    call.argument<String>("open"),
                 )
                 "ask" -> ask(
                     call.argument<Int>("id") ?: 0,
@@ -47,7 +54,17 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
                     (call.argument<Number>("timeoutMs"))?.toLong(),
                     call.argument<String>("group"),
                 )
-                "cancel" -> manager.cancel(call.argument<Int>("id") ?: 0)
+                "cancel" -> {
+                    val id = call.argument<Int>("id") ?: 0
+                    val tag = call.argument<String>("tag")
+                    if (tag == null) {
+                        // An ask, and the summary that keeps it on its own.
+                        manager.cancel(QUESTIONS, id)
+                        manager.cancel(ASK_SUMMARY, id)
+                    } else {
+                        manager.cancel(tag, id)
+                    }
+                }
                 else -> return@setMethodCallHandler result.notImplemented()
             }
             result.success(null)
@@ -74,18 +91,16 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
         timeoutMs: Long?,
         group: String?,
     ) {
-        if (Build.VERSION.SDK_INT >= 26) {
-            // The first asks went on a default-importance channel, and
-            // Android never raises a channel's importance, so it is replaced.
-            manager.deleteNotificationChannel(OLD_ASKS)
-            manager.createNotificationChannel(
-                NotificationChannel(QUESTIONS, "Questions from automations", NotificationManager.IMPORTANCE_HIGH)
-                    .apply { description = "An automation waits for your answer" },
-            )
-        }
-        // A heads-up with the answers as buttons. Each ask is its own group
-        // so Android does not bundle it with others, which hides the buttons.
-        // No full-screen intent: a question never takes over the screen.
+        // The first asks went on a default-importance channel, and Android
+        // never raises a channel's importance, so it is replaced.
+        manager.deleteNotificationChannel(OLD_ASKS)
+        manager.createNotificationChannel(
+            NotificationChannel(QUESTIONS, "Questions from automations", NotificationManager.IMPORTANCE_HIGH)
+                .apply { description = "An automation waits for your answer" },
+        )
+        val key = group ?: "ask/$askId"
+        // A heads-up with the answers as buttons. No full-screen intent: a
+        // question never takes over the screen.
         val builder = NotificationCompat.Builder(app, QUESTIONS)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(0xFF00F5D4.toInt())
@@ -95,8 +110,8 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setGroup(group ?: "ask/$askId")
-            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_ALL)
+            .setGroup(key)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
         if (timeoutMs != null && timeoutMs > 0) builder.setTimeoutAfter(timeoutMs)
@@ -122,37 +137,59 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
                 builder.addAction(NotificationCompat.Action.Builder(0, "Choose", it).build())
             }
         } else {
-            openIntent(id, link)
+            openIntent(id, link, null)
         }
         builder.setContentIntent(tap)
+        // A group with a summary and one child shows the child alone, with
+        // its buttons. Without the summary Android folds a lone grouped
+        // notification into the app's automatic bundle, two taps deep.
+        val summary = NotificationCompat.Builder(app, QUESTIONS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(0xFF00F5D4.toInt())
+            .setContentTitle(title)
+            .setContentText(body)
+            .setGroup(key)
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setSilent(true)
+            .setContentIntent(tap)
+        if (timeoutMs != null && timeoutMs > 0) summary.setTimeoutAfter(timeoutMs)
         try {
-            manager.notify(id, builder.build())
+            manager.notify(QUESTIONS, id, builder.build())
+            manager.notify(ASK_SUMMARY, id, summary.build())
         } catch (_: SecurityException) {
         }
     }
 
-    private fun openIntent(id: Int, link: String?): PendingIntent? {
-        val open = (
-            if (link != null && link.startsWith("omniflow://open/")) {
-                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)).setPackage(app.packageName)
+    /** A tap opens what the notification names: an omniflow://open/ link,
+     * one of Android's settings pages ([open]), or the app. */
+    private fun openIntent(id: Int, link: String?, open: String?): PendingIntent? {
+        val settings = when (open) {
+            "location" -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            "alarms" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", app.packageName, null))
             } else {
-                app.packageManager.getLaunchIntentForPackage(app.packageName)
+                null
             }
-            )?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        return open?.let { PendingIntent.getActivity(app, id, it, PendingIntent.FLAG_IMMUTABLE) }
+            else -> null
+        }
+        val intent = settings ?: if (link != null && link.startsWith("omniflow://open/")) {
+            Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(app.packageName)
+        } else {
+            app.packageManager.getLaunchIntentForPackage(app.packageName)
+        }
+        val launch = intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP) ?: return null
+        if (settings != null && launch.resolveActivity(app.packageManager) == null) return openIntent(id, link, null)
+        return PendingIntent.getActivity(app, id, launch, PendingIntent.FLAG_IMMUTABLE)
     }
 
-    private fun post(channel: String, id: Int, title: String, body: String?, link: String?) {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val (name, importance) = when (channel) {
-                PROBLEMS -> "Problems" to NotificationManager.IMPORTANCE_HIGH
-                else -> "From automations" to NotificationManager.IMPORTANCE_DEFAULT
-            }
-            manager.createNotificationChannel(NotificationChannel(channel, name, importance))
+    private fun post(channel: String, id: Int, title: String, body: String?, link: String?, open: String?) {
+        val (name, importance) = when (channel) {
+            PROBLEMS -> "Problems" to NotificationManager.IMPORTANCE_HIGH
+            ALERTS -> "Device alerts" to NotificationManager.IMPORTANCE_DEFAULT
+            else -> "From automations" to NotificationManager.IMPORTANCE_DEFAULT
         }
-        // A tap opens what the notification names (omniflow://open/...),
-        // which Flutter routes for a cold start and a running app alike.
-        val tap = openIntent(id, link)
+        manager.createNotificationChannel(NotificationChannel(channel, name, importance))
         val notification = NotificationCompat.Builder(app, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(0xFF00F5D4.toInt())
@@ -160,12 +197,12 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-            .setContentIntent(tap)
+            .setContentIntent(openIntent(id, link, open))
             .build()
         // Without the notification permission Android drops it, which is the
         // user's choice.
         try {
-            manager.notify(id, notification)
+            manager.notify(channel, id, notification)
         } catch (_: SecurityException) {
         }
     }
@@ -182,7 +219,9 @@ class NotifyBridge(context: Context) : FlutterForegroundTaskLifecycleListener {
         const val CHANNEL = "omniflow/notify"
         const val AUTOMATIONS = "automations"
         const val PROBLEMS = "problems"
+        const val ALERTS = "alerts"
         const val QUESTIONS = "questions"
+        const val ASK_SUMMARY = "questions/summary"
         private const val OLD_ASKS = "asks"
     }
 }

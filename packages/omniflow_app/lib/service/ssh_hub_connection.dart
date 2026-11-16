@@ -9,9 +9,11 @@ import 'hub_settings.dart';
 const hubClientName = 'omniflow-app';
 
 /// One connection to the hub over SSH through the engine's hub client:
-/// `omni hub attach` on an exec channel, the host key checked against the
-/// pin the user matched, the version checked, and a `hello` naming this
-/// phone.
+/// `omni hub attach --phone NAME` on an exec channel (the key's forced
+/// command), the host key checked against the one the user matched and
+/// nothing else, the version checked, and a `hello` naming this phone. The
+/// hub names the phone from the key, and a name that differs from this
+/// phone's is refused, so the readings never go out under another phone.
 HubSession sshHubSession({
   required HubSettings settings,
   required SecretStore secrets,
@@ -38,16 +40,35 @@ class _SshHubSession implements HubSession {
         'this phone has no hub key yet',
       );
     }
+    final matched = _settings.hostKey;
+    if (matched == null) {
+      // Never trust whatever answers: the key the user matched is the only
+      // one that counts, and without it the hub is set up again.
+      throw const HubConnectException(
+        'host_key',
+        'no host key was matched for the hub. Set the hub up again from '
+            'Settings',
+      );
+    }
     final HubConnection hub;
     try {
       hub = _hub = await connectSshHub(
         target: SshHubTarget(_settings.user, _settings.host, _settings.port),
         privateKeyPem: pem,
         secrets: _secrets,
+        expectedHostKey: matched,
         hello: {'client': hubClientName, 'phone': _settings.phone},
       );
     } on HubLinkException catch (e) {
       throw _plain(e);
+    }
+    if (hub.hubPhone case final named? when named != _settings.phone) {
+      await hub.close();
+      throw HubConnectException(
+        'not_allowed',
+        'the hub knows this phone\'s key as $named, not ${_settings.phone}. '
+            'Set the hub up again with the name $named',
+      );
     }
     try {
       final events = await hub.events();
@@ -63,9 +84,9 @@ class _SshHubSession implements HubSession {
       throw _plain(e);
     }
     return HubHello(
-      hostKey: await HostKeyPins(_secrets)
-          .pinned(_settings.host, _settings.port),
+      hostKey: matched,
       hubVersion: hub.hubVersion,
+      person: hub.hubPerson,
     );
   }
 

@@ -253,7 +253,11 @@ void main() {
       final saved = await store.settings();
       expect(saved?.host, '192.168.1.20');
       expect(saved?.hostKey, _offered);
-      expect(await store.pinnedHostKey(saved!), _offered);
+      expect(
+        await secrets.read(HostKeyPins.keyFor('192.168.1.20', 22)),
+        isNull,
+        reason: 'the matched key lives in the hub settings only',
+      );
     });
 
     testWidgets('a hub that refuses the key says to run the allow line, and '

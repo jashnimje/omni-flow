@@ -6,10 +6,10 @@
   "icon": "zigbee",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "friendlyName", "label": "Friendly name in Zigbee2MQTT" },
-    { "key": "baseTopic", "label": "Base topic, zigbee2mqtt unless changed" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "friendlyName", "label": "Friendly name in Zigbee2MQTT", "help": "The name the device has in Zigbee2MQTT, such as hallway_sensor.\nOpen the Zigbee2MQTT web page, then Devices, and copy the name shown in the list." },
+    { "key": "baseTopic", "label": "Base topic, zigbee2mqtt unless changed", "help": "The topic Zigbee2MQTT sends on. Leave it empty for zigbee2mqtt, unless you changed base_topic in its configuration." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:friendlyName", "configure:baseTopic?", "configure:username?", "secret:password?"],
   "statePush": {

@@ -2,82 +2,144 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../design/design.dart';
 import 'confetti.dart';
 import 'home_stats.dart';
-import 'week_bars.dart';
-import 'your_home_page.dart';
 
-/// Home's top card: what the automations did today, the week as small
-/// bars and the streak. A tap opens Your home. It celebrates each
-/// achievement the engine reports as newly earned. Nothing shows until the
-/// numbers load, or when the engine has none.
-class HomeTodayCard extends ConsumerWidget {
-  const HomeTodayCard({super.key});
+/// Celebrates each achievement the engine reports as newly earned, once
+/// per session. Home's hero calls it from its build.
+void listenForAchievements(BuildContext context, WidgetRef ref) {
+  ref.listen(homeStatsProvider, (_, next) {
+    final stats = next.value;
+    if (stats == null) return;
+    final shown = ref.read(celebratedProvider);
+    final fresh = [
+      for (final id in stats.newlyEarned)
+        if (shown.add(id)) id,
+    ];
+    if (fresh.isEmpty) return;
+    unawaited(celebrate(context, ref, message: earnedMessage(stats, fresh)));
+  });
+}
+
+/// Today's three numbers in Home's hero: what ran, the taps it saved and
+/// the streak, each in a small box. A screen reader hears them as one
+/// line, which [todaySpoken] gives.
+class HomeTodayNumbers extends StatelessWidget {
+  const HomeTodayNumbers({super.key, required this.stats});
+
+  final HomeStats stats;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    ref.listen(homeStatsProvider, (_, next) {
-      final stats = next.value;
-      if (stats == null) return;
-      final shown = ref.read(celebratedProvider);
-      final fresh = [
-        for (final id in stats.newlyEarned)
-          if (shown.add(id)) id,
-      ];
-      if (fresh.isEmpty) return;
-      unawaited(celebrate(context, ref, message: earnedMessage(stats, fresh)));
-    });
-    final stats = ref.watch(homeStatsProvider).value;
-    if (stats == null) return const SizedBox.shrink();
-    final line = todayLine(stats);
-    return OmniCard(
-      key: const ValueKey('home-today'),
-      onTap: () => openYourHome(context),
-      child: Semantics(
-        button: true,
-        label:
-            '${line.title}. ${line.detail}. '
-            '${stats.streak == 1 ? '1 day' : '${stats.streak} days'} in a row',
-        hint: 'Opens Your home',
-        excludeSemantics: true,
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Your home today', style: OmniText.caption),
-                  const SizedBox(height: 2),
-                  Text(line.title, style: OmniText.bodyStrong),
-                  Text(
-                    line.detail,
-                    key: const ValueKey('home-today-detail'),
-                    style: OmniText.caption.copyWith(
-                      color: OmniColors.onAccentSoft,
-                    ),
-                  ),
-                ],
-              ),
+  Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
+    final streak = stats.streak;
+    return ExcludeSemantics(
+      child: Row(
+        key: const ValueKey('home-today'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: _Number(
+              key: const ValueKey('home-today-ran'),
+              value: '${stats.today.automationsRun}',
+              label: 'ran today',
+              ink: palette.onAccentSoft,
             ),
-            const SizedBox(width: OmniSpace.md),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                StreakFlame(days: stats.streak),
-                const SizedBox(height: OmniSpace.xs),
-                WeekBars(runs: [for (final d in stats.days) d.runs]),
-              ],
+          ),
+          const SizedBox(width: OmniSpace.sm),
+          Expanded(
+            child: _Number(
+              key: const ValueKey('home-today-taps'),
+              value: '${stats.today.tapsSaved}',
+              label: stats.today.tapsSaved == 1 ? 'tap saved' : 'taps saved',
+              ink: palette.onAccentSoft,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: OmniSpace.sm),
+          Expanded(
+            child: _Number(
+              key: const ValueKey('home-today-streak'),
+              value: '$streak',
+              label: 'day streak',
+              ink: palette.onAccentSoft,
+              icon: streak > 0 ? Symbols.local_fire_department_rounded : null,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// The card's two lines: what ran today, and the taps it saved.
+/// The three numbers as a screen reader hears them.
+String todaySpoken(HomeStats stats) {
+  final line = todayLine(stats);
+  final streak = stats.streak == 1 ? '1 day' : '${stats.streak} days';
+  return '${line.title}. ${line.detail}. $streak in a row';
+}
+
+/// One of the hero's numbers: the figure big, what it counts under it.
+class _Number extends StatelessWidget {
+  const _Number({
+    super.key,
+    required this.value,
+    required this.label,
+    required this.ink,
+    this.icon,
+  });
+
+  /// The shade the boxes add over the hero's gradient.
+  static const shade = Color(0x38000000);
+
+  final String value;
+  final String label;
+  final Color ink;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(10, OmniSpace.sm, 10, OmniSpace.sm),
+    decoration: BoxDecoration(
+      color: shade,
+      borderRadius: BorderRadius.circular(OmniShape.md),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 18, fill: 1, color: OmniColors.trigger),
+              const SizedBox(width: 2),
+            ],
+            Flexible(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: OmniText.titleMedium.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: OmniText.caption.copyWith(color: ink),
+        ),
+      ],
+    ),
+  );
+}
+
+/// What ran today and the taps it saved, in two lines.
 ({String title, String detail}) todayLine(HomeStats stats) {
   final today = stats.today;
   if (today.automationsRun == 0) {

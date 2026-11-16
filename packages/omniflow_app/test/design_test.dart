@@ -424,7 +424,7 @@ void main() {
         children: [
           const OmniBanner.info('Nothing was sent.'),
           OmniBanner.warning(
-            'Claude made "Movie night". Review before it can run.',
+            'An agent made "Movie night". Review before it can run.',
             actionLabel: 'Review',
             onAction: () => acted++,
           ),

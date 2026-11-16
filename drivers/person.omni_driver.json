@@ -5,7 +5,7 @@
   "category": "presence",
   "icon": "person",
   "transport": { "type": "virtual" },
-  "settings": [{ "key": "homePlace", "label": "Place that counts as home (default home)" }],
+  "settings": [{ "key": "homePlace", "label": "Place that counts as home (default home)", "help": "The place that counts as home for this person. Leave it empty to use the place called home.\nPlaces are in Settings, Places and people." }],
   "capabilities": [
     { "id": "home", "type": "sensor", "label": "At home", "stateJsonPath": "$.home" },
     { "id": "place", "type": "sensor", "label": "Place", "stateJsonPath": "$.place" },

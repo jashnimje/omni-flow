@@ -50,7 +50,7 @@ void main() {
     expect(find.text('All 5'), findsOneWidget);
     expect(find.text('Needs you 1'), findsOneWidget);
     expect(
-      find.text('Claude made "Movie night". Review before it can run.'),
+      find.text('An agent made "Movie night". Review before it can run.'),
       findsOneWidget,
     );
     expect(
@@ -322,7 +322,7 @@ void main() {
       expect(find.text('Bedtime'), findsOneWidget);
       await tapKey(tester, 'new-blank-rule');
       expect(find.byType(RuleEditorPage), findsOneWidget);
-      expect(find.text('New rule'), findsOneWidget);
+      expect(find.text('New automation'), findsOneWidget);
     });
 
     testWidgets('a template is filled with picked things and opens in the '

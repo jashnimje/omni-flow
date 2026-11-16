@@ -39,20 +39,16 @@ class SecureStorageSecretStore implements SecretStore {
 
   final FlutterSecureStorage _storage;
 
-  /// A value the keystore cannot decrypt (its key stayed on another phone)
-  /// is dropped, so the engine reports the secret as missing and asks for it
-  /// again instead of failing every call.
+  /// A keystore read that fails throws [SecretReadException] and keeps the
+  /// entry. The failure can be passing (the keystore busy or locked), and
+  /// dropping the entry then would wipe the hub settings or a device's key
+  /// for good. Saving the secret again replaces a value that cannot be read.
   @override
   Future<String?> read(String key) async {
     try {
       return await _storage.read(key: key);
-    } on PlatformException {
-      try {
-        await _storage.delete(key: key);
-      } on PlatformException {
-        // The next write replaces it.
-      }
-      return null;
+    } on PlatformException catch (e) {
+      throw SecretReadException(key, e.code);
     }
   }
 
@@ -62,4 +58,20 @@ class SecureStorageSecretStore implements SecretStore {
 
   @override
   Future<void> delete(String key) => _storage.delete(key: key);
+}
+
+/// The phone's keystore could not read the secret [key]. It is kept as it
+/// was, so trying again later can work.
+class SecretReadException implements Exception {
+  const SecretReadException(this.key, [this.code]);
+
+  final String key;
+
+  /// The platform's error code, for the log.
+  final String? code;
+
+  @override
+  String toString() =>
+      'This phone could not read a saved key ($key). It is kept. Try again, '
+      'or enter it again if it was saved on another phone';
 }

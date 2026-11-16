@@ -1,4 +1,5 @@
 import 'adb_commands.dart';
+import 'app_labels.dart';
 
 /// Starts each section of a combined shell run, so one round trip reads
 /// several things. Device output does not print it.
@@ -125,29 +126,14 @@ final Map<String, String> tvAppsCommands = {
   'launcher':
       'cmd package query-activities --brief -a android.intent.action.MAIN '
       '-c android.intent.category.LAUNCHER',
-};
-
-/// Names for apps the package name does not make plain.
-const _knownLabels = {
-  'com.netflix.ninja': 'Netflix',
-  'com.google.android.youtube.tv': 'YouTube',
-  'com.google.android.youtube.tvmusic': 'YouTube Music',
-  'com.google.android.youtube.tvkids': 'YouTube Kids',
-  'com.amazon.amazonvideo.livingroom': 'Prime Video',
-  'com.graymatrix.did': 'ZEE5',
-  'in.startv.hotstar': 'JioHotstar',
-  'com.sonyliv': 'Sony LIV',
-  'com.jio.media.jiotvplus': 'JioTV+',
-  'com.mxtech.videoplayer.television': 'MX Player',
-  'com.shemaroo.shemarootv': 'ShemarooMe',
-  'com.spotify.tv.android': 'Spotify',
-  'com.disney.disneyplus': 'Disney+',
-  'com.android.vending': 'Google Play Store',
-  'com.android.tv.settings': 'Settings',
-  'com.google.android.apps.tv.launcherx': 'Google TV Home',
-  'com.google.android.katniss': 'Google Assistant',
-  'com.google.android.videos': 'Google TV',
-  'com.google.android.play.games': 'Google Play Games',
+  // The full launcher queries carry each app's label when it is plain
+  // text in its manifest. A label kept as a resource prints null.
+  'labels': [
+    for (final category in ['LEANBACK_LAUNCHER', 'LAUNCHER'])
+      'cmd package query-activities -a android.intent.action.MAIN '
+          '-c android.intent.category.$category '
+          "| grep -E 'packageName=|nonLocalizedLabel='",
+  ].join('; '),
 };
 
 final _packageLine = RegExp(r'^  Package \[([^\]]+)\]');
@@ -171,6 +157,7 @@ List<Map<String, Object?>> parseTvApps(Map<String, String> sections) {
     ...parseLaunchable(sections['leanback'] ?? ''),
     ...parseLaunchable(sections['launcher'] ?? ''),
   };
+  final labels = parseActivityLabels(sections['labels'] ?? '');
   final apps = <String, Map<String, Object?>>{};
   Map<String, Object?>? current;
   for (final line in (sections['packages'] ?? '').split('\n')) {
@@ -181,7 +168,7 @@ List<Map<String, Object?>> parseTvApps(Map<String, String> sections) {
           ? null
           : (apps[package] = {
               'package': package,
-              'label': ?_knownLabels[package],
+              'label': appLabelFor(package, label: labels[package]),
               'versionName': null,
               'versionCode': null,
               'system': false,

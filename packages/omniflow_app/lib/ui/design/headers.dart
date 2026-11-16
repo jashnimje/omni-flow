@@ -83,6 +83,7 @@ class OmniScreenTitle extends StatelessWidget {
     this.subtitle,
     this.actions = const [],
     this.collapse = 0,
+    this.reveal = false,
   });
 
   final String title;
@@ -90,9 +91,38 @@ class OmniScreenTitle extends StatelessWidget {
   final List<Widget> actions;
   final double collapse;
 
+  /// The page shows its own big title (Home's hero), so this one stays
+  /// small and fades in as [collapse] reaches 1, with no subtitle.
+  final bool reveal;
+
   @override
   Widget build(BuildContext context) {
     final t = collapse.clamp(0.0, 1.0);
+    if (reveal) {
+      return Padding(
+        padding: const EdgeInsetsDirectional.only(start: 2),
+        child: Row(
+          children: [
+            Expanded(
+              child: t == 0
+                  ? const SizedBox(height: OmniSpace.target)
+                  : ExcludeSemantics(
+                      child: Opacity(
+                        opacity: t,
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: OmniText.screenTitle,
+                        ),
+                      ),
+                    ),
+            ),
+            ...actions,
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: EdgeInsetsDirectional.fromSTEB(
         2,
@@ -376,6 +406,7 @@ class OmniTabPage extends StatelessWidget {
     this.subtitle,
     this.actions = const [],
     this.padded = true,
+    this.heroTitle = false,
   });
 
   final String title;
@@ -383,6 +414,10 @@ class OmniTabPage extends StatelessWidget {
   final List<Widget> actions;
   final Widget body;
   final bool padded;
+
+  /// [body] opens with its own big title (Home's hero), so the bar holds
+  /// only [actions] until the page scrolls ([OmniScreenTitle.reveal]).
+  final bool heroTitle;
 
   @override
   Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
@@ -398,6 +433,7 @@ class OmniTabPage extends StatelessWidget {
               subtitle: subtitle,
               actions: actions,
               collapse: collapse,
+              reveal: heroTitle,
             ),
           ),
           child: padded

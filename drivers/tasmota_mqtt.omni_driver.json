@@ -6,9 +6,9 @@
   "icon": "power",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "topic", "label": "Tasmota topic (Configuration, MQTT, Topic)" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "topic", "label": "Tasmota topic (Configuration, MQTT, Topic)", "help": "The device's MQTT topic, such as tasmota_A1B2C3.\nOpen the device's web page, then Configuration, MQTT, and copy Topic." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:topic", "configure:username?", "secret:password?"],
   "statePush": {

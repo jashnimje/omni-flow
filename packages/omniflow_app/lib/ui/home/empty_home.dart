@@ -8,6 +8,7 @@ import '../add/guided_steps_page.dart';
 import '../add/name_sheet.dart';
 import '../design/design.dart';
 import '../devices/device_text.dart';
+import '../onboarding/start_options.dart';
 
 /// 8.2: Home with nothing added. It looks on the Wi-Fi at once and offers
 /// what it found, each with Add.
@@ -118,6 +119,8 @@ class _EmptyHomeState extends ConsumerState<EmptyHome> {
               label: 'Add something else',
               onPressed: () => openAddThing(context),
             ),
+            const SizedBox(height: OmniSpace.md),
+            const StartOptions(),
           ],
         ),
       ),

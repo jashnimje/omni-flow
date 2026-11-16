@@ -60,9 +60,32 @@ void main() {
     };
     await pumpTv(tester, engine);
     await openTvTab(tester, 'Apps');
-    expect(inList('Example'), findsOneWidget);
-    expect(inList('E'), findsOneWidget);
+    expect(inList('Player'), findsOneWidget);
+    expect(inList('P'), findsOneWidget);
     expect(inList('com.example.player · 2.0'), findsOneWidget);
+  });
+
+  testWidgets('All lists system packages last, under System apps', (
+    tester,
+  ) async {
+    engine.answers['tv.apps'] = {
+      'ok': true,
+      'apps': [
+        {'package': 'com.google.android.gms', 'system': true},
+        {'package': 'com.netflix.ninja', 'label': 'Netflix'},
+      ],
+    };
+    await pumpTv(tester, engine);
+    await openTvTab(tester, 'Apps');
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+    final header = tester.getTopLeft(inList('System apps').last);
+    expect(tester.getTopLeft(inList('Netflix')).dy, lessThan(header.dy));
+    expect(
+      tester.getTopLeft(inList('Google Play services')).dy,
+      greaterThan(header.dy),
+      reason: 'named, not "Gms"',
+    );
   });
 
   testWidgets('an empty filter says so', (tester) async {

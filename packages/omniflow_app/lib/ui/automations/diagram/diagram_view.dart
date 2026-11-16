@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/semantics.dart';
 
 import '../../../api/diagram_calls.dart';
@@ -45,6 +46,46 @@ String plusLabel(DiagramInsert insert) => switch (insert.as) {
   _ => 'Add a step here',
 };
 
+/// The layouts worked out lately, by the shape of their diagram, so a
+/// rebuild or a run lighting one more node does not lay it all out again.
+final _layouts = <String, DiagramLayout>{};
+const _keptLayouts = 24;
+
+/// [diagram]'s layout, worked out once per shape. A run's marks (what ran,
+/// what it saw) change the colours, not the places, except that a check
+/// that saw something is taller, so that is part of the shape.
+DiagramLayout layoutOf(Diagram diagram) {
+  final key = _shapeOf(diagram);
+  final kept = _layouts.remove(key);
+  final layout = kept ?? DiagramLayout.of(diagram);
+  _layouts[key] = layout;
+  if (_layouts.length > _keptLayouts) _layouts.remove(_layouts.keys.first);
+  return layout;
+}
+
+String _shapeOf(Diagram d) => [
+  for (final n in d.nodes)
+    [
+      n.id,
+      n.kind,
+      n.words,
+      n.group,
+      n.lane,
+      n.children.join(','),
+      n.seen != null,
+    ].join('\u0001'),
+  '',
+  for (final e in d.edges)
+    [
+      e.from,
+      e.to,
+      e.label,
+      e.insert?.path,
+      e.insert?.as,
+      e.alsoInsert?.path,
+    ].join('\u0001'),
+].join('\u0002');
+
 /// The diagram drawn at its laid-out size: lines and boxes painted, nodes
 /// and "+" buttons on top, at their places.
 class DiagramCanvas extends StatelessWidget {
@@ -53,16 +94,25 @@ class DiagramCanvas extends StatelessWidget {
     required this.diagram,
     required this.layout,
     this.handlers = const DiagramHandlers(),
+    this.scale = 1,
   });
 
   final Diagram diagram;
   final DiagramLayout layout;
   final DiagramHandlers handlers;
 
+  /// The zoom the canvas is shown at, so each "+" keeps a tap area of
+  /// [OmniSpace.target] on screen however far it is zoomed out.
+  final double scale;
+
   @override
   Widget build(BuildContext context) {
     final h = handlers;
     final order = {for (final (i, id) in layout.order.indexed) id: i};
+    final hit = math.max(
+      DiagramPlus.drawn,
+      OmniSpace.target / (scale <= 0 ? 1 : scale),
+    );
     return SizedBox.fromSize(
       key: const ValueKey('diagram-canvas'),
       size: layout.size,
@@ -98,17 +148,21 @@ class DiagramCanvas extends StatelessWidget {
               ),
           if (h.onPlus != null)
             for (final r in layout.edges)
-              if (r.edge.insert case final insert?)
-                Positioned(
-                  left: r.plusAt.dx - DiagramPlus.size / 2,
-                  top: r.plusAt.dy - DiagramPlus.size / 2,
-                  child: DiagramPlus(
-                    key: ValueKey('diagram-plus-${r.index}'),
-                    label: plusLabel(insert),
-                    order: order[r.edge.from] ?? 0,
-                    onTap: () => h.onPlus!(r.edge),
+              // The edge of this diagram, not of the one the layout was
+              // first worked out for, so the insert path is current.
+              if (diagram.edges.elementAtOrNull(r.index) case final edge?)
+                if (edge.insert case final insert?)
+                  Positioned(
+                    left: r.plusAt.dx - hit / 2,
+                    top: r.plusAt.dy - hit / 2,
+                    child: DiagramPlus(
+                      key: ValueKey('diagram-plus-${r.index}'),
+                      label: plusLabel(insert),
+                      order: order[edge.from] ?? 0,
+                      size: hit,
+                      onTap: () => h.onPlus!(edge),
+                    ),
                   ),
-                ),
         ],
       ),
     );
@@ -142,7 +196,10 @@ class DiagramViewer extends StatefulWidget {
 
 class DiagramViewerState extends State<DiagramViewer> {
   final _transform = TransformationController();
-  late DiagramLayout _layout = DiagramLayout.of(widget.diagram);
+  late DiagramLayout _layout = layoutOf(widget.diagram);
+
+  /// The scale the "+" tap areas were last sized for.
+  var _plusScale = 1.0;
   Size? _viewport;
   var _fitted = false;
   bool? _asList;
@@ -156,13 +213,36 @@ class DiagramViewerState extends State<DiagramViewer> {
   void didUpdateWidget(DiagramViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.diagram != widget.diagram) {
-      _layout = DiagramLayout.of(widget.diagram);
+      _layout = layoutOf(widget.diagram);
     }
   }
 
   @override
+  void initState() {
+    super.initState();
+    _transform.addListener(_onTransform);
+  }
+
+  /// Resizes the "+" tap areas once the zoom moved by a tenth, not on
+  /// every frame of a pan.
+  void _onTransform() {
+    final s = scale;
+    if (s <= 0 || (s - _plusScale).abs() / _plusScale < 0.1) return;
+    // The fit on first layout sets the zoom while the tree builds.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) => _onTransform());
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _plusScale = s);
+  }
+
+  @override
   void dispose() {
-    _transform.dispose();
+    _transform
+      ..removeListener(_onTransform)
+      ..dispose();
     super.dispose();
   }
 
@@ -246,6 +326,7 @@ class DiagramViewerState extends State<DiagramViewer> {
                           diagram: widget.diagram,
                           layout: _layout,
                           handlers: widget.handlers,
+                          scale: _plusScale,
                         ),
                       ),
                     );
@@ -271,7 +352,7 @@ class DiagramPicture extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final layout = DiagramLayout.of(diagram);
+    final layout = layoutOf(diagram);
     if (MediaQuery.accessibleNavigationOf(context)) {
       return DiagramList(
         diagram: diagram,

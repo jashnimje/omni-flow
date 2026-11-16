@@ -87,6 +87,25 @@ omni phone battery 15 unplugged
 omni board periph /dev/cu.usbserial-110 nfc_rc522 --pin ss=8 --pin rst=9
 ```
 
+Automations, the home helpers, a phone paired by code and a board on USB, with the same commands as the app:
+
+```sh
+omni automation run evening               # as Run it now: a time-only rule runs from its first trigger
+omni automation diagram evening --run last # the diagram as an indented tree, the last run marked
+omni automation remove evening            # kept 30 days: omni automation removed, omni automation unremove evening
+omni energy summary --days 7
+omni energy price 8.5 Rs                  # --clear takes it away
+omni weather add --room Garden            # after omni home location set
+omni sunlight set desk living --on --min-k 2400 --max-k 5000
+omni away set desk hall --on
+omni away preview 2026-11-20
+omni android find                         # phones with Wireless debugging on
+omni android pair 192.168.1.30 37123      # reads the six-digit code from stdin
+omni tv phone notifications collapse
+omni device move lamp 192.168.1.44        # found again at a new address, keeps its name, room and automations
+omni board ports
+```
+
 After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build --delete-conflicting-outputs`.
 
 Flows. Save the sample flow from `docs/DESIGN.md` (Flows, Schema v1) to a file first. Its id is `flow_arrive_desk_evening`.

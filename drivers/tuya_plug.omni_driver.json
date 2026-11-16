@@ -7,9 +7,9 @@
   "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
   "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
   "settings": [
-    { "key": "devId", "label": "Device id" },
-    { "key": "localKey", "label": "Local key", "secret": true },
-    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5" }
+    { "key": "devId", "label": "Device id", "help": "The Tuya id of this device, about 20 letters and numbers. OmniFlow fills it in when it finds the device on your Wi-Fi.\nIf it is empty, open the device in the Smart Life or Wipro app, tap the pencil or the three dots, then Device information, and copy Virtual ID. The tinytuya wizard in the local key steps lists it too." },
+    { "key": "localKey", "label": "Local key", "secret": true, "help": "A 16 character key the device uses to lock its messages. It is not in the Smart Life or Wipro app, so you get it once with a computer. It stays on this phone.\n1. Make sure the device works in the Smart Life app. A Wipro device works with Smart Life too: add it there, or keep the Wipro app if it lets you link below.\n2. On a computer, make a free account at iot.tuya.com. Open Cloud, Development, Create Cloud Project. Pick Smart Home and the data centre for your country (India for Wipro bought in India).\n3. In the project, open Devices, Link App Account, Add App Account. Scan the code with the Smart Life app (Me, then the scan icon). Your devices now show in the project.\n4. On the same computer, install Python, then run pip install tinytuya and python -m tinytuya wizard. Paste the Access ID and Access Secret from the project's Overview when it asks.\n5. The wizard prints each device with its id and local key. Copy the key for this device and paste it here.\nRemoving the device from the app and adding it again makes a new key, so run the wizard again after that. Close the Smart Life app while OmniFlow talks to the device, because it takes one connection at a time." },
+    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5", "help": "Which Tuya protocol the device speaks. Leave it empty for 3.3, which most plugs and bulbs use.\nIf commands time out, try 3.4, then 3.5. python -m tinytuya scan on a computer shows the version of each device." }
   ],
   "setup": ["configure:devId", "secret:localKey", "configure:version?"],
   "statePush": { "jsonPath": "$.dps" },

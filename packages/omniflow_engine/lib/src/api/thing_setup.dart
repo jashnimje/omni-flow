@@ -123,6 +123,8 @@ Map<String, Object?> _keyJson(DriverManifest manifest, SetupStep step) => {
   'key': ?step.key,
   if (step.key != null)
     'label': manifest.settings.firstWhere((s) => s.key == step.key).label,
+  if (step.key != null)
+    'help': ?manifest.settings.firstWhere((s) => s.key == step.key).help,
   if (step.optional) 'optional': true,
 };
 

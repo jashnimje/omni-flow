@@ -6,6 +6,7 @@ import '../../state/providers.dart';
 import '../add/add_page.dart';
 import '../design/design.dart';
 import '../home/home_data.dart';
+import '../help/screen_help.dart';
 import '../shell/shell.dart';
 import 'device_text.dart';
 import 'open_device.dart';
@@ -233,6 +234,7 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
           onPressed: () =>
               ref.read(shellControllerProvider).open(const SearchLink()),
         ),
+        const ScreenHelpButton(HelpScreen.devices),
       ],
       body: !twoPanes
           ? list
@@ -266,6 +268,7 @@ class _SearchField extends StatelessWidget {
       key: const ValueKey('devices-filter'),
       controller: controller,
       textInputAction: TextInputAction.search,
+      onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
       decoration: InputDecoration(
         hintText: 'Find a device',
         prefixIcon: const Icon(OmniIcons.search, color: OmniColors.muted),
@@ -392,8 +395,12 @@ class _DeviceList extends ConsumerWidget {
                 ),
                 dot: statusOf(d),
                 selected: selected == d.id,
-                onTap: () =>
-                    onOpen == null ? openDevice(context, d.id) : onOpen!(d.id),
+                onTap: () {
+                  // Unfocused first, so coming back does not bring the
+                  // keyboard up for the search field again.
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  onOpen == null ? openDevice(context, d.id) : onOpen!(d.id);
+                },
               ),
           ],
         ],

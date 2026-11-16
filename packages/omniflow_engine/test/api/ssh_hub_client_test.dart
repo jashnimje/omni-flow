@@ -470,6 +470,96 @@ void main() {
       );
     });
 
+    test('a phone key over sshd cannot run anything on the Mac', () async {
+      final hub = await connectSshHub(
+        target: target(),
+        privateKeyPem: File(clientKey).readAsStringSync(),
+        secrets: secrets,
+        hello: const {'client': 'test', 'phone': 'someone_else'},
+      );
+      expect(hub.hubPhone, 'test_phone');
+      final marker = File('${dir.path}/ran.txt');
+      final register = await hub.handle('driver.register', {
+        'manifest': {
+          'schemaVersion': 1,
+          'id': 'probe_host',
+          'name': 'Probe',
+          'category': 'computer',
+          'transport': {'type': 'exec'},
+          'capabilities': [
+            {
+              'id': 'run',
+              'type': 'action',
+              'label': 'Run',
+              'command': ['/bin/sh', '-c', 'echo ran > ${marker.path}'],
+            },
+          ],
+        },
+      });
+      expect((register['error'] as Map)['type'], 'not_allowed');
+      final local = await hub.handle('device.add', {
+        'id': 'probe',
+        'driver': 'person',
+        'host': 'local',
+      });
+      expect((local['error'] as Map)['type'], 'not_allowed');
+      expect(marker.existsSync(), isFalse);
+      expect(
+        engine.hubClients.list(),
+        contains(
+          allOf(
+            containsPair('phone', 'test_phone'),
+            containsPair('session', 'phone'),
+          ),
+        ),
+      );
+      await hub.close();
+    });
+
+    test('the matched host key is required, and nothing is pinned', () async {
+      final hub = await connectSshHub(
+        target: target(),
+        privateKeyPem: File(clientKey).readAsStringSync(),
+        secrets: secrets,
+        expectedHostKey: 'ssh-ed25519 $hostFingerprint',
+      );
+      await hub.close();
+      expect(await secrets.read('ssh/hostkey/127.0.0.1:$port'), isNull);
+      await expectLater(
+        connectSshHub(
+          target: target(),
+          privateKeyPem: File(clientKey).readAsStringSync(),
+          secrets: secrets,
+          expectedHostKey: 'ssh-ed25519 SHA256:notthisone',
+        ),
+        throwsA(
+          isA<HubLinkException>()
+              .having((e) => e.type, 'type', 'host_key')
+              .having(
+                (e) => e.details,
+                'details',
+                containsPair('offered', 'ssh-ed25519 $hostFingerprint'),
+              ),
+        ),
+      );
+      expect(await secrets.read('ssh/hostkey/127.0.0.1:$port'), isNull);
+    });
+
+    test('a pin that cannot be read stops instead of trusting', () async {
+      await expectLater(
+        connectSshHub(
+          target: target(),
+          privateKeyPem: File(clientKey).readAsStringSync(),
+          secrets: _BrokenSecrets(),
+        ),
+        throwsA(
+          isA<HubLinkException>()
+              .having((e) => e.type, 'type', 'host_key')
+              .having((e) => e.message, 'message', contains('cannot read')),
+        ),
+      );
+    });
+
     test('a key that was not allowed is refused', () async {
       final stranger = await keygen('stranger');
       await expectLater(
@@ -509,6 +599,21 @@ void main() {
       );
     });
   }, skip: _sshdSkip());
+}
+
+/// A keystore that fails every read, as Android's can after a restore.
+class _BrokenSecrets implements SecretStore {
+  final written = <String, String>{};
+
+  @override
+  Future<String?> read(String key) async =>
+      throw const FileSystemException('the keystore is locked');
+
+  @override
+  Future<void> write(String key, String value) async => written[key] = value;
+
+  @override
+  Future<void> delete(String key) async => written.remove(key);
 }
 
 String? _sshdSkip() {

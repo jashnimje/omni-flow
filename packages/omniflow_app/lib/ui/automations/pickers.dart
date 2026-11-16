@@ -12,6 +12,7 @@ import '../../service/installed_apps.dart';
 import '../../service/permissions.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import '../settings/home_location_page.dart' show HomeLocationPage;
 import 'form_parts.dart';
 import 'library_sheet.dart';
 import 'phone_words.dart';
@@ -19,6 +20,9 @@ import 'rule_words.dart';
 import 'rules_core_forms.dart';
 import 'timer_forms.dart';
 import 'token_field.dart';
+import 'web_headers.dart';
+import '../../api/home_location_calls.dart' show HomeLocationCalls;
+import '../../api/screen_calls.dart';
 
 part 'trigger_pickers.dart';
 part 'condition_pickers.dart';
@@ -319,7 +323,7 @@ class _KnownVariables extends ConsumerStatefulWidget {
 
 class _KnownVariablesState extends ConsumerState<_KnownVariables> {
   late final Future<List<String>> _names = () async {
-    final r = await ref.read(engineClientProvider).call('var.list');
+    final r = await ref.read(engineClientProvider).call(VarCalls.list);
     final vars = r['variables'];
     return [
       if (vars is Map)

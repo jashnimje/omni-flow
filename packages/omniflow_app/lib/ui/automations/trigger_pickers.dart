@@ -181,7 +181,7 @@ Future<RuleTrigger?> pickTrigger(
         LibraryChoice(
           key: 'pick-manual',
           title: 'Only when I run it',
-          subtitle: 'from the list, a scene button or another rule',
+          subtitle: 'from the list, a scene button or another automation',
           icon: OmniIcons.action,
           category: time,
           onTap: (c) async => Navigator.of(c).pop(const ManualTrigger()),
@@ -700,7 +700,7 @@ Future<TimeTrigger?> timeTriggerForm(
 Future<({String sunrise, String sunset})?> _sunToday(
   EngineClient engine,
 ) async {
-  final r = await engine.call('home.location');
+  final r = await engine.call(HomeLocationCalls.get);
   if (r['ok'] != true || r['location'] == null) return null;
   final today = r['today'] is Map ? r['today'] as Map : const {};
   String clock(Object? at) {
@@ -785,7 +785,7 @@ Future<SunTrigger?> sunTriggerForm(
               );
               return;
             }
-            final r = await engine.call('home.location.set', {
+            final r = await engine.call(HomeLocationCalls.set, {
               'latitude': here.latitude,
               'longitude': here.longitude,
             });
@@ -793,6 +793,17 @@ Future<SunTrigger?> sunTriggerForm(
               setState(() => locating = errorMessage(r));
               return;
             }
+            final now = await _sunToday(engine);
+            setState(() => today = now);
+          },
+        ),
+        OmniButton.ghost(
+          key: const ValueKey('sun-home-location'),
+          label: 'Type where home is',
+          onPressed: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const HomeLocationPage()),
+            );
             final now = await _sunToday(engine);
             setState(() => today = now);
           },

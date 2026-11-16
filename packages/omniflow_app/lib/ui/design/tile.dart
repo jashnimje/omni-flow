@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'card.dart' show OmniSheen;
 import 'icons.dart';
 import 'skeleton.dart';
 import 'tokens.dart';
@@ -28,6 +29,7 @@ class OmniTile extends StatefulWidget {
     this.pending = false,
     this.level,
     this.tint,
+    this.wash,
     this.onTap,
     this.onIconTap,
     this.iconLabel,
@@ -50,6 +52,10 @@ class OmniTile extends StatefulWidget {
   /// The device's own colour while on (a light's colour). Null uses the
   /// accent.
   final Color? tint;
+
+  /// The tile's own colour (a room's), washed in from its top corner
+  /// while it is not lit ([OmniDepth.wash]).
+  final Color? wash;
   final VoidCallback? onTap;
 
   /// Switches the device. Null leaves the icon as decoration.
@@ -82,13 +88,17 @@ class _OmniTileState extends State<OmniTile> {
         ? mutedTint(tint, palette.card, amount: 0.2)
         : palette.card;
     final fill = lit ? mutedTint(tint, palette.card, amount: 0.38) : base;
-    final border = lit ? Color.lerp(palette.card, tint, 0.55)! : palette.line;
+    final washed = !lit && w.wash != null;
+    final border = lit ? Color.lerp(palette.card, tint, 0.55)! : null;
     final radius = BorderRadius.circular(OmniRadii.tile);
     final spring = OmniMotion.springFast;
     final reduced = OmniMotion.reduced(context);
     final level = lit ? w.level?.clamp(0.0, 1.0) : null;
-    final textColor = w.offline ? OmniColors.muted : OmniColors.text;
-    final stateColor = lit ? OmniColors.text : OmniColors.muted;
+    final caption = OmniDepth.captionOn(
+      washed ? OmniDepth.washTopOf(w.wash!, palette.card) : base,
+    );
+    final textColor = w.offline ? caption : OmniColors.text;
+    final stateColor = lit ? OmniColors.text : caption;
     return Semantics(
       container: true,
       explicitChildNodes: true,
@@ -107,10 +117,11 @@ class _OmniTileState extends State<OmniTile> {
           curve: OmniMotion.curve,
           constraints: const BoxConstraints(minHeight: OmniTile.minHeight),
           clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            borderRadius: radius,
+          decoration: OmniDepth.surface(
             color: base,
-            border: Border.all(color: border),
+            gradient: washed ? OmniDepth.wash(w.wash!, palette.card) : null,
+            radius: radius,
+            border: border,
           ),
           child: Stack(
             children: [
@@ -127,6 +138,9 @@ class _OmniTileState extends State<OmniTile> {
                     ),
                   ),
                 ),
+              const Positioned.fill(
+                child: IgnorePointer(child: OmniSheen(child: SizedBox())),
+              ),
               Material(
                 type: MaterialType.transparency,
                 child: InkWell(

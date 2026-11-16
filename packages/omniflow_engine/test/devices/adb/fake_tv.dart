@@ -15,6 +15,7 @@ class FakeApp {
     this.launcher = false,
     this.apkSizes = const [1000],
     this.updatedSystemApp = false,
+    this.label,
   });
 
   final String package;
@@ -28,6 +29,10 @@ class FakeApp {
   bool launcher;
   List<int> apkSizes;
   bool updatedSystemApp;
+
+  /// A label written as text in the manifest, which the full launcher
+  /// query prints. Null is a resource label, printed as null.
+  String? label;
   var installed = true;
   var dataCleared = 0;
   var cacheCleared = 0;
@@ -322,7 +327,9 @@ class FakeTv {
     }
     if (line.startsWith('dumpsys package packages')) return (_packages(), 0);
     if (line.startsWith('cmd package query-activities')) {
-      return (_activities(line.contains('LEANBACK')), 0);
+      return line.contains('--brief')
+          ? (_activities(line.contains('LEANBACK')), 0)
+          : (_labels(line), 0);
     }
     if (line.startsWith('c=\$(cmd package resolve-activity')) {
       final words = shellWords(line);
@@ -539,6 +546,27 @@ class FakeTv {
         ..writeln('  Activity #$i:')
         ..writeln('    priority=0 preferredOrder=0 match=0x108000')
         ..writeln('    ${list[i]}/.MainActivity');
+    }
+    return out.toString();
+  }
+
+  /// The `packageName=` and `nonLocalizedLabel=` lines of a full launcher
+  /// query, as the grep after it keeps them.
+  String _labels(String line) {
+    final leanback = line.contains('category.LEANBACK_LAUNCHER');
+    final launcher = line.contains('category.LAUNCHER');
+    final out = StringBuffer();
+    for (final a in apps.values) {
+      if (!a.installed ||
+          !((leanback && a.leanback) || (launcher && a.launcher))) {
+        continue;
+      }
+      out
+        ..writeln('      packageName=${a.package}')
+        ..writeln(
+          '      labelRes=0x7f0f0019 nonLocalizedLabel=${a.label ?? 'null'} '
+          'icon=0x0 banner=0x0',
+        );
     }
     return out.toString();
   }

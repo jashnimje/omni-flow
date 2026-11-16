@@ -81,6 +81,7 @@ class RoomTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) => OmniTile(
     key: ValueKey('room-tile-${room.id}'),
     icon: OmniIcons.light,
+    wash: OmniPalette.of(context).accent,
     name: room.name,
     state: room.summary,
     on: room.anyOn,

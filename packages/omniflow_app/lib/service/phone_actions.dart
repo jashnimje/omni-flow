@@ -112,11 +112,13 @@ class PhoneActionRunner {
   StreamSubscription<Map<String, Object?>>? _events;
   Timer? _ready;
   String? _phone;
-  Map<String, Object?>? _watch;
   List<String> _words = const [];
   DateTime? _calendarRead;
   final _calendarTimers = <Timer>[];
-  final _reported = <String>{};
+
+  /// Start and end reports already sent, with when each was due, so
+  /// none is sent twice. Kept for a day.
+  final _reported = <String, DateTime>{};
   var _stopped = false;
 
   /// The phone thing the engine knows this phone as, once it said ready.
@@ -155,10 +157,10 @@ class PhoneActionRunner {
     final watch = reply['watch'];
     if (watch is! Map) return;
     final next = {for (final e in watch.entries) '${e.key}': e.value};
-    if (!_same(next, _watch)) {
-      _watch = next;
-      await _hands.watch(next);
-    }
+    // Sent every time, not only on a change: each watch registers only
+    // what is missing, so a permission granted later in Settings (calls,
+    // media, notification access) starts the watch its rule waits on.
+    await _hands.watch(next);
     final words = [
       for (final w in next['calendarWords'] as List? ?? const [])
         if (w is String) w,
@@ -170,19 +172,6 @@ class PhoneActionRunner {
       _words = words;
       await _readCalendar();
     }
-  }
-
-  static bool _same(Map<String, Object?> a, Map<String, Object?>? b) {
-    if (b == null || a.length != b.length) return false;
-    for (final e in a.entries) {
-      final other = b[e.key];
-      if (e.value is List && other is List) {
-        if (!_sameList(e.value as List, other)) return false;
-      } else if (e.value != other) {
-        return false;
-      }
-    }
-    return true;
   }
 
   static bool _sameList(List a, List b) {
@@ -226,6 +215,13 @@ class PhoneActionRunner {
   static String? _text(Object? v) =>
       v is String && v.trim().isNotEmpty ? v : null;
 
+  /// The calendar changed on the phone: read it now, so an event added
+  /// at short notice is not missed.
+  void calendarChanged() {
+    if (_stopped || _words.isEmpty) return;
+    unawaited(_readCalendar());
+  }
+
   /// Times a start and an end report for each matching calendar event.
   Future<void> _readCalendar() async {
     _cancelCalendar();
@@ -234,6 +230,9 @@ class PhoneActionRunner {
     final found = await _hands.calendar(_words);
     if (_stopped) return;
     final now = _now();
+    _reported.removeWhere(
+      (_, at) => now.difference(at) > const Duration(days: 1),
+    );
     for (final event in found) {
       final words = event['words'];
       final begin = event['begin'];
@@ -243,10 +242,18 @@ class PhoneActionRunner {
       for (final (at, kind) in [(begin, 'started'), (end, 'ended')]) {
         final when = DateTime.fromMillisecondsSinceEpoch(at);
         final key = '$words|$at|$kind|$title';
-        if (when.isBefore(now) || _reported.contains(key)) continue;
+        // A time just passed still counts: the phone may have woken a
+        // moment late.
+        if (now.difference(when) > calendarLate || _reported.containsKey(key)) {
+          continue;
+        }
+        _calendarDue[key] = when;
+        final wait = when.difference(now);
         _calendarTimers.add(
-          Timer(when.difference(now), () {
-            if (_stopped || !_reported.add(key)) return;
+          Timer(wait.isNegative ? Duration.zero : wait, () {
+            _calendarDue.remove(key);
+            if (_stopped || _reported.containsKey(key)) return;
+            _reported[key] = when;
             unawaited(
               _send(calendarCommand, {
                 'event': kind,
@@ -258,13 +265,43 @@ class PhoneActionRunner {
         );
       }
     }
+    _timed();
   }
+
+  void _timed() => onCalendarTimed?.call();
 
   void _cancelCalendar() {
     for (final t in _calendarTimers) {
       t.cancel();
     }
     _calendarTimers.clear();
+    _calendarDue.clear();
+  }
+
+  /// How late a calendar report may still be sent.
+  static const calendarLate = Duration(minutes: 2);
+
+  final _calendarDue = <String, DateTime>{};
+
+  /// Called once the calendar reports are timed, so the service sets its
+  /// wake alarm for the next one.
+  void Function()? onCalendarTimed;
+
+  /// The next calendar start or end due, so the service wakes the phone
+  /// for it. Null with none.
+  DateTime? get nextCalendarDue {
+    DateTime? next;
+    for (final at in _calendarDue.values) {
+      if (next == null || at.isBefore(next)) next = at;
+    }
+    return next;
+  }
+
+  /// After the phone slept, or the clock moved: timers count only awake
+  /// time, so read the calendar again and time each report afresh.
+  void retime() {
+    if (_stopped || _words.isEmpty) return;
+    unawaited(_readCalendar());
   }
 
   Future<void> _send(String command, Map<String, Object?> args) async {

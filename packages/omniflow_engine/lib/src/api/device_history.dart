@@ -71,3 +71,13 @@ class DeviceHistoryLog {
 
 /// Who changed a device through the core API rather than an automation.
 const changedByUser = 'user';
+
+/// Who changed a device when an agent sent the command through
+/// `agent.call`. Habits and away lighting learn only from the user's own
+/// changes, so an agent's are kept apart.
+const changedByAgent = 'agent';
+
+/// The caller `args` names: the agent when `agent.call` forced `by`, else
+/// the user. Nothing else can be claimed.
+String callerOf(Map<String, Object?> args) =>
+    args['by'] == changedByAgent ? changedByAgent : changedByUser;

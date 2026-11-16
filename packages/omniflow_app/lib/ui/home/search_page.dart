@@ -12,6 +12,7 @@ import '../devices/open_device.dart';
 import '../settings/settings_screen.dart';
 import '../shell/shell.dart';
 import 'home_data.dart';
+import 'tile_look.dart' show phoneLine;
 
 /// 1.3: one box for search and commands. As the user types, the engine's
 /// reading of the line comes first ("Do it"), then the things, automations
@@ -20,7 +21,8 @@ import 'home_data.dart';
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
 
-  static const settle = Duration(milliseconds: 300);
+  /// How long typing pauses before the line is read.
+  static const settle = Duration(milliseconds: 700);
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -33,6 +35,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   String? _readFor;
   String? _summary;
 
+  /// Enter was pressed on the line read last, so a line the engine did not
+  /// understand says so. While typing only a runnable reading shows.
+  var _asked = false;
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -41,7 +47,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _changed(String text) {
-    setState(() => _summary = null);
+    setState(() {
+      _summary = null;
+      _asked = false;
+    });
     _debounce?.cancel();
     if (text.trim().isEmpty) {
       setState(() => _reading = null);
@@ -78,11 +87,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         : await _interpret(text);
     if (read == null || !mounted) return;
     if (read['kind'] == 'ask') {
-      // The Do it card already says what the engine made of it.
+      // The Do it card says what the engine made of it.
       setState(() {
         _reading = read;
         _readFor = text;
         _summary = null;
+        _asked = true;
       });
       return;
     }
@@ -131,7 +141,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final automations = ref.watch(summariesProvider).value ?? const [];
     final things = query.isEmpty
         ? const <DeviceView>[]
-        : _byHits(devices, (d) => _hits(query, d.name)).take(6).toList();
+        : _byHits(
+            devices,
+            (d) => _hits(query, [d.name, ?d.room].join(' ')),
+          ).take(6).toList();
     final matching = query.isEmpty
         ? const <AutomationSummary>[]
         : _byHits(
@@ -146,6 +159,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         : _byHits(settingsPlaces, (p) => _hits(query, p.title)).toList();
     final reading = _reading;
     final runnable = reading != null && reading['kind'] != 'ask';
+    final showReading = runnable || (reading != null && _asked);
     final target = runnable && reading['args'] is Map
         ? devices
               .where((d) => d.id == (reading['args'] as Map)['id'])
@@ -176,7 +190,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 key: const ValueKey('command-summary'),
               ),
             ),
-          if (reading != null) ...[
+          if (showReading) ...[
             const OmniSectionHeader('Do it'),
             OmniCard(
               key: const ValueKey('search-do-it'),
@@ -209,7 +223,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 key: ValueKey('search-thing-${d.id}'),
                 icon: iconOf(d, drivers),
                 title: d.name,
-                subtitle: stateLine(d),
+                subtitle: kindOf(d) == DeviceKind.phone
+                    ? phoneLine(d)
+                    : stateLine(d),
                 chevron: true,
                 onTap: () => openDevice(context, d.id),
               ),
@@ -242,7 +258,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           Wrap(
             spacing: 6,
             children: [
-              for (final s in _suggestions(devices, automations))
+              for (final s in _suggestions(devices, automations, drivers))
                 OmniFilterChip(
                   key: ValueKey('try-$s'),
                   label: s,
@@ -255,21 +271,31 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     );
   }
 
-  /// Lines made from the user's own things, so each one works here.
+  /// The quick commands the command bar documents (`<device> 50%`,
+  /// `<device> off`, `run <automation>`), made from the user's own lights,
+  /// plugs and automations, so each one works here and reads plainly.
   static List<String> _suggestions(
     List<DeviceView> devices,
     List<AutomationSummary> automations,
+    Map<String, Json> drivers,
   ) {
-    final level = devices
-        .where((d) => d.capabilityOf('level') != null && d.online)
+    String? category(DeviceView d) =>
+        (d.json['category'] ?? drivers[d.driver]?['category']) as String?;
+    final light = devices
+        .where(
+          (d) =>
+              category(d) == 'lighting' &&
+              d.capabilityOf('level') != null &&
+              d.online,
+        )
         .firstOrNull;
-    final power = devices
-        .where((d) => d.hasPower && d.capabilityOf('level') == null)
+    final plug = devices
+        .where((d) => category(d) == 'power' && d.hasPower && d.online)
         .firstOrNull;
     final run = automations.where((a) => a.enabled && a.approved).firstOrNull;
     return [
-      if (level != null) '${level.name.toLowerCase()} 50',
-      if (power != null) '${power.name.toLowerCase()} off',
+      if (light != null) '${light.name.toLowerCase()} 50%',
+      if (plug != null) '${plug.name.toLowerCase()} off',
       if (run != null) 'run ${run.name.toLowerCase()}',
     ];
   }

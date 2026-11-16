@@ -6,9 +6,9 @@
   "icon": "place",
   "transport": { "type": "virtual" },
   "settings": [
-    { "key": "ble", "label": "Beacon: {matchName, enterDbm, exitDbm, enterDwellMs, exitDwellMs, silenceMs}" },
-    { "key": "wifi", "label": "Wi-Fi: {ssids, bssids, required}" },
-    { "key": "zone", "label": "Zone id this place answers to" }
+    { "key": "ble", "label": "Beacon: {matchName, enterDbm, exitDbm, enterDwellMs, exitDwellMs, silenceMs}", "help": "A Bluetooth beacon that marks this place, with how strong its signal must be to count as here.\nSet it in Settings, Places and people, where you can pick a beacon nearby." },
+    { "key": "wifi", "label": "Wi-Fi: {ssids, bssids, required}", "help": "The Wi-Fi networks that mean you are at this place.\nSet them in Settings, Places and people, which offers the network you are on now." },
+    { "key": "zone", "label": "Zone id this place answers to", "help": "The hub zone this place follows, so the hub can say who is here. Leave it empty without a hub." }
   ],
   "capabilities": [
     { "id": "inside", "type": "sensor", "label": "Someone inside", "stateJsonPath": "$.inside" },

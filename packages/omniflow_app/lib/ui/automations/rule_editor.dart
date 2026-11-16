@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -143,19 +144,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
   }
 
   /// What still keeps Save off, in plain words, or null when it can save.
-  String? _missing(RuleSpec spec) {
-    if (spec.when.isEmpty && !spec.onlyKeeps) {
-      return spec.then.isEmpty
-          ? 'Add a trigger and a step to save.'
-          : 'Add a trigger to save.';
-    }
-    if (spec.then.isEmpty) return 'Add a step to save.';
-    if (!stepsComplete(spec.then)) {
-      return 'A group needs filling in: each If needs a check and a step, '
-          'each branch a step and each keep a while.';
-    }
-    return null;
-  }
+  String? _missing(RuleSpec spec) => spec.missing;
 
   Future<void> _test() async {
     final draft = _draft!;
@@ -172,7 +161,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => TestRunPage(
-          name: _name.isEmpty ? 'New rule' : _name,
+          name: _name.isEmpty ? 'New automation' : _name,
           id: widget.id,
           dryRun: reply.value!.firstOrNull,
           rule: draft.spec.toJson(),
@@ -239,7 +228,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
             path: 'name',
             message:
                 'there is a ${existing.source ?? 'automation'} called '
-                '${existing.name}. Give this rule another name',
+                '${existing.name}. Give this automation another name',
           ),
         ]),
       );
@@ -249,8 +238,8 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       context,
       title: 'Replace ${existing.name}?',
       body:
-          'There is a rule called ${existing.name} already. Saving this one '
-          'replaces it. Rename this rule to keep both.',
+          'There is an automation called ${existing.name} already. Saving this one '
+          'replaces it. Rename this one to keep both.',
       action: 'Replace',
       destructive: true,
     );
@@ -261,18 +250,43 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     final ok = await confirm(
       context,
       title: 'Remove $_name?',
-      body: 'It stops running and is deleted. This cannot be undone.',
+      body:
+          'It stops running and is removed. You can undo it for a moment '
+          'after.',
       action: 'Remove',
       destructive: true,
     );
     if (!ok || !mounted) return;
-    final reply = await ref
-        .read(engineApiProvider)
-        .removeAutomation(widget.id!);
+    final api = ref.read(engineApiProvider);
+    final client = ref.read(engineClientProvider);
+    final automations = ref.read(automationsProvider.notifier);
+    final id = widget.id!;
+    final name = _name;
+    // The saved record, so Undo puts back what was there, as the list does.
+    final saved = await api.automation(id);
+    final record = saved.value == null
+        ? null
+        : EngineCalls.automationOf(saved.value!);
+    final reply = await api.removeAutomation(id);
     if (!reply.ok || !mounted) return;
     _draft!.dirty = false;
-    await ref.read(automationsProvider.notifier).refresh();
-    showMessage('Removed $_name');
+    await automations.refresh();
+    showMessage(
+      'Removed $name',
+      action: record == null ? null : 'Undo',
+      onAction: record == null
+          ? null
+          : () async {
+              if (await RuleCalls.restore(client, record)) {
+                if (record['enabled'] == false) {
+                  await api.enableAutomation(id, false);
+                }
+              } else {
+                showMessage('$name could not be put back');
+              }
+              await automations.refresh();
+            },
+    );
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -291,7 +305,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
             builder: (_) => RuleEditorPage(
               initial: {
                 ...draft.spec.toJson(),
-                'name': _name.isEmpty ? 'New rule copy' : '$_name copy',
+                'name': _name.isEmpty ? 'New automation copy' : '$_name copy',
               },
             ),
           ),
@@ -312,7 +326,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       context,
       title: 'Discard changes?',
       body:
-          'What you changed in ${_name.isEmpty ? 'this rule' : _name} is not '
+          'What you changed in ${_name.isEmpty ? 'this automation' : _name} is not '
           'saved and will be lost.',
       action: 'Discard',
       destructive: true,
@@ -365,17 +379,22 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     final draft = _draft;
     if (draft != null) {
       draft
-        ..words = RuleWords(things, {
-          for (final a in automations) a.id: a.name,
-        }, draft.tokenLabels)
+        ..words = RuleWords(
+          things,
+          {for (final a in automations) a.id: a.name},
+          draft.tokenLabels,
+          draft.served,
+        )
         ..automations = [
           for (final a in automations)
             if (a.id != widget.id) a,
-        ];
+        ]
+        ..wordsFrom = ref.read(engineClientProvider);
+      unawaited(draft.fetchWords());
     }
     if (draft == null) {
       return OmniPage(
-        title: widget.id ?? 'New rule',
+        title: widget.id ?? 'New automation',
         body: switch ((_loadFailure, _notARule)) {
           (final ApiFailure f, _) => OmniEmptyState(
             key: const ValueKey('rule-load-error'),
@@ -399,6 +418,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       builder: (context, _) {
         final spec = draft.spec;
         final missing = _missing(spec);
+        final short = MediaQuery.sizeOf(context).height < 480;
         final loose = draft.looseIssues;
         return PopScope(
           canPop: !draft.dirty,
@@ -406,7 +426,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
             if (!didPop) _leave();
           },
           child: OmniPage(
-            title: _name.isEmpty ? 'New rule' : _name,
+            title: _name.isEmpty ? 'New automation' : _name,
             actions: [
               PopupMenuButton<_Menu>(
                 key: const ValueKey('rule-menu'),
@@ -449,7 +469,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
               banners: [
                 if (!_approved)
                   OmniBanner.warning(
-                    'Made by Claude. It runs only after you approve this '
+                    'Made by an agent. It runs only after you approve this '
                     'exact version.',
                     key: const ValueKey('rule-needs-approval'),
                     actionLabel: 'Review',
@@ -497,13 +517,21 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                 if (widget.id != null) LastRunSection(id: widget.id!),
                 if (widget.id != null)
                   AutomationInsights(id: widget.id!, onRestored: _load),
+                // On a short screen (a phone on its side) the bar keeps
+                // only its buttons, so more of the rule shows.
+                if (short && missing != null)
+                  Text(
+                    missing,
+                    key: const ValueKey('rule-missing'),
+                    style: OmniText.caption,
+                  ),
                 const SizedBox(height: OmniSpace.lg),
               ],
             ),
             bottom: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (missing != null)
+                if (!short && missing != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: OmniSpace.sm),
                     child: Text(

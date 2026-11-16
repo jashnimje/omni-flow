@@ -40,11 +40,38 @@ Color whiteOf(double kelvin) => Color.lerp(
   ((kelvin - 2200) / (6500 - 2200)).clamp(0.0, 1.0),
 )!;
 
-/// The big line of a tile: a sensor's reading, or the app on a TV that is
-/// on. Null when the name and state line say enough.
+/// Whether [d] has a power to switch from Home: a TV, or anything with a
+/// toggle except a phone, whose first toggle is its torch.
+bool hasMainPower(DeviceView d) => switch (kindOf(d)) {
+  DeviceKind.tv => true,
+  DeviceKind.phone => false,
+  _ => d.hasPower,
+};
+
+/// A phone's line: whether its screen is on, and its battery.
+String phoneLine(DeviceView d) {
+  final s = d.state;
+  return [
+    ?_screenWords(d),
+    if (s['battery'] case final num b)
+      '${b.round()}% battery${s['charging'] == true ? ', charging' : ''}',
+  ].join(' · ');
+}
+
+String? _screenWords(DeviceView d) => switch (d.state['screen_on']) {
+  true => 'Screen on',
+  false => 'Screen off',
+  _ => null,
+};
+
+/// The big line of a tile: a sensor's reading, a phone's battery, or the
+/// app on a TV that is on. Null when the name and state line say enough.
 String? tileReading(DeviceView d) {
   if (!d.online) return null;
   switch (kindOf(d)) {
+    case DeviceKind.phone:
+      final b = d.state['battery'];
+      return b is num ? '${b.round()}%' : null;
     case DeviceKind.sensor:
       return sensorReading(d);
     case DeviceKind.tv:
@@ -61,6 +88,15 @@ String? tileReading(DeviceView d) {
 /// carries what is left: a TV's "Playing · vol 35", nothing for a
 /// sensor.
 String? tileState(DeviceView d) {
+  if (d.online && kindOf(d) == DeviceKind.phone) {
+    final line = tileReading(d) == null
+        ? phoneLine(d)
+        : [
+            ?_screenWords(d),
+            if (d.state['charging'] == true) 'charging',
+          ].join(' · ');
+    return line.isEmpty ? stateLine(d) : line;
+  }
   final reading = tileReading(d);
   if (reading == null) return stateLine(d);
   if (kindOf(d) != DeviceKind.tv) return null;

@@ -17,9 +17,9 @@
     "instructions": "In Home Assistant open your profile, then Security, and create a long-lived access token"
   },
   "settings": [
-    { "key": "entityId", "label": "Entity id, such as light.kitchen or switch.heater" },
-    { "key": "domain", "label": "Entity domain: light, switch, fan or input_boolean" },
-    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
+    { "key": "entityId", "label": "Entity id, such as light.kitchen or switch.heater", "help": "The name Home Assistant gives this light or switch, such as light.kitchen.\nIn Home Assistant open Settings, Devices and services, Entities, tap the entity, then the gear icon, and copy Entity ID." },
+    { "key": "domain", "label": "Entity domain: light, switch, fan or input_boolean", "help": "The first part of the entity id, before the dot: light, switch, fan or input_boolean." },
+    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true, "help": "A key that lets OmniFlow talk to Home Assistant. It stays on this phone.\nIn Home Assistant, open your profile (your name at the bottom left), then the Security tab.\nUnder Long-lived access tokens, tap Create token, give it a name such as OmniFlow, and copy it. Home Assistant shows it only once." }
   ],
   "setup": ["secret:token", "configure:entityId", "configure:domain"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },

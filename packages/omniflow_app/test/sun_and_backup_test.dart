@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/rules/rule_spec.dart';
 import 'package:omniflow_app/state/providers.dart';
+import 'package:omniflow_app/ui/add/guided_steps_page.dart'
+    show GuidedStepsPage;
 import 'package:omniflow_app/ui/automations/pickers.dart';
 import 'package:omniflow_app/ui/automations/rule_words.dart';
 import 'package:omniflow_app/ui/settings/backup_page.dart';
@@ -217,6 +219,11 @@ void main() {
       ]);
       expect(find.byKey(const ValueKey('backup-waiting')), findsOneWidget);
       expect(find.text('Desk plug'), findsOneWidget);
+      // Each row opens that device's setup, where its key goes.
+      await tester.tap(find.byKey(const ValueKey('backup-secret-plug')));
+      await tester.pumpAndSettle();
+      expect(find.byType(GuidedStepsPage), findsOneWidget);
+      expect(engine.callsOf('thing.next').last.$2['id'], 'plug');
     });
   });
 }

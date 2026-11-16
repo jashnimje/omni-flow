@@ -6,8 +6,8 @@
   "icon": "laptop",
   "transport": { "type": "exec", "port": 22 },
   "settings": [
-    { "key": "username", "label": "Username" },
-    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
+    { "key": "username", "label": "Username", "help": "The account you sign in as on that computer, the same name you would type after ssh. Run whoami in a terminal on it to see it." },
+    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true, "help": "A private key that computer accepts for that account. It stays on this phone. Make one on a computer with ssh-keygen -t ed25519, add the .pub line to ~/.ssh/authorized_keys on the target, then paste the private file here, from its BEGIN line to its END line.\nOn a Mac, also turn on System Settings, General, Sharing, Remote Login." }
   ],
   "setup": ["configure:username", "secret:sshPrivateKey"],
   "reliability": { "timeoutMs": 10000, "retries": 0 },

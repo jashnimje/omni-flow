@@ -1,5 +1,5 @@
 import '../dag/node_types.dart';
-import '../dag/rules.dart' show sunTriggerLabel;
+import '../dag/rules.dart' show daysSuffix, daysWords, sunTriggerLabel;
 import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../storage/database.dart';
@@ -53,6 +53,19 @@ class SentenceContext {
       (_capability(thing, key)?.label ?? key.replaceAll('_', ' '))
           .toLowerCase();
 
+  /// Whether [key] of [thing] is its one on/off: a toggle that is the
+  /// thing's only toggle, so "Desk lamp is on" says enough.
+  bool isOnOff(String thing, String key) {
+    final toggles =
+        drivers[thing]?.capabilities
+            .where((c) => c.type == CapabilityType.toggle)
+            .toList() ??
+        const [];
+    return toggles.length == 1 &&
+        (toggles.single.id == key ||
+            stateKeyOf(toggles.single.stateJsonPath) == key);
+  }
+
   /// The words for a state a thing reports: the label of the capability
   /// that fills that key (a TV's power sensor, not its Power key), without
   /// its parenthetical list of values.
@@ -98,7 +111,7 @@ class SentenceContext {
     if (t['on'] is String) return 'When ${_on(t)}';
     if (t['time'] != null) {
       final days = t['days'];
-      return 'At ${t['time']}${days is List ? ' on ${days.join(', ')}' : ''}';
+      return 'At ${t['time']}${daysSuffix(days)}';
     }
     if (t['sun'] != null) {
       final label = sunTriggerLabel(t);
@@ -132,6 +145,10 @@ class SentenceContext {
           '${crosses.values.single}';
     }
     if (change is Map && change.containsKey('to')) {
+      // A light's power reads as the light itself: "Desk lamp turns on".
+      if (to is bool && isOnOff(thing, key)) {
+        return '${name(thing)} turns ${value(to)}';
+      }
       return '${state(t['on'] as String)} turns ${value(to)}';
     }
     return '${state(t['on'] as String)} changes';
@@ -152,7 +169,7 @@ class SentenceContext {
     if (c['between'] case [final start, final end]) {
       return 'between $start and $end';
     }
-    if (c['days'] is List) return 'on ${(c['days'] as List).join(', ')}';
+    if (c['days'] is List) return daysWords(c['days'] as List);
     if (c['not'] is Map) {
       return 'not ${condition(Map<String, Object?>.from(c['not'] as Map))}';
     }
@@ -180,6 +197,12 @@ class SentenceContext {
         final home = (c['op'] == '==') == right;
         if (_isMe(thing)) return home ? 'I am home' : 'I am away';
         return '${name(thing)} is ${home ? 'home' : 'away'}';
+      }
+      if (right is bool &&
+          isOnOff(thing, key) &&
+          (c['op'] == '==' || c['op'] == '!=')) {
+        final on = (c['op'] == '==') == right;
+        return '${name(thing)} is ${on ? 'on' : 'off'}';
       }
       return '${state(ref)} $op $rightText';
     }

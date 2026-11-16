@@ -276,7 +276,9 @@ class _OmniShellState extends ConsumerState<OmniShell> {
                 decoration: BoxDecoration(
                   border: Border(top: BorderSide(color: palette.line)),
                 ),
-                child: _bar(context, tab),
+                // Built under the Scaffold so the bar reads the padding the
+                // Scaffold already took the status bar out of.
+                child: Builder(builder: (context) => _bar(context, tab)),
               ),
       ),
     );
@@ -293,8 +295,8 @@ class _OmniShellState extends ConsumerState<OmniShell> {
     final scaler = MediaQuery.textScalerOf(context)
         .clamp(maxScaleFactor: _maxLabelScale);
     final label = scaler.scale(OmniText.navLabel.fontSize!) * 1.4;
-    return MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: scaler),
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: _maxLabelScale,
       child: NavigationBar(
         key: const ValueKey('shell-tabs'),
         height: 48 + label,

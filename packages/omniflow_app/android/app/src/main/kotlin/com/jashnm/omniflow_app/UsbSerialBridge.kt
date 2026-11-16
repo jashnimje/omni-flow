@@ -24,7 +24,7 @@ import java.util.concurrent.Executors
  * USB serial boards plugged into the phone (CDC-ACM, CP210x, CH34x, FTDI,
  * Prolific), on the foreground service's engine, so the engine sets boards
  * up and flashes them with no computer. The omniflow/usb method channel
- * lists ports as `usb:<device name>`, asks Android for permission, opens,
+ * lists ports as `usb:<vendor>:<product>`, asks Android for permission, opens,
  * writes, sets DTR, RTS and speed, and closes. omniflow/usb_data carries
  * each port's bytes and plug and unplug events.
  */
@@ -84,11 +84,12 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
         })
     }
 
-    private fun listPorts(): List<Map<String, Any?>> =
-        UsbSerialProber.getDefaultProber().findAllDrivers(usb).map { driver ->
+    private fun listPorts(): List<Map<String, Any?>> {
+        val names = stableNames()
+        return UsbSerialProber.getDefaultProber().findAllDrivers(usb).map { driver ->
             val d = driver.device
             mapOf(
-                "path" to "usb:${d.deviceName}",
+                "path" to (names[d.deviceName] ?: "usb:${d.deviceName}"),
                 "vendorId" to d.vendorId,
                 "productId" to d.productId,
                 "name" to (d.productName ?: driver.javaClass.simpleName.removeSuffix("SerialDriver")),
@@ -96,10 +97,37 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
                 "allowed" to usb.hasPermission(d),
             )
         }
+    }
 
-    private fun deviceOf(path: String): UsbDevice =
-        usb.deviceList.values.firstOrNull { "usb:${it.deviceName}" == path }
+    /**
+     * A port's name by its vendor and product id (`usb:1a86:7523`), with
+     * `-2`, `-3` for a second and third board of the same kind. Android
+     * numbers the device again on every attach (`/dev/bus/usb/001/007`),
+     * so a name from that would lose the board after a replug or a reboot.
+     */
+    private fun stableNames(): Map<String, String> {
+        val names = mutableMapOf<String, String>()
+        usb.deviceList.values.sortedBy { it.deviceName }
+            .groupBy { String.format(java.util.Locale.ROOT, "usb:%04x:%04x", it.vendorId, it.productId) }
+            .forEach { (base, devices) ->
+                devices.forEachIndexed { i, d -> names[d.deviceName] = if (i == 0) base else "$base-${i + 1}" }
+            }
+        known.putAll(names)
+        return names
+    }
+
+    /** Kept after a detach, when Android no longer lists the device. */
+    private val known = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun pathOf(device: UsbDevice): String =
+        stableNames()[device.deviceName] ?: known[device.deviceName] ?: "usb:${device.deviceName}"
+
+    /** By its stable name, or the kernel path that names saved before had. */
+    private fun deviceOf(path: String): UsbDevice {
+        val names = stableNames()
+        return usb.deviceList.values.firstOrNull { names[it.deviceName] == path || "usb:${it.deviceName}" == path }
             ?: throw IllegalStateException("$path is not plugged in")
+    }
 
     private fun permission(path: String, result: MethodChannel.Result) {
         val device = try {
@@ -108,12 +136,17 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
             return result.error("unreachable", e.message, null)
         }
         if (usb.hasPermission(device)) return result.success(true)
-        waitingPermission.getOrPut(path) { mutableListOf() }.add(result)
-        if (waitingPermission[path]!!.size > 1) return
+        // Keyed by Android's device name, which the answer carries.
+        val key = device.deviceName
+        waitingPermission.getOrPut(key) { mutableListOf() }.add(result)
+        if (waitingPermission[key]!!.size > 1) return
         listenForPermissions()
         val intent = Intent(ACTION_PERMISSION).setPackage(app.packageName)
         val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
         usb.requestPermission(device, PendingIntent.getBroadcast(app, 0, intent, flags))
+        // Nobody may be at the phone (a start after a reboot): stop waiting
+        // after a while, as a refusal, rather than hold the engine's call.
+        main.postDelayed({ waitingPermission.remove(key)?.forEach { it.success(false) } }, PERMISSION_WAIT_MS)
     }
 
     /** One receiver for every answer, settled by the device it names. */
@@ -123,7 +156,7 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
             override fun onReceive(context: Context, intent: Intent) {
                 val device = deviceIn(intent) ?: return
                 val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                waitingPermission.remove("usb:${device.deviceName}")?.forEach { it.success(granted) }
+                waitingPermission.remove(device.deviceName)?.forEach { it.success(granted) }
             }
         }
         register(permissionReceiver!!, IntentFilter(ACTION_PERMISSION))
@@ -203,9 +236,19 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
         if (plugReceiver != null) return
         plugReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                val path = "usb:${deviceIn(intent)?.deviceName ?: return}"
+                val device = deviceIn(intent) ?: return
+                val path = pathOf(device)
+                val kernel = "usb:${device.deviceName}"
                 val plugged = intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED
-                if (!plugged) io.execute { close(path) }
+                if (!plugged) {
+                    known.remove(device.deviceName)
+                    io.execute {
+                        close(path)
+                        close(kernel)
+                    }
+                }
+                // By the stable name, so the Dart side reopens a board that
+                // comes back on the same name.
                 emit(mapOf("event" to if (plugged) "attached" else "detached", "path" to path))
             }
         }
@@ -257,5 +300,6 @@ class UsbSerialBridge(context: Context) : FlutterForegroundTaskLifecycleListener
         const val EVENTS = "omniflow/usb_data"
         const val ACTION_PERMISSION = "com.jashnm.omniflow_app.USB_PERMISSION"
         const val WRITE_TIMEOUT_MS = 2000
+        const val PERMISSION_WAIT_MS = 60_000L
     }
 }

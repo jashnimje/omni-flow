@@ -8,11 +8,31 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.7.0';
+const appVersion = '0.8.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.8.0',
+    date: '14 Nov 2026',
+    notes: [
+      'A new Home: your day in one card at the top, and cards with depth.',
+      'A short setup on a new phone: you, where home is, your home Wi-Fi, '
+          'your first device and automation. Restore a backup or connect '
+          'to a hub from an empty home.',
+      'Help on every device setting, including how to get a Tuya local key, '
+          'and a ? on each main screen.',
+      'Recently removed keeps automations for 30 days, and the phone backs '
+          'itself up every day.',
+      'Automations keep running if Android stops the app, and use far less '
+          'battery.',
+      'Safer: agents cannot touch another phone\'s screen, and phone actions '
+          'they add wait for your approval.',
+      'Many fixes: rooms in real percent, scenes keep lights off, timed '
+          'automations across clock changes, plain error messages.',
+    ],
+  ),
   (
     version: '0.7.0',
     date: '13 Nov 2026',

@@ -9,6 +9,7 @@ import '../devices/device_controls.dart';
 import '../devices/device_text.dart';
 import '../devices/open_device.dart';
 import 'home_data.dart';
+import 'tile_look.dart' show hasMainPower;
 
 /// 1.2: a long press on a tile. The device's name, driver and room, its
 /// power switch, the controls its capabilities need, and "Open device".
@@ -51,7 +52,7 @@ class QuickSheet extends ConsumerWidget {
               shortDriverName(drivers[d.driver], d.driver),
               ?d.room,
             ].where((s) => s.isNotEmpty).join(' · '),
-      trailing: d.hasPower || tv ? PowerSwitch(device: d) : null,
+      trailing: hasMainPower(d) ? PowerSwitch(device: d) : null,
       children: [
         if (!d.online && !tv)
           OmniBanner.error(

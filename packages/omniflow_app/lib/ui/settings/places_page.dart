@@ -9,6 +9,7 @@ import 'phone_access.dart';
 import '../automations/form_parts.dart' show showFormSheet, DurationInput;
 import '../add/room_field.dart' show showOrganizeSheet;
 import '../devices/device_text.dart';
+import '../home/home_presence.dart';
 
 /// The places that have inputs, as zone.list reports them.
 final zonesProvider = FutureProvider<List<Json>>(
@@ -194,13 +195,21 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
         children: [
           OmniHeroCard(
             key: const ValueKey('presence-hero'),
-            title: switch (presence?.home) {
-              true => 'You are home',
-              false => 'You are away',
-              null => 'Not known yet',
+            title: switch (presenceShown(presence, zones.value)) {
+              PresenceShown.notSetUp => presenceNotSetUp,
+              _ => switch (presence?.home) {
+                true => 'You are home',
+                false => 'You are away',
+                null => 'Not known yet',
+              },
             },
-            subtitle: presence == null || presence.home == null
-                ? 'OmniFlow decides once Wi-Fi or a beacon reports'
+            subtitle:
+                presence == null ||
+                    presence.home == null ||
+                    presenceShown(presence, zones.value) ==
+                        PresenceShown.notSetUp
+                ? 'Add your home Wi-Fi or a beacon below, and OmniFlow can '
+                      'tell when you are home'
                 : [
                     if (presence.since != null)
                       'since ${when(presence.since!)}',

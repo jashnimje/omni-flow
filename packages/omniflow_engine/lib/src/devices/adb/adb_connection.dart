@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'adb_key.dart';
 import 'adb_tls.dart';
 import 'adb_protocol.dart';
+import 'raw_link.dart';
 
 /// The connection ended. [acknowledged] says whether the device had already
 /// accepted the stream, so whether the command may have run.
@@ -50,6 +51,14 @@ class AdbTlsRefusedException implements Exception {
       'AdbTlsRefusedException: the device did not accept the key over TLS';
 }
 
+/// The device presented a TLS certificate other than the one pinned for
+/// it, so the host that answered is not the paired device.
+class AdbIdentityException implements Exception {
+  @override
+  String toString() =>
+      'AdbIdentityException: the device is not the one that was paired';
+}
+
 class AdbHandshakeTimeoutException implements Exception {
   @override
   String toString() => 'AdbHandshakeTimeoutException';
@@ -75,13 +84,8 @@ const _maxShellOutput = 256 * 1024;
 /// One authenticated ADB transport to a device, carrying any number of
 /// shell streams.
 class AdbConnection {
-  AdbConnection._(this._socket, this.host, this.port) {
-    _listen();
-  }
-
-  void _listen() {
-    _socket.listen(_onData, onError: (_) => _end(), onDone: _end);
-    unawaited(_socket.done.then<void>((_) {}, onError: (_) {}));
+  AdbConnection._(this._link, this.host, this.port, this._acceptCertificate) {
+    _link.listen(_onData, _end);
   }
 
   /// Connects and authenticates with [key].
@@ -99,6 +103,10 @@ class AdbConnection {
   /// the client certificate, and the device's CNXN follows inside it, with
   /// no AUTH: the device knows the key from pairing or refuses the
   /// handshake, which throws [AdbTlsRefusedException].
+  ///
+  /// [acceptCertificate] judges the device's TLS certificate: false ends
+  /// the handshake with [AdbIdentityException], so a host that is not the
+  /// paired device gets nothing.
   static Future<AdbConnection> connect(
     String host,
     int port, {
@@ -110,9 +118,10 @@ class AdbConnection {
     void Function()? onPrompt,
     void Function(AdbConnection connection)? onOpened,
     bool offerKey = true,
+    bool Function(X509Certificate certificate)? acceptCertificate,
   }) async {
-    final socket = await Socket.connect(host, port, timeout: connectTimeout);
-    final connection = AdbConnection._(socket, host, port);
+    final link = await RawLink.connect(host, port, timeout: connectTimeout);
+    final connection = AdbConnection._(link, host, port, acceptCertificate);
     onOpened?.call(connection);
     try {
       await connection._handshake(
@@ -130,7 +139,12 @@ class AdbConnection {
     }
   }
 
-  Socket _socket;
+  final RawLink _link;
+  final bool Function(X509Certificate certificate)? _acceptCertificate;
+  var _certificateRefused = false;
+
+  /// The device's TLS certificate, once the connection is TLS.
+  X509Certificate? get peerCertificate => _link.peerCertificate;
 
   /// Where the connection was opened.
   final String host;
@@ -239,27 +253,34 @@ class AdbConnection {
 
   Future<void> _startTls(AdbHostKey key, DateTime deadline) async {
     _send(AdbMessage(AdbCommand.stls, adbStlsVersion, 0));
-    await _socket.flush();
-    final left = deadline.difference(DateTime.now());
-    final SecureSocket secure;
+    Duration left() {
+      final rest = deadline.difference(DateTime.now());
+      return rest > Duration.zero ? rest : Duration.zero;
+    }
+
     try {
+      await _link.flush().timeout(left());
       // The device sends nothing more until our ClientHello, so no bytes
-      // are left behind in the plain socket.
-      secure = await SecureSocket.secure(
-        _socket,
+      // are left behind in the plain socket. A timeout closes the socket,
+      // so a device that never finishes TLS is not left holding it.
+      await _link.secure(
         context: adbTlsContext(key),
-        onBadCertificate: (_) => true,
-      ).timeout(left > Duration.zero ? left : Duration.zero);
+        onBadCertificate: (certificate) {
+          final ok = _acceptCertificate?.call(certificate) ?? true;
+          if (!ok) _certificateRefused = true;
+          return ok;
+        },
+        timeout: left(),
+      );
     } on TimeoutException {
       _end();
       throw AdbHandshakeTimeoutException();
     } on Exception {
       _end();
+      if (_certificateRefused) throw AdbIdentityException();
       throw AdbTlsRefusedException();
     }
     _tls = true;
-    _socket = secure;
-    _listen();
   }
 
   Future<AdbMessage> _nextHandshakeMessage(DateTime deadline) async {
@@ -394,7 +415,7 @@ class AdbConnection {
 
   void _send(AdbMessage message) {
     if (_closed) return;
-    _socket.add(message.encode());
+    _link.add(message.encode());
   }
 
   void _wake() {
@@ -406,7 +427,7 @@ class AdbConnection {
   void _end() {
     if (_closed) return;
     _closed = true;
-    _socket.destroy();
+    _link.destroy();
     _wake();
     for (final stream in _streams.values) {
       stream._ended(

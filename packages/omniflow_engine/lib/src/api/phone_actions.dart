@@ -352,9 +352,10 @@ class PhoneActions {
     return {'media_playing': playing};
   }
 
-  /// `{event: started | ended, words, title?, phone?}`: a calendar event
-  /// whose title has [words] started or ended. The phone matches the
-  /// words, so no other title leaves it.
+  /// `{event: started | ended, words, phone?}`: a calendar event whose
+  /// title has [words] started or ended. The phone matches the words, and
+  /// a title it sends anyway is dropped here: the run log, the events and
+  /// a diagram's `seen` say only that an event with those words matched.
   Future<Map<String, Object?>> calendar(Map<String, Object?> args) async {
     final event = args['event'];
     if (event != 'started' && event != 'ended') {
@@ -368,7 +369,7 @@ class PhoneActions {
     _engine.raiseEvent(
       device.id,
       event == 'started' ? 'calendar_started' : 'calendar_ended',
-      {'words': words, 'title': ?optStringArg(args, 'title')},
+      {'words': words},
     );
     return {'received': true};
   }
@@ -512,6 +513,8 @@ class PhoneWatch {
     'headphones': _any(const ['headphones']),
     'boot': _any(const ['started_up']),
     'packages': _any(const ['app_installed', 'app_updated']),
+    // The app on screen is read every few seconds, so only when asked.
+    'apps': _any(const ['app_on_screen', 'app_opened', 'app_closed']),
     'calendarWords': calendarWords.toList()..sort(),
     'alarmMinutes': alarmMinutes.toList()..sort(),
   };
@@ -588,16 +591,11 @@ final List<PhoneReadingVerb> phoneReadingVerbs = [
     verb: 'calendar',
     help:
         'A calendar event with these words started or ended: omni phone '
-        'calendar started gym [TITLE]',
+        'calendar started gym',
     command: 'phone.calendar',
-    usage: 'started|ended WORDS [TITLE]',
-    args: (rest) => rest.length < 2 || rest.length > 3
-        ? null
-        : {
-            'event': rest[0],
-            'words': rest[1],
-            if (rest.length > 2) 'title': rest[2],
-          },
+    usage: 'started|ended WORDS',
+    args: (rest) =>
+        rest.length != 2 ? null : {'event': rest[0], 'words': rest[1]},
   ),
   (
     verb: 'shake',

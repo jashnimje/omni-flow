@@ -32,11 +32,19 @@ class UsbLinks implements SerialLinks {
         case 'data':
           final bytes = e['bytes'];
           if (bytes is Uint8List) _open[path]?._in.add(bytes);
-        case 'closed' || 'detached':
+        case 'closed':
           _open.remove(path)?._ended();
-          if (e['event'] == 'detached') _plugs.add(e);
+        case 'detached':
+          // Kept for a while: a board that comes back on the same name (a
+          // cable wiggle, a hub reset) is opened again, and the engine
+          // never notices.
+          _open[path]?._unplugged(replugWait);
+          _plugs.add(e);
         case 'attached':
           _plugs.add(e);
+          if (_open[path] case final link? when link.unplugged) {
+            unawaited(_reopen(link));
+          }
       }
     }, onError: (Object _) {});
   }
@@ -63,10 +71,40 @@ class UsbLinks implements SerialLinks {
     for (final p in await describe()) '${p['path']}',
   ];
 
+  /// How long an unplugged port waits to come back before it closes.
+  static const replugWait = Duration(minutes: 5);
+
+  /// How long to wait for the person to answer Android's USB prompt. The
+  /// phone side gives up a little sooner.
+  static const permissionWait = Duration(seconds: 75);
+
   /// Asks Android to let OmniFlow use [path]: the phone shows its own
-  /// prompt once, and remembers a choice the user ticks.
-  Future<bool> allow(String path) async =>
-      await _methods.invokeMethod<bool>('permission', {'path': path}) ?? false;
+  /// prompt once, and remembers a choice the user ticks. False when nobody
+  /// answers in [permissionWait].
+  Future<bool> allow(String path) async {
+    try {
+      return await _methods
+              .invokeMethod<bool>('permission', {'path': path})
+              .timeout(permissionWait, onTimeout: () => false) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<void> _reopen(_UsbLink link) async {
+    try {
+      if (!await allow(link.path)) throw const SerialPortClosed();
+      await _methods.invokeMethod<void>('open', {
+        'path': link.path,
+        'baud': link.baud,
+      });
+      link._pluggedIn();
+    } on Object {
+      if (identical(_open[link.path], link)) _open.remove(link.path);
+      link._ended();
+    }
+  }
 
   @override
   Future<SerialLink> open(String path, int baud) async {
@@ -81,7 +119,7 @@ class UsbLinks implements SerialLinks {
     } on PlatformException catch (e) {
       throw TransportTimeoutException(e.message ?? 'cannot open $path');
     }
-    final link = _UsbLink(path, _methods, () => _open.remove(path));
+    final link = _UsbLink(path, baud, _methods, () => _open.remove(path));
     _open[path] = link;
     return link;
   }
@@ -96,9 +134,10 @@ class UsbLinks implements SerialLinks {
 }
 
 class _UsbLink implements SerialLink {
-  _UsbLink(this.path, this._methods, this._forget);
+  _UsbLink(this.path, this.baud, this._methods, this._forget);
 
   final String path;
+  int baud;
   final MethodChannel _methods;
   final void Function() _forget;
   final _in = StreamController<List<int>>();
@@ -112,6 +151,9 @@ class _UsbLink implements SerialLink {
     Map<String, Object?> args = const {},
   ]) async {
     if (_closed) throw const SerialPortClosed();
+    if (unplugged) {
+      throw TransportTimeoutException('$path is unplugged: plug it back in');
+    }
     try {
       await _methods.invokeMethod<void>(method, {'path': path, ...args});
     } on PlatformException catch (e) {
@@ -128,9 +170,31 @@ class _UsbLink implements SerialLink {
       _call('lines', {'dtr': ?dtr, 'rts': ?rts});
 
   @override
-  Future<void> setBaud(int baud) => _call('baud', {'baud': baud});
+  Future<void> setBaud(int baud) async {
+    await _call('baud', {'baud': baud});
+    this.baud = baud;
+  }
+
+  /// Unplugged and waiting to come back.
+  bool get unplugged => _gone != null;
+  Timer? _gone;
+
+  void _unplugged(Duration wait) {
+    _gone?.cancel();
+    _gone = Timer(wait, () {
+      _forget();
+      _ended();
+    });
+  }
+
+  void _pluggedIn() {
+    _gone?.cancel();
+    _gone = null;
+  }
 
   void _ended() {
+    _gone?.cancel();
+    _gone = null;
     if (_closed) return;
     _closed = true;
     _in.close();

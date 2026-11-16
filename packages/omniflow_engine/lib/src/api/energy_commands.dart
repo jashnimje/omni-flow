@@ -43,11 +43,17 @@ EnergyReading? energyReading(String driverId, Map<String, Object?> state) {
   return null;
 }
 
-/// Readings further apart than this are not joined: the plug was away.
-const energyGap = Duration(minutes: 15);
+/// Power readings further apart than this count only this long after the
+/// first, at its power: what the plug did after that is not known.
+const energyGap = Duration(hours: 1);
 
-/// A counter jump above this is a replaced or reset plug, not real use.
-const _counterJumpKwh = 50.0;
+/// The most power a plug's counter can add, in kW. A counter that grew
+/// faster over a gap is a replaced or reset plug, not real use.
+const _maxKw = 25.0;
+
+/// The smallest counter jump always taken, so readings close together are
+/// not refused for rounding.
+const _minJumpKwh = 1.0;
 
 /// How many days of totals are kept.
 const energyKeepDays = 35;
@@ -56,7 +62,10 @@ typedef _Last = ({DateTime at, double? watts, double? counterKwh});
 
 /// Adds up kWh per device per local day from successive readings. A plug's
 /// own counter is preferred, and power is integrated (the mean of two
-/// readings over the time between them) where there is none.
+/// readings over the time between them) where there is none. A gap that
+/// crosses midnight is shared between the days it covers, a counter jump
+/// faster than any plug draws is refused, and a power gap longer than
+/// [energyGap] counts only [energyGap].
 class EnergyMeter {
   /// kWh by device, then by `YYYY-MM-DD`.
   final days = <String, Map<String, double>>{};
@@ -85,25 +94,42 @@ class EnergyMeter {
     final previous = before.counterKwh;
     if (counter != null && previous != null) {
       final delta = counter - previous;
-      if (delta >= 0 && delta < _counterJumpKwh) {
-        _add(device, local, delta);
+      final limit = _maxKw * _hours(gap);
+      if (delta >= 0 && delta <= (limit < _minJumpKwh ? _minJumpKwh : limit)) {
+        _spread(device, before.at, local, delta);
         return;
       }
     }
     final watts = reading.watts;
-    if (watts == null || gap > energyGap) return;
-    final mean = ((before.watts ?? watts) + watts) / 2;
-    // A span across midnight is shared between the two days.
-    final midnight = DateTime(local.year, local.month, local.day);
-    if (before.at.isBefore(midnight)) {
-      _add(
+    if (watts == null) return;
+    if (gap <= energyGap) {
+      final mean = ((before.watts ?? watts) + watts) / 2;
+      _spread(device, before.at, local, mean * _hours(gap) / 1000);
+    } else if (before.watts case final w?) {
+      _spread(
         device,
         before.at,
-        mean * _hours(midnight.difference(before.at)) / 1000,
+        before.at.add(energyGap),
+        w * _hours(energyGap) / 1000,
       );
-      _add(device, local, mean * _hours(local.difference(midnight)) / 1000);
-    } else {
-      _add(device, local, mean * _hours(gap) / 1000);
+    }
+  }
+
+  /// Shares [kwh] used from [from] to [to] between the local days the span
+  /// covers, by the time spent in each.
+  void _spread(String device, DateTime from, DateTime to, double kwh) {
+    final total = to.difference(from);
+    if (total <= Duration.zero) return _add(device, to, kwh);
+    var start = from;
+    while (start.isBefore(to)) {
+      final next = DateTime(start.year, start.month, start.day + 1);
+      final end = next.isBefore(to) ? next : to;
+      _add(
+        device,
+        start,
+        kwh * end.difference(start).inMicroseconds / total.inMicroseconds,
+      );
+      start = end;
     }
   }
 
@@ -205,6 +231,12 @@ class EnergyCommands {
       ...meter.toJson(),
       'price': {'perKwh': ?perKwh, 'currency': currency},
     });
+  }
+
+  /// Saves the totals after a device's were dropped.
+  Future<void> forgetSaved() async {
+    _dirty = true;
+    await flush();
   }
 
   /// Every device state change: a plug's power reading is counted.

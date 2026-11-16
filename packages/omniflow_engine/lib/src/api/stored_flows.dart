@@ -11,7 +11,7 @@ import '../dag/links.dart';
 import '../dag/migrate.dart';
 import '../dag/node_types.dart';
 import '../dag/validator.dart';
-import '../devices/adb/adb_commands.dart' show adbCommandIsHighRisk;
+import '../devices/adb/adb_commands.dart' show adbCapabilityIsHighRisk;
 import '../devices/board.dart';
 import '../devices/device_service.dart' show stateKeyOf;
 import '../manifest/capability.dart';
@@ -323,16 +323,23 @@ class StoredFlows {
   /// Whether running [capability] needs the user's approval in a flow: a
   /// host command, any capability of a driver an agent registered that the
   /// user has not approved, or on a TV over ADB a raw setting or an app's
-  /// data, state or presence.
+  /// data, state or presence, typed text or a key that types (and on a
+  /// phone opening an app or a link), or a capability its manifest marks
+  /// high risk because it acts on a person.
   bool capabilityIsHighRisk(
     DriverManifest manifest,
     CapabilitySpec capability,
   ) =>
       capability.type.isHighRisk ||
+      capability.highRisk ||
       _core.agentDrivers.contains(manifest.id) ||
       manifest.transport.type == TransportType.exec ||
       (manifest.transport.type == TransportType.adb &&
-          adbCommandIsHighRisk(capability.command));
+          adbCapabilityIsHighRisk(
+            capability.command,
+            capability.params,
+            onPhone: manifest.category == 'phone',
+          ));
 
   /// The ids of the high-risk flows among [all]: a flow that drives a device
   /// whose driver runs host commands, or a TV step [capabilityIsHighRisk]

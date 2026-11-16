@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show mergeSort;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,14 +20,31 @@ class DevicePage extends ConsumerWidget {
 
   final String id;
 
+  /// Whether [d] is a phone. Its first toggle is the torch, so its hero
+  /// shows the screen and battery rather than a power button.
+  static bool _isPhone(DeviceView d) => kindOf(d) == DeviceKind.phone;
+
   /// The capabilities the hero and the sliders already cover.
   static bool _shownAbove(DeviceView d, Json cap) => switch (cap['type']) {
-    'toggle' => cap['id'] == d.capabilityOf('toggle')?['id'],
+    'toggle' => !_isPhone(d) && cap['id'] == d.capabilityOf('toggle')?['id'],
     'level' || 'color_temp' || 'color_rgb' => true,
     _ => false,
   };
 
+  static int _rank(Json cap) => switch (cap['type']) {
+    'toggle' => 0,
+    'event' => 2,
+    _ => 1,
+  };
+
   static String _heroTitle(DeviceView d) {
+    if (_isPhone(d)) {
+      return switch (d.state['screen_on']) {
+        true => 'Screen on',
+        false => 'Screen off',
+        _ => 'Screen not read yet',
+      };
+    }
     if (!d.hasPower) return stateLine(d);
     final on = powerOf(d);
     if (on == null) return 'Not read yet';
@@ -36,7 +54,19 @@ class DevicePage extends ConsumerWidget {
     return v is num ? 'On · ${formatValue(v, rangeOf(level!).unit)}' : 'On';
   }
 
+  static String? _phoneSubtitle(DeviceView d) {
+    final battery = d.state['battery'];
+    final parts = [
+      if (battery is num)
+        'Battery ${formatValue(battery, '%')}'
+            '${d.state['charging'] == true ? ', charging' : ''}',
+      if (d.room != null) d.room!,
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
   static String? _heroSubtitle(DeviceView d) {
+    if (_isPhone(d)) return _phoneSubtitle(d);
     final temp = d.capabilityOf('color_temp');
     final v = temp == null ? null : d.state[temp['stateKey']];
     final k = v is num ? kelvinOf(v, rangeOf(temp!).unit) : null;
@@ -62,11 +92,20 @@ class DevicePage extends ConsumerWidget {
       ),
       (_, _) => ref.invalidate(deviceHistoryProvider(id)),
     );
+    final phone = _isPhone(d);
     final others = [
       for (final c in d.capabilities)
-        if (!_shownAbove(d, c)) c,
+        if (!_shownAbove(d, c) && !(phone && c['type'] == 'sensor')) c,
     ];
-    final lit = shownOn(ref, d);
+    // A phone has many events and actions: its switches (the torch, Do
+    // Not Disturb) go first so they are not buried under the events.
+    if (phone) mergeSort(others, compare: (a, b) => _rank(a) - _rank(b));
+    final readings = [
+      if (phone)
+        for (final c in d.capabilities)
+          if (c['type'] == 'sensor') c,
+    ];
+    final lit = phone ? d.state['screen_on'] == true : shownOn(ref, d);
     return OmniPage(
       title: d.name,
       actions: [
@@ -91,7 +130,7 @@ class DevicePage extends ConsumerWidget {
               title: _heroTitle(d),
               subtitle: _heroSubtitle(d),
               tone: lit ? HeroTone.accent : HeroTone.plain,
-              trailing: d.hasPower
+              trailing: d.hasPower && !phone
                   ? OmniPowerButton(
                       key: ValueKey('device-power-$id'),
                       on: lit,
@@ -104,6 +143,11 @@ class DevicePage extends ConsumerWidget {
             if (others.isNotEmpty) ...[
               const OmniSectionHeader('Controls'),
               for (final c in others)
+                CapabilityControl(device: d.json, capability: c),
+            ],
+            if (readings.isNotEmpty) ...[
+              const OmniSectionHeader('Readings'),
+              for (final c in readings)
                 CapabilityControl(device: d.json, capability: c),
             ],
           ],

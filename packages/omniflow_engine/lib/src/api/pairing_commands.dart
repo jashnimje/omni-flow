@@ -34,8 +34,8 @@ class PairingCommands {
           'paired': true,
           'prompted': prompted,
           'message': prompted
-              ? '$id accepted the key. Commands now run without a prompt'
-              : '$id already trusts this key',
+              ? '${device.name} accepted the key. Commands now run without a prompt'
+              : '${device.name} already trusts this key',
         };
       case PairingMethod.tv:
         final newKey = await _core.tv.pair(device, manifest);
@@ -44,20 +44,22 @@ class PairingCommands {
           'paired': true,
           'newKey': newKey,
           'message': newKey
-              ? '$id is paired and its key is stored'
-              : '$id was already paired',
+              ? '${device.name} is paired and its key is stored'
+              : '${device.name} was already paired',
         };
       case PairingMethod.hueBridge:
         final port = device.port ?? manifest.transport.port ?? 80;
         // One username serves every light on the bridge, so each of them
         // gets it and the button is pressed once.
-        final ids = [
+        final lights = [
           for (final d in await DriftDeviceStore(_core.db).all())
             if (d.driverId == device.driverId &&
                 d.host == device.host &&
                 (d.port ?? manifest.transport.port ?? 80) == port)
-              d.id,
+              d,
         ];
+        final ids = [for (final d in lights) d.id];
+        final names = [for (final d in lights) d.name];
         await _core.http.pairHueBridge(
           host: device.host,
           port: port,
@@ -68,7 +70,7 @@ class PairingCommands {
           ...base,
           'paired': true,
           'devices': ids,
-          'message': 'The bridge username is stored for ${ids.join(', ')}',
+          'message': 'The bridge username is stored for ${names.join(', ')}',
         };
       case PairingMethod.secret:
         final key = spec.secret!;
@@ -79,7 +81,7 @@ class PairingCommands {
           'paired': stored,
           'secret': key,
           'message': stored
-              ? '$key is stored for $id'
+              ? '$key is stored for ${device.name}'
               : pairingPrompt(spec, device),
         };
     }

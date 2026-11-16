@@ -220,9 +220,6 @@ class HouseApi {
 
   Future<Json> timers() => _client.call(HouseCalls.timers);
 
-  Future<Json> startTimer(String name, int ms) =>
-      _client.call(HouseCalls.timerStart, {'name': name, 'ms': ms});
-
   Future<Json> cancelTimer(String name) =>
       _client.call(HouseCalls.timerCancel, {'name': name});
 

@@ -18,6 +18,7 @@
     { "id": "rain_chance_next_hour", "type": "sensor", "label": "Chance of rain in the next hour (%)", "stateJsonPath": "$.rain_chance_next_hour" },
     { "id": "high_today", "type": "sensor", "label": "Today's high (°C)", "stateJsonPath": "$.high_today" },
     { "id": "low_today", "type": "sensor", "label": "Today's low (°C)", "stateJsonPath": "$.low_today" },
-    { "id": "updated_at", "type": "sensor", "label": "Last updated", "stateJsonPath": "$.updated_at" }
+    { "id": "updated_at", "type": "sensor", "label": "Last updated", "stateJsonPath": "$.updated_at" },
+    { "id": "stale", "type": "sensor", "label": "Out of date (no answer for 3 hours)", "stateJsonPath": "$.stale" }
   ]
 }

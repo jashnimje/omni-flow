@@ -14,6 +14,7 @@ import 'package:omniflow_app/service/hub_handback.dart';
 import 'package:omniflow_app/service/hub_key.dart';
 import 'package:omniflow_app/service/hub_settings.dart';
 import 'package:omniflow_app/service/notifier.dart';
+import 'package:omniflow_app/service/ssh_hub_connection.dart';
 import 'package:omniflow_app/startup.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
 
@@ -165,6 +166,39 @@ void main() {
       expect(client.view.connected, isTrue);
     });
 
+    test(
+      'a new Wi-Fi network while the hub is away tries again at once',
+      () async {
+        hub.refuse = const HubConnectException('unavailable', 'down');
+        client = make(retry: const Duration(minutes: 5));
+        await client.start();
+        final opens = hub.opens;
+        hub.refuse = null;
+        await client.call('phone.wifi', {'ssid': 'Home', 'bssid': 'aa'});
+        await pumpEventQueue();
+        expect(hub.opens, opens + 1);
+        expect(client.view.connected, isTrue);
+        await client.call('phone.wifi', {'ssid': 'Home', 'bssid': 'aa'});
+        await pumpEventQueue();
+        expect(
+          hub.opens,
+          opens + 1,
+          reason: 'the same network does not reopen',
+        );
+      },
+    );
+
+    test('a slow command is not taken for a lost hub', () async {
+      await client.start();
+      hub.answers['device.list'] = {
+        'ok': false,
+        'error': {'type': 'timeout', 'message': 'slow'},
+      };
+      final r = await client.call('device.list');
+      expect((r['error'] as Map)['type'], 'timeout');
+      expect(client.view.connected, isTrue);
+    });
+
     test('an older hub says Update the hub, with both versions', () async {
       hub.hello = const HubHello(hubVersion: '0.3.2');
       await client.start();
@@ -313,6 +347,39 @@ void main() {
     });
     expect(answer['ok'], true);
     expect(hub.callsOf('ask.answer').single.$2['askId'], 'a1');
+  });
+
+  group('the SSH session', () {
+    test('without the matched host key it stops, and never trusts on first '
+        'use', () async {
+      final secrets = InMemorySecretStore();
+      await secrets.write(HubSettingsStore.privateKeyKey, 'a key');
+      final session = sshHubSession(
+        settings: _settings,
+        secrets: secrets,
+        privateKeySecret: HubSettingsStore.privateKeyKey,
+      );
+      await expectLater(
+        session.open(),
+        throwsA(
+          isA<HubConnectException>()
+              .having((e) => e.type, 'type', 'host_key')
+              .having((e) => e.message, 'message', contains('Set the hub up')),
+        ),
+      );
+      expect(
+        await secrets.read(HostKeyPins.keyFor('mac-mini.local', 22)),
+        isNull,
+      );
+      await session.close();
+    });
+
+    test('a host key problem reads as set the hub up again', () {
+      expect(
+        hubFailureText('host_key', 'x', _settings),
+        contains('set the hub up again'),
+      );
+    });
   });
 
   group('the service', () {

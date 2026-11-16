@@ -111,9 +111,3 @@ List<Thing> thingsOf(List<Json> devices) {
   });
   return things;
 }
-
-/// How a `thing.key` reads to a person: `Desk lamp Power`.
-String describeRef(List<Thing> things, String thing, String key) {
-  final t = things.where((t) => t.id == thing).firstOrNull;
-  return t == null ? '$thing.$key' : '${t.name} ${t.labelOf(key)}';
-}

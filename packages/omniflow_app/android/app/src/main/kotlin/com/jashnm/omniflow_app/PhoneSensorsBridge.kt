@@ -13,6 +13,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -25,6 +26,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.pravera.flutter_foreground_task.FlutterForegroundTaskLifecycleListener
 import com.pravera.flutter_foreground_task.FlutterForegroundTaskStarter
@@ -59,7 +61,7 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
     private val readApps = object : Runnable {
         override fun run() {
             main.removeCallbacks(this)
-            if (sink == null) return
+            if (sink == null || !appsWanted) return
             val power = app.getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!power.isInteractive) return
             if (usageAllowed(app)) readForegroundApp()
@@ -111,6 +113,7 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
                     NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> sendDnd()
                     BluetoothDevice.ACTION_ACL_CONNECTED -> sendBluetooth(intent, true)
                     BluetoothDevice.ACTION_ACL_DISCONNECTED -> sendBluetooth(intent, false)
+                    LocationManager.PROVIDERS_CHANGED_ACTION, LocationManager.MODE_CHANGED_ACTION -> sendLocation()
                 }
             }
         }
@@ -121,10 +124,14 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+            addAction(LocationManager.MODE_CHANGED_ACTION)
         }
         ContextCompat.registerReceiver(app, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         val power = app.getSystemService(Context.POWER_SERVICE) as PowerManager
         send(mapOf("kind" to "screen", "on" to power.isInteractive))
+        locationOn = null
+        sendLocation()
         sendDnd()
         sendConnectedBluetooth()
         main.post(readApps)
@@ -180,6 +187,29 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             "address" to device.address,
             "connected" to connected,
         )
+    }
+
+    private var locationOn: Boolean? = null
+
+    /**
+     * The phone's location switch. With it off Android hides the Wi-Fi
+     * name from every app, so arriving home by Wi-Fi cannot be seen. When it
+     * comes back on, the Wi-Fi network is read again at once.
+     */
+    private fun sendLocation() {
+        val on = locationEnabled(app)
+        if (on == locationOn) return
+        val wasOff = locationOn == false
+        locationOn = on
+        send(mapOf("kind" to "location", "on" to on))
+        if (on && wasOff) rereadWifi()
+    }
+
+    /** A new network callback is told about the current network at once. */
+    private fun rereadWifi() {
+        wifi?.let { runCatching { connectivity.unregisterNetworkCallback(it) } }
+        wifi = null
+        listenToWifi()
     }
 
     /** Reading Do Not Disturb needs no permission; only changing it would. */
@@ -242,16 +272,19 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             battery = receiver
             app.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let(::sendBattery)
         }
-        if (wifi == null) {
-            val callback = wifiCallback()
-            wifi = callback
-            val request = NetworkRequest.Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .build()
-            connectivity.registerNetworkCallback(request, callback)
-        }
+        listenToWifi()
         if (system == null) listenToSystem()
         active = this
+    }
+
+    private fun listenToWifi() {
+        if (wifi != null) return
+        val callback = wifiCallback()
+        wifi = callback
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        connectivity.registerNetworkCallback(request, callback)
     }
 
     private fun sendBattery(intent: Intent) {
@@ -291,6 +324,7 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
                     "connected" to true,
                     "ssid" to ssidOf(info),
                     "bssid" to info?.bssid?.takeUnless { it == HIDDEN_BSSID },
+                    "locationOn" to locationEnabled(app),
                 ),
             )
         }
@@ -334,6 +368,7 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
         main.removeCallbacks(readApps)
         foreground = null
         lastUsageRead = 0L
+        locationOn = null
         if (active === this) active = null
         sink = null
     }
@@ -353,6 +388,28 @@ class PhoneSensorsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
         fun emit(reading: Map<String, Any?>) {
             active?.send(reading)
         }
+
+        /** Whether an "An app opens" trigger exists, from the engine's
+         * watch. Off, the app on screen is not read at all. */
+        @Volatile private var appsWanted = false
+
+        fun watchApps(on: Boolean) {
+            if (on == appsWanted) return
+            appsWanted = on
+            val bridge = active ?: return
+            bridge.main.post(bridge.readApps)
+        }
+
+        /** The location switch in Quick Settings. */
+        fun locationEnabled(context: Context): Boolean =
+            (context.getSystemService(Context.LOCATION_SERVICE) as LocationManager).let {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    it.isLocationEnabled
+                } else {
+                    @Suppress("DEPRECATION")
+                    Settings.Secure.getInt(context.contentResolver, Settings.Secure.LOCATION_MODE, 0) != 0
+                }
+            }
 
         /** Whether the person allowed usage access, which the app on screen
          * needs. */

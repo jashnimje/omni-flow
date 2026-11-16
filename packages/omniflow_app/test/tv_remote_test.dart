@@ -110,10 +110,9 @@ void main() {
       };
       await pumpTv(tester, engine);
       expect(find.byKey(const ValueKey('tv-offline')), findsOneWidget);
-      expect(
-        find.textContaining('No answer from 192.168.1.60'),
-        findsOneWidget,
-      );
+      // Plain words: the address and port stay out of what it says.
+      expect(find.textContaining('did not answer'), findsOneWidget);
+      expect(find.textContaining('192.168.1.60'), findsNothing);
       final before = engine.callsOf('tv.state').length;
       engine.answers['tv.state'] = {'ok': true, 'power': 'on'};
       await tester.tap(find.text('Retry'));
@@ -147,7 +146,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.widget<Text>(find.byKey(const ValueKey('tv-app'))).data,
-        'Sonyliv',
+        'Sony LIV',
       );
       expect(volumeShows('12'), isTrue);
     });

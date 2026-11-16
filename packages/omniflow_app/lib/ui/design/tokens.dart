@@ -222,6 +222,87 @@ Color mutedTint(
   return mixed;
 }
 
+/// The depth every card and tile wears (Home look C in
+/// docs/ui/home-modern-mockups.html): a faint light along the top, a soft
+/// shadow under it and a near-clear edge. A tile with a colour of its own
+/// (a scene, a room) also takes a wash of that colour from its top
+/// corner. Text on every surface here stays at AA (4.5 to 1).
+abstract final class OmniDepth {
+  /// White at 4.5 %, fading out 40 % of the way down.
+  static const highlight = Color(0x0BFFFFFF);
+  static const highlightEnd = 0.4;
+
+  /// White at 6 %, the edge of a card or tile without a colour.
+  static const edge = Color(0x0FFFFFFF);
+
+  /// How much of a tile's own colour shows at its top corner and where
+  /// the wash ends.
+  static const washTop = 0.30;
+  static const washBottom = 0.06;
+  static const washEnd = 0.7;
+
+  static const shadow = [
+    BoxShadow(color: Color(0x59000000), blurRadius: 24, offset: Offset(0, 8)),
+  ];
+
+  /// The light along the top, laid over a surface's own fill.
+  static const sheen = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [highlight, Color(0x00FFFFFF)],
+    stops: [0, highlightEnd],
+  );
+
+  /// [edge] over [surface], as one solid colour for a border.
+  static Color edgeOn(Color surface) => Color.alphaBlend(edge, surface);
+
+  /// The top corner of [tint]'s wash on [surface]: [washTop] of it, less
+  /// when [OmniColors.text] would drop below AA.
+  static Color washTopOf(Color tint, Color surface) =>
+      mutedTint(tint, surface, amount: washTop);
+
+  /// A wash of [tint] on [surface], from the top left (strong) to 70 %
+  /// down (faint), as solid colours so it lerps when a tile changes.
+  static LinearGradient wash(Color tint, Color surface) => LinearGradient(
+    begin: const Alignment(-0.7, -1),
+    end: const Alignment(0.7, 1),
+    colors: [washTopOf(tint, surface), Color.lerp(surface, tint, washBottom)!],
+    stops: const [0, washEnd],
+  );
+
+  /// The brightest point of a surface of [fill] under the [sheen].
+  static Color litTop(Color fill) => Color.alphaBlend(highlight, fill);
+
+  /// The colour for small grey text (a caption) on [surface]: the usual
+  /// [OmniColors.muted] where it reads at AA, else lighter until it does.
+  static Color captionOn(Color surface) {
+    final top = litTop(surface);
+    var t = 0.0;
+    var c = OmniColors.muted;
+    while (t < 1 && contrastRatio(c, top) < 4.5) {
+      t = math.min(1, t + 0.05);
+      c = Color.lerp(OmniColors.muted, OmniColors.text, t)!;
+    }
+    return c;
+  }
+
+  /// A card or tile surface: [color] (or [gradient]), its [border] (the
+  /// clear [edge] by default), the [radius] and the [shadow].
+  static BoxDecoration surface({
+    required Color color,
+    required BorderRadius radius,
+    Gradient? gradient,
+    Color? border,
+    bool lifted = true,
+  }) => BoxDecoration(
+    color: gradient == null ? color : null,
+    gradient: gradient,
+    borderRadius: radius,
+    border: Border.all(color: border ?? edgeOn(color)),
+    boxShadow: lifted ? shadow : null,
+  );
+}
+
 /// Dark ink or light text, whichever reads better on [background].
 Color inkOn(Color background) =>
     contrastRatio(background, OmniColors.background) >=
@@ -301,21 +382,6 @@ abstract final class OmniRadii {
   static const tooltip = OmniShape.sm;
   static const handle = OmniShape.xs;
   static const chip = OmniShape.full;
-}
-
-/// The pressed, focused, hovered and dragged overlays of Material 3, as
-/// the opacity of the content colour laid over a surface.
-abstract final class OmniState {
-  static const hover = 0.08;
-  static const focus = 0.10;
-  static const pressed = 0.10;
-  static const dragged = 0.16;
-  static const disabledContent = 0.38;
-  static const disabledContainer = 0.12;
-
-  /// [content] at [opacity] over [surface].
-  static Color overlay(Color surface, Color content, double opacity) =>
-      Color.alphaBlend(content.withValues(alpha: opacity), surface);
 }
 
 /// The type scale. Nothing is below 12. Page titles are 22 (title large),

@@ -46,10 +46,7 @@ class TagsPage extends ConsumerWidget {
               onAction: () => ref.read(devicesProvider.notifier).refresh(),
             )
           else if (devices.isLoading && devices.value == null)
-            const Padding(
-              padding: EdgeInsets.all(OmniSpace.xl),
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
-            )
+            const OmniListSkeleton(rows: 3, label: 'Loading tags')
           else if (tags.isEmpty)
             OmniEmptyState(
               icon: OmniIcons.tag,

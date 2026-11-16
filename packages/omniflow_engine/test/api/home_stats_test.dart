@@ -122,6 +122,21 @@ void main() {
       expect(s['busiest'], {'id': 'b', 'name': 'Bedtime', 'runs': 2});
     });
 
+    test('a busiest automation that was removed is named as removed', () {
+      final s = stats(
+        runs: [
+          run(now, flow: 'call_test'),
+          run(now, flow: 'call_test'),
+        ],
+        flows: const [],
+      );
+      expect(s['busiest'], {
+        'id': 'call_test',
+        'name': 'A removed automation',
+        'runs': 2,
+      });
+    });
+
     test(
       'a streak counts days in a row and survives a day with no run yet',
       () {

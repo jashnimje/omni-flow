@@ -120,7 +120,7 @@ void main() {
       });
     });
 
-    testWidgets('a swipe left removes it, and Undo saves it back as it was', (
+    testWidgets('a swipe left removes it, and Undo puts it back as it was', (
       tester,
     ) async {
       final engine = automationsEngine();
@@ -151,17 +151,13 @@ void main() {
       expect(find.text('Removed Arrive home'), findsOneWidget);
       await tester.tap(find.text('Undo'));
       await tester.pumpAndSettle();
-      expect(engine.callsOf('automation.save').single.$2, {
-        'form': 'rule',
-        'spec': spec,
-        'trusted': true,
+      // The engine puts it back as it was, off included, in one step: no
+      // save that could run before a second call turns it off.
+      expect(engine.callsOf('automation.unremove').single.$2, {
         'id': 'arrive_home',
       });
-      // It was off, so it comes back off.
-      expect(engine.callsOf('automation.enable').single.$2, {
-        'id': 'arrive_home',
-        'enabled': false,
-      });
+      expect(engine.callsOf('automation.save'), isEmpty);
+      expect(engine.callsOf('automation.enable'), isEmpty);
     });
   });
 

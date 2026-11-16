@@ -12,7 +12,7 @@ const builtInDriverSources = <String, String>{
   "transport": { "type": "adb", "port": 5555 },
   "discovery": [{ "method": "mdns", "service": "_adb-tls-connect._tcp", "idInstance": true }],
   "settings": [
-    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)" }
+    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)", "help": "How often the hub reads its state, in seconds. 5 is fine for most. 0 stops the reads, so the app shows its state only after a command." }
   ],
   "setup": ["pair"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },
@@ -117,8 +117,8 @@ const builtInDriverSources = <String, String>{
   "transport": { "type": "adb", "port": 5555 },
   "discovery": [{ "method": "mdns", "service": "_adb._tcp", "idInstance": true }],
   "settings": [
-    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" },
-    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)" }
+    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)", "help": "The TV's hardware address, used to wake it from standby over Wi-Fi. Leave it empty if you do not need that.\nOn the TV open Settings, then About or Network, and look for MAC address or Wi-Fi MAC, six pairs like 3c:2e:ff:11:22:33." },
+    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)", "help": "How often the hub reads its state, in seconds. 5 is fine for most. 0 stops the reads, so the app shows its state only after a command." }
   ],
   "setup": ["pair", "configure:mac?"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },
@@ -231,9 +231,9 @@ const builtInDriverSources = <String, String>{
     "instructions": "In Home Assistant open your profile, then Security, and create a long-lived access token"
   },
   "settings": [
-    { "key": "entityId", "label": "Entity id, such as light.kitchen or switch.heater" },
-    { "key": "domain", "label": "Entity domain: light, switch, fan or input_boolean" },
-    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
+    { "key": "entityId", "label": "Entity id, such as light.kitchen or switch.heater", "help": "The name Home Assistant gives this light or switch, such as light.kitchen.\nIn Home Assistant open Settings, Devices and services, Entities, tap the entity, then the gear icon, and copy Entity ID." },
+    { "key": "domain", "label": "Entity domain: light, switch, fan or input_boolean", "help": "The first part of the entity id, before the dot: light, switch, fan or input_boolean." },
+    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true, "help": "A key that lets OmniFlow talk to Home Assistant. It stays on this phone.\nIn Home Assistant, open your profile (your name at the bottom left), then the Security tab.\nUnder Long-lived access tokens, tap Create token, give it a name such as OmniFlow, and copy it. Home Assistant shows it only once." }
   ],
   "setup": ["secret:token", "configure:entityId", "configure:domain"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
@@ -278,8 +278,8 @@ const builtInDriverSources = <String, String>{
     "instructions": "In Home Assistant open your profile, then Security, and create a long-lived access token"
   },
   "settings": [
-    { "key": "entityId", "label": "Entity id, such as sensor.living_room_temperature" },
-    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true }
+    { "key": "entityId", "label": "Entity id, such as sensor.living_room_temperature", "help": "The name Home Assistant gives this sensor, such as sensor.living_room_temperature.\nIn Home Assistant open Settings, Devices and services, Entities, tap the sensor, then the gear icon, and copy Entity ID." },
+    { "key": "token", "label": "Long-lived access token (one per Home Assistant user, stored for each device)", "secret": true, "help": "A key that lets OmniFlow talk to Home Assistant. It stays on this phone.\nIn Home Assistant, open your profile (your name at the bottom left), then the Security tab.\nUnder Long-lived access tokens, tap Create token, give it a name such as OmniFlow, and copy it. Home Assistant shows it only once." }
   ],
   "setup": ["secret:token", "configure:entityId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/states/{{device.entityId}}" } },
@@ -309,8 +309,8 @@ const builtInDriverSources = <String, String>{
     "permissions": ["CONTROL_AUDIO", "CONTROL_POWER", "LAUNCH", "WRITE_NOTIFICATION_TOAST"]
   },
   "settings": [
-    { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true },
-    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true }
+    { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true, "help": "The key the TV gives OmniFlow when you accept it. You never type it: pair the TV and press Accept on the TV screen, and it is saved on this phone." },
+    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true, "help": "A fingerprint of the TV's security certificate, saved the first time OmniFlow connects, so another device cannot pretend to be the TV. You never type it." }
   ],
   "setup": ["pair"],
   "statePoll": { "intervalSeconds": 60, "command": { "uri": "ssap://audio/getVolume" } },
@@ -363,8 +363,8 @@ const builtInDriverSources = <String, String>{
   "icon": "server",
   "transport": { "type": "exec", "port": 22 },
   "settings": [
-    { "key": "username", "label": "Username" },
-    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
+    { "key": "username", "label": "Username", "help": "The account you sign in as on that computer, the same name you would type after ssh. Run whoami in a terminal on it to see it." },
+    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true, "help": "A private key that computer accepts for that account. It stays on this phone. Make one on a computer with ssh-keygen -t ed25519, add the .pub line to ~/.ssh/authorized_keys on the target, then paste the private file here, from its BEGIN line to its END line." }
   ],
   "setup": ["configure:username", "secret:sshPrivateKey"],
   "reliability": { "timeoutMs": 15000, "retries": 0 },
@@ -401,8 +401,8 @@ const builtInDriverSources = <String, String>{
   "icon": "laptop",
   "transport": { "type": "exec", "port": 22 },
   "settings": [
-    { "key": "username", "label": "Username" },
-    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true }
+    { "key": "username", "label": "Username", "help": "The account you sign in as on that computer, the same name you would type after ssh. Run whoami in a terminal on it to see it." },
+    { "key": "sshPrivateKey", "label": "SSH private key", "secret": true, "help": "A private key that computer accepts for that account. It stays on this phone. Make one on a computer with ssh-keygen -t ed25519, add the .pub line to ~/.ssh/authorized_keys on the target, then paste the private file here, from its BEGIN line to its END line.\nOn a Mac, also turn on System Settings, General, Sharing, Remote Login." }
   ],
   "setup": ["configure:username", "secret:sshPrivateKey"],
   "reliability": { "timeoutMs": 10000, "retries": 0 },
@@ -448,9 +448,9 @@ const builtInDriverSources = <String, String>{
   "icon": "gauge",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "stateTopic", "label": "Topic the sensor publishes on" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "stateTopic", "label": "Topic the sensor publishes on", "help": "The topic the sensor sends its reading on, such as home/garden/temperature.\nIt is in the sensor's own MQTT settings, or watch the broker with an MQTT app such as MQTT Explorer to see it." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:stateTopic", "configure:username?", "secret:password?"],
   "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "value" }] },
@@ -466,10 +466,10 @@ const builtInDriverSources = <String, String>{
   "icon": "power",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "commandTopic", "label": "Command topic, for ESPHome <node>/switch/<name>/command" },
-    { "key": "stateTopic", "label": "State topic, for ESPHome <node>/switch/<name>/state" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "commandTopic", "label": "Command topic, for ESPHome <node>/switch/<name>/command", "help": "The topic the switch listens on for ON and OFF.\nFor ESPHome it is <node>/switch/<name>/command, where node is the device name in its YAML and name is the switch name in lower case with underscores." },
+    { "key": "stateTopic", "label": "State topic, for ESPHome <node>/switch/<name>/state", "help": "The topic the switch reports ON or OFF on.\nFor ESPHome it is <node>/switch/<name>/state." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:commandTopic", "configure:stateTopic", "configure:username?", "secret:password?"],
   "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "state" }] },
@@ -495,7 +495,7 @@ const builtInDriverSources = <String, String>{
   "icon": "nfc",
   "transport": { "type": "virtual" },
   "settings": [
-    { "key": "uid", "label": "Tag UID, hex" }
+    { "key": "uid", "label": "Tag UID, hex", "help": "The tag's built-in serial number. OmniFlow reads it when you hold the phone to the tag, so you do not type it." }
   ],
   "capabilities": [
     { "id": "last_scanned", "type": "sensor", "label": "Last scanned", "stateJsonPath": "$.last_scanned" },
@@ -516,7 +516,7 @@ const builtInDriverSources = <String, String>{
     { "method": "mdns", "service": "_omniflow._udp", "idInstance": true },
     { "method": "serial" }
   ],
-  "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
+  "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}", "help": "The pins you wired, each with a name and whether it is an output or an input.\nUse the pin picker on the board's page. It knows which pins your board has." }],
   "setup": ["configure:pins"],
   "reliability": { "timeoutMs": 800, "retries": 2 },
   "capabilities": [
@@ -560,7 +560,7 @@ const builtInDriverSources = <String, String>{
   "category": "presence",
   "icon": "person",
   "transport": { "type": "virtual" },
-  "settings": [{ "key": "homePlace", "label": "Place that counts as home (default home)" }],
+  "settings": [{ "key": "homePlace", "label": "Place that counts as home (default home)", "help": "The place that counts as home for this person. Leave it empty to use the place called home.\nPlaces are in Settings, Places and people." }],
   "capabilities": [
     { "id": "home", "type": "sensor", "label": "At home", "stateJsonPath": "$.home" },
     { "id": "place", "type": "sensor", "label": "Place", "stateJsonPath": "$.place" },
@@ -580,9 +580,9 @@ const builtInDriverSources = <String, String>{
   "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid", "usePort": false }],
   "pairing": { "method": "hue_bridge" },
   "settings": [
-    { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
-    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true },
-    { "key": "gamut", "label": "Colour gamut the light reports as capabilities.control.colorgamuttype: A, B or C (the default)" }
+    { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)", "help": "The light's number on the Hue bridge: 1 for the first light added, then 2 and so on.\nIn the Hue app open Settings, Lights, and count down the list, or let OmniFlow find the lights on the bridge." },
+    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true, "help": "The key the bridge gives OmniFlow when you press its round link button during pairing. You never type it. It stays on this phone." },
+    { "key": "gamut", "label": "Colour gamut the light reports as capabilities.control.colorgamuttype: A, B or C (the default)", "help": "Which range of colours the bulb can show: A, B or C. Leave it empty for C, which newer bulbs use.\nIf colours look wrong on an older bulb, try A or B." }
   ],
   "setup": ["pair", "configure:lightId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },
@@ -770,11 +770,12 @@ const builtInDriverSources = <String, String>{
     {
       "id": "ringer",
       "type": "action",
+      "highRisk": true,
       "label": "Set the ringer",
       "params": { "mode": { "type": "enum", "values": ["silent", "vibrate", "normal"] } },
       "command": { "phoneAction": "ringer" }
     },
-    { "id": "set_dnd", "type": "toggle", "label": "Do Not Disturb", "command": { "phoneAction": "dnd" } },
+    { "id": "set_dnd", "type": "toggle", "label": "Do Not Disturb", "highRisk": true, "command": { "phoneAction": "dnd" } },
     {
       "id": "media_volume",
       "type": "action",
@@ -792,6 +793,7 @@ const builtInDriverSources = <String, String>{
     {
       "id": "open_app",
       "type": "action",
+      "highRisk": true,
       "label": "Open an app",
       "params": { "package": { "type": "string", "pattern": "[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+" } },
       "command": { "phoneAction": "open_app" }
@@ -799,6 +801,7 @@ const builtInDriverSources = <String, String>{
     {
       "id": "open_link",
       "type": "action",
+      "highRisk": true,
       "label": "Open a link",
       "params": { "url": { "type": "string", "pattern": "https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!$&()*+,;=%]{1,2000}" } },
       "command": { "phoneAction": "open_link" }
@@ -806,6 +809,7 @@ const builtInDriverSources = <String, String>{
     {
       "id": "set_alarm",
       "type": "action",
+      "highRisk": true,
       "label": "Set an alarm",
       "params": {
         "time": { "type": "string", "pattern": "([01][0-9]|2[0-3]):[0-5][0-9]" },
@@ -816,6 +820,7 @@ const builtInDriverSources = <String, String>{
     {
       "id": "set_timer",
       "type": "action",
+      "highRisk": true,
       "label": "Set a timer",
       "params": {
         "minutes": { "type": "number", "integer": true, "min": 1, "max": 1440, "unit": "min" },
@@ -826,6 +831,7 @@ const builtInDriverSources = <String, String>{
     {
       "id": "show_message",
       "type": "action",
+      "highRisk": true,
       "label": "Show a message on screen",
       "params": {
         "title": { "type": "string", "pattern": "[^\\n]{1,100}" },
@@ -845,9 +851,9 @@ const builtInDriverSources = <String, String>{
   "icon": "place",
   "transport": { "type": "virtual" },
   "settings": [
-    { "key": "ble", "label": "Beacon: {matchName, enterDbm, exitDbm, enterDwellMs, exitDwellMs, silenceMs}" },
-    { "key": "wifi", "label": "Wi-Fi: {ssids, bssids, required}" },
-    { "key": "zone", "label": "Zone id this place answers to" }
+    { "key": "ble", "label": "Beacon: {matchName, enterDbm, exitDbm, enterDwellMs, exitDwellMs, silenceMs}", "help": "A Bluetooth beacon that marks this place, with how strong its signal must be to count as here.\nSet it in Settings, Places and people, where you can pick a beacon nearby." },
+    { "key": "wifi", "label": "Wi-Fi: {ssids, bssids, required}", "help": "The Wi-Fi networks that mean you are at this place.\nSet them in Settings, Places and people, which offers the network you are on now." },
+    { "key": "zone", "label": "Zone id this place answers to", "help": "The hub zone this place follows, so the hub can say who is here. Leave it empty without a hub." }
   ],
   "capabilities": [
     { "id": "inside", "type": "sensor", "label": "Someone inside", "stateJsonPath": "$.inside" },
@@ -929,8 +935,8 @@ const builtInDriverSources = <String, String>{
     "pairingTimeoutMs": 60000
   },
   "settings": [
-    { "key": "token", "label": "Pairing token (issued when you allow OmniFlow on the TV)", "secret": true },
-    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect)", "secret": true }
+    { "key": "token", "label": "Pairing token (issued when you allow OmniFlow on the TV)", "secret": true, "help": "The key the TV gives OmniFlow when you allow it. You never type it: pair the TV and choose Allow on the TV screen, and it is saved on this phone." },
+    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect)", "secret": true, "help": "A fingerprint of the TV's security certificate, saved the first time OmniFlow connects, so another device cannot pretend to be the TV. You never type it." }
   ],
   "setup": ["pair"],
   "reliability": { "timeoutMs": 3000, "retries": 1 },
@@ -1146,9 +1152,9 @@ const builtInDriverSources = <String, String>{
   "icon": "power",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "topic", "label": "Tasmota topic (Configuration, MQTT, Topic)" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "topic", "label": "Tasmota topic (Configuration, MQTT, Topic)", "help": "The device's MQTT topic, such as tasmota_A1B2C3.\nOpen the device's web page, then Configuration, MQTT, and copy Topic." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:topic", "configure:username?", "secret:password?"],
   "statePush": {
@@ -1190,9 +1196,9 @@ const builtInDriverSources = <String, String>{
   "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
   "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
   "settings": [
-    { "key": "devId", "label": "Device id" },
-    { "key": "localKey", "label": "Local key", "secret": true },
-    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5" }
+    { "key": "devId", "label": "Device id", "help": "The Tuya id of this device, about 20 letters and numbers. OmniFlow fills it in when it finds the device on your Wi-Fi.\nIf it is empty, open the device in the Smart Life or Wipro app, tap the pencil or the three dots, then Device information, and copy Virtual ID. The tinytuya wizard in the local key steps lists it too." },
+    { "key": "localKey", "label": "Local key", "secret": true, "help": "A 16 character key the device uses to lock its messages. It is not in the Smart Life or Wipro app, so you get it once with a computer. It stays on this phone.\n1. Make sure the device works in the Smart Life app. A Wipro device works with Smart Life too: add it there, or keep the Wipro app if it lets you link below.\n2. On a computer, make a free account at iot.tuya.com. Open Cloud, Development, Create Cloud Project. Pick Smart Home and the data centre for your country (India for Wipro bought in India).\n3. In the project, open Devices, Link App Account, Add App Account. Scan the code with the Smart Life app (Me, then the scan icon). Your devices now show in the project.\n4. On the same computer, install Python, then run pip install tinytuya and python -m tinytuya wizard. Paste the Access ID and Access Secret from the project's Overview when it asks.\n5. The wizard prints each device with its id and local key. Copy the key for this device and paste it here.\nRemoving the device from the app and adding it again makes a new key, so run the wizard again after that. Close the Smart Life app while OmniFlow talks to the device, because it takes one connection at a time." },
+    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5", "help": "Which Tuya protocol the device speaks. Leave it empty for 3.3, which most plugs and bulbs use.\nIf commands time out, try 3.4, then 3.5. python -m tinytuya scan on a computer shows the version of each device." }
   ],
   "setup": ["configure:devId", "secret:localKey", "configure:version?"],
   "statePush": { "jsonPath": "$.dps" },
@@ -1252,9 +1258,9 @@ const builtInDriverSources = <String, String>{
   "transport": { "type": "tuya", "port": 6668, "version": "3.3" },
   "discovery": [{ "method": "tuya_broadcast", "idSetting": "devId" }],
   "settings": [
-    { "key": "devId", "label": "Device id" },
-    { "key": "localKey", "label": "Local key", "secret": true },
-    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5" }
+    { "key": "devId", "label": "Device id", "help": "The Tuya id of this device, about 20 letters and numbers. OmniFlow fills it in when it finds the device on your Wi-Fi.\nIf it is empty, open the device in the Smart Life or Wipro app, tap the pencil or the three dots, then Device information, and copy Virtual ID. The tinytuya wizard in the local key steps lists it too." },
+    { "key": "localKey", "label": "Local key", "secret": true, "help": "A 16 character key the device uses to lock its messages. It is not in the Smart Life or Wipro app, so you get it once with a computer. It stays on this phone.\n1. Make sure the device works in the Smart Life app. A Wipro device works with Smart Life too: add it there, or keep the Wipro app if it lets you link below.\n2. On a computer, make a free account at iot.tuya.com. Open Cloud, Development, Create Cloud Project. Pick Smart Home and the data centre for your country (India for Wipro bought in India).\n3. In the project, open Devices, Link App Account, Add App Account. Scan the code with the Smart Life app (Me, then the scan icon). Your devices now show in the project.\n4. On the same computer, install Python, then run pip install tinytuya and python -m tinytuya wizard. Paste the Access ID and Access Secret from the project's Overview when it asks.\n5. The wizard prints each device with its id and local key. Copy the key for this device and paste it here.\nRemoving the device from the app and adding it again makes a new key, so run the wizard again after that. Close the Smart Life app while OmniFlow talks to the device, because it takes one connection at a time." },
+    { "key": "version", "label": "Tuya protocol version: 3.3 (the default), 3.4 or 3.5", "help": "Which Tuya protocol the device speaks. Leave it empty for 3.3, which most plugs and bulbs use.\nIf commands time out, try 3.4, then 3.5. python -m tinytuya scan on a computer shows the version of each device." }
   ],
   "setup": ["configure:devId", "secret:localKey", "configure:version?"],
   "statePush": { "jsonPath": "$.dps" },
@@ -1295,7 +1301,8 @@ const builtInDriverSources = <String, String>{
     { "id": "rain_chance_next_hour", "type": "sensor", "label": "Chance of rain in the next hour (%)", "stateJsonPath": "$.rain_chance_next_hour" },
     { "id": "high_today", "type": "sensor", "label": "Today's high (°C)", "stateJsonPath": "$.high_today" },
     { "id": "low_today", "type": "sensor", "label": "Today's low (°C)", "stateJsonPath": "$.low_today" },
-    { "id": "updated_at", "type": "sensor", "label": "Last updated", "stateJsonPath": "$.updated_at" }
+    { "id": "updated_at", "type": "sensor", "label": "Last updated", "stateJsonPath": "$.updated_at" },
+    { "id": "stale", "type": "sensor", "label": "Out of date (no answer for 3 hours)", "stateJsonPath": "$.stale" }
   ]
 }
 ''',
@@ -1308,10 +1315,10 @@ const builtInDriverSources = <String, String>{
   "icon": "zigbee",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "friendlyName", "label": "Friendly name in Zigbee2MQTT" },
-    { "key": "baseTopic", "label": "Base topic, zigbee2mqtt unless changed" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "friendlyName", "label": "Friendly name in Zigbee2MQTT", "help": "The name the device has in Zigbee2MQTT, such as hallway_sensor.\nOpen the Zigbee2MQTT web page, then Devices, and copy the name shown in the list." },
+    { "key": "baseTopic", "label": "Base topic, zigbee2mqtt unless changed", "help": "The topic Zigbee2MQTT sends on. Leave it empty for zigbee2mqtt, unless you changed base_topic in its configuration." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:friendlyName", "configure:baseTopic?", "configure:username?", "secret:password?"],
   "statePush": {

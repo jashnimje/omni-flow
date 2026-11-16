@@ -183,11 +183,16 @@ class SettingSpec {
     required this.key,
     required this.label,
     this.secret = false,
+    this.help,
   });
 
   final String key;
   final String label;
   final bool secret;
+
+  /// What the setting is and where to find it, in plain words. The first
+  /// sentence shows under the field, the whole text in its help sheet.
+  final String? help;
 }
 
 class Reliability {
@@ -396,11 +401,16 @@ class DriverManifest {
       final key = issues.requiredString(setting, 'key', path);
       if (key == null) continue;
       if (!seenSettings.add(key)) issues.add('$path.key', 'duplicates "$key"');
+      final help = issues.optionalString(setting, 'help', path);
+      if (help != null && help.trim().isEmpty) {
+        issues.add('$path.help', 'must not be empty');
+      }
       settings.add(
         SettingSpec(
           key: key,
           label: setting['label'] is String ? setting['label'] as String : key,
           secret: setting['secret'] == true,
+          help: help == null || help.trim().isEmpty ? null : help.trim(),
         ),
       );
     }

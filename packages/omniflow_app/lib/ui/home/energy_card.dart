@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,12 +10,25 @@ import '../design/design.dart';
 import '../devices/weather_page.dart';
 import '../fun/week_bars.dart';
 
-/// `energy.summary`, read again whenever a device's state changes. Null
-/// when the engine has no energy commands, as an older hub.
+/// How often the energy card reads `energy.summary` again while shown.
+const energyRefresh = Duration(minutes: 1);
+
+/// `energy.summary`, read again every [energyRefresh] and when a device is
+/// added or removed. A plug's reading moving does not re-read it: power
+/// pushes come every few seconds and the totals barely move between them.
+/// Null when the engine has no energy commands, as an older hub.
 final energySummaryProvider = FutureProvider.autoDispose<EnergySummary?>((
   ref,
 ) async {
-  ref.watch(devicesProvider);
+  ref.listen(
+    devicesProvider.select((v) => v.value?.map((d) => d['id']).join(',')),
+    (before, now) {
+      // Not when the list first loads: that read is this one.
+      if (before != null && before != now) ref.invalidateSelf();
+    },
+  );
+  final again = Timer(energyRefresh, ref.invalidateSelf);
+  ref.onDispose(again.cancel);
   try {
     final r = await ref
         .read(engineClientProvider)
@@ -245,45 +260,55 @@ Future<void> editEnergyPrice(
   final symbol = TextEditingController(text: summary?.currency ?? '');
   final saved = await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Price of one kWh'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const ValueKey('energy-price-value'),
-            controller: price,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Price, such as 8.5'),
-          ),
-          TextField(
-            key: const ValueKey('energy-price-currency'),
-            controller: symbol,
-            decoration: const InputDecoration(
-              labelText: 'Money symbol, such as ₹ or \$',
+    // The fields are read below, before the dialog's exit ends and these
+    // go with it.
+    builder: (context) => Owning(
+      [price, symbol],
+      child: AlertDialog(
+        title: const Text('Price of one kWh'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const ValueKey('energy-price-value'),
+              controller: price,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Price, such as 8.5',
+              ),
             ),
+            TextField(
+              key: const ValueKey('energy-price-currency'),
+              controller: symbol,
+              decoration: const InputDecoration(
+                labelText: 'Money symbol, such as ₹ or \$',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            key: const ValueKey('energy-price-save'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save'),
           ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          key: const ValueKey('energy-price-save'),
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Save'),
-        ),
-      ],
     ),
   );
-  if (saved != true) return;
   final value = double.tryParse(price.text.trim().replaceAll(',', '.'));
+  final money = symbol.text.trim();
+  if (saved != true) return;
   final r = await callEngine(
     ref,
     SmartHomeCalls.energyPriceSet,
-    SmartHomeCalls.priceArgs(value, symbol.text.trim()),
+    SmartHomeCalls.priceArgs(value, money),
   );
   if (r['ok'] == true) ref.invalidate(energySummaryProvider);
 }

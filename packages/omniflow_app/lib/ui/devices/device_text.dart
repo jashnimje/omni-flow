@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show appLabelFor;
 
 import '../../api/engine_calls.dart';
 import '../../api/tv_calls.dart';
@@ -171,13 +172,9 @@ String? _lightLine(DeviceView d) {
   return parts.isEmpty ? null : parts.join(' · ');
 }
 
-/// A TV app's name from its package: com.netflix.ninja reads "Netflix".
-String appName(String package) {
-  const generic = {'com', 'org', 'net', 'in', 'tv', 'android', 'google'};
-  final parts = package.split('.').where((p) => !generic.contains(p));
-  final name = parts.isEmpty ? package : parts.first;
-  return name.isEmpty ? package : name[0].toUpperCase() + name.substring(1);
-}
+/// A TV app's name from its package, the engine's way: com.netflix.ninja
+/// reads "Netflix".
+String appName(String package) => appLabelFor(package);
 
 /// What a TV is doing: "Netflix · vol 35", "Asleep".
 String tvLine(DeviceView d) {

@@ -126,6 +126,10 @@ class HomeStatsStore {
   }
 }
 
+/// What the busiest automation is called once it has been removed, so
+/// nobody sees its id.
+const removedAutomationName = 'A removed automation';
+
 /// A run from the log, reduced to what the numbers need.
 class StatsRun {
   const StatsRun({
@@ -258,7 +262,7 @@ Map<String, Object?> homeStatsOf({
         ? null
         : {
             'id': busiest.key,
-            'name': names[busiest.key] ?? busiest.key,
+            'name': names[busiest.key] ?? removedAutomationName,
             'runs': busiest.value,
           },
     'totalRuns': totalRuns,

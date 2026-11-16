@@ -304,6 +304,7 @@ class AutomationCommands {
         'askFirst': record.json['askFirst'] == true,
         'notifyOnRun': record.json['notifyOnRun'] == true,
         'manualOnly': manualOnly(record.json),
+        'nextRun': ?_core.flows.nextRunOf('${a['id']}')?.toIso8601String(),
       });
     }
     return {'automations': out, 'loadIssues': listed['loadIssues']};

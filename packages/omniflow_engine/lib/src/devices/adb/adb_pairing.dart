@@ -9,6 +9,7 @@ import 'package:pointycastle/export.dart';
 
 import 'adb_key.dart';
 import 'adb_tls.dart';
+import 'raw_link.dart';
 import 'spake2.dart';
 
 // Android Wireless Debugging pairing, the client side of AOSP's
@@ -89,6 +90,9 @@ final adbPairingCodePattern = RegExp(r'^[0-9]{6}$');
 /// [keyName] is the name the phone lists the key under. [spake2] fixes
 /// the SPAKE2 context, and [onExported] gets the exporter bytes, for a
 /// loopback phone in tests, as `dart:io` gives a TLS server no keyLog.
+/// How long a paired connection waits for the phone to close it.
+const _closeGrace = Duration(seconds: 2);
+
 Future<AdbPairingResult> pairAdbDevice({
   required String host,
   required int port,
@@ -100,32 +104,42 @@ Future<AdbPairingResult> pairAdbDevice({
   void Function(Uint8List exported)? onExported,
 }) async {
   Uint8List? exporterSecret;
-  final SecureSocket socket;
+  // One deadline covers the whole pairing: connecting, TLS and each reply,
+  // so a peer that accepts the connection and then goes quiet cannot hold
+  // android.pair open.
+  final deadline = DateTime.now().add(timeout);
+  Duration left() {
+    final rest = deadline.difference(DateTime.now());
+    return rest > Duration.zero ? rest : Duration.zero;
+  }
+
+  final RawLink socket;
   try {
-    socket = await SecureSocket.connect(
-      host,
-      port,
-      context: adbTlsContext(key),
-      onBadCertificate: (_) => true,
-      timeout: timeout,
-      keyLog: (line) {
-        exporterSecret ??= keyLogSecret(line, 'EXPORTER_SECRET');
-      },
-    );
-  } on HandshakeException {
-    throw AdbPairingFailedException(
-      AdbPairingFailure.tls,
-      'the TLS handshake with $host:$port failed',
-    );
+    socket = await RawLink.connect(host, port, timeout: left());
   } on SocketException catch (e) {
     throw AdbPairingFailedException(
       AdbPairingFailure.unreachable,
       'cannot reach $host:$port (${e.osError?.message ?? e.message})',
     );
+  }
+  try {
+    await socket.secure(
+      context: adbTlsContext(key),
+      onBadCertificate: (_) => true,
+      timeout: left(),
+      keyLog: (line) {
+        exporterSecret ??= keyLogSecret(line, 'EXPORTER_SECRET');
+      },
+    );
   } on TimeoutException {
     throw AdbPairingFailedException(
-      AdbPairingFailure.unreachable,
-      'no answer from $host:$port',
+      AdbPairingFailure.timeout,
+      'no TLS answer from $host:$port',
+    );
+  } on Exception {
+    throw AdbPairingFailedException(
+      AdbPairingFailure.tls,
+      'the TLS handshake with $host:$port failed',
     );
   }
   final reader = _SocketReader(socket);
@@ -146,9 +160,9 @@ Future<AdbPairingResult> pairAdbDevice({
     final auth = spake2 ?? Spake2.adbClient();
     final ours = auth.generateMessage([...utf8.encode(code), ...exported]);
     socket.add(_packet(_spake2Message, ours));
-    await socket.flush();
+    await socket.flush().timeout(left());
 
-    final theirs = await _readPacket(reader, _spake2Message, timeout);
+    final theirs = await _readPacket(reader, _spake2Message, left());
     final Uint8List shared;
     try {
       shared = auth.processMessage(theirs);
@@ -168,11 +182,11 @@ Future<AdbPairingResult> pairAdbDevice({
     }
     peerInfo.setRange(1, 1 + publicKey.length, publicKey);
     socket.add(_packet(_peerInfoMessage, cipher.encrypt(peerInfo)));
-    await socket.flush();
+    await socket.flush().timeout(left());
 
     final Uint8List sealed;
     try {
-      sealed = await _readPacket(reader, _peerInfoMessage, timeout);
+      sealed = await _readPacket(reader, _peerInfoMessage, left());
     } on _Closed {
       throw AdbPairingFailedException(
         AdbPairingFailure.wrongCode,
@@ -203,6 +217,10 @@ Future<AdbPairingResult> pairAdbDevice({
         'the phone sent a guid this engine cannot use',
       );
     }
+    // The phone closes the connection once it has read our key. Closing
+    // first could drop the TLS bytes that carry the key before they leave,
+    // so wait for the phone (briefly) before tearing the link down.
+    await socket.done.timeout(_closeGrace, onTimeout: () {});
     return AdbPairingResult(guid);
   } on _Closed {
     throw AdbPairingFailedException(
@@ -290,17 +308,12 @@ class _Closed implements Exception {}
 
 /// Exact-length reads from a socket.
 class _SocketReader {
-  _SocketReader(Socket socket) {
-    socket.listen(
-      (chunk) {
-        _chunks.add(chunk);
-        _buffered += chunk.length;
-        _wake();
-      },
-      onError: (Object _) => _end(),
-      onDone: _end,
-      cancelOnError: true,
-    );
+  _SocketReader(RawLink socket) {
+    socket.listen((chunk) {
+      _chunks.add(chunk);
+      _buffered += chunk.length;
+      _wake();
+    }, _end);
   }
 
   final _chunks = ListQueue<Uint8List>();

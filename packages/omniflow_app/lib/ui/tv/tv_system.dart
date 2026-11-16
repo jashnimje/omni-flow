@@ -51,9 +51,23 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
 
   TvController get tv => widget.tv;
 
+  /// Whether the app is in front: no reads behind the lock screen.
+  var _inFront = true;
+  late final AppLifecycleListener _lifecycle;
+
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(
+      onHide: () {
+        _inFront = false;
+        _sync();
+      },
+      onShow: () {
+        _inFront = true;
+        _sync();
+      },
+    );
     _sync();
   }
 
@@ -65,13 +79,14 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _timer?.cancel();
     super.dispose();
   }
 
-  /// Reads only while the tab is on screen.
+  /// Reads only while the tab is on screen and the app is in front.
   void _sync() {
-    if (widget.active) {
+    if (widget.active && _inFront) {
       if (_timer != null) return;
       unawaited(_read());
       _timer = Timer.periodic(_every, (_) => _read());
@@ -182,24 +197,28 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
       Padding(
         key: key,
         padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(child: Text(label)),
-                Text(value, style: OmniText.caption),
-              ],
-            ),
-            const SizedBox(height: 4),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: fraction?.clamp(0.0, 1.0),
-                minHeight: 6,
+        child: MergeSemantics(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: Text(label)),
+                  Text(value, style: OmniText.caption),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              ExcludeSemantics(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: fraction?.clamp(0.0, 1.0),
+                    minHeight: 6,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       );
 

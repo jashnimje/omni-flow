@@ -41,7 +41,65 @@ String? webAddressProblem(String url) {
         'address out, and use {{...}} only in the path, query or body';
   }
   if (authority.isEmpty) return 'needs a host';
+  if (authority.contains('@')) {
+    return 'cannot carry a user name or password: $_secretHint';
+  }
+  final query = _queryOf(trimmed);
+  for (final part in query.split('&')) {
+    final name = part.split('=').first.trim();
+    if (webCredentialQueryName(name)) {
+      return 'cannot carry a key or token in the address ($name=): '
+          '$_secretHint';
+    }
+  }
   return null;
+}
+
+const _secretHint =
+    'send it as a header whose value is a secret, such as '
+    '{"X-Api-Key": {"secret": "name"}}, and store it with omni secret '
+    'set-web name';
+
+/// The query of [url], between `?` and `#`, or empty.
+String _queryOf(String url) {
+  final start = url.indexOf('?');
+  if (start < 0) return '';
+  final end = url.indexOf('#', start);
+  return url.substring(start + 1, end < 0 ? url.length : end);
+}
+
+/// Whether a query parameter named [name] carries a credential: `key`,
+/// `token`, `apikey`, `access_token`, `password` and the like, so the
+/// address would keep it in the rule, its versions and every backup.
+bool webCredentialQueryName(String name) {
+  String decoded;
+  try {
+    decoded = Uri.decodeQueryComponent(name);
+  } on ArgumentError {
+    decoded = name;
+  }
+  final lower = decoded.toLowerCase().replaceAll('-', '_');
+  const exact = {
+    'key',
+    'token',
+    'apikey',
+    'api_key',
+    'access_token',
+    'auth',
+    'auth_token',
+    'password',
+    'pass',
+    'pwd',
+    'secret',
+    'client_secret',
+    'sig',
+    'signature',
+  };
+  return exact.contains(lower) ||
+      lower.endsWith('_key') ||
+      lower.endsWith('_token') ||
+      lower.endsWith('_secret') ||
+      lower.endsWith('apikey');
 }
 
 /// Whether [url] can be a web request's address.

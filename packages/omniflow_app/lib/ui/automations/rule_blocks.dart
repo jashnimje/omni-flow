@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show keepStepsLast;
 
 import '../../api/engine_calls.dart' show ApiFailure, AutomationSummary;
+import '../../api/engine_client.dart' show EngineClient;
 import '../../api/rule_calls.dart';
 import '../../rules/rule_spec.dart';
 import '../../state/providers.dart'
@@ -47,6 +50,33 @@ class RuleDraft extends ChangeNotifier {
 
   void changed() {
     failure = null;
+    notifyListeners();
+    unawaited(fetchWords());
+  }
+
+  /// The engine's words for each part, from `rule.words`, shared with
+  /// [words] so every row reads as the card and the diagram do.
+  final served = <String, List<RuleWordPiece>>{};
+
+  /// Where [fetchWords] asks, set by the editor. Null asks nothing, and the
+  /// rows keep the words they have.
+  EngineClient? wordsFrom;
+  String? _wordsFor;
+
+  /// Asks the engine for the words of the rule as it stands, once per
+  /// change, and redraws the rows when they arrive.
+  Future<void> fetchWords() async {
+    final client = wordsFrom;
+    if (client == null) return;
+    final rule = spec.toJson();
+    final key = jsonEncode(rule);
+    if (key == _wordsFor) return;
+    _wordsFor = key;
+    final reply = await RuleCalls.fetchWords(client, rule);
+    if (reply == null || key != _wordsFor) return;
+    served
+      ..clear()
+      ..addAll(reply.parts);
     notifyListeners();
   }
 
@@ -512,12 +542,8 @@ Future<String?> pickTime(BuildContext context, String hhmm) async {
 
 /// Keep steps go last in a rule's THEN, so a move, an add or an undo never
 /// puts a plain step after one.
-void keepsLast(List<RuleStep> steps) {
-  final keeps = steps.whereType<KeepStep>().toList();
-  steps
-    ..removeWhere((s) => s is KeepStep)
-    ..addAll(keeps);
-}
+void keepsLast(List<RuleStep> steps) =>
+    keepStepsLast(steps, (s) => s is KeepStep);
 
 /// The draft an Undo offered now would change, while its editor is open.
 RuleDraft? _undoDraft;

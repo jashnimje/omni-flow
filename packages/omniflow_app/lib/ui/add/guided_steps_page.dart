@@ -11,6 +11,8 @@ import '../boards/board_page.dart' show saveBoardPins;
 import '../boards/board_pins.dart';
 import '../boards/pin_sheet.dart' show PinSheet;
 import '../design/design.dart';
+import '../devices/open_device.dart' show DeviceRoute;
+import '../help/setting_help.dart' show settingHelpLine;
 import 'pair_sheet.dart' show pairFailureText;
 import 'room_field.dart';
 
@@ -59,21 +61,6 @@ Future<void> addAndFollow(
     always: always,
   );
 }
-
-/// [followAdded] for a raw `thing.add` or `device.add` reply.
-Future<void> followNext(
-  NavigatorState navigator,
-  Json added, {
-  required String name,
-  String? id,
-  bool replaceRoute = false,
-}) => followAdded(
-  navigator,
-  Added.fromJson(added),
-  name: name,
-  id: id,
-  replaceRoute: replaceRoute,
-);
 
 /// After an add, opens the guided steps on the step the engine says comes
 /// next, or says it was added when nothing is left, optional keys included.
@@ -305,9 +292,16 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
     return _api.nextStep(widget.id);
   }
 
+  /// One Finish saves everything on the last step: the optional keys
+  /// typed, then the name and room. A new thing then opens on its page.
   Future<void> _finish() async {
     final navigator = Navigator.of(context);
     final devices = ref.read(devicesProvider.notifier);
+    final optional = _step?.optional ?? const <StepKey>[];
+    if (_anyTyped(optional)) {
+      await _run(() => _storeOptional(optional));
+      if (!mounted || _failure != null) return;
+    }
     final name = _name.text.trim();
     final device = _device;
     final room = _room;
@@ -330,7 +324,13 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
       await devices.refresh();
     }
     showMessage('Added ${name.isEmpty ? widget.name : name}');
-    navigator.pop();
+    if (widget.stepsBefore == 0) {
+      navigator.pop();
+      return;
+    }
+    await navigator.pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => DeviceRoute(id: widget.id)),
+    );
   }
 
   TextEditingController _field(String key) =>
@@ -409,26 +409,33 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
               padding: EdgeInsets.only(top: OmniSpace.sm),
               child: OmniProgressBar(height: 2, semanticLabel: 'Working'),
             ),
-          const SizedBox(height: OmniSpace.lg),
-          TextField(
-            key: const ValueKey('setup-name'),
-            controller: _name,
-            onTap: _name.firstTap,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(labelText: 'Name'),
-            onChanged: (_) => setState(() {}),
-          ),
-          if (!_presence) ...[
-            const SizedBox(height: OmniSpace.sm),
-            RoomField(
-              value: _room ?? DeviceView(_device ?? {}).roomId ?? '',
-              onChanged: (r) => setState(() => _room = r),
-            ),
+          // The last step puts these above its Finish.
+          if (step?.kind != NextKind.done) ...[
+            const SizedBox(height: OmniSpace.lg),
+            ..._nameAndRoom(),
           ],
         ],
       ),
     );
   }
+
+  List<Widget> _nameAndRoom() => [
+    TextField(
+      key: const ValueKey('setup-name'),
+      controller: _name,
+      onTap: _name.firstTap,
+      textCapitalization: TextCapitalization.sentences,
+      decoration: const InputDecoration(labelText: 'Name'),
+      onChanged: (_) => setState(() {}),
+    ),
+    if (!_presence) ...[
+      const SizedBox(height: OmniSpace.sm),
+      RoomField(
+        value: _room ?? DeviceView(_device ?? {}).roomId ?? '',
+        onChanged: (r) => setState(() => _room = r),
+      ),
+    ],
+  ];
 
   static String _stepName(NextStep step) => switch (step.kind) {
     NextKind.pair => 'Pair',
@@ -453,6 +460,11 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
           labelText: k.optional && !k.label.contains('(optional)')
               ? '${k.label} (optional)'
               : k.label,
+          helper: settingHelpLine(
+            settingKey: k.key,
+            label: k.label,
+            help: _step?.help[k.key],
+          ),
           suffixIcon: secret
               ? OmniIconAction(
                   icon: shown
@@ -558,23 +570,18 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
             ? 'Give it a name, then finish.'
             : 'Give it a name and a room, then finish.',
       ),
+      const SizedBox(height: OmniSpace.sm),
+      ..._nameAndRoom(),
       if (step.optional.isNotEmpty) ...[
         const OmniSectionHeader('Optional'),
         const Text(
-          'Fill in any it needs. These can wait.',
+          'Fill in any it needs. These can wait. Finish saves what you type.',
           style: OmniText.caption,
         ),
         const SizedBox(height: OmniSpace.sm),
         for (final k in step.optional) _keyField(k, secret: k.step == 'secret'),
-        OmniButton.ghost(
-          key: const ValueKey('setup-optional-save'),
-          label: 'Save these',
-          onPressed: _busy || !_anyTyped(step.optional)
-              ? null
-              : () => _run(() => _storeOptional(step.optional)),
-        ),
-        const SizedBox(height: OmniSpace.sm),
       ],
+      const SizedBox(height: OmniSpace.md),
       OmniButton(
         key: const ValueKey('setup-close'),
         label: 'Finish',

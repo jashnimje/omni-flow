@@ -9,6 +9,7 @@ import '../api/engine_calls.dart' show EngineApi, Json;
 import '../api/engine_client.dart';
 import '../nfc/nfc.dart';
 import '../service/phone_files.dart';
+import '../api/screen_calls.dart';
 
 export '../api/engine_calls.dart' show Json;
 export '../service/phone_files.dart' show PhoneFiles, PickedFile;
@@ -57,18 +58,121 @@ final consoleAcceptedProvider = NotifierProvider<ConsoleAccepted, bool>(
 /// Shows API errors without each screen handling them.
 final messengerKey = GlobalKey<ScaffoldMessengerState>();
 
-void showMessage(String text, {String? action, VoidCallback? onAction}) =>
-    messengerKey.currentState?.showSnackBar(
-      SnackBar(
-        content: Text(text),
-        // With an action Flutter keeps it up until tapped, over the Save
-        // button. It goes after the usual few seconds instead.
-        persist: false,
-        action: action == null || onAction == null
-            ? null
-            : SnackBarAction(label: action, onPressed: onAction),
-      ),
+/// The text of the snackbar on screen or queued last, so the same message
+/// from two places (a call's failure and the screen that made it) shows
+/// once.
+({ScaffoldMessengerState on, String text})? _lastMessage;
+
+/// Shows [text] as a snackbar, in plain words: an address, a port, a
+/// retry count or a rule path never reaches the user. When [text] carried
+/// such detail and there is no other action, a Details action shows it.
+/// The same message without an action, while it is still up, shows once.
+/// Returns the snackbar, or null when nothing was shown.
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showMessage(
+  String text, {
+  String? action,
+  VoidCallback? onAction,
+}) {
+  final plain = plainWords(text);
+  final messenger = messengerKey.currentState;
+  if (messenger == null) return null;
+  final hasAction = action != null && onAction != null;
+  if (!hasAction && _lastMessage == (on: messenger, text: plain.text)) {
+    return null;
+  }
+  final details = plain.details;
+  final SnackBarAction? button;
+  if (hasAction) {
+    button = SnackBarAction(label: action, onPressed: onAction);
+  } else if (details != null) {
+    button = SnackBarAction(
+      label: 'Details',
+      onPressed: () => _showDetails(messenger, details),
     );
+  } else {
+    button = null;
+  }
+  final last = (on: messenger, text: plain.text);
+  _lastMessage = last;
+  final shown = messenger.showSnackBar(
+    SnackBar(
+      content: Text(plain.text),
+      // With an action Flutter keeps it up until tapped, over the Save
+      // button. It goes after the usual few seconds instead.
+      persist: false,
+      action: button,
+    ),
+  );
+  unawaited(
+    shown.closed.then((_) {
+      if (_lastMessage == last) _lastMessage = null;
+    }),
+  );
+  return shown;
+}
+
+void _showDetails(ScaffoldMessengerState messenger, String details) {
+  _lastMessage = null;
+  messenger.showSnackBar(
+    SnackBar(
+      key: const ValueKey('error-details'),
+      content: Text(details),
+      duration: const Duration(seconds: 8),
+      persist: false,
+    ),
+  );
+}
+
+/// [text] in words a person can act on, and the technical detail it held.
+typedef PlainWords = ({String text, String? details});
+
+/// An address with a port, a bare IP address, a retry count or an
+/// exception name: detail for Settings, Developer, not for a message.
+final _transport = RegExp(
+  r'\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b'
+  r'|\b[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*:\d{2,5}\b'
+  r'|\bafter \d+ attempts?\b'
+  r'|\b(?:Socket|Http|Handshake|TlsException|OS Error|errno)\w*',
+);
+
+/// A rule path at the start of a line or after a space (`then[2].do: `).
+final _rulePath = RegExp(
+  r'(?:^|(?<=\s))[a-z]+(?:\[\d+\])(?:\.[a-z]+|\[\d+\])*:\s*',
+  multiLine: true,
+);
+
+/// The sentence for a step or call that did not answer.
+const didNotAnswer =
+    'The device did not answer. Check that it is on and on this Wi-Fi.';
+
+/// [text] with rule paths dropped and each piece of transport detail
+/// swapped for what it means. "Desk lamp failed: no reply from
+/// 10.0.2.2:38899 after 3 attempts" reads "Desk lamp failed: it did not
+/// answer", with the original in [PlainWords.details].
+PlainWords plainWords(String text) {
+  final raw = <String>[];
+  // The same sentence twice (two failed steps on one device) reads once.
+  final seen = <String>{};
+  final lines = <String>[];
+  for (final line in text.replaceAll(_rulePath, '').split('\n')) {
+    final sentences = <String>[];
+    for (final sentence in line.split(RegExp(r'(?<=\.)\s+'))) {
+      var s = sentence.trim();
+      if (_transport.hasMatch(s)) {
+        raw.add(s);
+        final colon = s.indexOf(': ');
+        final head = colon < 0 ? '' : s.substring(0, colon);
+        s = head.isEmpty || _transport.hasMatch(head)
+            ? didNotAnswer
+            : '$head: it did not answer. Check that it is on and on this '
+                  'Wi-Fi.';
+      }
+      if (s.isNotEmpty && seen.add(s)) sentences.add(s);
+    }
+    if (sentences.isNotEmpty) lines.add(sentences.join(' '));
+  }
+  return (text: lines.join('\n'), details: raw.isEmpty ? null : raw.join('\n'));
+}
 
 /// Calls the engine and shows the error message when the call fails.
 Future<Json> callEngine(
@@ -83,13 +187,18 @@ Future<Json> callClient(
   Json args = const {},
 ]) async {
   final result = await client.call(command, args);
-  if (result['ok'] != true) showMessage(errorMessage(result));
+  if (result['ok'] != true) showMessage(_errorText(result));
   return result;
 }
 
 /// The error's message and, for a validation error, each issue, since the
-/// message alone only names what was invalid.
-String errorMessage(Json result) {
+/// message alone only names what was invalid. Plain words only: see
+/// [plainWords].
+String errorMessage(Json result) => plainWords(_errorText(result)).text;
+
+/// [errorMessage] with its technical detail still in, for [showMessage]
+/// to put under Details.
+String _errorText(Json result) {
   final error = result['error'] as Map? ?? const {};
   return [
     plainError('${error['type'] ?? 'failed'}', error['message'] as String?),
@@ -188,7 +297,9 @@ class DevicesNotifier extends AsyncNotifier<List<Json>>
   }
 
   Future<List<Json>> _load(EngineClient client) async {
-    final result = await client.call('device.list', {'withCapabilities': true});
+    final result = await client.call(DeviceCalls.list, {
+      'withCapabilities': true,
+    });
     if (result['ok'] != true) throw EngineReadFailed(errorMessage(result));
     return [
       for (final d in (result['devices'] as List? ?? const []))
@@ -253,7 +364,7 @@ class FlowsNotifier extends AsyncNotifier<List<Json>> with _KeepsListOnFailure {
   }
 
   Future<List<Json>> _load(EngineClient client) async {
-    final result = await client.call('flow.list');
+    final result = await client.call(FlowCalls.list);
     if (result['ok'] != true) throw EngineReadFailed(errorMessage(result));
     return [
       for (final f in (result['flows'] as List? ?? const []))
@@ -269,41 +380,49 @@ final flowsProvider = AsyncNotifierProvider<FlowsNotifier, List<Json>>(
   FlowsNotifier.new,
 );
 
-/// The newest packets for the inspector, oldest dropped past [cap].
+/// Asks the service to send captured packets to the UI ([on] true) or to
+/// stop. Packets cost a copy across the isolate for every UDP broadcast and
+/// HTTP body on the LAN, so they flow only while the inspector is open.
+/// `EngineHost` answers it and forwards captures only while a UI asks.
+const packetsCommand = 'link.packets';
+
+/// The newest packets for the inspector, oldest dropped past [cap]. It
+/// listens only while a screen watches it, and tells the service when.
 class PacketsNotifier extends Notifier<List<Json>> {
   static const cap = 200;
 
   @override
   List<Json> build() {
-    final sub = ref
-        .watch(engineClientProvider)
-        .events
+    final client = ref.watch(engineClientProvider);
+    unawaited(client.call(packetsCommand, {'on': true}));
+    final sub = client.events
         .where((e) => e['event'] == 'packet.captured')
         .listen((p) {
           final next = [p, ...state];
           state = next.length > cap ? next.sublist(0, cap) : next;
         });
-    ref.onDispose(sub.cancel);
+    ref.onDispose(() {
+      sub.cancel();
+      unawaited(client.call(packetsCommand, {'on': false}));
+    });
     return const [];
   }
 
   void clear() => state = const [];
 }
 
-final packetsProvider = NotifierProvider<PacketsNotifier, List<Json>>(
-  PacketsNotifier.new,
-);
+final packetsProvider =
+    NotifierProvider.autoDispose<PacketsNotifier, List<Json>>(
+      PacketsNotifier.new,
+    );
 
 /// The typed engine calls. A failure shows as a snackbar, as with
 /// [callEngine], and comes back in the reply for the screen to show inline.
+/// The snackbar carries only the message: each issue shows on the row it
+/// is about, so it is not said twice.
 final engineApiProvider = Provider<EngineApi>(
   (ref) => EngineApi(
     ref.watch(engineClientProvider),
-    onFailure: (f) => showMessage(
-      [
-        f.message,
-        for (final i in f.issues) '${i.path}: ${i.message}',
-      ].join('\n'),
-    ),
+    onFailure: (f) => showMessage(f.message),
   ),
 );

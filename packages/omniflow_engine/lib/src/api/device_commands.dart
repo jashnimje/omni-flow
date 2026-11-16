@@ -5,11 +5,14 @@ import 'board_runtime.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'device_history.dart';
+import 'presence_view.dart';
+import 'house_things.dart' show reservedThingIds;
 import 'hub_runtime.dart';
 import 'organize_commands.dart';
 import 'stored_flows.dart';
 import 'thing_setup.dart';
 import 'things_runtime.dart';
+import 'versions.dart' show TurnedOffByRemoval;
 import '../dag/web_request.dart';
 import '../devices/board.dart';
 import '../devices/device.dart';
@@ -57,7 +60,12 @@ class DeviceCommands {
           if (m.pairingSpec case final p?) 'pairing': p.method.wireName,
           'settings': [
             for (final s in m.settings)
-              {'key': s.key, 'label': s.label, if (s.secret) 'secret': true},
+              {
+                'key': s.key,
+                'label': s.label,
+                if (s.secret) 'secret': true,
+                'help': ?s.help,
+              },
           ],
           'capabilities': m.capabilities.map((c) => c.id).toList(),
         },
@@ -129,6 +137,13 @@ class DeviceCommands {
     if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(id)) {
       throw ApiError('invalid', 'device id must be lower snake case');
     }
+    if (reservedThingIds.contains(id) || _core.builtInThings.containsKey(id)) {
+      throw ApiError(
+        'invalid',
+        '$id is a built-in thing (the house mode or the timers), so a device '
+            'cannot use it. Pick another id, such as ${id}_2',
+      );
+    }
     final driverId = stringArg(args, 'driver');
     final manifest = _registry[driverId];
     if (manifest == null) throw ApiError('not_found', 'no driver $driverId');
@@ -198,16 +213,48 @@ class DeviceCommands {
     } else if (_hub.running && isBoardDriver(manifest)) {
       _core.track(_boards.provisionQuietly(id));
     }
+    final back = await _turnBackOn(id);
     await _stored.reloadFlows();
+    for (final f in back) {
+      _automationChanged('device.add', f['id']! as String);
+    }
     final added = await _core.device(id);
     return {
       'device': _core.deviceJson(added),
+      if (back.isNotEmpty) 'turnedBackOn': back,
       if (missingSecrets.isNotEmpty) 'missingSecrets': missingSecrets,
       if (missingSettings.isNotEmpty) 'missingSettings': missingSettings,
       'provisioned': ?board,
       'provisionError': ?boardError,
       'next': await _nextFor(added, manifest),
     };
+  }
+
+  /// Tells every screen an automation changed, as a save does.
+  void _automationChanged(String command, String flowId) => _core.emit({
+    'event': 'automation.changed',
+    'command': command,
+    'id': flowId,
+  });
+
+  /// Turns back on the automations removing [deviceId] turned off, once
+  /// every device each one lost is back, and says which as `{id, name}`.
+  /// One the user turned on, edited off or removed since is left alone.
+  Future<List<Map<String, Object?>>> _turnBackOn(String deviceId) async {
+    final out = <Map<String, Object?>>[];
+    for (final f in await TurnedOffByRemoval(_db).back(deviceId)) {
+      final r = await DriftFlowStore(_db).get(f);
+      if (r == null || r.enabled) continue;
+      await _stored.put(
+        f,
+        {...StoredFlows.flowJsonOf(r), 'enabled': true},
+        enabled: true,
+        approved: r.approved,
+        trusted: StoredFlows.trustedOf(r),
+      );
+      out.add({'id': f, 'name': r.spec?['name'] ?? r.json['name'] ?? f});
+    }
+    return out;
   }
 
   /// Devices whose pairing stores no secret (ADB) that this engine paired,
@@ -378,25 +425,39 @@ class DeviceCommands {
   }
 
   /// Every device, or those in `room` (a room id or name).
-  Future<Map<String, Object?>> list(Map<String, Object?> args) async => {
-    'devices': [
-      for (final d in await DriftDeviceStore(_db).all())
-        if (args['room'] == null ||
-            args['room'] == d.room ||
-            (d.room != null &&
-                '${_core.roomNames[d.room]}'.toLowerCase() ==
-                    '${args['room']}'.toLowerCase()))
-          {
-            ..._core.deviceJson(d),
-            if (args['withCapabilities'] == true)
-              'capabilities': _capabilitiesJson(d),
-          },
-    ],
-  };
+  Future<Map<String, Object?>> list(Map<String, Object?> args) async {
+    final all = await DriftDeviceStore(_db).all();
+    return {
+      'devices': [
+        for (final d in all)
+          if (args['room'] == null ||
+              args['room'] == d.room ||
+              (d.room != null &&
+                  '${_core.roomNames[d.room]}'.toLowerCase() ==
+                      '${args['room']}'.toLowerCase()))
+            withPresence(
+              {
+                ..._core.deviceJson(d),
+                if (args['withCapabilities'] == true)
+                  'capabilities': _capabilitiesJson(d),
+              },
+              d,
+              all,
+            ),
+      ],
+    };
+  }
 
-  Future<Map<String, Object?>> get(Map<String, Object?> args) async => {
-    'device': _core.deviceJson(await _core.device(stringArg(args, 'id'))),
-  };
+  Future<Map<String, Object?>> get(Map<String, Object?> args) async {
+    final d = await _core.device(stringArg(args, 'id'));
+    return {
+      'device': withPresence(
+        _core.deviceJson(d),
+        d,
+        await DriftDeviceStore(_db).all(),
+      ),
+    };
+  }
 
   Future<Map<String, Object?>> remove(Map<String, Object?> args) async {
     final id = stringArg(args, 'id');
@@ -423,8 +484,14 @@ class DeviceCommands {
       await _things.reload();
     }
     final disabled = <String>[];
+    final turnedOff = TurnedOffByRemoval(_db);
+    // One another removal already turned off waits for this device too.
+    final alsoHeld = <String>[];
+    final held = await turnedOff.held();
     for (final r in await DriftFlowStore(_db).all()) {
-      if (!r.enabled || !StoredFlows.mentionsThing(r.json['nodes'], id)) {
+      if (!StoredFlows.mentionsThing(r.json['nodes'], id)) continue;
+      if (!r.enabled) {
+        if (held.contains(r.json['id'])) alsoHeld.add(r.json['id'] as String);
         continue;
       }
       await _stored.put(
@@ -436,7 +503,11 @@ class DeviceCommands {
       );
       disabled.add(r.json['id'] as String);
     }
+    await turnedOff.add(id, [...disabled, ...alsoHeld]);
     await _stored.reloadFlows();
+    for (final f in disabled) {
+      _automationChanged('device.remove', f);
+    }
     return {'removed': removed, 'flows': disabled};
   }
 
@@ -446,7 +517,7 @@ class DeviceCommands {
       stringArg(args, 'capability'),
       args['params'] == null ? const {} : objectArg(args, 'params'),
       allowPairing: args['allowPairing'] != false,
-      by: changedByUser,
+      by: callerOf(args),
     );
     return {
       'device': _core.deviceJson(result.device),

@@ -45,15 +45,16 @@ void main() {
         ),
         ['then[0].then[0]'],
       );
+      // A keep written before a plain step moves to the end, as the app's
+      // editor puts it.
+      final moved = normalizeRule({
+        'name': 'After',
+        'when': ['manual'],
+        'then': [_keep(), 'lamp.power=true'],
+      });
       expect(
-        _paths(
-          () => normalizeRule({
-            'name': 'After',
-            'when': ['manual'],
-            'then': [_keep(), 'lamp.power=true'],
-          }),
-        ),
-        ['then[1]'],
+        [for (final s in moved['then'] as List) (s as Map).keys.first],
+        ['do', 'keep'],
       );
       expect(
         _paths(

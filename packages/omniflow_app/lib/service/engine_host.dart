@@ -16,7 +16,7 @@ class EngineHost {
   /// This service task, so a client ignores the `stopped` of a task that
   /// a restart replaced.
   final String instance;
-  final _opened = Completer<EngineClient?>();
+  var _opened = Completer<EngineClient?>();
   StreamSubscription<Map<String, Object?>>? _events;
   String? _hubError;
   String? _startError;
@@ -25,13 +25,24 @@ class EngineHost {
   /// Starts serving [engine], which was opened with the hub result
   /// [hubError].
   void attach(EngineClient engine, {String? hubError}) {
-    if (_opened.isCompleted) return;
+    if (_opened.isCompleted) {
+      // A start that failed and then worked on a retry: later hellos and
+      // calls get the engine.
+      if (_startError == null) return;
+      _opened = Completer<EngineClient?>();
+      _startError = null;
+    }
     _hubError = hubError;
-    _events = engine.events.listen(
-      (event) => _post({'t': LinkMessage.event, 'event': event}),
-    );
+    _events = engine.events.listen((event) {
+      // Packet captures are heavy and only the inspector shows them.
+      if (event['event'] == _packetEvent && _packetSessions.isEmpty) return;
+      _post({'t': LinkMessage.event, 'event': event});
+    });
     _opened.complete(engine);
   }
+
+  /// The hub started on a retry: later hellos carry no hub error.
+  void hubStarted() => _hubError = null;
 
   /// The engine could not open: every hello is told why.
   void fail(String error) {
@@ -61,6 +72,16 @@ class EngineHost {
         final command = message['command'];
         final args = message['args'];
         if (id is! int || command is! String) return;
+        if (command == packetsCommand) {
+          _setPackets(session, args);
+          _post({
+            't': LinkMessage.reply,
+            's': session,
+            'id': id,
+            'result': {'ok': true, 'on': _packetSessions.contains(session)},
+          });
+          return;
+        }
         final engine = await _opened.future;
         final result = engine == null
             ? _error('unavailable', 'OmniFlow did not start: $_startError')
@@ -71,6 +92,21 @@ class EngineHost {
           'id': id,
           'result': result,
         });
+    }
+  }
+
+  /// `link.packets {on}`: whether this UI session wants packet captures.
+  /// The service forwards them only while some session does.
+  static const packetsCommand = 'link.packets';
+  static const _packetEvent = 'packet.captured';
+  final _packetSessions = <String>{};
+
+  void _setPackets(String session, Object? args) {
+    final on = args is Map && args['on'] == true;
+    if (on) {
+      _packetSessions.add(session);
+    } else {
+      _packetSessions.remove(session);
     }
   }
 

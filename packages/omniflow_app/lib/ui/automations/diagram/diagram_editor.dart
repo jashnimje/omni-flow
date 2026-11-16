@@ -46,7 +46,15 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
   /// An edit is not in the diagram on screen yet, so its paths may point
   /// at the wrong part: taps wait for the new one.
   var _stale = false;
+
+  /// The last ask for the diagram of the edited rule failed. The old one
+  /// stays on screen but locked, with Retry, as its paths are out of date.
+  var _failed = false;
   Timer? _debounce;
+
+  /// Bumped by every ask and every edit: an answer counts only when
+  /// nothing happened since it was asked for, so a diagram of the rule
+  /// before an edit never unlocks the editor.
   var _asked = 0;
 
   RuleDraft get _draft => widget.draft;
@@ -77,7 +85,13 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
 
   void _onEdit() {
     _debounce?.cancel();
-    if (!_stale) setState(() => _stale = true);
+    _asked++;
+    if (!_stale || _failed) {
+      setState(() {
+        _stale = true;
+        _failed = false;
+      });
+    }
     _debounce = Timer(diagramRefetchDelay, _fetch);
   }
 
@@ -90,10 +104,21 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
     if (!mounted || asked != _asked) return;
     setState(() {
       _loading = false;
-      _stale = false;
-      // A failed ask keeps the last diagram rather than blanking it.
-      _diagram = diagram ?? _diagram;
+      if (diagram != null) {
+        _diagram = diagram;
+        _stale = false;
+        _failed = false;
+      } else if (_diagram != null) {
+        // A failed ask keeps the last diagram rather than blanking it, but
+        // locked: its paths are of the rule before the edit.
+        _failed = _stale;
+      }
     });
+  }
+
+  void _retry() {
+    setState(() => _failed = false);
+    _fetch();
   }
 
   @override
@@ -115,10 +140,19 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
       key: const ValueKey('diagram-editor'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          height: 2,
-          child: _stale ? const LinearProgressIndicator() : null,
-        ),
+        if (_failed)
+          OmniBanner.error(
+            'The diagram did not refresh, so it cannot be changed until it '
+            'does. Your edits are kept.',
+            key: const ValueKey('diagram-refresh-failed'),
+            actionLabel: 'Retry',
+            onAction: _retry,
+          )
+        else
+          SizedBox(
+            height: 2,
+            child: _stale ? const LinearProgressIndicator() : null,
+          ),
         if (!diagram.editable)
           const Padding(
             padding: EdgeInsets.only(top: OmniSpace.sm),
@@ -408,38 +442,65 @@ void copyRulePart(RuleDraft draft, RulePlace place) {
 }
 
 /// The draft an Undo the diagram offered would change, while its editor
-/// is open.
+/// is open and nothing else changed it.
 RuleDraft? _undoDraft;
 
+/// Stops watching the draft for the edit that takes the Undo away.
+VoidCallback? _stopWatchingUndo;
+
+void _forgetUndo() {
+  _stopWatchingUndo?.call();
+  _stopWatchingUndo = null;
+  _undoDraft = null;
+}
+
 /// Removes the part at [place] and offers to put it back, as the sentence
-/// view does.
+/// view does. The Undo puts it back at the index it had, so any other edit
+/// before it is tapped takes the Undo away: the index may point elsewhere
+/// by then.
 void removeRulePart(RuleDraft draft, RulePlace place) {
   final list = place.list;
   final i = place.index;
   final removed = list.removeAt(i);
   draft.changed();
+  _forgetUndo();
   _undoDraft = draft;
   final what = switch (removed) {
     RuleTrigger() => 'Trigger',
     RuleCondition() => 'Condition',
     _ => 'Step',
   };
-  showMessage(
+  // Shown at once rather than queued, so it is the current snackbar until
+  // it closes and an edit can take it away.
+  messengerKey.currentState
+    ?..clearSnackBars()
+    ..removeCurrentSnackBar();
+  final shown = showMessage(
     '$what removed',
     action: 'Undo',
     onAction: () {
       if (!identical(_undoDraft, draft)) return;
+      _forgetUndo();
       list.insert(i.clamp(0, list.length), removed);
       if (identical(list, draft.spec.then)) keepsLast(draft.spec.then);
       draft.changed();
     },
   );
+  var up = shown != null;
+  unawaited(shown?.closed.then((_) => up = false));
+  void edited() {
+    _forgetUndo();
+    if (up) shown?.close();
+  }
+
+  draft.addListener(edited);
+  _stopWatchingUndo = () => draft.removeListener(edited);
 }
 
 /// Called when [draft]'s editor closes: an Undo the diagram still shows
 /// for it is taken away.
 void dropDiagramUndoFor(RuleDraft draft) {
   if (!identical(_undoDraft, draft)) return;
-  _undoDraft = null;
+  _forgetUndo();
   messengerKey.currentState?.hideCurrentSnackBar();
 }

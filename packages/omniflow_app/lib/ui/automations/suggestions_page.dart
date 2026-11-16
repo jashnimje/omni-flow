@@ -71,7 +71,7 @@ class SuggestionsPage extends ConsumerWidget {
                   padding: EdgeInsets.only(bottom: OmniSpace.md),
                   child: Text(
                     'From the last four weeks of what you turned on and off '
-                    'yourself. Make it opens the rule to check before it is '
+                    'yourself. Make it opens the automation to check before it is '
                     'saved.',
                     style: OmniText.caption,
                   ),

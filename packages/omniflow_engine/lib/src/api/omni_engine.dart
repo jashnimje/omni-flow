@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'add_commands.dart';
 import 'agent_policy.dart';
+import 'android_names.dart';
 import 'android_pair_commands.dart';
 import 'api_error.dart';
 import 'automation_commands.dart';
@@ -13,6 +14,7 @@ import 'board_commands.dart';
 import 'board_runtime.dart';
 import 'command_args.dart';
 import 'device_commands.dart';
+import 'device_move_commands.dart';
 import 'engine_core.dart';
 import 'engine_flow_host.dart';
 import 'error_of.dart';
@@ -27,6 +29,7 @@ import 'nfc_tags.dart';
 import 'organize_commands.dart';
 import 'pairing_commands.dart';
 import 'rule_parse.dart';
+import 'rule_words_commands.dart';
 import 'suggestions.dart';
 import 'rules_core_commands.dart';
 import 'phone_actions.dart';
@@ -256,6 +259,8 @@ class OmniEngine {
         home,
         engine._stored,
         engine._automationCommands,
+        hubRunning: () => built._hub.running,
+        exportBackup: () => built._backupCommands.export(const {}),
       );
       engine._closers.add(engine._house.close);
       return engine;
@@ -431,6 +436,24 @@ class OmniEngine {
     }
   }
 
+  /// Whether a `tv.*` or `android.*` [command] names another person's phone
+  /// over ADB rather than a TV, which the agent policy treats apart.
+  Future<bool> _namesAndroidPhone(
+    String command,
+    Map<String, Object?> args,
+  ) async {
+    final id = args['id'];
+    if (!tvNameOf(command).startsWith(tvCommandPrefix) || id is! String) {
+      return false;
+    }
+    try {
+      final manifest = _core.registry[(await _core.device(id)).driverId];
+      return manifest != null && isAndroidPhone(manifest);
+    } on ApiError {
+      return false;
+    }
+  }
+
   late final Map<String, CommandHandler> _commands = {
     // What an agent may do, and the commands each level opens. Setting it
     // is the user's: MCP refuses agent.access.set.
@@ -477,7 +500,13 @@ class OmniEngine {
           '$command cannot be called through agent.call',
         );
       }
-      final why = agentRefusal(command, inner, await _agentAccess.read());
+      final level = await _agentAccess.read();
+      final why = agentRefusal(
+        command,
+        inner,
+        level,
+        onPhone: await _namesAndroidPhone(command, inner),
+      );
       if (why != null) throw ApiError('needs_user', why);
       if (command == 'device.invoke') await _refuseHighRiskInvoke(inner);
       // The engine's state decides these: a high-risk automation runs only
@@ -527,7 +556,11 @@ class OmniEngine {
           ],
         );
       }
-      return {...result}..remove('ok');
+      // At read, what the phone says about where its person has been and
+      // what they do stays out of the reply.
+      return Map<String, Object?>.from(
+        agentReadView({...result}..remove('ok'), level) as Map,
+      );
     },
     // Everything an agent needs to plan a change, in one reply.
     'agent.describe': (_) async {
@@ -589,6 +622,7 @@ class OmniEngine {
       'hubRunning': _hub.running,
       'flows': flows.loadedFlows.toList(),
       'loadIssues': loadIssues,
+      ..._house.backups.statusJson(),
     },
     'hub.start': (args) async {
       // The long names match startHub's parameters.
@@ -640,7 +674,6 @@ class OmniEngine {
     'flow.run': _flowCommands.run,
     'flow.dryRun': _flowCommands.dryRun,
     'flow.log': _flowCommands.log,
-    'flow.cards': _flowCommands.cards,
     'command.interpret': _flowCommands.interpret,
     'var.list': _stateCommands.varList,
     'var.set': _stateCommands.varSet,
@@ -663,7 +696,11 @@ class OmniEngine {
     'device.discover': _deviceCommands.discover,
     'device.list': _deviceCommands.list,
     'device.get': _deviceCommands.get,
-    'device.remove': _deviceCommands.remove,
+    'device.remove': (args) async {
+      final removed = await _deviceCommands.remove(args);
+      await _smartHome.forget(stringArg(args, 'id'));
+      return removed;
+    },
     'device.invoke': _deviceCommands.invoke,
     'device.refresh': _deviceCommands.refresh,
     'device.pair': _pairingCommands.pair,
@@ -676,6 +713,8 @@ class OmniEngine {
     ...HomeStatsCommands(_core).commands,
     ...SuggestionCommands(_core, _automationCommands).commands,
     ...RuleParseCommands(_core, _automationCommands).commands,
+    ...RuleWordsCommands(_automationCommands).commands,
+    ...DeviceMoveCommands(_core, handle).commands,
     ...AutomationDiagramCommands(_core, _automationCommands).commands,
     ..._smartHome.commands,
     ..._backupCommands.commands,

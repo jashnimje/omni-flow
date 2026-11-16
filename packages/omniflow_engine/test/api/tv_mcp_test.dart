@@ -113,18 +113,25 @@ void main() {
     );
   });
 
-  test('every TV change answers needs_user and sends nothing', () async {
+  test('tv_change says which changes an agent sends at setup and which are '
+      'the user\'s, and sends nothing', () async {
     await pairAsUser();
-    for (final change in [
-      'remote',
-      'text',
-      'volume',
-      'apps',
-      'install',
-      'settings',
-      'files',
-      'shell',
+    for (final (change, command) in [
+      ('remote', 'tv.key'),
+      ('text', 'tv.text'),
+      ('volume', 'tv.volume'),
+      ('apps', 'tv.app'),
     ]) {
+      final (ok, body) = await call('tv_change', {
+        'deviceId': 'tv',
+        'change': change,
+      });
+      expect(ok, isTrue, reason: change);
+      expect(body['yours'], isTrue);
+      expect(body['needs'], 'setup');
+      expect(body['command'], command);
+    }
+    for (final change in ['install', 'settings', 'files', 'shell']) {
       final (ok, body) = await call('tv_change', {
         'deviceId': 'tv',
         'change': change,
@@ -132,6 +139,7 @@ void main() {
       expect(ok, isFalse);
       expect((body['error'] as Map)['type'], 'needs_user', reason: change);
       expect((body['error'] as Map)['message'], contains('omni tv tv'));
+      expect((body['error'] as Map)['message'], contains('for the user only'));
     }
     expect(adbd.commands, isEmpty);
   });

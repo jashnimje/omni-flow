@@ -21,7 +21,7 @@ void main() {
     expect(find.byKey(const ValueKey('console-command')), findsOneWidget);
     expect(
       find.text(
-        'Commands run directly on the TV. Only you can use this, never Claude.',
+        'Commands run directly on the TV. Only you can use this, never an agent.',
       ),
       findsOneWidget,
     );

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../automations/sun_lighting_page.dart' show RoomFollowSunSwitch;
@@ -23,8 +25,12 @@ import 'quick_sheet.dart';
 import 'run_section.dart';
 import 'suggestion_card.dart';
 import 'tile_look.dart';
-import '../fun/home_today_card.dart';
+import 'home_hero.dart';
+import 'home_notices.dart';
+import 'home_presence.dart';
 import 'energy_card.dart' show SmartHomeCards;
+import '../help/screen_help.dart';
+import '../onboarding/home_setup.dart' show openHomeSetup;
 
 /// The things Home shows as tiles: not the phone, people or places.
 List<DeviceView> tileDevices(List<Json> devices) => [
@@ -70,6 +76,7 @@ class HomeScreen extends ConsumerWidget {
           onDone: () async {
             await ref.read(firstRunStoreProvider).markDone();
             ref.invalidate(firstRunDoneProvider);
+            if (context.mounted) unawaited(openHomeSetup(context));
           },
         );
       }
@@ -99,26 +106,25 @@ class _Overview extends ConsumerWidget {
     final drivers = ref.watch(driversProvider).value ?? const {};
     final now = DateTime.now();
     final name = person?.name;
-    // An offline device's last state is not "on" now.
-    final on = tiles?.where((d) => d.online && isLit(d)).length;
     final active = summaries
         ?.where((a) => a.enabled && a.approved && !a.isScene)
         .length;
+    final shown = watchPresence(ref, all);
     final status = [
-      switch (presence?.home) {
-        true => 'Home',
-        false => 'Away',
-        null => null,
+      switch (shown) {
+        PresenceShown.home => 'Home',
+        PresenceShown.away => 'Away',
+        _ => null,
       },
-      if (on != null) '$on on',
       if (ref.watch(houseModeProvider).value?.name case final mode?)
         '$mode mode',
       if (active != null) '$active automation${active == 1 ? '' : 's'} active',
     ].whereType<String>().join(' · ');
     final offline = tiles?.where((d) => !d.online).toList() ?? const [];
+    final title = name == null ? greeting(now) : '${greeting(now)}, $name';
     return OmniTabPage(
-      title: name == null ? greeting(now) : '${greeting(now)}, $name',
-      subtitle: status.isEmpty ? null : status,
+      title: title,
+      heroTitle: true,
       padded: false,
       actions: [
         OmniIconAction(
@@ -134,6 +140,7 @@ class _Overview extends ConsumerWidget {
           label: 'What needs you',
           onPressed: () => showNeedsYou(context, ref),
         ),
+        const ScreenHelpButton(HelpScreen.home),
       ],
       body: RefreshIndicator(
         onRefresh: () => reloadHome(ref),
@@ -146,14 +153,19 @@ class _Overview extends ConsumerWidget {
             OmniInsets.fabClearance(context),
           ),
           children: [
+            HomeHero(title: title, subtitle: status.isEmpty ? null : status),
             if (tiles == null)
               const _Loading()
             else ...[
+              HomeNotices(devices: all),
               const HomeHelpers(),
-              const HomeTodayCard(),
               const SuggestionCard(),
               const SmartHomeCards(),
-              _StatusChips(tiles: tiles, presence: presence, person: person),
+              _StatusChips(
+                tiles: tiles,
+                presence: shown == PresenceShown.notSetUp ? null : presence,
+                person: person,
+              ),
               RunSection(items: runItems(scenes, summaries)),
               ..._favourites(context, ref, tiles, drivers),
               for (final g in _roomGroups(
@@ -294,8 +306,8 @@ class TileGrid extends ConsumerWidget {
 
   Widget _tile(BuildContext context, WidgetRef ref, DeviceView d) {
     final tv = kindOf(d) == DeviceKind.tv;
-    final toggles = d.online && (d.hasPower || tv);
-    final lit = tv ? isLit(d) : shownOn(ref, d);
+    final toggles = d.online && hasMainPower(d);
+    final lit = tv ? isLit(d) : toggles && shownOn(ref, d);
     return Builder(
       builder: (tileContext) => OmniTile(
         key: ValueKey('tile-${d.id}'),

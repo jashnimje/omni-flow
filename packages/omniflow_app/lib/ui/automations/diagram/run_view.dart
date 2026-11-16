@@ -10,8 +10,10 @@ import '../../../state/providers.dart';
 import '../../design/design.dart';
 import '../automations_state.dart' show ruleThingsProvider;
 import '../dialogs.dart' show whenInline;
-import '../rule_words.dart' show ThingWords;
+import '../../../rules/rule_spec.dart';
+import '../rule_words.dart' show AutomationIcons, RuleWords, ThingWords;
 import 'diagram_view.dart';
+import 'rule_paths.dart' show partAt;
 
 /// How long each node of a live run stays the newest before the next
 /// one lights, so a quick run can be followed.
@@ -20,23 +22,35 @@ const liveStep = Duration(milliseconds: 350);
 /// A run drawn on its diagram, sized to the page, with a button that
 /// opens it full screen to pan and zoom.
 class DiagramRunView extends ConsumerWidget {
-  const DiagramRunView({super.key, required this.diagram, required this.title});
+  const DiagramRunView({
+    super.key,
+    required this.diagram,
+    required this.title,
+    this.spec,
+  });
 
   final Diagram diagram;
   final String title;
+
+  /// The rule the diagram draws, for each part's icon.
+  final RuleSpec? spec;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      DiagramPicture(diagram: diagram, handlers: runHandlers(ref)),
+      DiagramPicture(
+        diagram: diagram,
+        handlers: runHandlers(ref, diagram, spec: spec),
+      ),
       Align(
         alignment: AlignmentDirectional.centerEnd,
         child: TextButton.icon(
           key: const ValueKey('diagram-open'),
           onPressed: () => Navigator.of(context).push<void>(
             MaterialPageRoute(
-              builder: (_) => DiagramRunPage(diagram: diagram, title: title),
+              builder: (_) =>
+                  DiagramRunPage(diagram: diagram, title: title, spec: spec),
             ),
           ),
           icon: const Icon(OmniIcons.search, size: 18),
@@ -52,29 +66,97 @@ class DiagramRunView extends ConsumerWidget {
 
 /// A run's diagram on its own page, to pan and zoom.
 class DiagramRunPage extends ConsumerWidget {
-  const DiagramRunPage({super.key, required this.diagram, required this.title});
+  const DiagramRunPage({
+    super.key,
+    required this.diagram,
+    required this.title,
+    this.spec,
+  });
 
   final Diagram diagram;
   final String title;
+  final RuleSpec? spec;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => OmniPage(
     title: title,
     large: false,
-    body: DiagramViewer(diagram: diagram, handlers: runHandlers(ref)),
+    body: DiagramViewer(
+      diagram: diagram,
+      handlers: runHandlers(ref, diagram, spec: spec),
+    ),
   );
 }
 
-/// A read-only diagram's icons: each device step and trigger shows its
-/// device's icon.
-DiagramHandlers runHandlers(WidgetRef ref) {
-  final things = ref.watch(ruleThingsProvider);
+/// A read-only diagram's icons, the same the editor's diagram shows: each
+/// device step and trigger its device's, and every other part its own (a
+/// bell for a notify, a timer for a wait) from [spec], the rule the
+/// diagram draws. Without the rule a part falls back to its kind's icon.
+///
+/// It rebuilds only when a device the diagram names changes its icon,
+/// not on every device's state report.
+DiagramHandlers runHandlers(WidgetRef ref, Diagram diagram, {RuleSpec? spec}) {
+  final named = {for (final n in diagram.nodes) ?n.thing};
+  ref.watch(
+    ruleThingsProvider.select(
+      (things) => [
+        for (final t in things)
+          if (named.contains(t.id) || spec != null)
+            '${t.id}:${t.icon.codePoint}',
+      ].join(','),
+    ),
+  );
+  final words = RuleWords(ref.read(ruleThingsProvider));
   return DiagramHandlers(
     iconOf: (n) => switch (n.thing) {
-      final id? => things.where((t) => t.id == id).firstOrNull?.icon,
-      null => null,
+      final id? => words.thing(id)?.icon,
+      null => _partIcon(n, spec, words) ?? _kindIcon(n),
     },
   );
+}
+
+IconData? _partIcon(DiagramNode n, RuleSpec? spec, RuleWords words) {
+  final path = n.path;
+  if (spec == null || path == null) return null;
+  return switch (partAt(spec, path)) {
+    final RuleTrigger t => words.triggerIcon(t),
+    final RuleCondition c => words.conditionIcon(c),
+    final RuleStep s => words.stepIcon(s),
+    _ => null,
+  };
+}
+
+/// The icon for [n]'s kind, for a run of a rule the app does not have.
+IconData? _kindIcon(DiagramNode n) => switch (n.kind) {
+  NodeKind.wait => OmniIcons.wait,
+  NodeKind.ask => AutomationIcons.ask,
+  NodeKind.group => switch (n.group) {
+    'together' => AutomationIcons.together,
+    'try' => AutomationIcons.fallback,
+    'repeat' => AutomationIcons.repeat,
+    'forEach' => AutomationIcons.forEach,
+    'scene' => OmniIcons.scene,
+    _ => null,
+  },
+  _ => null,
+};
+
+/// The rule of the stored automation [id], for its run's icons, or null
+/// when it is a graph or did not load.
+Future<RuleSpec?> storedRule(WidgetRef ref, String id) async {
+  try {
+    final r = await ref.read(engineClientProvider).call(
+      EngineCalls.automationGet,
+      {'id': id},
+    );
+    if (r['ok'] != true) return null;
+    final a = EngineCalls.automationOf(r);
+    final spec = a['spec'];
+    if (EngineCalls.formOf(a) != 'rule' || spec is! Map) return null;
+    return RuleSpec.fromJson(Map<String, Object?>.from(spec));
+  } on Object {
+    return null;
+  }
 }
 
 /// A dry run (a test run, or Try as if) on the diagram of the rule it
@@ -93,6 +175,7 @@ class DryRunDiagram extends ConsumerStatefulWidget {
 
 class _DryRunDiagramState extends ConsumerState<DryRunDiagram> {
   Diagram? _diagram;
+  RuleSpec? _spec;
 
   @override
   void initState() {
@@ -105,8 +188,14 @@ class _DryRunDiagramState extends ConsumerState<DryRunDiagram> {
     final Json args;
     if (rule != null) {
       args = DiagramCalls.specArgs(rule, id: widget.id);
+      _spec = RuleSpec.fromJson(rule);
     } else if (widget.id case final id?) {
       args = {'id': id};
+      unawaited(
+        storedRule(ref, id).then((spec) {
+          if (mounted && spec != null) setState(() => _spec = spec);
+        }),
+      );
     } else {
       return;
     }
@@ -127,7 +216,7 @@ class _DryRunDiagramState extends ConsumerState<DryRunDiagram> {
     if (d == null) return const SizedBox.shrink();
     return KeyedSubtree(
       key: const ValueKey('dry-run-diagram'),
-      child: DiagramRunView(diagram: d, title: 'Test run'),
+      child: DiagramRunView(diagram: d, title: 'Test run', spec: _spec),
     );
   }
 }
@@ -147,6 +236,7 @@ class LastRunSection extends ConsumerStatefulWidget {
 }
 
 class _LastRunSectionState extends ConsumerState<LastRunSection> {
+  RuleSpec? _spec;
   Diagram? _base;
   Diagram? _shown;
   String? _caption;
@@ -165,6 +255,11 @@ class _LastRunSectionState extends ConsumerState<LastRunSection> {
     super.initState();
     _events = ref.read(engineClientProvider).events.listen(_onEvent);
     _load();
+    unawaited(
+      storedRule(ref, widget.id).then((spec) {
+        if (mounted && spec != null) setState(() => _spec = spec);
+      }),
+    );
   }
 
   @override
@@ -303,6 +398,7 @@ class _LastRunSectionState extends ConsumerState<LastRunSection> {
           child: DiagramRunView(
             diagram: shown,
             title: live ? 'Running now' : 'Last run',
+            spec: _spec,
           ),
         ),
       ],

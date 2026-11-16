@@ -70,7 +70,14 @@ class CapabilitySpec {
     this.alsoOff = const [],
     this.values = const [],
     this.derive = const [],
+    this.highRisk = false,
   });
+
+  /// Set in the manifest for a capability that acts on a person (a
+  /// full-screen message on their phone, a link opened, the ringer
+  /// silenced), so an automation an agent saves with it waits for the
+  /// user, and an agent never runs it directly.
+  final bool highRisk;
 
   final String id;
   final CapabilityType type;
@@ -255,6 +262,10 @@ class CapabilitySpec {
         values = List<Object>.unmodifiable(rawValues.cast<Object>());
       }
     }
+    final highRisk = map['highRisk'];
+    if (highRisk != null && highRisk is! bool) {
+      issues.add('$path.highRisk', 'must be true or false');
+    }
     if (issues.issues.length > before || id == null || type == null) {
       return null;
     }
@@ -269,6 +280,7 @@ class CapabilitySpec {
       alsoOff: alsoOff,
       values: values,
       derive: List.unmodifiable(derive),
+      highRisk: highRisk == true,
     );
   }
 

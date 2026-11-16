@@ -1,5 +1,6 @@
 package com.jashnm.omniflow_app
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
@@ -62,6 +63,8 @@ abstract class RunTile : TileService() {
             ?: Toast.makeText(this, EngineSocket.NOT_RUNNING, Toast.LENGTH_LONG).show()
     }
 
+    // The old call runs only before Android 14, behind the version check.
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     private fun startCollapsed(intent: Intent) {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

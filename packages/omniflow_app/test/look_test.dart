@@ -196,6 +196,30 @@ void main() {
       );
     });
 
+    testWidgets('coming back from a device does not focus the search again', (
+      tester,
+    ) async {
+      await openDevices(tester);
+      await tester.tap(find.byKey(const ValueKey('devices-filter')));
+      await tester.enterText(
+        find.byKey(const ValueKey('devices-filter')),
+        'lamp',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('device-row-desk_lamp')));
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      final field = tester.widget<EditableText>(
+        find.descendant(
+          of: find.byKey(const ValueKey('devices-filter')),
+          matching: find.byType(EditableText),
+        ),
+      );
+      expect(field.focusNode.hasFocus, isFalse);
+      expect(tester.testTextInput.isVisible, isFalse);
+    });
+
     testWidgets('By type uses plain groups in a fixed order', (tester) async {
       await openDevices(tester);
       await tester.tap(find.text('By type'));

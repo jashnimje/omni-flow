@@ -2,15 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart' show DeviceView, Json;
+import '../../api/home_location_calls.dart';
 import '../../api/smart_home_calls.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
-
-/// The weather thing's id among [devices], or null.
-String? weatherIdOf(List<Json> devices) => devices
-    .where((j) => j['driver'] == SmartHomeCalls.weatherDriver)
-    .map((j) => '${j['id']}')
-    .firstOrNull;
+import '../settings/home_location_page.dart'
+    show homeLocationProvider, openHomeLocation;
 
 DeviceView? _weatherThing(WidgetRef ref, [String? id]) {
   final list = ref.watch(devicesProvider).value ?? const <Json>[];
@@ -98,7 +95,14 @@ class WeatherPage extends ConsumerWidget {
         key: const ValueKey('weather-page'),
         children: [
           if (w.problem != null)
-            OmniBanner.info(w.problem!, key: const ValueKey('weather-problem')),
+            OmniBanner.info(
+              w.problem!,
+              key: const ValueKey('weather-problem'),
+              actionLabel: ref.watch(homeLocationProvider).value?.isSet == false
+                  ? 'Set home location'
+                  : null,
+              onAction: () => openHomeLocation(context),
+            ),
           OmniHeroCard(
             key: const ValueKey('weather-hero'),
             title: WeatherView.degrees(w.temperature),
@@ -160,6 +164,14 @@ class AddWeatherRow extends ConsumerWidget {
       chevron: existing == null,
       onTap: existing == null
           ? () async {
+              final home = await HomeLocationApi(ref.read(engineClientProvider))
+                  .read();
+              if (home != null && !home.isSet) {
+                if (!context.mounted) return;
+                showMessage('The weather needs to know where home is first');
+                openHomeLocation(context);
+                return;
+              }
               final r = await callEngine(ref, SmartHomeCalls.weatherAdd);
               if (r['ok'] != true) return;
               ref.invalidate(devicesProvider);

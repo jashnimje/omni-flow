@@ -14,9 +14,10 @@ import java.net.SocketTimeoutException
 
 /**
  * Hands one engine command from a computer to the engine's private control
- * socket, so an agent can set OmniFlow up with `omni --phone` or MCP and no
- * screen. Only adb's shell user (or root) may call it: a computer gets that
- * only after the phone owner allows it for USB or wireless debugging.
+ * socket, so OmniFlow can be set up from a computer with `omni --phone` or
+ * MCP and no screen.
+ * Only adb's shell user (or root) may call it: a computer gets that only
+ * after the phone owner allows it for USB or wireless debugging.
  * Nothing listens on the network.
  *
  * `adb shell content call --uri content://com.jashnm.omniflow_app.agent
@@ -51,6 +52,13 @@ class AgentBridgeProvider : ContentProvider() {
         }
     }
 
+    /**
+     * A command from `omni --phone` runs as the phone owner's, the same as
+     * the `omni` CLI on a computer: adb reaches the phone only after its
+     * owner allowed that computer, and with adb a computer can already drive
+     * the whole screen. `omni mcp --phone` sends its tools as `agent.call`,
+     * which keeps an agent to its access level.
+     */
     private fun forward(request: String): String {
         val json = JSONObject(request)
         return EngineSocket.call(

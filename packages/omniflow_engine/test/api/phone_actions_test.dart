@@ -472,13 +472,12 @@ void main() {
       await ok('phone.package', {'package': 'com.x', 'updated': true});
       await ok('phone.headphones', {'plugged': true});
       await ok('phone.faceDown', {'on': true});
-      await until(() => titles().length == 11);
+      await until(() => titles().length == 10);
       expect(titles().toSet(), {
         'media_started',
         'title A song',
         'media_stopped',
         'calendar_started',
-        'title Gym with Sam',
         'calendar_ended',
         'started_up',
         'app_installed',
@@ -486,6 +485,11 @@ void main() {
         'headphones',
         'face_down',
       });
+      // The calendar title stays on the phone: not in an event, the run log
+      // or what a run renders.
+      expect(jsonEncode(events), isNot(contains('Gym with Sam')));
+      final log = await ok('automation.log', {'id': 'titles'});
+      expect(jsonEncode(log), isNot(contains('Gym with Sam')));
       final state = await phoneState();
       expect(state['headphones'], isTrue);
       expect(state['face_down'], isTrue);
@@ -545,6 +549,7 @@ void main() {
         'headphones': false,
         'boot': false,
         'packages': false,
+        'apps': false,
         'calendarWords': ['dentist', 'gym'],
         'alarmMinutes': [20],
       });

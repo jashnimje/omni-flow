@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../state/providers.dart';
 import '../design/design.dart';
+import '../../api/screen_calls.dart';
 
 /// The boards OmniFlow ships firmware for, with what each is called and
 /// the asset the app carries.
@@ -58,7 +59,7 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
 
   Future<void> _look() async {
     setState(() => _ports = null);
-    final r = await ref.read(engineClientProvider).call('board.ports');
+    final r = await ref.read(engineClientProvider).call(BoardCalls.ports);
     if (!mounted) return;
     final ports = [
       for (final p in (r['ports'] as List? ?? const []))
@@ -130,7 +131,7 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
       });
       return;
     }
-    final r = await engine.call('board.flash', {
+    final r = await engine.call(BoardCalls.flash, {
       'port': port,
       'chip': _chip,
       'file': file,

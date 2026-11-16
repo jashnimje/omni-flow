@@ -215,11 +215,6 @@ void main() {
           (tnfExternal, 'android.com:pkg'),
         ]);
         expect(tagIdFromNdef(decoded), 'front_door');
-        expect(
-          await ok('phone.nfc_write', {'id': 'front_door'}),
-          payload,
-          reason: 'the earlier name answers the same',
-        );
       },
     );
 
@@ -435,28 +430,6 @@ void main() {
       expect(thingEvents(), isEmpty);
       expect(unknowns(), isEmpty);
       expect(await stateOf('front_door'), isEmpty);
-    });
-
-    test('phone.nfc is the earlier name, and takes a writtenId', () async {
-      expect((await ok('phone.nfc', {'uid': '04A22B1C'}))['tag'], 'front_door');
-      await ok('tag.save', {'id': 'shelf', 'name': 'Shelf'});
-      final written = await ok('phone.nfc', {
-        'uid': '04000000',
-        'writtenId': 'shelf',
-      });
-      expect(written['tag'], 'shelf');
-      expect(written['source'], 'phone');
-      expect(
-        (await ok('phone.nfc', {'uid': '04000001', 'writtenId': 'shelf'})),
-        containsPair('mismatch', 'shelf'),
-      );
-      expect(
-        (await err('phone.nfc', {
-          'uid': '04000000',
-          'writtenId': '../x',
-        }))['type'],
-        'invalid',
-      );
     });
   });
 

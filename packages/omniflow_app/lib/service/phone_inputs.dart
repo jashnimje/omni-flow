@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../api/engine_calls.dart';
 import '../api/engine_client.dart';
+import 'notifier.dart';
 
 /// Feeds the phone thing from Android, inside the service so it keeps
 /// working with the screen off. Readings come from PhoneSensorsBridge.kt
@@ -11,7 +12,9 @@ import '../api/engine_client.dart';
 /// event channel of the service's engine:
 ///
 /// - `{"kind": "battery", "level": 0..100, "charging": bool}`
-/// - `{"kind": "wifi", "connected": bool, "ssid"?: String, "bssid"?: String}`
+/// - `{"kind": "wifi", "connected": bool, "ssid"?: String, "bssid"?: String,
+///   "locationOn"?: bool}`
+/// - `{"kind": "location", "on": bool}`, the location switch
 /// - `{"kind": "app", "package", "label"?, "event": "opened" | "closed"}`
 /// - `{"kind": "notification", "package", "label"?, "title"?, "text"?}`
 /// - `{"kind": "bluetooth", "name", "address", "connected": bool}`
@@ -20,9 +23,26 @@ import '../api/engine_client.dart';
 /// A notification's text is only passed on to the engine, never kept or
 /// logged here.
 class PhoneInputs {
-  PhoneInputs(this._engine, {Stream<Object?>? readings})
-    : _readings =
-          readings ?? const EventChannel(channelName).receiveBroadcastStream();
+  PhoneInputs(
+    this._engine, {
+    Stream<Object?>? readings,
+    PostSettingsNotice? post,
+  }) : _readings =
+           readings ?? const EventChannel(channelName).receiveBroadcastStream(),
+       _post = post ?? AutomationNotifier.platformPost;
+
+  final PostSettingsNotice _post;
+
+  /// Called when the phone joins or leaves a Wi-Fi network, so the service
+  /// stays awake while presence settles.
+  void Function()? onWifiChanged;
+
+  /// The location switch, as last read. With it off Android hides the
+  /// Wi-Fi name, so a Wi-Fi place cannot see the phone arrive. Null until
+  /// the phone says.
+  bool? get locationOn => _locationOn;
+  bool? _locationOn;
+  var _toldLocationOff = false;
 
   static const channelName = 'omniflow/phone_sensors';
 
@@ -72,14 +92,20 @@ class PhoneInputs {
       case 'wifi':
         final connected = reading['connected'] == true;
         final ssid = reading['ssid'] as String?;
-        // Connected with the name hidden (no location access) says nothing
-        // about where the phone is, so it must not read as "off Wi-Fi".
-        if (connected && ssid == null) return;
+        if (reading['locationOn'] case final bool on) _locationOn = on;
+        // Connected with the name hidden (location off, or no location
+        // access) says nothing about where the phone is, so it must not
+        // read as "off Wi-Fi".
+        if (connected && ssid == null) {
+          if (_locationOn == false) await _tellLocationOff();
+          return;
+        }
         final next = connected
             ? (ssid: ssid, bssid: reading['bssid'] as String?)
             : (ssid: null, bssid: null);
         if (next == _wifi) return;
         _wifi = next;
+        onWifiChanged?.call();
         await _send(
           EngineCalls.phoneWifi,
           EngineCalls.wifiArgs(ssid: next.ssid, bssid: next.bssid),
@@ -113,6 +139,16 @@ class PhoneInputs {
           'address': address,
           'connected': connected,
         });
+      case 'location':
+        final on = reading['on'];
+        if (on is! bool) return;
+        _locationOn = on;
+        if (on) {
+          // Told again the next time it goes off.
+          _toldLocationOff = false;
+        } else {
+          await _tellLocationOff();
+        }
       case 'screen':
         final on = reading['on'];
         if (on is! bool || on == _screenOn) return;
@@ -204,6 +240,39 @@ class PhoneInputs {
           'updated': reading['updated'] == true,
         });
     }
+  }
+
+  static const locationNoticeId = 0x10ca7;
+
+  /// Once per time location goes off, and only when a place is found by
+  /// Wi-Fi: a notification that says arriving home cannot be seen, and
+  /// opens the location switch.
+  Future<void> _tellLocationOff() async {
+    if (_toldLocationOff || !await _hasWifiPlace()) return;
+    _toldLocationOff = true;
+    await _post(
+      channel: 'problems',
+      id: locationNoticeId,
+      title: 'Location is off',
+      body:
+          'Android hides the Wi-Fi name while location is off, so OmniFlow '
+          'cannot see you arrive at a Wi-Fi place. Tap to turn location on.',
+      open: 'location',
+    );
+  }
+
+  Future<bool> _hasWifiPlace() async {
+    try {
+      final reply = await _engine.call('device.list');
+      for (final d in reply['devices'] as List? ?? const []) {
+        if (d is! Map || d['driver'] != 'place') continue;
+        final settings = d['settings'];
+        if (settings is Map && settings['wifi'] != null) return true;
+      }
+    } on Object {
+      return false;
+    }
+    return false;
   }
 
   static String? _text(Object? value) =>

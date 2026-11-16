@@ -27,7 +27,7 @@ class HubSettings {
   final String phone;
 
   /// The hub's host key the user matched against `omni hub fingerprint`,
-  /// as `<type> SHA256:...`.
+  /// as `<type> SHA256:...`. Every connection requires exactly this key.
   final String? hostKey;
 
   String get address => port == 22 ? '$user@$host' : '$user@$host:$port';
@@ -100,7 +100,7 @@ class HubSettingsStore {
       _store.write(settingsKey, jsonEncode(settings.toJson()));
 
   /// This phone's key, made the first time it is asked for. The private
-  /// half never leaves the keystore.
+  /// half is kept only in the phone's keystore.
   Future<HubKey> phoneKey(String phone) async {
     final private = await _store.read(privateKeyKey);
     final public = await _store.read(publicKeyKey);
@@ -115,11 +115,4 @@ class HubSettingsStore {
 
   /// The public half alone, or null before a key was made.
   Future<String?> publicKey() => _store.read(publicKeyKey);
-
-  /// Pins the host key the user matched, where the SSH client checks it.
-  Future<void> pinHostKey(HubSettings settings, String offered) =>
-      HostKeyPins(_store).pin(settings.host, settings.port, offered);
-
-  Future<String?> pinnedHostKey(HubSettings settings) =>
-      HostKeyPins(_store).pinned(settings.host, settings.port);
 }

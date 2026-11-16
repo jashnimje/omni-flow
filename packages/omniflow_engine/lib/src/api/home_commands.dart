@@ -4,6 +4,7 @@ import 'dart:io';
 import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
+import 'mode_commands.dart' show HomeFile;
 import 'stored_flows.dart';
 import '../dag/sun.dart';
 
@@ -12,9 +13,12 @@ import '../dag/sun.dart';
 /// BLE, a person may count another place as home, and a sun rule needs no
 /// place at all.
 class HomeLocationStore {
-  HomeLocationStore(Directory home) : _file = File('${home.path}/home.json');
+  HomeLocationStore(Directory home)
+    : _file = File('${home.path}/home.json'),
+      _writer = HomeFile(home);
 
   final File _file;
+  final HomeFile _writer;
 
   Future<HomeLocation?> read() async {
     try {
@@ -30,24 +34,13 @@ class HomeLocationStore {
     return null;
   }
 
-  /// Keeps the other keys `home.json` holds (the house mode, the alerts).
-  Future<void> write(HomeLocation? location) async {
-    final temp = File('${_file.path}.tmp');
-    Map<String, Object?> others = {};
-    try {
-      final json = jsonDecode(await _file.readAsString());
-      if (json is Map) others = Map<String, Object?>.from(json);
-    } on FileSystemException {
-      // Never written.
-    } on FormatException {
-      // Damaged: replaced whole.
-    }
-    others.remove('location');
-    await temp.writeAsString(
-      jsonEncode({...others, 'location': ?homeLocationJson(location)}),
-      flush: true,
-    );
-    await temp.rename(_file.path);
+  /// Keeps the other keys `home.json` holds (the house mode, the alerts),
+  /// through the one [HomeFile] writer.
+  Future<void> write(HomeLocation? location) {
+    final json = homeLocationJson(location);
+    return json == null
+        ? _writer.update(const {}, remove: const ['location'])
+        : _writer.update({'location': json});
   }
 }
 

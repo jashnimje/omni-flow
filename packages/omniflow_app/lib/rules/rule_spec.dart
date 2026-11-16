@@ -1,3 +1,6 @@
+import 'package:omniflow_engine/omniflow_engine.dart'
+    show ruleMissing, stepsFilled, typedValue;
+
 import '../api/engine_calls.dart' show Json;
 
 /// The rule form of an automation in the object form the engine stores
@@ -43,11 +46,12 @@ class RuleSpec {
   /// `cooldownSeconds`, `enabled`), kept so saving does not drop them.
   final Json extra;
 
-  /// Whether every list the rule form needs filled has something in it: a
-  /// trigger and a step, and in each If a condition and a THEN step, and a
-  /// step in each Do together branch. A rule of keep steps alone needs no
-  /// trigger, since each keep watches its own conditions.
-  bool get complete => (when.isNotEmpty || onlyKeeps) && stepsComplete(then);
+  /// Whether the engine would take it as a whole rule: a trigger and a
+  /// step, and every group filled ([ruleMissing] says what is not).
+  bool get complete => ruleMissing(toJson()) == null;
+
+  /// What still keeps it from being saved, in the engine's words, or null.
+  String? get missing => ruleMissing(toJson());
 
   /// Whether [then] is all keep steps.
   bool get onlyKeeps => then.isNotEmpty && then.every((s) => s is KeepStep);
@@ -120,27 +124,10 @@ const automationIconNames = [
   'fire',
 ];
 
-/// Whether [steps] has a step, and each If and Do together in it is filled.
+/// Whether [steps] has a step, and each group in it is filled, by the
+/// engine's own check.
 bool stepsComplete(List<RuleStep> steps) =>
-    steps.isNotEmpty &&
-    steps.every(
-      (s) => switch (s) {
-        IfStep() =>
-          s.conditions.isNotEmpty &&
-              stepsComplete(s.then) &&
-              (s.otherwise.isEmpty || stepsComplete(s.otherwise)),
-        TogetherStep() => s.branches.every(stepsComplete),
-        TryStep() =>
-          stepsComplete(s.steps) &&
-              (s.otherwise.isEmpty || stepsComplete(s.otherwise)),
-        RepeatStep() =>
-          stepsComplete(s.steps) && (s.times != null || s.until.isNotEmpty),
-        ForEachStep() => stepsComplete(s.steps),
-        WaitForStep() => s.onTimeout.isEmpty || stepsComplete(s.onTimeout),
-        KeepStep() => s.whileConditions.isNotEmpty,
-        _ => true,
-      },
-    );
+    stepsFilled([for (final s in steps) s.toJson()]);
 
 List<Json> _maps(Object? list) => [
   for (final m in (list as List? ?? const []))
@@ -1035,25 +1022,13 @@ class UnknownStep extends RuleStep {
   Json toJson() => json;
 }
 
-/// A typed literal from a text field: true, false, null, a number, or else
-/// the text itself.
-/// What a person types as a value: on/off and yes/no are booleans,
-/// numbers are numbers, the rest is text.
-Object? wordValue(String text) => switch (text.trim().toLowerCase()) {
-  'on' || 'yes' => true,
-  'off' || 'no' => false,
-  _ => literalFromText(text),
-};
+/// What a person types as a value, read by the engine's [typedValue] so
+/// the app, the CLI and an agent read the same words: on and yes are true,
+/// off and no are false, numbers are numbers, the rest is text.
+Object? wordValue(String text) => typedValue(text);
 
-Object? literalFromText(String text) {
-  final t = text.trim();
-  return switch (t) {
-    'true' => true,
-    'false' => false,
-    'null' => null,
-    _ => num.tryParse(t) ?? t,
-  };
-}
+/// A typed literal from a text field, read the same way as [wordValue].
+Object? literalFromText(String text) => typedValue(text);
 
 /// A duration in ms as the largest whole unit: `90 s`, `5 min`, `2 h`.
 String durationText(int ms) {

@@ -45,6 +45,7 @@ void main() {
         'com.example.phoneonly',
         leanback: false,
         launcher: true,
+        label: 'Phone Only',
       )
       ..['com.tcl.guard'] = FakeApp(
         'com.tcl.guard',
@@ -211,6 +212,31 @@ void main() {
       expect(device['host'], '127.0.0.1');
       expect(moved.single, containsPair('to', '127.0.0.1'));
     }, skip: Platform.isMacOS ? null : '127.0.0.2 is not refused everywhere');
+
+    test('a host announcing the TV with another serial is not followed, and '
+        'nothing is sent there', () async {
+      await engine.handle('device.add', {
+        'id': 'tv',
+        'replace': true,
+        'driver': 'android_tv_adb',
+        'host': '127.0.0.2',
+        'port': adbd.port,
+        'stableId': 'adb-FAKE0123456789',
+      });
+      tv.serial = 'SOMEONEELSE01';
+      const instance = 'adb-FAKE0123456789._adb._tcp.local';
+      mdnsRecords.addAll([
+        ptr('_adb._tcp', instance),
+        srv(instance, 'Android.local', adbd.port),
+        a('Android.local', '127.0.0.1'),
+      ]);
+      final r = await engine.handle('tv.key', {'id': 'tv', 'key': 'home'});
+      expect(r['ok'], isFalse);
+      final device =
+          (await engine.handle('device.get', {'id': 'tv'}))['device'] as Map;
+      expect(device['host'], '127.0.0.2');
+      expect(tv.keys, isEmpty, reason: 'the key never reached the impostor');
+    }, skip: Platform.isMacOS ? null : '127.0.0.2 is not refused everywhere');
   });
 
   group('remote, text and volume', () {
@@ -333,12 +359,12 @@ void main() {
         expect(
           [for (final a in apps) (a as Map)['package']],
           [
-            'com.example.phoneonly',
             'com.tcl.guard',
             'in.startv.hotstar',
             'com.netflix.ninja',
+            'com.example.phoneonly',
           ],
-          reason: 'by label or package, and com.example.gone is not installed',
+          reason: 'by label, and com.example.gone is not installed',
         );
         final netflix = apps.cast<Map>().firstWhere(
           (a) => a['package'] == 'com.netflix.ninja',
@@ -356,6 +382,12 @@ void main() {
           (a) => a['package'] == 'com.tcl.guard',
         );
         expect((guard['enabled'], guard['launchable']), (false, false));
+        expect(guard['label'], 'Guard', reason: 'named from its package');
+        expect(
+          apps.cast<Map>().last['label'],
+          'Phone Only',
+          reason: 'the label the TV printed wins over the package',
+        );
       },
     );
 
@@ -364,17 +396,17 @@ void main() {
         for (final a in r['apps'] as List) (a as Map)['package'],
       ];
       expect(names(await ok('tv.apps', {'filter': 'user'})), [
-        'com.example.phoneonly',
         'in.startv.hotstar',
+        'com.example.phoneonly',
       ]);
       expect(names(await ok('tv.apps', {'filter': 'system'})), [
         'com.tcl.guard',
         'com.netflix.ninja',
       ]);
       expect(names(await ok('tv.apps', {'launchableOnly': true})), [
-        'com.example.phoneonly',
         'in.startv.hotstar',
         'com.netflix.ninja',
+        'com.example.phoneonly',
       ]);
       expect((await err('tv.apps', {'filter': 'mine'}))['type'], 'invalid');
     });

@@ -7,8 +7,8 @@
   "transport": { "type": "adb", "port": 5555 },
   "discovery": [{ "method": "mdns", "service": "_adb._tcp", "idInstance": true }],
   "settings": [
-    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)" },
-    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)" }
+    { "key": "mac", "label": "MAC address, for Wake-on-LAN (optional)", "help": "The TV's hardware address, used to wake it from standby over Wi-Fi. Leave it empty if you do not need that.\nOn the TV open Settings, then About or Network, and look for MAC address or Wi-Fi MAC, six pairs like 3c:2e:ff:11:22:33." },
+    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)", "help": "How often the hub reads its state, in seconds. 5 is fine for most. 0 stops the reads, so the app shows its state only after a command." }
   ],
   "setup": ["pair", "configure:mac?"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },

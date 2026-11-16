@@ -63,26 +63,35 @@ flowchart LR
   end
   subgraph mini["Mac mini"]
     sshd["macOS SSH, key only"]
-    attach["omni hub attach"]
+    attach["omni hub attach --phone NAME"]
+    gate["Phone socket and its allowlist"]
     hub["omni hub, the only engine"]
     db["Database and keychain"]
   end
+  cli["omni on the Mac"]
   devices["Lights, plugs, TV, boards"]
   app1 -- "SSH, LAN or Tailscale" --> sshd
   sens1 --> app1
   app2 -- "SSH" --> sshd
   sshd -- "forced command" --> attach
-  attach -- "omni.sock" --> hub
+  attach -- "omni-phone.sock, phone named first" --> gate
+  gate -- "allowed commands, events for this phone" --> hub
+  cli -- "omni.sock, full access" --> hub
   hub --> db
   hub -- "Wi-Fi, ADB, USB" --> devices
   classDef new fill:#bbdefb,stroke:#1565c0,color:#0d47a1,stroke-width:2px
-  class attach new
+  class attach,gate new
 ```
 
 - **Transport: macOS Remote Login (OpenSSH).** It is an existing, maintained service with real authentication, so nothing new listens and no auth is invented.
-- **A new `omni hub attach` command** copies stdin to `omni.sock` and the socket's replies to stdout, nothing else. Each phone's public key goes into `~/.ssh/authorized_keys` on the Mac mini as `restrict,command="/Users/<you>/.local/bin/omni hub attach" ssh-ed25519 AAAA... omniflow-<phone>`, optionally with `from="<LAN subnet>,100.64.0.0/10"`. `restrict` turns off shells, port forwarding, agent forwarding and terminals. A stolen phone key can then only do what the app can do, and removing that one line revokes the phone.
-- **The phone side** is a new engine client in the app that speaks the same newline JSON over an SSH exec channel. The app already has two clients (in-process and the service port), so screens do not change. The phone keeps its SSH private key in the Android keystore and pins the Mac mini's host key the way device SSH already does.
-- **A version check** on connect: the app reads `engine.status` and refuses a hub whose engine version differs in major or minor, with "Update the hub" or "Update the app", so command shapes never drift.
+- **The forced command names the phone.** `omni hub allow NAME KEY` writes `restrict,command="/Users/<you>/.local/bin/omni hub attach --phone NAME" ssh-ed25519 AAAA... omniflow-NAME` into `~/.ssh/authorized_keys`, optionally with `from="<LAN subnet>,100.64.0.0/10"`. `restrict` turns off shells, port forwarding, agent forwarding and terminals, and removing that one line revokes the phone. `--from` takes only plain IPv4 and IPv6 addresses and ranges, rebuilt from what parsed, so no zone, quote, comma or space can add options to the line.
+- **Phone sessions use their own socket.** `attach --phone NAME` connects to `<home>/omni-phone.sock`, a second 0600 unix socket beside `omni.sock`, and writes `{"session": "phone", "phone": NAME}` as the first line, before any byte from the phone. The hub takes the phone from that line only, checks that NAME is a phone thing on the hub, and reads its person from the thing. A connection to that socket without a valid first line is refused and closed. `omni.sock` stays the Mac's own, with full access, for the CLI and `omni mcp`. A key line written before phone sessions runs plain `omni hub attach`, which refuses to start when sshd ran it as a forced command (`SSH_ORIGINAL_COMMAND` is set), and `omni hub phones` marks such lines `needsAllowAgain`. Running `omni hub allow NAME KEY` again rewrites the line in place.
+- **What a phone session may send** is an allowlist: everything an agent may send at read or setup level, the phone's own readings, asks, action replies and NFC scans, and the user's steps the app offers (pairing, approving, removing, scenes, TV control and settings). It may never send `driver.register`, `driver.approve`, `config.import`, `device.hostkey`, `tv.shell`, `tv.install`, `tv.helper.install`, `tv.files.download`, `tv.files.upload`, `tv.app.backup` (each reads or writes a file on the Mac), `board.flash`, `hub.start`, `hub.stop`, `agent.access.set` or `agent.call`, nor their `android.*` twins. `device.add` and `thing.add` refuse an `exec` driver, a host that is the Mac itself (`local`, `localhost`, loopback), and any path except a USB serial port (`/dev/cu*` or `/dev/tty*`) for a serial device or a board. `thing.configure` and `secret.set` refuse a thing whose driver runs programs. A refusal answers `not_allowed` and says to run it on the Mac. A stolen phone key can then only do what the app can do, and nothing that runs a program or touches a file on the Mac.
+- **The phone comes from the session, never from the client.** `hello.phone` is ignored on a phone session, and the hello answer says which phone and person the hub took the key for. Every `phone.*`, `sensor.*` and `nfc.scanned` reading and every `phone.actionDone` is tagged with the session's phone, and one that names another phone is refused. `presence.set` speaks only for the phone's person. `ask.answer` is taken only for an ask meant for that person or for no one. A `phone.actionDone` for a request sent to another phone is refused by the engine's own check, since the phone is always set.
+- **Each phone gets only its events.** The hub filters per session: its person's asks and notifications plus those for no one, its own phone actions, Wi-Fi changes and phone-thing state, and the home-wide rest (devices, automations, runs, variables, timers, places). Another phone's readings, notification words and requests, another person's asks and notifications, and packet captures never leave the hub.
+- **The phone side** is an engine client in the app that speaks the same newline JSON over an SSH exec channel. The app already has two clients (in-process and the service port), so screens do not change. The phone keeps its SSH private key in the Android keystore. The host key the user matched against `omni hub fingerprint` is kept in the hub settings and required on every connection: any other key fails with `host_key`, nothing is trusted on first use, and a hub with no matched key is set up again. `omni --hub user@host` from a Mac still pins on first use, and a pin it cannot read stops the connection instead of counting as none.
+- **A version check** on every channel: the hello answer carries the hub's engine version, and a hub whose major or minor differs is refused with "Update the hub" or "Update the app", so command shapes never drift.
+- **Timeouts and keepalive.** Connecting has 10 s from the first byte to the version check. Each command has 10 s, 30 s for one that waits on a device (`device.invoke`, `tv.*`), its listen window on top for discovery, and 10 minutes for one that runs as long as its work (running an automation, pairing, file copies, firmware), then answers `timeout` without dropping the link. Every channel, the command one and each event stream, is pinged every 15 s with `ping`, which the hub answers outside its command queue, and a ping unanswered for 10 s drops that channel: the command channel reopens on the next command and an event stream resubscribes. The hub runs up to 8 commands from one connection side by side, so a slow discovery does not hold up a tap. A failed subscription surfaces as `unavailable` instead of hanging, and a channel opened after the connection was closed or the stream cancelled is closed at once.
 
 ## What runs where
 
@@ -94,13 +103,13 @@ flowchart LR
 | Wi-Fi and Bluetooth presence, NFC scans, app and notification triggers, screen, Do Not Disturb | Each phone, sent to the hub |
 | Notifications, asks, widgets, tiles, share sheet | Each phone, fed by hub events |
 
-- **Asks:** the hub's `ask.request` event carries the automation's person when it has one. Each phone shows asks for its own person, plus asks with no person. The first answer wins, and `ask.closed` clears it on every phone.
+- **Asks:** the hub's `ask.request` event carries the automation's person when it has one. The hub sends each phone the asks for its own person, plus asks with no person, and takes an answer only from those phones. The first answer wins, and `ask.closed` clears it on every phone that had it.
 - **Notify steps** gain an optional `to` (a person). With none, every connected phone shows it.
 - **Two phones, one trigger:** each phone reports its own readings, and the engine decides per person, so "when I get home" fires once for the right person.
 
 ## When the hub is down
 
-- The app shows "Hub not reachable" with the last known state, read-only, and keeps retrying.
+- The app shows "Hub not reachable" with the last known state, read-only, and keeps retrying with backoff up to a minute. A new Wi-Fi network, or coming back to the app, tries again at once.
 - Phone readings taken while the hub was unreachable are dropped, except the latest presence, which is sent on reconnect so home and away are right again.
 - No automatic fallback to a phone engine. Two engines with two databases is exactly the split that option A exists to avoid. The phone can still be moved back to "This phone" by hand from Settings, which imports the hub's latest backup.
 - To keep outages rare: the Mac mini on Ethernet, on a UPS if possible, with Energy Saver set to start after a power failure and never sleep.
@@ -143,7 +152,7 @@ On each phone:
 
 - **Updates:** both ends come from one repo commit and one version. Release the APK and the hub binary together. On the Mac mini, `omni hub update <binary>` replaces the binary and runs `launchctl kickstart -k`. A phone on the old version sees "Update the app" until it updates.
 - **Health:** `omni hub status` shows uptime, version, connected phones, the last run and load issues. The app shows the same under Settings, Hub. A phone not seen for 7 days is listed there.
-- **Backups:** the daily export on the Mac mini, plus the existing "Back up to Google Drive" from any phone, which now exports the hub's home. Secrets are in the Mac mini's keychain, which Time Machine already covers.
+- **Backups:** the daily export on the Mac mini, each file 0600 in a 0700 `~/OmniFlow/backups` (a folder others can write is refused, and older backups are tightened), plus the existing "Back up to Google Drive" from any phone, which now exports the hub's home. Secrets are in the Mac mini's keychain, which Time Machine already covers.
 - **Revoke a phone:** `omni hub revoke <name>` deletes its `authorized_keys` line. The next connection from that phone fails. A session that is already open stays until it drops, so for a lost phone also restart Remote Login. The phone thing stays, with its history.
 - **Config files:** `omni hub install` writes the launchd plists and prints the sshd snippet, from templates in this repo (`packages/omniflow_engine/tool/hub/`). They stay out of dotfiles, since OmniFlow is a personal project kept to its own repo.
 
@@ -161,5 +170,5 @@ Each step goes through the builder-security skill where it touches SSH or a list
 ## Decisions
 
 - **Hub down:** phones are read-only with the last known state until the hub is back. Option B stays the later route if outages matter.
-- **FileVault:** stays on. After a power cut someone logs in once, and planned restarts use `fdesetup authrestart`.
+- **FileVault:** decided when the Mac mini is set up. With FileVault on, someone logs in once after a power cut, and planned restarts use `fdesetup authrestart`. With it off and automatic login for a dedicated hub user, the hub comes back on its own after a power cut, but a stolen Mac exposes the device keys in the keychain.
 - **Second person:** gets the full app on the same home.

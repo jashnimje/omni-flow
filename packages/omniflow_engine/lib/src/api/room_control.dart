@@ -1,8 +1,9 @@
 import 'api_error.dart';
 import 'command_args.dart';
-import 'device_history.dart' show changedByUser;
+import 'device_history.dart' show callerOf;
 import 'engine_core.dart';
 import 'error_of.dart';
+import 'smart_lights.dart' show kelvinToDevice, percentToDevice;
 import 'stored_flows.dart';
 import '../devices/board.dart' show manifestFor;
 import '../devices/device.dart';
@@ -32,15 +33,32 @@ Future<(Room, List<Device>)> roomWithDevices(
   return (match, devices);
 }
 
-/// Whether a toggle's reported [raw] state is on, in the device's own
-/// words for on and off when it has them.
+/// Whether a toggle's reported [raw] state is on. Stored state is already
+/// `true` or `false` for a device with on and off words, and a raw word is
+/// read through the capability's own decoding.
 bool? toggleIsOn(CapabilitySpec toggle, Object? raw) {
-  final words = toggle.onOff;
-  if (words == null) return raw is bool ? raw : null;
-  if (raw == words.$1) return true;
-  if (raw == words.$2 || toggle.alsoOff.contains(raw)) return false;
-  return null;
+  final value = toggle.fromDevice(raw);
+  return value is bool ? value : null;
 }
+
+/// [value] in a light's own units as a percent of its range, 0 to 100.
+num devicePercent(CapabilitySpec capability, num value) {
+  final max = capability.params['value']?.max ?? 100;
+  if (max <= 0) return value;
+  return (value * 100 / max).clamp(0, 100);
+}
+
+/// Whether [capability] is a light's brightness, which a room takes in
+/// percent.
+bool _isBrightness(CapabilitySpec c) =>
+    c.type == CapabilityType.level &&
+    (c.id == 'brightness' || c.id == 'dimmer');
+
+/// Whether [capability] is a white temperature, which a room takes in
+/// kelvin.
+bool _isWhite(CapabilitySpec c) =>
+    c.id == 'color_temp' &&
+    (c.type == CapabilityType.colorTemp || c.type == CapabilityType.level);
 
 /// A room as one light: `room.invoke {room, capability, params?, only?}`
 /// sends to every device in it that has the capability, and `room.state
@@ -77,11 +95,27 @@ class RoomControl {
     if (only != null && only != 'lights') {
       throw ApiError('invalid', 'only must be lights');
     }
+    final value = params['value'];
+    if (value is num &&
+        (capability == 'brightness' || capability == 'dimmer') &&
+        (value < 0 || value > 100 || !value.isFinite)) {
+      throw ApiError('invalid', 'a room takes brightness from 0 to 100 %');
+    }
+    if (value is num && capability == 'color_temp' && !value.isFinite) {
+      throw ApiError('invalid', 'a room takes white in kelvin');
+    }
     final results = <Map<String, Object?>>[];
     for (final d in devices) {
       final manifest = _manifest(d);
       final spec = manifest?.capability(capability);
       if (manifest == null || spec == null) continue;
+      final sent = value is! num
+          ? params
+          : _isBrightness(spec)
+          ? {...params, 'value': percentToDevice(spec, value)}
+          : _isWhite(spec)
+          ? {...params, 'value': kelvinToDevice(spec, value)}
+          : params;
       if (only == 'lights' && !_isLight(manifest)) continue;
       if (_stored.capabilityIsHighRisk(manifest, spec)) {
         results.add({
@@ -101,9 +135,9 @@ class RoomControl {
         final result = await _core.devices.invoke(
           d.id,
           capability,
-          params,
+          sent,
           allowPairing: false,
-          by: changedByUser,
+          by: callerOf(args),
         );
         results.add({
           'id': d.id,
@@ -130,7 +164,8 @@ class RoomControl {
     };
   }
 
-  /// `{room}`: its lights, how many are on, and their average brightness.
+  /// `{room}`: its lights, how many are on, and their average brightness
+  /// as a percent of each light's own range.
   /// A light that is offline counts in `offline`, not as on, since its
   /// stored state is only what it last said.
   Future<Map<String, Object?>> state(Map<String, Object?> args) async {
@@ -160,16 +195,20 @@ class RoomControl {
           ? null
           : toggleIsOn(power, d.state[stateKeyOf(power.stateJsonPath)]);
       if (isOn == true) on++;
-      final level = manifest.capability('brightness');
+      final level =
+          manifest.capability('brightness') ?? manifest.capability('dimmer');
       final value = level == null
           ? null
           : d.state[stateKeyOf(level.stateJsonPath)];
-      if (isOn == true && value is num) levels.add(value);
+      final percent = value is num
+          ? devicePercent(level!, value).round()
+          : null;
+      if (isOn == true && percent != null) levels.add(percent);
       things.add({
         'id': d.id,
         'name': d.name,
         'on': ?isOn,
-        if (value is num) 'brightness': value,
+        'brightness': ?percent,
       });
     }
     return {

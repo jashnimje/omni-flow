@@ -123,7 +123,7 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
               prefixIcon: const Icon(OmniIcons.search),
               hintText: all == null
                   ? 'Search apps'
-                  : 'Search ${all.length} apps',
+                  : 'Search ${all.length} app${all.length == 1 ? '' : 's'}',
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -133,7 +133,7 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
             children: [
               for (final (f, label) in const [
                 (AppFilter.user, 'Installed'),
-                (AppFilter.system, 'System'),
+                (AppFilter.system, 'System apps'),
                 (AppFilter.all, 'All'),
               ])
                 OmniFilterChip(
@@ -154,17 +154,24 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
           if (_error != null)
             TvLoadError(what: 'The apps', reason: _error!, onRetry: _load)
           else if (all == null)
-            const TvLoading(label: 'Reading the apps')
+            const OmniListSkeleton(label: 'Reading the apps')
           else if (apps.isEmpty)
             OmniEmptyState(
               icon: OmniIcons.search,
               title: query.isEmpty ? 'No apps here' : 'No app matches',
               message: query.isEmpty
-                  ? 'Try System or All.'
+                  ? 'Try System apps or All.'
                   : 'Search looks at names and packages.',
             )
-          else
-            for (final a in apps) _row(a),
+          else ...[
+            for (final a in apps)
+              if (!a.system || _filter != AppFilter.all) _row(a),
+            if (_filter == AppFilter.all && apps.any((a) => a.system)) ...[
+              const OmniSectionHeader('System apps'),
+              for (final a in apps)
+                if (a.system) _row(a),
+            ],
+          ],
         ],
       ),
     );

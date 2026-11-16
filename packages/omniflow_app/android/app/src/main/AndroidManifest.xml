@@ -16,6 +16,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Exact alarms: the watchdog that starts a killed service again (Android
+         lets a background app start its service only from an exact alarm),
+         and the wake for the next time trigger, so the CPU sleeps between
+         them. SCHEDULE_EXACT_ALARM, not USE_EXACT_ALARM: OmniFlow is not an
+         alarm clock or a calendar. Android 14 and later leave it off until
+         the person turns on Alarms and reminders; until then the service
+         keeps the CPU awake while time triggers are armed. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Reading and writing NFC tags (nfc_manager), and the tag intent
          below. Phones without NFC can still install the app. -->
     <uses-permission android:name="android.permission.NFC" />
@@ -157,6 +165,21 @@
              the tile long press, the share sheet), and they only show a
              picker: nothing runs until the person picks. -->
         <receiver android:name=".RunReceiver" android:exported="false" />
+        <!-- Keeping automations running (ServiceKeeper.kt): the Start button
+             of the "not running" notice, the watchdog alarm, the wake for
+             the next time trigger, and the system events after a reboot, an
+             update or a grant of Alarms and reminders. None is exported:
+             only Android and this app's own pending intents reach them. -->
+        <receiver android:name=".StartReceiver" android:exported="false" />
+        <receiver android:name=".WatchdogReceiver" android:exported="false" />
+        <receiver android:name=".WakeAlarmReceiver" android:exported="false" />
+        <receiver android:name=".SystemEventsReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
         <receiver android:name=".AskReceiver" android:exported="false" />
         <activity
             android:name=".AskActivity"

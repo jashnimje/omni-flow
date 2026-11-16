@@ -51,30 +51,6 @@ class FakeEngine implements EngineClient {
         },
       ],
     },
-    'flow.cards': {
-      'ok': true,
-      'tree': true,
-      'when': [
-        {'node': 'trig', 'type': 'zone_change', 'label': 'Arrived at desk'},
-      ],
-      'then': [
-        {
-          'kind': 'if',
-          'node': 'cond',
-          'type': 'all_of',
-          'label': 'Evening',
-          'then': [
-            {
-              'kind': 'step',
-              'node': 'lamp',
-              'type': 'device_capability',
-              'label': 'Lamp warm',
-            },
-          ],
-          'else': [],
-        },
-      ],
-    },
     'command.interpret': {
       'ok': true,
       'kind': 'call',

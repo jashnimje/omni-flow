@@ -1,3 +1,4 @@
+import '../../manifest/param_spec.dart';
 import '../../manifest/validation.dart';
 import 'tv_keys.dart';
 
@@ -59,6 +60,78 @@ bool adbCommandIsHighRisk(Object? command) {
   if (command is! Map) return false;
   final op = command['op'];
   return op is! String || op.contains('{{') || adbHighRiskOps.contains(op);
+}
+
+/// The keys an agent may press on another person's phone: power, volume
+/// and media. Every other key types, or moves around their screen.
+const adbPhoneAgentKeys = {
+  'power',
+  'sleep',
+  'wakeup',
+  'volume_up',
+  'volume_down',
+  'mute',
+  'play_pause',
+  'play',
+  'pause',
+  'stop',
+  'next',
+  'previous',
+  'rewind',
+  'fast_forward',
+};
+
+/// Keys that type into what is on screen, or open the notification shade.
+const adbTypingKeys = {
+  'enter',
+  'delete',
+  'tab',
+  'escape',
+  'search',
+  'notification',
+  'star',
+  'pound',
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+};
+
+/// Whether [capability] of an ADB device needs the user's approval in an
+/// automation an agent saved. [onPhone] is true for another person's phone.
+///
+/// On any ADB device: a raw setting or an app's data ([adbCommandIsHighRisk]),
+/// typed text, and a key that types or opens the shade (a key left to a
+/// param that is not a list of such keys counts too). On a phone, opening
+/// an app or a link acts on the person holding it, so those count as well.
+bool adbCapabilityIsHighRisk(
+  Object? command,
+  Map<String, ParamSpec> params, {
+  required bool onPhone,
+}) {
+  if (adbCommandIsHighRisk(command)) return true;
+  if (command is! Map) return false;
+  final op = command['op'];
+  if (op == 'text') return true;
+  if (onPhone && (op == 'launch' || op == 'open_url')) return true;
+  if (op != 'key') return false;
+  final key = command['key'];
+  bool risky(String name) =>
+      adbTypingKeys.contains(name) ||
+      (onPhone && !adbPhoneAgentKeys.contains(name));
+  if (key is! String) return true;
+  final placeholder = RegExp(r'^\{\{\s*([A-Za-z_][A-Za-z0-9_]*)')
+      .firstMatch(key);
+  if (placeholder == null) return key.contains('{{') || risky(key);
+  final spec = params[placeholder.group(1)];
+  if (spec == null || spec.values.isEmpty) return true;
+  return spec.values.any(risky);
 }
 
 /// Quotes [value] as one POSIX shell word: nothing inside can end the word.

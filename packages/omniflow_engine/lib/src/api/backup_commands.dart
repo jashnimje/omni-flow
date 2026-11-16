@@ -8,6 +8,7 @@ import 'home_commands.dart';
 import 'house_helpers.dart';
 import 'stored_flows.dart';
 import 'thing_setup.dart';
+import 'versions.dart' show keepingVersionsOf;
 import 'things_runtime.dart';
 import '../dag/canonical.dart';
 import '../dag/flow.dart';
@@ -156,7 +157,13 @@ class BackupCommands {
   /// `{backup, mode?: merge | replace, dryRun?}`. Checks the whole backup
   /// first and changes nothing when any part is wrong. Merge keeps what the
   /// backup does not name, replace makes the home exactly the backup.
-  Future<Map<String, Object?>> import(Map<String, Object?> args) async {
+  /// Keeps the version of every automation the import replaces.
+  Future<Map<String, Object?>> import(Map<String, Object?> args) =>
+      args['dryRun'] == true
+      ? _import(args)
+      : keepingVersionsOf(_db, () => _import(args));
+
+  Future<Map<String, Object?>> _import(Map<String, Object?> args) async {
     final backup = objectArg(args, 'backup');
     final mode = args['mode'] ?? 'merge';
     if (mode != 'merge' && mode != 'replace') {

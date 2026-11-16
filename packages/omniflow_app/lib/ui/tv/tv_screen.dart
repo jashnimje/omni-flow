@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -11,6 +10,7 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 import '../settings/backup_page.dart' show shareFileProvider;
 import 'tv_controller.dart';
+import 'tv_frame.dart';
 
 /// Where the TV's screenshots and recordings land on the phone.
 Future<String> tvSaveDir(WidgetRef ref, {bool phone = false}) async {
@@ -21,6 +21,12 @@ Future<String> tvSaveDir(WidgetRef ref, {bool phone = false}) async {
   await dir.create(recursive: true);
   return dir.path;
 }
+
+/// What a save to the phone that failed says: the folder is full, gone or
+/// not writable.
+const couldNotSave =
+    'Could not save it on this phone. Check there is space free and try '
+    'again.';
 
 String _stamp(DateTime t) =>
     '${t.year}${_two(t.month)}${_two(t.day)}-${_two(t.hour)}${_two(t.minute)}'
@@ -103,7 +109,8 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
       setState(() => _error = errorMessage(r));
       return false;
     }
-    final png = base64Decode('${r['png']}');
+    final png = await decodeFrame('${r['png']}');
+    if (!mounted) return false;
     setState(() {
       _error = null;
       _frame = png;
@@ -160,9 +167,15 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
   Future<void> _saveScreenshot() async {
     final frame = _frame;
     if (frame == null) return;
-    final dir = await tvSaveDir(ref, phone: tv.isPhone);
-    final file = File('$dir/screenshot-${_stamp(DateTime.now())}.png');
-    await file.writeAsBytes(frame, flush: true);
+    final File file;
+    try {
+      final dir = await tvSaveDir(ref, phone: tv.isPhone);
+      file = File('$dir/screenshot-${_stamp(DateTime.now())}.png');
+      await file.writeAsBytes(frame, flush: true);
+    } on FileSystemException {
+      if (mounted) showMessage(couldNotSave);
+      return;
+    }
     if (!mounted) return;
     showMessage(
       'Saved to ${file.path}',
@@ -182,7 +195,14 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
       _recordFile = r['file'] as String?;
       _since = DateTime.tryParse('${r['startedAt']}')?.toLocal();
     });
-    if (_recording == true) _startTick();
+    // Past the limit the tick would only ask again every second.
+    if (_recording == true && !_pastLimit) _startTick();
+  }
+
+  bool get _pastLimit {
+    final since = _since;
+    return since != null &&
+        DateTime.now().difference(since).inSeconds > _seconds + 2;
   }
 
   void _startTick() {
@@ -190,10 +210,8 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
     _tick = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (!mounted) return;
       setState(() {});
-      final since = _since;
       // screenrecord stops on its own at the limit: read where it is then.
-      if (since != null &&
-          DateTime.now().difference(since).inSeconds > _seconds + 2) {
+      if (_pastLimit) {
         _tick?.cancel();
         await _status();
       }
@@ -238,7 +256,13 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
   Future<void> _download() async {
     final file = _recordFile;
     if (file == null) return;
-    final dir = await tvSaveDir(ref, phone: tv.isPhone);
+    final String dir;
+    try {
+      dir = await tvSaveDir(ref, phone: tv.isPhone);
+    } on FileSystemException {
+      if (mounted) showMessage(couldNotSave);
+      return;
+    }
     if (!mounted) return;
     final r = await tv.transfer(
       TvCalls.filesDownload,
@@ -305,30 +329,30 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
                               ),
                       )
                     : LayoutBuilder(
-                        builder: (context, box) => GestureDetector(
-                          key: const ValueKey('tv-screen-touch'),
-                          onTapUp: (d) => _tap(d.localPosition, box.biggest),
-                          onPanStart: (d) {
-                            _dragFrom = d.localPosition;
-                            _dragAt = DateTime.now();
-                          },
-                          onPanEnd: (d) {
-                            final from = _dragFrom;
-                            final at = _dragAt;
-                            if (from == null || at == null) return;
-                            final to = from + d.velocity.pixelsPerSecond * 0.15;
-                            _swipe(
-                              from,
-                              to,
-                              box.biggest,
-                              DateTime.now().difference(at),
-                            );
-                          },
-                          child: Image.memory(
-                            frame,
-                            gaplessPlayback: true,
-                            fit: BoxFit.contain,
-                            filterQuality: FilterQuality.medium,
+                        builder: (context, box) => Semantics(
+                          label: "The ${tv.noun}'s screen, live",
+                          image: true,
+                          child: GestureDetector(
+                            key: const ValueKey('tv-screen-touch'),
+                            onTapUp: (d) => _tap(d.localPosition, box.biggest),
+                            onPanStart: (d) {
+                              _dragFrom = d.localPosition;
+                              _dragAt = DateTime.now();
+                            },
+                            onPanEnd: (d) {
+                              final from = _dragFrom;
+                              final at = _dragAt;
+                              if (from == null || at == null) return;
+                              final to =
+                                  from + d.velocity.pixelsPerSecond * 0.15;
+                              _swipe(
+                                from,
+                                to,
+                                box.biggest,
+                                DateTime.now().difference(at),
+                              );
+                            },
+                            child: TvFrame(frame),
                           ),
                         ),
                       ),

@@ -7,6 +7,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
+import '../automations/capture_scene.dart' show showCaptureScene;
 import '../automations/scenes.dart'
     show automationIconFor, openScenes, openSceneEditor, sceneIconFor;
 import '../design/automation_look.dart';
@@ -75,7 +76,8 @@ List<RunItem>? surpriseScenes(List<RunItem> items) {
 }
 
 /// The Run header and a grid of coloured tiles, then Surprise me with two
-/// scenes or more, or nothing when there is nothing to run.
+/// scenes or more, and last "Save how things are now", which makes a
+/// scene of the devices as they are.
 class RunSection extends StatelessWidget {
   const RunSection({super.key, required this.items});
 
@@ -83,11 +85,11 @@ class RunSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
     final surprise = surpriseScenes(items);
     final tiles = <Widget>[
       for (final item in items) RunTile(item: item),
       if (surprise != null) SurpriseTile(scenes: surprise),
+      const CaptureTile(),
     ];
     return Column(
       key: const ValueKey('home-run'),
@@ -232,6 +234,11 @@ class _RunTileState extends ConsumerState<RunTile> {
     final item = _item;
     final radius = BorderRadius.circular(OmniRadii.tile);
     final failed = _state == _RunState.failed;
+    final card = OmniPalette.of(context).card;
+    final own = AutomationLook.colorOf(item.color);
+    final caption = OmniDepth.captionOn(
+      own == null ? card : OmniDepth.washTopOf(own, card),
+    );
     return Semantics(
       container: true,
       button: true,
@@ -247,61 +254,64 @@ class _RunTileState extends ConsumerState<RunTile> {
       onTap: _tap,
       onLongPress: widget.pick == null ? _open : null,
       child: SpringyPress(
-        child: Material(
-          key: ValueKey(item.isScene ? 'scene-${item.id}' : 'run-${item.id}'),
-          color: AutomationLook.tintOf(item.color),
-          shape: RoundedRectangleBorder(
-            borderRadius: radius,
-            side: BorderSide(
-              color: failed
-                  ? OmniColors.badLine
-                  : AutomationLook.lineOf(item.color),
-            ),
+        child: DecoratedBox(
+          decoration: OmniDepth.surface(
+            color: card,
+            gradient: own == null ? null : OmniDepth.wash(own, card),
+            radius: radius,
+            border: failed ? OmniColors.badLine : null,
           ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: _tap,
-            onLongPress: widget.pick == null ? _open : null,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 92),
-              child: Padding(
-                padding: const EdgeInsets.all(OmniSpace.md),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
+          child: Material(
+            key: ValueKey(item.isScene ? 'scene-${item.id}' : 'run-${item.id}'),
+            type: MaterialType.transparency,
+            shape: RoundedRectangleBorder(borderRadius: radius),
+            clipBehavior: Clip.antiAlias,
+            child: OmniSheen(
+              child: InkWell(
+                onTap: _tap,
+                onLongPress: widget.pick == null ? _open : null,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 92),
+                  child: Padding(
+                    padding: const EdgeInsets.all(OmniSpace.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        AutomationBadge(
-                          icon: item.icon,
-                          color: item.color,
-                          size: 32,
+                        Row(
+                          children: [
+                            AutomationBadge(
+                              icon: item.icon,
+                              color: item.color,
+                              size: 32,
+                            ),
+                            const Spacer(),
+                            _Indicator(state: _state, id: item.id),
+                          ],
                         ),
-                        const Spacer(),
-                        _Indicator(state: _state, id: item.id),
+                        const SizedBox(height: OmniSpace.gap),
+                        Text(
+                          item.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: OmniText.label,
+                        ),
+                        Text(
+                          _stateText,
+                          key: ValueKey('run-state-${item.id}'),
+                          maxLines: failed ? 3 : 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: OmniText.caption.copyWith(
+                            color: failed
+                                ? OmniColors.bad
+                                : item.waiting
+                                ? OmniColors.warn
+                                : caption,
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: OmniSpace.gap),
-                    Text(
-                      item.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: OmniText.label,
-                    ),
-                    Text(
-                      _stateText,
-                      key: ValueKey('run-state-${item.id}'),
-                      maxLines: failed ? 3 : 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: OmniText.caption.copyWith(
-                        color: failed
-                            ? OmniColors.bad
-                            : item.waiting
-                            ? OmniColors.warn
-                            : OmniColors.muted,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -378,4 +388,70 @@ class _SurpriseTileState extends State<SurpriseTile> {
       pick: _pick,
     ),
   );
+}
+
+/// "Save how things are now": picks devices and saves how they are as a
+/// new scene.
+class CaptureTile extends ConsumerWidget {
+  const CaptureTile({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final radius = BorderRadius.circular(OmniRadii.tile);
+    final card = OmniPalette.of(context).card;
+    void open() => showCaptureScene(context, ref);
+    return Semantics(
+      container: true,
+      button: true,
+      label: 'Save how things are now',
+      hint: 'Makes a scene of how your devices are',
+      excludeSemantics: true,
+      onTap: open,
+      child: DecoratedBox(
+        decoration: OmniDepth.surface(color: card, radius: radius),
+        child: Material(
+          key: const ValueKey('run-capture'),
+          type: MaterialType.transparency,
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          clipBehavior: Clip.antiAlias,
+          child: OmniSheen(
+            child: InkWell(
+              onTap: open,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 92),
+                child: Padding(
+                  padding: const EdgeInsets.all(OmniSpace.md),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const AutomationBadge(
+                        icon: Symbols.photo_camera_rounded,
+                        size: 32,
+                      ),
+                      const SizedBox(height: OmniSpace.gap),
+                      const Text(
+                        'Save how things are now',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: OmniText.label,
+                      ),
+                      Text(
+                        'As a new scene',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: OmniText.caption.copyWith(
+                          color: OmniDepth.captionOn(card),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

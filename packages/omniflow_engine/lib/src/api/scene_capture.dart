@@ -4,6 +4,7 @@ import 'command_args.dart';
 import 'engine_core.dart';
 import 'room_control.dart';
 import 'stored_flows.dart';
+import 'versions.dart' show keepingVersionsOf;
 import '../devices/board.dart' show manifestFor;
 import '../devices/device.dart';
 import '../devices/device_service.dart' show stateKeyOf;
@@ -131,13 +132,30 @@ class SceneCapture {
         'none of these devices report a state a scene can set',
       );
     }
-    final saved = await _automations.saveScene({
-      'id': ?optStringArg(args, 'id'),
-      'name': args['name'],
-      'icon': ?args['icon'],
-      'color': ?args['color'],
-      'actions': actions,
-    }, args['trusted'] == true);
-    return {...saved, 'actions': actions, 'skipped': skipped};
+    // Capturing over a scene keeps the one it replaces, as a save does.
+    final saved = await keepingVersionsOf(
+      _core.db,
+      () => _automations.saveScene({
+        'id': ?optStringArg(args, 'id'),
+        'name': args['name'],
+        'icon': ?args['icon'],
+        'color': ?args['color'],
+        'actions': actions,
+      }, args['trusted'] == true),
+    );
+    // A state older than the device's poll window may no longer be true.
+    final now = DateTime.now();
+    final stale = [
+      for (final d in devices)
+        if (!skipped.contains(d.id))
+          if (_core.onlineWindowOf(d) case final window?
+              when !d.isOnline(now, window))
+            {
+              'id': d.id,
+              'name': d.name,
+              'lastSeen': ?d.lastSeen?.toUtc().toIso8601String(),
+            },
+    ];
+    return {...saved, 'actions': actions, 'skipped': skipped, 'stale': stale};
   }
 }

@@ -13,9 +13,15 @@ import 'adb_commands.dart';
 import 'adb_connection.dart';
 import 'adb_key.dart';
 import 'adb_sync.dart';
+import 'adb_tls.dart';
 import 'wake_on_lan.dart';
 
 const adbDefaultPort = 5555;
+
+/// The device setting a Wireless Debugging device's pinned public key
+/// (SHA-256 of its SubjectPublicKeyInfo) is kept under, with its other
+/// secrets.
+const adbIdentitySecret = 'adbTlsKeySha256';
 
 /// Finds the TLS connect port a Wireless Debugging device with [guid]
 /// announces now, or null.
@@ -494,12 +500,28 @@ class AdbChannel implements DriverChannel {
     } on TransportTimeoutException {
       final moved = await _follow(device, port);
       if (moved == null) rethrow;
-      return _openAt(device, moved.host, moved.port, timeout, offerKey);
+      // The move is saved only once the host there proved it is the
+      // paired device: a stale or spoofed announcement changes nothing.
+      final connection = await _openAt(
+        device,
+        moved.host,
+        moved.port,
+        timeout,
+        offerKey,
+        following: true,
+      );
+      try {
+        await _onMoved?.call(device.id, moved.host, moved.port);
+      } catch (_) {
+        connection.close();
+        rethrow;
+      }
+      return connection;
     }
   }
 
   /// Where a Wireless Debugging device that stopped answering at [port]
-  /// announces its connect port now, recorded through [_onMoved], or null.
+  /// announces its connect port now, or null. Nothing is saved here.
   Future<({String host, int port})?> _follow(Device device, int port) async {
     final locate = _locateTls;
     final guid = device.stableId;
@@ -514,21 +536,33 @@ class AdbChannel implements DriverChannel {
     if (found == null || (found.host == device.host && found.port == port)) {
       return null;
     }
-    await _onMoved?.call(device.id, found.host, found.port);
+    // Only a device whose identity was pinned can be followed, since the
+    // new host has to prove it.
+    if (await _secrets.read(_pinName(device.id)) == null) return null;
     return found;
   }
 
+  String _pinName(String deviceId) =>
+      deviceSecretKey(deviceId, adbIdentitySecret);
+
+  /// Opens [device] at [host]:[port]. Over TLS the device's public key must
+  /// be the one pinned for it, and the first TLS connection after pairing
+  /// pins it. When [following] a move, a device with no pin is refused.
   Future<AdbConnection> _openAt(
     Device device,
     String host,
     int port,
     Duration timeout,
-    bool offerKey,
-  ) async {
+    bool offerKey, {
+    bool following = false,
+  }) async {
     final key = await _hostKey();
+    final pinName = _pinName(device.id);
+    final pin = await _secrets.read(pinName);
+    String? presented;
     AdbConnection? opened;
     try {
-      return await AdbConnection.connect(
+      final connection = await AdbConnection.connect(
         host,
         port,
         key: key,
@@ -546,6 +580,20 @@ class AdbChannel implements DriverChannel {
           if (_closed) c.close();
         },
         offerKey: offerKey,
+        acceptCertificate: (certificate) {
+          presented = adbIdentitySha256(certificate.der);
+          return pin == null ? !following : presented == pin;
+        },
+      );
+      if (pin == null && connection.isTls && presented != null) {
+        await _secrets.write(pinName, presented!);
+      }
+      return connection;
+    } on AdbIdentityException {
+      throw AdbPairingException(
+        '${device.id} at $host:$port is not the device that was paired: it '
+        'shows a different identity, so nothing was sent. If the phone was '
+        'reset, pair it again with android.pair',
       );
     } on AdbTlsRefusedException {
       throw AdbPairingException(
@@ -601,7 +649,18 @@ class AdbChannel implements DriverChannel {
 
   /// Closes the device's held session, for a device that is removed or
   /// replaced.
-  void forget(String deviceId) => _drop(deviceId);
+  /// The pinned identity goes too: a device added again under the id may
+  /// be another one, and its first TLS connection pins it.
+  void forget(String deviceId) {
+    _drop(deviceId);
+    unawaited(_secrets.delete(_pinName(deviceId)));
+  }
+
+  /// Drops the pinned identity of [deviceId], for a new pairing.
+  Future<void> forgetIdentity(String deviceId) async {
+    _drop(deviceId);
+    await _secrets.delete(_pinName(deviceId));
+  }
 
   Future<void> close() async {
     _closed = true;

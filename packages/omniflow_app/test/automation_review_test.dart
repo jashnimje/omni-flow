@@ -85,7 +85,7 @@ void main() {
       expect(find.text('Review "Movie night"'), findsOneWidget);
       expect(
         find.text(
-          'Made by Claude. It runs only after you approve this exact version.',
+          'Made by an agent. It runs only after you approve this exact version.',
         ),
         findsOneWidget,
       );

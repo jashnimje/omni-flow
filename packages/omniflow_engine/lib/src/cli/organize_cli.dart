@@ -5,6 +5,7 @@ import 'package:args/command_runner.dart';
 
 import 'house_cli.dart';
 import 'omni_command_runner.dart';
+import 'parity_cli.dart' show automationVerbs;
 
 typedef _Build = Map<String, Object?> Function(ArgResults a);
 
@@ -267,6 +268,7 @@ Command<int> automationCommand() =>
         },
         usageLine: '[ID [key=value ...]]',
       ),
+      ...automationVerbs(),
     ]);
 
 /// `omni presence home|away`: say whether you are home.

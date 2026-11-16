@@ -45,7 +45,6 @@ class AlertsPage extends ConsumerWidget {
     final modes = ref.watch(houseModeProvider).value;
     return OmniPage(
       title: 'Alerts and modes',
-      padded: false,
       body: ListView(
         key: const ValueKey('alerts-list'),
         children: [

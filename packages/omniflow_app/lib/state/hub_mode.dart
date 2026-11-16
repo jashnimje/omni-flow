@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:path_provider/path_provider.dart';
@@ -33,7 +34,9 @@ final hubSettingsProvider = FutureProvider<HubSettings?>(
 );
 
 /// The link to the hub, kept current from the service's hub client. Null on
-/// a phone that runs its own home.
+/// a phone that runs its own home. Coming back to the app while the hub is
+/// not reachable tries again at once, since the phone may have changed
+/// network while it was away.
 class HubLinkNotifier extends Notifier<HubLinkView?> {
   @override
   HubLinkView? build() {
@@ -42,8 +45,22 @@ class HubLinkNotifier extends Notifier<HubLinkView?> {
         .where((e) => e['event'] == HubLink.event)
         .listen((e) => state = HubLinkView.fromJson(e) ?? state);
     ref.onDispose(sub.cancel);
+    final resumed = _onResume(() {
+      final link = state;
+      if (link != null && !link.connected) unawaited(reconnect());
+    });
+    if (resumed != null) ref.onDispose(resumed.dispose);
     unawaited(_load(client));
     return null;
+  }
+
+  /// Null where no Flutter binding runs, as in a plain unit test.
+  static AppLifecycleListener? _onResume(void Function() onResume) {
+    try {
+      return AppLifecycleListener(onResume: onResume);
+    } on Object {
+      return null;
+    }
   }
 
   Future<void> _load(EngineClient client) async {
@@ -121,9 +138,7 @@ Future<void> switchToHub(
   required String hostKey,
 }) async {
   final store = ref.read(hubSettingsStoreProvider);
-  final saved = settings.withHostKey(hostKey);
-  await store.pinHostKey(saved, hostKey);
-  await store.save(saved);
+  await store.save(settings.withHostKey(hostKey));
   await store.setMode(HomeMode.hub);
   ref.invalidate(homeModeProvider);
   ref.invalidate(hubSettingsProvider);

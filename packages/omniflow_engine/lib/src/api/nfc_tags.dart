@@ -153,9 +153,7 @@ class NfcTags {
 }
 
 /// `tag.*` and `nfc.scanned`: the tag registry, what the phone writes on a
-/// tag, and the one input every reader's scans arrive at. `phone.nfc` and
-/// `phone.nfc_write` are the earlier names, kept as aliases for one
-/// release.
+/// tag, and the one input every reader's scans arrive at.
 class TagCommands {
   TagCommands(this._core, this._things, this._devices);
 
@@ -173,8 +171,6 @@ class TagCommands {
     'tag.remove': remove,
     'tag.write_payload': writePayload,
     'nfc.scanned': scanned,
-    'phone.nfc': phoneNfc,
-    'phone.nfc_write': writePayload,
   };
 
   static Map<String, Object?> _json(Device tag) => {
@@ -286,16 +282,6 @@ class TagCommands {
   /// id of the board whose reader saw it.
   Future<Map<String, Object?>> scanned(Map<String, Object?> args) async =>
       _scan(args, stringArg(args, 'source'));
-
-  /// The earlier `{uid, writtenId?, ndef?, phone?, at?}`, from the phone.
-  /// A `writtenId` stands for the id the tag's OmniFlow link carries.
-  Future<Map<String, Object?>> phoneNfc(Map<String, Object?> args) {
-    final written = optStringArg(args, 'writtenId');
-    return _scan({
-      ...args,
-      if (written != null) 'ndef': [uriRecord('$tagUriPrefix$written')],
-    }, phoneScanSource);
-  }
 
   Future<Map<String, Object?>> _scan(
     Map<String, Object?> args,

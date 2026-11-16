@@ -16,7 +16,7 @@ import 'people_triggers.dart';
 export 'rule_shorthand.dart' show RuleContext;
 
 /// A sun trigger `{sun, offset?, days?}` in words: "30 min before sunset
-/// on sat, sun".
+/// on weekends".
 String sunTriggerLabel(Map<String, Object?> t) {
   final offset = t['offset'] is int ? t['offset'] as int : 0;
   final minutes = offset.abs();
@@ -26,9 +26,42 @@ String sunTriggerLabel(Map<String, Object?> t) {
   final when = offset == 0
       ? 'at ${t['sun']}'
       : '$amount ${offset < 0 ? 'before' : 'after'} ${t['sun']}';
-  final days = t['days'];
-  return '$when${days is List ? ' on ${days.join(', ')}' : ''}';
+  return '$when${daysSuffix(t['days'])}';
 }
+
+/// The days of the week in order, as rules write them.
+const ruleWeekDays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/// [days] in words: "every day", "on weekdays", "on weekends" or "on Mon,
+/// Wed and Fri". The app's sentence editor, the cards and the diagram all
+/// read days through this.
+String daysWords(Iterable<Object?> days) {
+  final set = {for (final d in days) '$d'.toLowerCase()};
+  if (set.isEmpty || ruleWeekDays.every(set.contains)) return 'every day';
+  if (set.length == 5 && !set.contains('sat') && !set.contains('sun')) {
+    return 'on weekdays';
+  }
+  if (set.length == 2 && set.containsAll(const ['sat', 'sun'])) {
+    return 'on weekends';
+  }
+  final names = [
+    for (final d in ruleWeekDays)
+      if (set.contains(d)) '${d[0].toUpperCase()}${d.substring(1)}',
+  ];
+  return 'on ${andWords(names)}';
+}
+
+/// " on weekdays" after a time, or nothing when [days] is not a list of
+/// days.
+String daysSuffix(Object? days) =>
+    days is List && days.isNotEmpty ? ' ${daysWords(days)}' : '';
+
+/// "a", "a and b", "a, b and c".
+String andWords(List<String> items) => switch (items.length) {
+  0 => '',
+  1 => items.single,
+  _ => '${items.sublist(0, items.length - 1).join(', ')} and ${items.last}',
+};
 
 /// A rule: when one of these, only if all of these, then these steps.
 ///
@@ -272,15 +305,14 @@ Map<String, Object?> normalizeRule(
       issues.add('onlyIf', 'needs a when: a keep step has its own while');
     }
   }
-  out['then'] = norm.steps(rule['then'], 'then');
-  if (rawThen is List) {
-    final firstKeep = rawThen.indexWhere(_isKeep);
-    for (var i = firstKeep + 1; firstKeep >= 0 && i < rawThen.length; i++) {
-      if (!_isKeep(rawThen[i])) {
-        issues.add('then[$i]', 'comes after a keep step: keep steps go last');
-      }
-    }
-  }
+  // Keep steps go last, in their own order, wherever they were written:
+  // the app, the CLI and an agent all get the same order.
+  out['then'] = norm.steps(
+    rawThen is List
+        ? [...rawThen.where((s) => !_isKeep(s)), ...rawThen.where(_isKeep)]
+        : rawThen,
+    'then',
+  );
   if (holds &&
       rule['mode'] != null &&
       !RuleKeys.keepModes.contains(rule['mode'])) {
@@ -572,7 +604,8 @@ class _Normalizer {
         if (crosses is! Map ||
             crosses.length != 1 ||
             !const {'above', 'below'}.contains(crosses.keys.single) ||
-            crosses.values.single is! num) {
+            crosses.values.single is! num ||
+            !(crosses.values.single as num).isFinite) {
           issues.add(
             '$path.crosses',
             'must be {"above": number} or {"below": number}',
@@ -1324,7 +1357,7 @@ class _Compiler {
       return add(
         id,
         'time_of_day',
-        'at ${t['time']}${t['days'] == null ? '' : ' on ${(t['days'] as List).join(', ')}'}',
+        'at ${t['time']}${daysSuffix(t['days'])}',
         {'at': t['time'], 'days': ?t['days']},
         {'': path, 'at': '$path.time', 'days': '$path.days'},
         col: 0,
@@ -1518,7 +1551,7 @@ class _Compiler {
       return 'between ${(cond['between'] as List).join(' and ')}';
     }
     if (cond.containsKey('days')) {
-      return 'on ${(cond['days'] as List).join(', ')}';
+      return daysWords(cond['days'] as List);
     }
     if (cond.containsKey('people')) {
       return cond['people'] == 'all_away'

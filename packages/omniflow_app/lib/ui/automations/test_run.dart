@@ -37,14 +37,27 @@ int stepsOf(RunRecord run) => run.steps.where((n) {
   return c != NodeCategory.trigger && c != NodeCategory.condition;
 }).length;
 
+/// The node types that act on a device, whose output's `result` is their
+/// own. Every later step passes the same message on, so a notify after a
+/// device step still carries that step's result and must not show it.
+const _deviceSteps = {'device_capability', 'device_toggle'};
+
+/// The node types that announce, whose `announced` is their own.
+const _announces = {'notify', 'speak'};
+
+/// [raw] as a failure reads in a run: plain words, no address or port.
+String _failureText(String raw) =>
+    plainWords(plainError('device_error', raw)).text;
+
 /// What a node did, or in a dry run would do, in plain words.
 String? _detail(RunNode n, {required bool dry}) {
   if (n.error case final e?) {
-    final plain = plainError('device_error', e);
+    final plain = _failureText(e);
     return dry ? 'would fail: $plain' : plain;
   }
   final c = _category(n.type);
-  final result = n.output?['result'];
+  final own = _deviceSteps.contains(n.type) || n.type == 'http_request';
+  final result = own ? (n.output?['result']) : null;
   switch (c) {
     case NodeCategory.trigger:
       return dry ? 'pretended it happened' : 'started this run';
@@ -55,15 +68,25 @@ String? _detail(RunNode n, {required bool dry}) {
         _ => null,
       };
     case NodeCategory.action:
+      if (_announces.contains(n.type)) {
+        final a = n.output?['announced'];
+        final words = a is Map ? a['title'] ?? a['text'] : null;
+        final verb = n.type == 'speak'
+            ? (dry ? 'would say' : 'said')
+            : (dry ? 'would show' : 'showed');
+        return words == null ? (dry ? null : 'done') : '$verb "$words"';
+      }
+      if (n.type == 'http_request' &&
+          result is Map &&
+          result['dryRun'] == true) {
+        return 'would call ${result['url'] ?? 'the web address'}';
+      }
       if (result is Map && result['dryRun'] == true) {
         final params = result['params'] is Map ? result['params'] as Map : {};
         return result['toggle'] == true
             ? 'would toggle ${result['capabilityId']}'
             : 'would send ${result['capabilityId']}'
                   '${params.isEmpty ? '' : ' ${params.entries.map((e) => e.key == 'value' ? valueText(e.value) : '${e.key} ${valueText(e.value)}').join(', ')}'}';
-      }
-      if (n.output?['announced'] case final Map a) {
-        return '${dry ? 'would show' : 'showed'} "${a['title'] ?? ''}"';
       }
       return dry ? null : 'done';
     default:
@@ -172,7 +195,7 @@ class RunRow extends StatelessWidget {
     final raw =
         run.steps.where((n) => n.error != null).firstOrNull?.error ??
         run.reason;
-    final failed = raw == null ? null : plainError('device_error', raw);
+    final failed = raw == null ? null : _failureText(raw);
     final steps = stepsOf(run);
     return OmniListRow(
       title: whenText(run.startedAt),
@@ -463,7 +486,7 @@ class _RunPageState extends ConsumerState<RunPage> {
     final raw =
         run?.steps.where((n) => n.error != null).firstOrNull?.error ??
         run?.reason;
-    final failed = raw == null ? null : plainError('device_error', raw);
+    final failed = raw == null ? null : _failureText(raw);
     return OmniPage(
       title: '${_name ?? widget.automationId} · run',
       body: ListView(
@@ -496,7 +519,7 @@ class _RunPageState extends ConsumerState<RunPage> {
             else
               OmniBanner.error(
                 'This run failed${failed == null ? '' : ': $failed'}. '
-                'Steps after a failed one still run unless the rule stops at '
+                'Steps after a failed one still run unless the automation stops at '
                 'the first failure.',
               ),
             DryRunDiagram(run: run, id: widget.automationId),
@@ -527,7 +550,7 @@ String runSummary(Object? name, Json result) {
         return [
           '$name did not finish',
           if (step != null) 'at $step',
-          if (why != null) '- ${plainError('device_error', '$why')}',
+          if (why != null) '- ${_failureText('$why')}',
         ].join(' ');
       }(),
   ].join('\n');

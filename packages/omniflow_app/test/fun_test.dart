@@ -10,6 +10,7 @@ import 'package:omniflow_app/ui/fun/home_stats.dart';
 import 'package:omniflow_app/ui/fun/home_today_card.dart';
 import 'package:omniflow_app/ui/fun/springy_press.dart';
 import 'package:omniflow_app/ui/fun/your_home_page.dart';
+import 'package:omniflow_app/ui/home/home_hero.dart';
 import 'package:omniflow_app/ui/home/run_section.dart';
 
 import 'fake_engine.dart';
@@ -73,7 +74,10 @@ class _CardPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const Scaffold(
-    body: Padding(padding: EdgeInsets.all(14), child: HomeTodayCard()),
+    body: Padding(
+      padding: EdgeInsets.all(14),
+      child: HomeHero(title: 'Good evening, Jade', subtitle: 'Home mode'),
+    ),
   );
 }
 
@@ -118,12 +122,26 @@ void main() {
     });
   });
 
-  group('the today card', () {
-    testWidgets('shows today and opens Your home', (tester) async {
+  group('the hero', () {
+    testWidgets('shows today\'s three numbers and opens Your home', (
+      tester,
+    ) async {
       final engine = FakeEngine()..answers['home.stats'] = statsReply();
       await pumpScreen(tester, engine, const _CardPage());
-      expect(find.text('12 automations ran'), findsOneWidget);
-      expect(find.text('Saved you 34 taps'), findsOneWidget);
+      expect(find.text('Good evening, Jade'), findsOneWidget);
+      expect(find.text('Home mode'), findsOneWidget);
+      String numberOf(String key) => tester
+          .widgetList<Text>(
+            find.descendant(
+              of: find.byKey(ValueKey(key)),
+              matching: find.byType(Text),
+            ),
+          )
+          .map((t) => t.data)
+          .join(' ');
+      expect(numberOf('home-today-ran'), '12 ran today');
+      expect(numberOf('home-today-taps'), '34 taps saved');
+      expect(numberOf('home-today-streak'), '3 day streak');
       expect(
         find.bySemanticsLabel(RegExp('12 automations ran.*3 days in a row')),
         findsOneWidget,
@@ -141,7 +159,9 @@ void main() {
       );
     });
 
-    testWidgets('shows nothing when the engine has no numbers', (tester) async {
+    testWidgets('shows only the greeting when the engine has no numbers', (
+      tester,
+    ) async {
       final engine = FakeEngine()
         ..answers['home.stats'] = {
           'ok': false,
@@ -149,6 +169,7 @@ void main() {
         };
       await pumpScreen(tester, engine, const _CardPage());
       expect(find.byKey(const ValueKey('home-today')), findsNothing);
+      expect(find.text('Good evening, Jade'), findsOneWidget);
     });
 
     testWidgets('a run that finishes reads the numbers again', (tester) async {
@@ -160,7 +181,7 @@ void main() {
       await tester.pump(HomeStatsNotifier.settle);
       await tester.pumpAndSettle();
       expect(engine.callsOf('home.stats').length, before + 1);
-      expect(find.text('13 automations ran'), findsOneWidget);
+      expect(find.text('13'), findsOneWidget);
     });
   });
 

@@ -3,17 +3,17 @@ import 'command_args.dart';
 import 'command_bar.dart';
 import 'engine_core.dart';
 import 'stored_flows.dart';
-import '../dag/cards.dart';
 import '../dag/flow.dart';
 import '../dag/flow_engine.dart';
 import '../dag/node_types.dart';
+import '../dag/untrusted_templates.dart';
 import '../dag/validator.dart';
 import '../devices/board.dart';
 import '../manifest/validation.dart';
 import '../storage/database.dart';
 
 /// The flow commands: validate, save and approve a flow with its trust and
-/// revision, enable, run, dry-run, its log and cards, and the command bar.
+/// revision, enable, run, dry-run, its log, and the command bar.
 class FlowCommands {
   FlowCommands(this._core, this._stored);
 
@@ -77,6 +77,11 @@ class FlowCommands {
       subject: subject,
       toSpecPaths: toSpecPaths,
     );
+    if (!trusted) {
+      if (untrustedTriggerTextProblem(flow) case final why?) {
+        throw ApiError('invalid', why);
+      }
+    }
     final highRisk = await _stored.isHighRisk(flow);
     // Only the user's own tools (the CLI, the app) pass trusted: true.
     // Anything else (MCP, the architect, an import) is untrusted: its
@@ -252,13 +257,6 @@ class FlowCommands {
       limit: optIntArg(args, 'limit') ?? 20,
     ),
   };
-
-  Future<Map<String, Object?>> cards(Map<String, Object?> args) async {
-    final record = await DriftFlowStore(_db).get(stringArg(args, 'id'));
-    if (record == null) throw ApiError('not_found', 'no flow ${args['id']}');
-    final cards = projectCards(FlowSpec.parse(StoredFlows.flowJsonOf(record)));
-    return cards == null ? {'tree': false} : {'tree': true, ...cards.toJson()};
-  }
 
   /// Reads a typed command against the stored devices and flows.
   Future<Map<String, Object?>> interpret(Map<String, Object?> args) async {

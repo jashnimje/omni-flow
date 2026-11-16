@@ -310,9 +310,7 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
       _busy = true;
       _problem = null;
     });
-    final store = ref.read(hubSettingsStoreProvider);
     final saved = settings.withHostKey(offered);
-    await store.pinHostKey(saved, offered);
     try {
       await ref.read(hubSetupToolsProvider).tryConnect(saved);
     } on HubConnectException catch (e) {
@@ -327,6 +325,9 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
             'not_allowed' =>
               'The Mac mini did not let this phone in. Run the line above '
                   'on it, then check again.',
+            'host_key' =>
+              'The Mac mini offered a different host key just now. Check '
+                  'the fingerprint again.',
             _ =>
               'The hub did not answer: ${e.message}. Check the address and '
                   'try again.',

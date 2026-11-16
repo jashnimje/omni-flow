@@ -29,6 +29,7 @@ class ModeChip extends ConsumerWidget {
       child: Padding(
         padding: const EdgeInsets.only(bottom: OmniSpace.sm),
         child: Semantics(
+          container: true,
           hint: 'Opens the house modes',
           child: OmniFilterChip(
             key: const ValueKey('mode-chip'),

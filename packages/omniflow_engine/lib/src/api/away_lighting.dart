@@ -155,6 +155,13 @@ class AwayLighting {
 
   LightParts? _partsOf(Device d) => lightPartsOf(_core.registry[d.driverId]);
 
+  /// A removed light leaves the picked lights and its log.
+  Future<void> forgetLight(String id) async {
+    final picked = lights.remove(id);
+    final logged = _log.remove(id) != null;
+    if (picked || logged) await _save();
+  }
+
   /// `{lights: [id], enabled}`.
   Future<Map<String, Object?>> set(Map<String, Object?> args) async {
     final picked = args['lights'];

@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:args/command_runner.dart' show UsageException;
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
@@ -170,10 +171,12 @@ void main() {
       );
       await input.close();
       expect(await runnerDone, 0);
+      // Commands on one connection run side by side, so replies come back
+      // in any order, each with its id.
       final replies = [
         for (final l in const LineSplitter().convert(out.toString()))
           jsonDecode(l) as Map,
-      ];
+      ]..sort((a, b) => (a['id'] as int).compareTo(b['id'] as int));
       expect(replies.map((r) => r['id']), [1, 2, 3]);
       expect(replies[0]['result'], containsPair('ok', true));
       expect((replies[1]['result'] as Map)['version'], isA<String>());
@@ -217,6 +220,49 @@ void main() {
       expect((jsonDecode(lines.last) as Map)['id'], 7);
     });
 
+    test('a dropped-line notice never lands inside a hub reply', () async {
+      final path = '${tmp.path}/split.sock';
+      final fake = await ServerSocket.bind(
+        InternetAddress(path, type: InternetAddressType.unix),
+        0,
+      );
+      final halfSent = Completer<void>();
+      final dropped = Completer<void>();
+      fake.listen((peer) async {
+        peer.add(utf8.encode('{"id":1,"result":'));
+        await peer.flush();
+        halfSent.complete();
+        await dropped.future;
+        peer.add(utf8.encode('{"ok":true}}\n'));
+        await peer.flush();
+        await peer.close();
+      });
+      final socket = await Socket.connect(
+        InternetAddress(path, type: InternetAddressType.unix),
+        0,
+      );
+      final input = StreamController<List<int>>();
+      final out = StringBuffer();
+      final done = attachStreams(socket, input.stream, out);
+      await halfSent.future;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      input.add(List<int>.filled((8 << 20) + 10, 0x61));
+      input.add([0x0A]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      dropped.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await input.close();
+      await done;
+      await fake.close();
+      final lines = const LineSplitter().convert(out.toString());
+      expect(lines, hasLength(2), reason: '$lines');
+      for (final l in lines) {
+        expect(jsonDecode(l), isA<Map<String, Object?>>(), reason: l);
+      }
+      expect(lines.first, '{"id":1,"result":{"ok":true}}');
+      expect(lines.last, contains('was dropped'));
+    });
+
     test('a bad hello is refused and the connection stays', () async {
       final client = (await LocalClient.connect(sock()))!;
       final bad = await client.handle('hello', {'client': ''});
@@ -240,6 +286,28 @@ void main() {
       expect(status['clients'] as List, contains(containsPair('phone', 'p1')));
       await watcher.close();
     });
+  });
+
+  test('a forced command without --phone is refused', () async {
+    final engine = await openEngine();
+    final server = await LocalServer.start(engine, home: home);
+    try {
+      final (code, out, err) = await omni(
+        ['hub', 'attach'],
+        hub: HubEnvironment(
+          userHome: userHome.path,
+          run: runner.call,
+          secrets: secrets,
+          environment: const {'SSH_ORIGINAL_COMMAND': 'omni hub attach'},
+        ),
+      );
+      expect(code, 77, reason: '$out $err');
+      expect(err, contains('omni hub allow NAME KEY again'));
+      expect(engine.hubClients.list(), isEmpty);
+    } finally {
+      await server.close();
+      await engine.close();
+    }
   });
 
   test('attach and status refuse when no hub runs, in one line', () async {
@@ -379,7 +447,8 @@ void main() {
       expect(
         authorizedKeys().readAsStringSync(),
         'restrict,from="192.168.1.0/24,100.64.0.0/10",'
-        'command="${userHome.path}/.local/bin/omni hub attach" '
+        'command="${userHome.path}/.local/bin/omni hub attach --phone '
+        'jade_pixel" '
         '${parts[0]} ${parts[1]} omniflow-jade_pixel\n',
       );
       expect(octal(authorizedKeys().statSync().mode), '600');
@@ -417,7 +486,7 @@ void main() {
         authorizedKeys().readAsStringSync(),
         contains(
           'command="${userHome.path}/.local/bin/omni --home '
-          '${home.absolute.path} hub attach"',
+          '${home.absolute.path} hub attach --phone p"',
         ),
       );
     });
@@ -472,12 +541,62 @@ void main() {
         (['p', 'ssh-ed25519 !!!'], 'not valid base64'),
         (['p', key, '--from', '10.0.0.0/40'], '--from is addresses'),
         (['p', key, '--from', '"x"'], '--from is addresses'),
+        // A zone after % parsed before, so this re-enabled what restrict
+        // turned off.
+        (
+          ['p', key, '--from', 'fe80::1%en0",command="/bin/sh'],
+          '--from is addresses',
+        ),
+        (
+          ['p', key, '--from', 'fe80::1%x",port-forwarding,pty,x="'],
+          '--from is addresses',
+        ),
+        (['p', key, '--from', 'fe80::1%en0'], '--from is addresses'),
+        (['p', key, '--from', '10.0.0.1, 10.0.0.2'], '--from is addresses'),
+        (['p', key, '--from', '10.0.0.1,,10.0.0.2'], '--from is addresses'),
+        (['p', key, '--from', ''], '--from is addresses'),
       ]) {
         final (code, _, err) = await omni(['hub', 'allow', ...args]);
         expect(code, 64, reason: '$args');
         expect(err, contains(why), reason: '$args');
       }
       expect(authorizedKeys().existsSync(), isFalse);
+    });
+
+    test('--from is rebuilt from the parsed addresses', () {
+      expect(
+        checkedFrom('192.168.1.0/24,100.64.0.0/10'),
+        '192.168.1.0/24,100.64.0.0/10',
+      );
+      expect(checkedFrom('FD00::1/64'), 'fd00::1/64');
+      expect(() => checkedFrom('fe80::1%en0'), throwsA(isA<UsageException>()));
+      expect(() => checkedFrom('1.2.3.4/33'), throwsA(isA<UsageException>()));
+    });
+
+    test('allow rewrites a line from before phone sessions', () async {
+      Directory('${userHome.path}/.ssh').createSync();
+      final parts = key.split(' ');
+      authorizedKeys().writeAsStringSync(
+        'restrict,command="${userHome.path}/.local/bin/omni hub attach" '
+        '${parts[0]} ${parts[1]} omniflow-old_phone\n',
+      );
+      final (_, listed, _) = await omni(['hub', 'phones']);
+      expect(json(listed)['phones'] as List, [
+        containsPair('needsAllowAgain', true),
+      ]);
+      final (code, out, err) = await omni(['hub', 'allow', 'old_phone', key]);
+      expect(code, 0, reason: err);
+      expect(json(out), containsPair('changed', true));
+      final lines = const LineSplitter().convert(
+        authorizedKeys().readAsStringSync(),
+      );
+      expect(lines, hasLength(1));
+      expect(lines.single, contains('hub attach --phone old_phone"'));
+      final (_, after, _) = await omni(['hub', 'phones']);
+      expect(
+        (json(after)['phones'] as List).single,
+        isNot(contains('needsAllowAgain')),
+      );
     });
 
     test('allow makes the phone thing, with its person', () async {
@@ -659,6 +778,13 @@ void main() {
     final written = File('${dir.path}/omniflow-2026-11-12.json');
     expect(json(out)['out'], written.path);
     expect(jsonDecode(written.readAsStringSync()), isA<Map<String, Object?>>());
+    expect(octal(written.statSync().mode), '600');
+    expect(octal(dir.statSync().mode), '700');
+    expect(
+      octal(File('${dir.path}/omniflow-2026-11-04.json').statSync().mode),
+      '600',
+      reason: 'kept backups an older omni wrote are tightened',
+    );
     final left = dir.listSync().map((f) => f.uri.pathSegments.last).toSet();
     expect(left, {
       'omniflow-2026-11-12.json',

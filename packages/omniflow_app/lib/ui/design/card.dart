@@ -57,23 +57,42 @@ class OmniCard extends StatelessWidget {
         ],
       ),
     );
+    final palette = OmniPalette.of(context);
     return Padding(
       padding: margin,
-      child: Material(
-        color: OmniPalette.of(context).card,
-        shape: RoundedRectangleBorder(
-          borderRadius: radius,
-          side: BorderSide(
-            color: highlighted
-                ? OmniPalette.of(context).accentLine
-                : OmniPalette.of(context).line,
+      child: DecoratedBox(
+        decoration: OmniDepth.surface(
+          color: palette.card,
+          radius: radius,
+          border: highlighted ? palette.accentLine : null,
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          clipBehavior: Clip.antiAlias,
+          child: OmniSheen(
+            child: onTap == null
+                ? content
+                : InkWell(onTap: onTap, child: content),
           ),
         ),
-        clipBehavior: Clip.antiAlias,
-        child: onTap == null ? content : InkWell(onTap: onTap, child: content),
       ),
     );
   }
+}
+
+/// The faint light along the top of a card or tile ([OmniDepth.sheen]),
+/// under [child].
+class OmniSheen extends StatelessWidget {
+  const OmniSheen({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: const BoxDecoration(gradient: OmniDepth.sheen),
+    child: child,
+  );
 }
 
 enum HeroTone { accent, plain, problem }
@@ -159,10 +178,11 @@ class OmniHeroCard extends StatelessWidget {
         border: Border.all(
           color: switch (tone) {
             HeroTone.accent => palette.accentLine,
-            HeroTone.plain => palette.line,
+            HeroTone.plain => OmniDepth.edgeOn(palette.card),
             HeroTone.problem => OmniColors.badLine,
           },
         ),
+        boxShadow: OmniDepth.shadow,
       ),
       child: Column(
         crossAxisAlignment: align,

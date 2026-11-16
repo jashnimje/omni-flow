@@ -1,8 +1,11 @@
 package com.jashnm.omniflow_app
 
 import android.app.Notification
+import android.content.ComponentName
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import androidx.core.app.NotificationManagerCompat
 
 /**
  * "A notification arrives from" triggers. Android binds this service only
@@ -48,13 +51,43 @@ class NotificationTriggers : NotificationListenerService() {
         sbn?.key?.let { sent.remove(it) }
     }
 
-    override fun onListenerDisconnected() {
-        sent.clear()
-        super.onListenerDisconnected()
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        connected = true
     }
 
-    private companion object {
-        const val MAX_TEXT = 2_000
-        const val MAX_KEPT = 200
+    /** Android unbinds a listener after an update, a crash or on its own,
+     * and may not bind it again until access is toggled: ask at once, so
+     * notification and media triggers keep working. */
+    override fun onListenerDisconnected() {
+        connected = false
+        sent.clear()
+        super.onListenerDisconnected()
+        rebind(this)
+    }
+
+    companion object {
+        private const val MAX_TEXT = 2_000
+        private const val MAX_KEPT = 200
+
+        /** Whether Android has the listener bound now. */
+        @Volatile var connected = false
+            private set
+
+        /** Asks Android to bind the listener again when the person allowed
+         * notification access but it is not bound. */
+        fun rebindIfNeeded(context: Context) {
+            if (connected) return
+            val allowed = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+            if (allowed) rebind(context)
+        }
+
+        private fun rebind(context: Context) {
+            try {
+                NotificationListenerService.requestRebind(ComponentName(context, NotificationTriggers::class.java))
+            } catch (_: RuntimeException) {
+                // Access was turned off meanwhile: nothing to bind.
+            }
+        }
     }
 }

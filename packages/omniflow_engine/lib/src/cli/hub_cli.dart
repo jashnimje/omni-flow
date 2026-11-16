@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:args/command_runner.dart';
 import 'package:pointycastle/digests/sha256.dart';
 
+import '../api/hub_phone_session.dart';
 import '../api/local_client.dart';
 import '../storage/keychain_secret_store.dart';
 import '../storage/secret_store.dart';
@@ -43,11 +44,17 @@ class HubEnvironment {
     HubProcessRunner? run,
     this._secrets,
     DateTime Function()? now,
+    Map<String, String>? environment,
   }) : userHome = userHome ?? Platform.environment['HOME'] ?? '',
        run = run ?? _runProcess,
-       now = now ?? DateTime.now;
+       now = now ?? DateTime.now,
+       environment = environment ?? Platform.environment;
 
   final String userHome;
+
+  /// The process environment: `SSH_ORIGINAL_COMMAND` tells a forced
+  /// command apart from one the Mac's user runs.
+  final Map<String, String> environment;
   final List<String>? _hostKeyFiles;
   final HubProcessRunner run;
   final DateTime Function() now;
@@ -141,9 +148,20 @@ abstract class _HubSub extends Command<int> {
       omni.out.writeln(const JsonEncoder.withIndent('  ').convert(json));
 }
 
-/// `omni hub attach`: copies stdin lines to the running hub's socket and
-/// its replies to stdout, nothing else, so it can be an SSH forced command.
+/// `omni hub attach [--phone NAME]`: copies stdin lines to the running
+/// hub's socket and its replies to stdout, nothing else, so it can be an
+/// SSH forced command. With `--phone` it connects to the phone socket and
+/// names the phone in a first line of its own, before any line from stdin,
+/// so the hub takes the phone from the key's `authorized_keys` line and
+/// checks every command against what a phone may do.
 class _HubAttach extends _HubSub {
+  _HubAttach() {
+    argParser.addOption(
+      'phone',
+      help: 'The phone this key belongs to. omni hub allow writes it.',
+    );
+  }
+
   @override
   String get name => 'attach';
 
@@ -153,9 +171,35 @@ class _HubAttach extends _HubSub {
 
   @override
   Future<int> run() async {
-    final socket = await LocalClient.openSocket(omni.socketPath);
+    final phone = argResults!.option('phone');
+    if (phone == null && env.environment.containsKey('SSH_ORIGINAL_COMMAND')) {
+      // A forced command without --phone is a phone line written before
+      // phone sessions, which would get the Mac's full access.
+      throw LocalSocketException(
+        'this key was allowed by an older omni and has no phone name. On the '
+        'Mac, run omni hub revoke NAME, then omni hub allow NAME KEY again',
+        exitCode: 77,
+      );
+    }
+    if (phone != null && !_phoneName.hasMatch(phone)) {
+      throw UsageException(
+        '--phone is the name given to omni hub allow',
+        usage,
+      );
+    }
+    final path = phone == null
+        ? omni.socketPath
+        : phoneSocketPath(omni.socketPath);
+    final socket = await LocalClient.openSocket(path);
     if (socket == null) {
       throw LocalSocketException('no omni hub is running', exitCode: 69);
+    }
+    if (phone != null) {
+      socket.add(
+        utf8.encode(
+          '${jsonEncode({phoneSessionKey: phoneSessionValue, 'phone': phone})}\n',
+        ),
+      );
     }
     return attachStreams(socket, omni.input, omni.out);
   }
@@ -186,13 +230,44 @@ Future<int> attachStreams(
   final decoder = const Utf8Decoder(allowMalformed: true)
       .startChunkedConversion(_SinkWriter(out));
   final hubDone = Completer<void>();
+  void emit(List<int> bytes) {
+    if (out is IOSink) {
+      out.add(bytes);
+    } else {
+      decoder.add(bytes);
+    }
+  }
+
+  // A dropped-line notice goes out only between two hub lines, never in the
+  // middle of a reply the hub is still sending.
+  var atLineStart = true;
+  final notices = <String>[];
+  void flushNotices() {
+    for (final n in notices) {
+      emit(utf8.encode('$n\n'));
+    }
+    notices.clear();
+  }
+
+  void notice(String line) {
+    notices.add(line);
+    if (atLineStart) flushNotices();
+  }
+
   final fromHub = socket.listen(
     (bytes) {
-      if (out is IOSink) {
-        out.add(bytes);
-      } else {
-        decoder.add(bytes);
+      if (bytes.isEmpty) return;
+      final last = bytes.lastIndexOf(0x0A);
+      if (notices.isNotEmpty && last >= 0) {
+        emit(bytes.sublist(0, last + 1));
+        flushNotices();
+        final rest = bytes.sublist(last + 1);
+        if (rest.isNotEmpty) emit(rest);
+        atLineStart = rest.isEmpty;
+        return;
       }
+      emit(bytes);
+      atLineStart = bytes.last == 0x0A;
     },
     onError: (Object _) {},
     onDone: () {
@@ -221,7 +296,7 @@ Future<int> attachStreams(
             pending.length + part.length - 1 > maxLocalRequestBytes) {
           pending.clear();
           dropping = false;
-          out.writeln(jsonEncode(_droppedLine()));
+          notice(jsonEncode(_droppedLine()));
           continue;
         }
         pending.add(part);
@@ -257,6 +332,10 @@ Future<int> attachStreams(
   }
   await toHub.cancel();
   await fromHub.cancel();
+  if (notices.isNotEmpty) {
+    if (!atLineStart) emit(utf8.encode('\n'));
+    flushNotices();
+  }
   decoder.close();
   socket.destroy();
   if (out is IOSink) await out.flush();
@@ -390,9 +469,10 @@ class _HubInstall extends _HubSub {
         out.writeln('  ${c.join(' ')}');
       }
     } else {
-      for (final dir in [env.launchAgents, env.logDir, env.backupDir]) {
+      for (final dir in [env.launchAgents, env.logDir]) {
         await Directory(dir).create(recursive: true);
       }
+      await privateBackupDir(Directory(env.backupDir));
       for (final MapEntry(:key, :value) in files.entries) {
         await File(key).writeAsString(value, flush: true);
       }
@@ -461,17 +541,29 @@ class _HubBackup extends _HubSub {
       reply(result);
       return 1;
     }
-    await dir.create(recursive: true);
+    await privateBackupDir(dir);
     final date = env.now().toIso8601String().substring(0, 10);
     final file = File('${dir.path}/omniflow-$date.json');
-    await file.writeAsString(
+    // Written at 0600 before any content, then renamed into place, so the
+    // home's places, people and automations are never readable by others.
+    final temp = File('${file.path}.tmp-$pid');
+    await temp.writeAsString('');
+    await _chmodFile('600', temp.path);
+    await temp.writeAsString(
       '${const JsonEncoder.withIndent('  ').convert(result['backup'])}\n',
       flush: true,
     );
+    await temp.rename(file.path);
     final backups = [
       for (final f in dir.listSync().whereType<File>())
         if (RegExp(r'/omniflow-\d{4}-\d{2}-\d{2}\.json$').hasMatch(f.path)) f,
     ]..sort((x, y) => y.path.compareTo(x.path));
+    // Backups an older omni wrote at the umask's 0644 are tightened too.
+    for (final kept in backups.take(keep)) {
+      if ((await kept.stat()).mode & groupOrOtherAny != 0) {
+        await _chmodFile('600', kept.path);
+      }
+    }
     final removed = <String>[];
     for (final old in backups.skip(keep)) {
       await old.delete();
@@ -479,6 +571,27 @@ class _HubBackup extends _HubSub {
     }
     reply({'ok': true, 'out': file.path, 'removed': removed});
     return 0;
+  }
+}
+
+/// Makes [dir] a 0700 folder for backups: created at 0700 when missing,
+/// tightened when others can read it, and refused when others can write it.
+Future<void> privateBackupDir(Directory dir) async {
+  if (!await dir.exists()) await dir.create(recursive: true);
+  final mode = (await dir.stat()).mode;
+  if (mode & groupOrOtherWrite != 0) {
+    throw LocalSocketException(
+      '${dir.path} is writable by other users, so backups do not go there. '
+      'Run chmod 700 ${dir.path}',
+    );
+  }
+  if (mode & groupOrOtherAny != 0) await _chmodFile('700', dir.path);
+}
+
+Future<void> _chmodFile(String mode, String path) async {
+  final r = await Process.run('/bin/chmod', [mode, path]);
+  if (r.exitCode != 0) {
+    throw FileSystemException('cannot set mode $mode', path);
   }
 }
 
@@ -564,11 +677,20 @@ class PhoneKeyLine {
   final String? from;
   final String line;
 
+  /// Whether the line's forced command opens a phone session for [name].
+  /// A line an older omni wrote runs plain omni hub attach, which the hub
+  /// now refuses, so omni hub allow rewrites it.
+  bool get phoneSession =>
+      RegExp(r'command="[^"]* hub attach --phone ([a-z0-9_]+)"')
+          .firstMatch(line)?[1] ==
+      name;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'type': key.type,
     'fingerprint': key.fingerprint,
     'from': ?from,
+    if (!phoneSession) 'needsAllowAgain': true,
   };
 
   static final _shape = RegExp(
@@ -592,25 +714,35 @@ class PhoneKeyLine {
   }
 }
 
-/// Checks `--from`: comma separated addresses or CIDR ranges.
-String _checkedFrom(String from) {
-  final parts = from.split(',');
-  for (final p in parts) {
-    final slash = p.indexOf('/');
-    final address = InternetAddress.tryParse(
-      slash < 0 ? p : p.substring(0, slash),
-    );
-    final bits = slash < 0 ? null : int.tryParse(p.substring(slash + 1));
-    final max = address?.type == InternetAddressType.IPv6 ? 128 : 32;
-    if (address == null ||
-        (slash >= 0 && (bits == null || bits < 0 || bits > max))) {
-      throw UsageException(
-        '--from is addresses or ranges like 192.168.1.0/24,100.64.0.0/10',
-        '',
-      );
-    }
+/// One `--from` part: a plain IPv4 or IPv6 address, then optionally `/`
+/// and a prefix length. No zone (`%`), quote, comma or space can pass, since
+/// the value goes inside `from="..."` in `authorized_keys`.
+final _fromPart = RegExp(r'^([0-9A-Fa-f:.]+)(?:/([0-9]{1,3}))?$');
+
+/// Checks `--from` and rebuilds it from what parsed, so only addresses and
+/// ranges like `192.168.1.0/24,100.64.0.0/10` reach the key line.
+String checkedFrom(String from) {
+  Never bad() => throw UsageException(
+    '--from is addresses or ranges like 192.168.1.0/24,100.64.0.0/10, with '
+        'no spaces and no IPv6 zone',
+    '',
+  );
+  final rebuilt = <String>[];
+  for (final p in from.split(',')) {
+    final m = _fromPart.firstMatch(p);
+    if (m == null) bad();
+    final parsed = InternetAddress.tryParse(m[1]!);
+    if (parsed == null) bad();
+    // Printed again from its bytes, so only the address itself goes on.
+    final address = InternetAddress.fromRawAddress(parsed.rawAddress).address;
+    final max = parsed.type == InternetAddressType.IPv6 ? 128 : 32;
+    final bits = m[2] == null ? null : int.parse(m[2]!);
+    if (bits != null && bits > max) bad();
+    rebuilt.add(bits == null ? address : '$address/$bits');
   }
-  return from;
+  final line = rebuilt.join(',');
+  if (line.contains(RegExp(r'[^0-9A-Fa-f:.,/]'))) bad();
+  return line;
 }
 
 /// The authorized_keys file: read with every line kept as it is, and
@@ -724,23 +856,36 @@ class _HubAllow extends _HubSub {
     }
     final from = a.option('from') == null
         ? null
-        : _checkedFrom(a.option('from')!);
+        : checkedFrom(a.option('from')!);
     final binary = _checkedPath(
       a.option('binary') ?? env.installedBinary,
       '--binary',
     );
-    final command = [..._omniArgv(omni, binary), 'hub', 'attach'].join(' ');
+    final command = [
+      ..._omniArgv(omni, binary),
+      'hub',
+      'attach',
+      '--phone',
+      name,
+    ].join(' ');
     final line =
         'restrict,${from == null ? '' : 'from="$from",'}command="$command" '
         '${key.type} ${key.base64} ${phoneKeyComment(name)}';
     final keys = _AuthorizedKeys(env);
     final lines = await keys.read();
     var present = false;
-    for (final existing in lines) {
+    int? upgrade;
+    for (final (i, existing) in lines.indexed) {
       final phone = PhoneKeyLine.parse(existing);
       if (phone == null) continue;
       if (phone.name == name && existing == line) {
         present = true;
+      } else if (phone.name == name &&
+          phone.key.base64 == key.base64 &&
+          !phone.phoneSession) {
+        // The same phone and key, allowed by an older omni without a phone
+        // session: its line is rewritten in place.
+        upgrade = i;
       } else if (phone.name == name) {
         reply(
           _conflict('$name already has a key. Run omni hub revoke $name first'),
@@ -756,11 +901,15 @@ class _HubAllow extends _HubSub {
       reply(thing);
       return 1;
     }
-    if (!present) await keys.write([...lines, line]);
+    if (upgrade != null) {
+      await keys.write([...lines]..[upgrade] = line);
+    } else if (!present) {
+      await keys.write([...lines, line]);
+    }
     reply({
       'ok': true,
       'name': name,
-      'changed': !present,
+      'changed': !present || upgrade != null,
       'fingerprint': key.fingerprint,
       'phone': thing['phone'],
     });

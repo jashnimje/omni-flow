@@ -9,14 +9,18 @@ import '../boards/usb_board.dart' show showUsbBoardSheet;
 import '../design/design.dart';
 import '../devices/device_text.dart';
 import '../home/home_data.dart';
+import '../home/home_presence.dart';
 import '../shell/shell.dart';
 import '../tags/tags_page.dart' show TagsPage;
+import '../help/screen_help.dart';
+import '../onboarding/home_setup.dart' show HomeSetupRow;
 import 'agent_access.dart';
 import 'alerts_page.dart';
 import 'appearance_page.dart';
 import 'backup_page.dart';
 import 'developer_page.dart';
 import 'hub_page.dart';
+import 'home_location_page.dart' show HomeLocationPage, HomeLocationRow;
 import 'hubs_page.dart';
 import 'phone_access.dart';
 import 'places_page.dart';
@@ -41,6 +45,7 @@ class SettingsPlace {
 
 final settingsPlaces = [
   SettingsPlace('Places and people', OmniIcons.place, PlacesPage.new),
+  SettingsPlace('Home location', OmniIcons.sun, HomeLocationPage.new),
   SettingsPlace('Rooms', OmniIcons.room, RoomsPage.new),
   SettingsPlace('NFC tags', OmniIcons.tag, TagsPage.new),
   SettingsPlace('Scenes', OmniIcons.scene, ScenesPage.new),
@@ -80,6 +85,7 @@ class SettingsScreen extends ConsumerWidget {
     ];
     final person = personOf(devices);
     final presence = person == null ? null : Presence.of(person.json);
+    final zones = ref.watch(zonesProvider).value;
     final rooms = ref.watch(roomsProvider).value;
     final summaries = ref.watch(summariesProvider).value;
     final access = ref.watch(phoneAccessStateProvider).value;
@@ -91,23 +97,27 @@ class SettingsScreen extends ConsumerWidget {
     final shell = ref.read(shellControllerProvider);
     return OmniTabPage(
       title: 'Settings',
+      actions: const [ScreenHelpButton(HelpScreen.settings)],
       body: ListView(
         key: const ValueKey('settings-list'),
         padding: EdgeInsets.only(bottom: OmniInsets.bottom(context)),
         children: [
           const OmniSectionHeader('Your home'),
+          const HomeSetupRow(),
           OmniListRow(
             key: const ValueKey('settings-places'),
             icon: OmniIcons.place,
             title: 'Places and people',
-            subtitle: switch (presence?.home) {
-              true => 'Home · you are here',
-              false => 'Home · you are away',
-              null => 'Where you are, and how OmniFlow knows',
+            subtitle: switch (presenceShown(presence, zones)) {
+              PresenceShown.home => 'Home · you are here',
+              PresenceShown.away => 'Home · you are away',
+              PresenceShown.notSetUp => '$presenceNotSetUp. Tap to set it up',
+              _ => 'Where you are, and how OmniFlow knows',
             },
             chevron: true,
             onTap: () => _push(context, const PlacesPage()),
           ),
+          const HomeLocationRow(),
           OmniListRow(
             key: const ValueKey('settings-rooms'),
             icon: OmniIcons.room,
@@ -192,7 +202,7 @@ class SettingsScreen extends ConsumerWidget {
             chevron: true,
             onTap: () => showUsbBoardSheet(context),
           ),
-          const OmniSectionHeader('Claude and agents'),
+          const OmniSectionHeader('Agents'),
           const AgentAccessRow(),
           OmniListRow(
             key: const ValueKey('settings-waiting'),

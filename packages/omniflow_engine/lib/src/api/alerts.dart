@@ -12,20 +12,37 @@ import '../storage/database.dart';
 /// when it is back), and a battery under [lowBattery] percent. They go out
 /// as `flow.announce` notifications, as a notify step's do, with `alert`
 /// saying which.
+///
+/// Offline is only judged while the hub polls, counted from the later of
+/// a device's last word and when polling started, so a stopped hub or a
+/// long gap before a restart is not taken for devices going quiet. What
+/// was already told is kept in `home.json`, so a restart does not tell it
+/// again.
 class HouseAlerts {
   HouseAlerts(
     this._core,
     this._file, {
     this.every = const Duration(minutes: 1),
-  });
+    bool Function()? hubRunning,
+  }) : _hubRunning = hubRunning ?? _always;
 
   final EngineCore _core;
   final HomeFile _file;
+  final bool Function() _hubRunning;
+
+  static bool _always() => true;
+
+  /// When the hub's polling was first seen running, or null while stopped.
+  DateTime? _pollingSince;
 
   /// How often devices are checked for being offline.
   final Duration every;
 
   static const offlineAfter = Duration(minutes: 10);
+
+  /// The `home.json` key keeping which devices were told offline or low.
+  static const _toldKey = 'alertsTold';
+
   static const lowBattery = 15;
 
   /// A battery counts as charged again from here, so one hovering at the
@@ -49,6 +66,12 @@ class HouseAlerts {
     if (saved is Map) {
       offline = saved['offline'] != false;
       battery = saved['battery'] != false;
+    }
+    final told = (await _file.read())[_toldKey];
+    if (told is Map) {
+      for (final (key, into) in [('offline', _offline), ('battery', _low)]) {
+        into.addAll((told[key] as List? ?? const []).whereType<String>());
+      }
     }
     _sub = _core.events.listen(_observe);
     _timer = Timer.periodic(every, (_) => _core.track(check()));
@@ -87,9 +110,17 @@ class HouseAlerts {
     }
     await _file.update({
       'alerts': {'offline': offline, 'battery': battery},
+      _toldKey: _toldJson(),
     });
     return _json();
   }
+
+  Map<String, Object?> _toldJson() => {
+    'offline': _offline.toList()..sort(),
+    'battery': _low.toList()..sort(),
+  };
+
+  Future<void> _saveTold() => _file.update({_toldKey: _toldJson()});
 
   void _notify(String kind, Device d, String title, String body) => _core.emit({
     'event': 'flow.announce',
@@ -103,30 +134,38 @@ class HouseAlerts {
   /// Looks at every device that reports in regularly, as at [at]. One
   /// offline (unseen for its online window) for [offlineAfter] alerts once.
   Future<void> check({DateTime? at}) async {
-    if (!offline) return;
     final now = at ?? DateTime.now();
+    if (!offline || !_hubRunning()) {
+      _pollingSince = null;
+      return;
+    }
+    final since = _pollingSince ??= now;
+    var changed = false;
     for (final d in await DriftDeviceStore(_core.db).all()) {
       final window = _core.onlineWindowOf(d);
       if (window == null) continue;
       final seen = d.lastSeen;
       if (d.isOnline(now, window)) {
         if (_offline.remove(d.id)) {
+          changed = true;
           _notify('online', d, '${d.name} is back online', 'It answers again');
         }
         continue;
       }
-      if (seen == null || now.difference(seen) < window + offlineAfter) {
-        continue;
-      }
+      if (seen == null) continue;
+      final quiet = seen.isAfter(since) ? seen : since;
+      if (now.difference(quiet) < window + offlineAfter) continue;
       if (_offline.add(d.id)) {
+        changed = true;
         _notify(
           'offline',
           d,
           '${d.name} is offline',
-          'Not heard from for ${offlineAfter.inMinutes} minutes',
+          'Not heard from for ${durationWords(now.difference(seen))}',
         );
       }
     }
+    if (changed) await _saveTold();
   }
 
   void _observe(Map<String, Object?> e) {
@@ -139,8 +178,9 @@ class HouseAlerts {
     final level = state['battery'];
     if (level is! num) return;
     if (level >= _batteryBack) {
-      _low.remove(id);
+      if (_low.remove(id)) _core.track(_saveTold());
     } else if (level < lowBattery && _low.add(id)) {
+      _core.track(_saveTold());
       _core.emit({
         'event': 'flow.announce',
         'type': 'notify',
@@ -151,4 +191,13 @@ class HouseAlerts {
       });
     }
   }
+}
+
+/// [d] in plain words, to the unit that reads best: "12 minutes",
+/// "3 hours", "5 days".
+String durationWords(Duration d) {
+  String of(int n, String unit) => '$n $unit${n == 1 ? '' : 's'}';
+  if (d.inMinutes < 120) return of(d.inMinutes, 'minute');
+  if (d.inHours < 48) return of(d.inHours, 'hour');
+  return of(d.inDays, 'day');
 }

@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.database.ContentObserver
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
@@ -80,6 +81,7 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
 
     override fun onEngineCreate(flutterEngine: FlutterEngine?) {
         val messenger = flutterEngine?.dartExecutor?.binaryMessenger ?: return
+        active = this
         channel = MethodChannel(messenger, CHANNEL).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -168,8 +170,11 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
     private fun speak(text: String, answer: (Map<String, Any?>) -> Unit) {
         if (text.isBlank()) return answer(failed("There is nothing to say", "invalid"))
         val answered = AtomicBoolean(false)
+        val started = AtomicBoolean(false)
         val once = { a: Map<String, Any?> -> if (answered.compareAndSet(false, true)) answer(a) }
-        main.postDelayed({ once(ok("Still speaking")) }, SPEAK_ANSWER_MS)
+        main.postDelayed({
+            once(if (started.get()) ok("Still speaking") else failed("The phone did not start speaking in time"))
+        }, SPEAK_ANSWER_MS)
         val say = {
             val engine = tts
             if (engine == null || !ttsReady) {
@@ -177,7 +182,10 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             } else {
                 val id = "omniflow-${SystemClock.elapsedRealtime()}"
                 engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) = once(ok())
+                    override fun onStart(utteranceId: String?) {
+                        started.set(true)
+                        once(ok())
+                    }
                     override fun onDone(utteranceId: String?) = once(ok())
 
                     @Deprecated("Deprecated in Java")
@@ -383,7 +391,11 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             app.startActivity(intent)
             return ok()
         }
-        notify(OPEN_NOTIFICATION + (title.hashCode() and 0xfff), title, text ?: "Tap to open", intent, fullScreen)
+        // Each its own id and request code, so two messages never replace
+        // each other's text. Ids wrap, so they never pile up past Android's
+        // limit either.
+        val id = OPEN_NOTIFICATION + Math.floorMod(nextOpen.getAndIncrement(), OPEN_IDS)
+        notify(id, title, text ?: "Tap to open", intent, fullScreen)
         val canFullScreen = Build.VERSION.SDK_INT < 34 || notifications.canUseFullScreenIntent()
         return ok(
             if (fullScreen && canFullScreen) {
@@ -419,7 +431,7 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             .setAutoCancel(true)
         if (fullScreen) builder.setFullScreenIntent(pending, true)
         try {
-            notifications.notify(id, builder.build())
+            notifications.notify(NOTIFY_TAG, id, builder.build())
         } catch (_: SecurityException) {
         }
     }
@@ -428,8 +440,19 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
 
     private fun emit(reading: Map<String, Any?>) = PhoneSensorsBridge.emit(reading)
 
+    /**
+     * Turns readings on and off to match [w]. The engine sends it on every
+     * phone.ready, and the app on every return to the screen, so a
+     * permission granted after the rule was made starts its watch: each
+     * part registers only what is not registered yet.
+     */
     private fun watch(w: Map<String, Any?>) {
+        lastWatch = w
         main.post {
+            // An engine from before the apps key still gets the app on screen.
+            PhoneSensorsBridge.watchApps(w.isNotEmpty() && w["apps"] != false)
+            if (w.isNotEmpty()) NotificationTriggers.rebindIfNeeded(app)
+            calendarWatch((w["calendarWords"] as? List<*>)?.isNotEmpty() == true)
             motionWatch(w["shake"] == true, w["faceDown"] == true)
             callsWatch(w["calls"] == true)
             mediaWatch(w["media"] == true)
@@ -507,12 +530,14 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
         val phone = app.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return
         val allowed = app.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
         if (!on || !allowed) {
-            when (val c = calls) {
-                is TelephonyCallback -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) phone.unregisterTelephonyCallback(c)
-                is PhoneStateListener -> {
-                    @Suppress("DEPRECATION")
-                    phone.listen(c, PhoneStateListener.LISTEN_NONE)
-                }
+            val c = calls
+            // The version first: TelephonyCallback does not exist before
+            // Android 12, so even an `is` check on it must not run there.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && c is TelephonyCallback) {
+                phone.unregisterTelephonyCallback(c)
+            } else if (c is PhoneStateListener) {
+                @Suppress("DEPRECATION")
+                phone.listen(c, PhoneStateListener.LISTEN_NONE)
             }
             calls = null
             return
@@ -630,20 +655,62 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
             CalendarContract.Instances.TITLE,
             CalendarContract.Instances.BEGIN,
             CalendarContract.Instances.END,
+            CalendarContract.Instances.ALL_DAY,
         )
         val found = mutableListOf<Map<String, Any?>>()
         app.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
             while (cursor.moveToNext()) {
                 val title = cursor.getString(0) ?: continue
                 val lower = title.lowercase(Locale.ROOT)
+                val allDay = cursor.getInt(3) != 0
+                val begin = cursor.getLong(1).let { if (allDay) localMidnight(it) else it }
+                val end = cursor.getLong(2).let { if (allDay) localMidnight(it) else it }
                 for (w in words) {
                     if (lower.contains(w.lowercase(Locale.ROOT))) {
-                        found.add(mapOf("words" to w, "title" to title, "begin" to cursor.getLong(1), "end" to cursor.getLong(2)))
+                        found.add(mapOf("words" to w, "title" to title, "begin" to begin, "end" to end))
                     }
                 }
             }
         }
         return found
+    }
+
+    /** An all-day event's times are midnight in UTC; the day it names
+     * starts at midnight here. */
+    private fun localMidnight(utcMs: Long): Long {
+        val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMs }
+        return java.util.Calendar.getInstance().apply {
+            clear()
+            set(utc.get(java.util.Calendar.YEAR), utc.get(java.util.Calendar.MONTH), utc.get(java.util.Calendar.DAY_OF_MONTH))
+        }.timeInMillis
+    }
+
+    private var calendarObserver: ContentObserver? = null
+
+    /** Tells the service when the calendar changes while a calendar
+     * trigger exists, so an event added at short notice is read at once,
+     * not at the next 15-minute read. Changes come in bursts, so they are
+     * gathered for a few seconds. */
+    private fun calendarWatch(on: Boolean) {
+        val allowed = app.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+        val existing = calendarObserver
+        if (on && allowed && existing == null) {
+            val changed = Runnable { PowerBridge.signal("calendar") }
+            val observer = object : ContentObserver(main) {
+                override fun onChange(selfChange: Boolean) {
+                    main.removeCallbacks(changed)
+                    main.postDelayed(changed, CALENDAR_SETTLE_MS)
+                }
+            }
+            try {
+                app.contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, observer)
+                calendarObserver = observer
+            } catch (_: SecurityException) {
+            }
+        } else if ((!on || !allowed) && existing != null) {
+            app.contentResolver.unregisterContentObserver(existing)
+            calendarObserver = null
+        }
     }
 
     companion object {
@@ -655,7 +722,24 @@ class PhoneActionsBridge(context: Context) : FlutterForegroundTaskLifecycleListe
         private const val PREFS = "omniflow_phone"
         private const val LAST_BOOT = "lastBootCount"
         private const val BOOT_WINDOW_MS = 15 * 60_000L
-        private const val CALENDAR_BACK_MS = 60_000L
+        // Far enough back that today's all-day events, kept in UTC, are in
+        // the list in every time zone.
+        private const val CALENDAR_BACK_MS = 15 * 60 * 60_000L
         private const val CALENDAR_AHEAD_MS = 24 * 60 * 60_000L
+        private const val CALENDAR_SETTLE_MS = 5_000L
+        private const val NOTIFY_TAG = "phone_actions"
+        private const val OPEN_IDS = 20
+        private val nextOpen = java.util.concurrent.atomic.AtomicInteger(0)
+
+        /** What the engine last asked to watch, applied again when the app
+         * comes back to the screen, after a grant made in Settings. */
+        @Volatile private var lastWatch: Map<String, Any?> = emptyMap()
+        @Volatile private var active: PhoneActionsBridge? = null
+
+        fun recheck() {
+            val bridge = active ?: return
+            val w = lastWatch
+            if (w.isNotEmpty()) bridge.watch(w)
+        }
     }
 }

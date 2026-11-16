@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../devices/adb/adb_commands.dart' show adbPhoneAgentKeys;
 import 'android_names.dart';
+import 'device_history.dart' show changedByAgent;
 
 /// How much an AI agent may do through MCP. The user picks it in the app or
 /// with `omni agent access`, and no agent can change it.
@@ -36,6 +38,8 @@ const _readCommands = {
   'automation.conflicts',
   'automation.skips',
   'automation.versions',
+  // The recently removed automations, which can be put back for 30 days.
+  'automation.removed',
   // An automation as a diagram, with a run's path lit.
   'automation.diagram',
   'board.describe',
@@ -50,7 +54,6 @@ const _readCommands = {
   'energy.price',
   'energy.summary',
   'engine.status',
-  'flow.cards',
   'flow.dryRun',
   'flow.get',
   'flow.list',
@@ -66,6 +69,8 @@ const _readCommands = {
   'rule.tokens',
   // A sentence read into a rule, never saved, and habits offered as rules.
   'rule.parse',
+  // An unsaved rule's words and what it still needs, never saved.
+  'rule.words',
   'suggest.list',
   'scene.list',
   'tag.list',
@@ -162,6 +167,11 @@ const _setupCommands = {
   'timer.pause',
   'timer.resume',
   'timer.start',
+  // Putting a removed automation back saves it as it was, and the daily
+  // backup's folder and switch, since a backup holds the whole home.
+  'automation.unremove',
+  'backup.auto.get',
+  'backup.auto.set',
 };
 
 /// Why each command no agent may send is the user's alone.
@@ -214,6 +224,8 @@ const _userOnly = {
   'phone.package': 'what the phone reports would fire automations falsely',
   'zone.remove': 'removing a place deletes it with its history',
   'board.flash': 'writing firmware replaces what a board runs',
+  'device.move':
+      'pointing a device at a new address decides where its commands go',
   'config.import':
       'restoring a backup replaces the home, and only you choose to',
 };
@@ -223,6 +235,121 @@ const _userOnly = {
 final agentReadCommands = withAndroidCommandNames(_readCommands);
 final agentSetupCommands = withAndroidCommandNames(_setupCommands);
 final agentUserOnly = withAndroidNames(_userOnly);
+
+/// On another person's phone (an ADB device in the phone category) the
+/// screen is theirs: tapping, typing and a screenshot together are the
+/// whole phone, so these are the user's even at setup. On a TV they stay
+/// at setup.
+const _phoneScreenOnly = {
+  'tv.input.tap': 'tapping another person\'s phone is the user\'s',
+  'tv.input.swipe': 'swiping on another person\'s phone is the user\'s',
+  'tv.text': 'typing on another person\'s phone is the user\'s',
+  'tv.screenshot': 'what is on another person\'s screen is theirs',
+  'tv.record.start': 'what is on another person\'s screen is theirs',
+  'tv.record.stop': 'what is on another person\'s screen is theirs',
+  'tv.notifications':
+      'another person\'s notifications are theirs, so opening the shade is '
+      'the user\'s',
+  'tv.pointer': 'pointing on another person\'s phone is the user\'s',
+  'tv.pointer.click': 'clicking on another person\'s phone is the user\'s',
+};
+
+/// What an agent at read sees on a TV, but on another person's phone only
+/// at setup: its files, its apps, what runs and its settings, secure ones
+/// included.
+const _phoneSetupReads = {
+  'tv.app.permissions',
+  'tv.apps',
+  'tv.files.list',
+  'tv.files.stat',
+  'tv.processes',
+  'tv.settings.get',
+  'tv.settings.list',
+};
+
+/// The `tv.*` and `android.*` commands that are the user's on a phone, with
+/// why, and those that need setup there.
+final agentPhoneUserOnly = withAndroidNames(_phoneScreenOnly);
+final agentPhoneSetupReads = withAndroidCommandNames(_phoneSetupReads);
+
+/// What the phone itself reports that says where its person has been and
+/// what they do: the Wi-Fi network and access point (a location trail),
+/// the app on screen and the Bluetooth devices nearby. Like home's
+/// location, an agent sees them only at setup.
+const agentPrivateStateKeys = {
+  'wifi_ssid',
+  'wifi_bssid',
+  'app_on_screen',
+  'bluetooth_devices',
+};
+
+/// The phone events whose details (the app, the Bluetooth device, what is
+/// playing) are habits, so an agent at read sees only that one happened.
+const agentPrivateEventKeys = {
+  'app_opened',
+  'app_closed',
+  'app_installed',
+  'app_updated',
+  'bluetooth_connected',
+  'bluetooth_disconnected',
+  'media_started',
+  'media_stopped',
+};
+
+/// [result] as an agent at [level] may see it: at read, the
+/// [agentPrivateStateKeys] leave every state map, their history entries
+/// are dropped, and the payload of a [agentPrivateEventKeys] event is
+/// emptied, wherever they sit (a thing, a run log, a diagram).
+Object? agentReadView(Object? result, AgentAccess level) =>
+    level == AgentAccess.setup ? result : _withoutPrivate(result);
+
+Object? _withoutPrivate(Object? value) {
+  if (value is List) {
+    return [
+      for (final item in value)
+        if (!_isPrivateHistoryEntry(item)) _withoutPrivate(item),
+    ];
+  }
+  if (value is! Map) return value;
+  final privateEvent = agentPrivateEventKeys.contains(value['key']);
+  return {
+    for (final e in value.entries)
+      if (e.key == 'state' && e.value is Map)
+        e.key: {
+          for (final s in (e.value as Map).entries)
+            if (!agentPrivateStateKeys.contains(s.key))
+              s.key: _withoutPrivate(s.value),
+        }
+      else if (privateEvent && e.key == 'payload' && e.value is Map)
+        e.key: const <String, Object?>{}
+      else if (!agentPrivateVariables.contains(e.key))
+        e.key: _withoutPrivate(e.value),
+  };
+}
+
+/// The engine's own globals that carry a [agentPrivateStateKeys] reading:
+/// the Wi-Fi network the phone is on now.
+const agentPrivateVariables = {'WifiSsid', r'$WifiSsid'};
+
+/// A `device.history` entry, `{at, key, value, by?}`, of a private key.
+bool _isPrivateHistoryEntry(Object? item) =>
+    item is Map &&
+    agentPrivateStateKeys.contains(item['key']) &&
+    item.containsKey('at') &&
+    item.containsKey('value');
+
+/// The level an agent needs to watch the packets the engine sends and
+/// receives: they carry what devices report (MQTT and Home Assistant
+/// payloads), so read is not enough.
+const agentPacketsLevel = AgentAccess.setup;
+
+/// Null when an agent at [level] may watch packets, else why not.
+String? agentPacketsRefusal(AgentAccess level) => level == agentPacketsLevel
+    ? null
+    : 'watching packets shows what every device reports, which needs the '
+          'user to allow setup: in the app, Settings, Claude and agents, What '
+          'agents can do, choose Set up everything (or run omni agent allow '
+          'setup)';
 
 /// Globals the engine keeps for itself (presence and Wi-Fi, which rules
 /// trigger on), which no agent may set or remove. Names come without `$`.
@@ -239,14 +366,29 @@ bool reservedVariable(Object? name) {
 const _agentTvAppActions = {'open', 'stop', 'info'};
 
 /// Null when an agent at [level] may send [command] with [args], else why
-/// not, for a `needs_user` reply.
+/// not, for a `needs_user` reply. [onPhone] says the device [args] names is
+/// another person's phone over ADB rather than a TV.
 String? agentRefusal(
   String command,
   Map<String, Object?> args,
-  AgentAccess level,
-) {
+  AgentAccess level, {
+  bool onPhone = false,
+}) {
   if (agentUserOnly[command] case final why?) {
     return '$command is for the user only: $why';
+  }
+  if (onPhone) {
+    if (agentPhoneUserOnly[command] case final why?) {
+      return '$command is for the user only: $why';
+    }
+    if (tvNameOf(command) == 'tv.key' && !_phoneKeyOpen(args)) {
+      return '$command is for the user only on a phone, apart from the '
+          'power, volume and media keys: other keys type or move around '
+          'another person\'s screen';
+    }
+    if (agentPhoneSetupReads.contains(command) && level != AgentAccess.setup) {
+      return _needsSetup(command);
+    }
   }
   if (tvNameOf(command) == 'tv.app') {
     if (level != AgentAccess.setup) return _needsSetup(command);
@@ -267,6 +409,15 @@ String? agentRefusal(
   return '$command is not open to agents';
 }
 
+/// Whether a `tv.key` on a phone presses a key by name that neither types
+/// nor moves around the screen. A raw key code could be any key.
+bool _phoneKeyOpen(Map<String, Object?> args) {
+  final key = args['key'];
+  return args['keycode'] == null &&
+      key is String &&
+      adbPhoneAgentKeys.contains(key);
+}
+
 String _needsSetup(String command) =>
     '$command sets the home up, which needs the user to allow it: in the app, '
     'Settings, Claude and agents, What agents can do, choose Set up '
@@ -285,7 +436,9 @@ Map<String, Object?> agentArgs(String command, Map<String, Object?> args) =>
       'scene.save' ||
       'scene.capture' ||
       'link.create' => {...args, 'trusted': false},
-      'device.invoke' => {...args, 'allowPairing': false},
+      'device.invoke' => {...args, 'allowPairing': false, 'by': changedByAgent},
+      // A room sent by an agent is the agent's change, not a habit.
+      'room.invoke' => {...args, 'by': changedByAgent},
       _
           when tvNameOf(command).startsWith(tvCommandPrefix) ||
               command == 'device.refresh' =>

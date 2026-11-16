@@ -7,6 +7,87 @@ import 'omni_engine.dart';
 /// The control socket a running `omni hub` serves in its data directory.
 String localSocketPath(Directory home) => '${home.absolute.path}/omni.sock';
 
+/// The hub's second socket, beside [localSocketPath] in the same 0700 home,
+/// for phone sessions only: `omni hub attach --phone NAME` connects here and
+/// names the phone in its first line, and every command on it is checked
+/// against what a phone may do.
+String phoneSocketPath(String localSocket) =>
+    '${File(localSocket).parent.path}/omni-phone.sock';
+
+/// A request the hub's socket answers at once, outside the command queue,
+/// so a client can tell a slow command from a dead link.
+const pingCommand = 'ping';
+
+/// How long a client waits for the hub to answer an ordinary command.
+const hubRequestTimeout = Duration(seconds: 10);
+
+/// Commands that touch a device and may wait on it (an ADB connect, a phone
+/// that has 10 s to act).
+const _deviceTimeout = Duration(seconds: 30);
+
+/// Commands that run as long as their work: a whole automation, a pairing
+/// that waits for someone at the TV, a file copy, firmware.
+const _longTimeout = Duration(minutes: 10);
+
+const _longCommands = {
+  'automation.run',
+  'flow.run',
+  'scene.run',
+  'device.pair',
+  'android.pair',
+  'board.flash',
+  'board.setup',
+  'board.provision',
+  'tv.install',
+  'tv.helper.install',
+  'tv.files.download',
+  'tv.files.upload',
+  'tv.files.copy',
+  'tv.files.move',
+  'tv.app.backup',
+  'tv.record.stop',
+  'config.import',
+};
+
+const _deviceCommands = {
+  'device.invoke',
+  'device.refresh',
+  'room.invoke',
+  'thing.configure',
+  'sunlight.apply',
+  'weather.refresh',
+  'scene.capture',
+};
+
+/// How long a client waits for [command] before it answers `timeout`. A
+/// command that listens for a window (`windowMs`) gets that window on top.
+Duration hubRequestDeadline(String command, Map<String, Object?> args) {
+  final name = command.startsWith('android.')
+      ? 'tv.${command.substring('android.'.length)}'
+      : command;
+  if (_longCommands.contains(name)) return _longTimeout;
+  final window = args['windowMs'];
+  final base = _deviceCommands.contains(name) || name.startsWith('tv.')
+      ? _deviceTimeout
+      : hubRequestTimeout;
+  if (window is int && window > 0 && window <= 600000) {
+    return base + Duration(milliseconds: window);
+  }
+  return base;
+}
+
+/// The reply a client gives itself when the hub did not answer [command]
+/// in time. The link may still be up: only a missed ping drops it.
+Map<String, Object?> hubTimeoutReply(String command, Duration after) => {
+  'ok': false,
+  'error': {
+    'type': 'timeout',
+    'message':
+        'the hub did not answer $command within ${after.inSeconds} s. It '
+        'may still be doing it',
+  },
+};
+
 /// Permission bits, written in octal as chmod takes them.
 final groupOrOtherWrite = int.parse('022', radix: 8);
 final groupOrOtherAny = int.parse('077', radix: 8);
@@ -212,7 +293,14 @@ class LocalClient implements EngineConnection {
     }
     final reply = _pending[id] = Completer<Map<String, Object?>>();
     _socket.add(request);
-    return reply.future;
+    final deadline = hubRequestDeadline(command, args);
+    return reply.future.timeout(
+      deadline,
+      onTimeout: () {
+        _pending.remove(id);
+        return hubTimeoutReply(command, deadline);
+      },
+    );
   }
 
   /// Each subscription has its own connection, so cancelling it ends the

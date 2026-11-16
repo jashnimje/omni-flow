@@ -16,7 +16,10 @@ import 'hub_settings.dart';
 /// reachable, read commands answer with the last result the hub gave, and
 /// every other command answers `unavailable` with the reason. Readings the
 /// phone takes meanwhile are dropped, except the latest presence, which is
-/// sent again as soon as the hub is back.
+/// sent again as soon as the hub is back. A new Wi-Fi network while the hub
+/// is not reachable tries again at once instead of waiting out the backoff,
+/// and so does [HubLink.reconnect], which the app sends when it comes back
+/// to the screen.
 class HubEngineClient implements EngineClient {
   HubEngineClient({
     required this.settings,
@@ -44,6 +47,9 @@ class HubEngineClient implements EngineClient {
 
   /// The latest presence reading per input, sent again on reconnect.
   final _presence = <String, (String, Map<String, Object?>)>{};
+
+  /// The network the last Wi-Fi reading named, to notice a change.
+  String? _network;
 
   HubSession? _connection;
   var _phoneKnown = false;
@@ -102,6 +108,12 @@ class HubEngineClient implements EngineClient {
     }
     if (_presenceKey(command, args) case final key?) {
       _presence[key] = (command, args);
+    }
+    if (command == 'phone.wifi' || command == 'sensor.wifi') {
+      final network = '${args['ssid']}/${args['bssid']}';
+      final changed = network != _network;
+      _network = network;
+      if (changed && !_view.connected && !_closed) unawaited(_open(now: true));
     }
     final sent = _tagged(command, args);
     final connection = _connection;

@@ -6,9 +6,9 @@
   "icon": "gauge",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "stateTopic", "label": "Topic the sensor publishes on" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "stateTopic", "label": "Topic the sensor publishes on", "help": "The topic the sensor sends its reading on, such as home/garden/temperature.\nIt is in the sensor's own MQTT settings, or watch the broker with an MQTT app such as MQTT Explorer to see it." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:stateTopic", "configure:username?", "secret:password?"],
   "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "value" }] },

@@ -75,11 +75,12 @@
     {
       "id": "ringer",
       "type": "action",
+      "highRisk": true,
       "label": "Set the ringer",
       "params": { "mode": { "type": "enum", "values": ["silent", "vibrate", "normal"] } },
       "command": { "phoneAction": "ringer" }
     },
-    { "id": "set_dnd", "type": "toggle", "label": "Do Not Disturb", "command": { "phoneAction": "dnd" } },
+    { "id": "set_dnd", "type": "toggle", "label": "Do Not Disturb", "highRisk": true, "command": { "phoneAction": "dnd" } },
     {
       "id": "media_volume",
       "type": "action",
@@ -97,6 +98,7 @@
     {
       "id": "open_app",
       "type": "action",
+      "highRisk": true,
       "label": "Open an app",
       "params": { "package": { "type": "string", "pattern": "[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+" } },
       "command": { "phoneAction": "open_app" }
@@ -104,6 +106,7 @@
     {
       "id": "open_link",
       "type": "action",
+      "highRisk": true,
       "label": "Open a link",
       "params": { "url": { "type": "string", "pattern": "https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!$&()*+,;=%]{1,2000}" } },
       "command": { "phoneAction": "open_link" }
@@ -111,6 +114,7 @@
     {
       "id": "set_alarm",
       "type": "action",
+      "highRisk": true,
       "label": "Set an alarm",
       "params": {
         "time": { "type": "string", "pattern": "([01][0-9]|2[0-3]):[0-5][0-9]" },
@@ -121,6 +125,7 @@
     {
       "id": "set_timer",
       "type": "action",
+      "highRisk": true,
       "label": "Set a timer",
       "params": {
         "minutes": { "type": "number", "integer": true, "min": 1, "max": 1440, "unit": "min" },
@@ -131,6 +136,7 @@
     {
       "id": "show_message",
       "type": "action",
+      "highRisk": true,
       "label": "Show a message on screen",
       "params": {
         "title": { "type": "string", "pattern": "[^\\n]{1,100}" },

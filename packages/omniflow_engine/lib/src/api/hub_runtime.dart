@@ -31,6 +31,10 @@ class HubClient {
   String? client;
   String? phone;
 
+  /// Whether this is a phone session (`omni hub attach --phone NAME`),
+  /// whose [phone] comes from its key's `authorized_keys` line.
+  var phoneSession = false;
+
   /// Whether the connection streams events rather than sends commands.
   var subscribed = false;
   DateTime? lastCommandAt;
@@ -39,6 +43,7 @@ class HubClient {
     'id': id,
     'client': ?client,
     'phone': ?phone,
+    if (phoneSession) 'session': 'phone',
     'connectedAt': connectedAt.toUtc().toIso8601String(),
     'connectedSeconds': now.difference(connectedAt).inSeconds,
     'events': subscribed,
@@ -64,8 +69,9 @@ class HubClients {
 
   void disconnect(HubClient c) => _open.remove(c.id);
 
-  /// Names [c] from a `hello {client, phone?}`.
-  void hello(HubClient c, Map<String, Object?> args) {
+  /// Names [c] from a `hello {client, phone?}`. On a phone session the
+  /// phone is [sessionPhone], whatever the hello says.
+  void hello(HubClient c, Map<String, Object?> args, {String? sessionPhone}) {
     String? name(String key, {required bool required}) {
       final value = args[key];
       if (value == null && !required) return null;
@@ -81,9 +87,14 @@ class HubClients {
       return value.trim();
     }
 
-    c
-      ..client = name('client', required: true)
-      ..phone = name('phone', required: false);
+    c.client = name('client', required: true);
+    if (sessionPhone != null) {
+      c
+        ..phone = sessionPhone
+        ..phoneSession = true;
+    } else {
+      c.phone = name('phone', required: false);
+    }
   }
 
   List<Map<String, Object?>> list() {

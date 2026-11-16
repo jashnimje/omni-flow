@@ -12,9 +12,6 @@ import 'add_pin_page.dart';
 import 'board_extras.dart';
 import 'board_pins.dart';
 
-/// Whether [device] is an OmniFlow board, which gets the board page.
-bool isBoardDevice(Json device) => device['board'] == true;
-
 /// Saves [pins] as the whole pin set of board [id] and reloads the devices.
 /// [quiet] leaves a refusal for the caller to show inline.
 Future<Reply<PinsSaved>> saveBoardPins(

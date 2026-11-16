@@ -67,7 +67,7 @@ class _OmniFlowAppState extends ConsumerState<OmniFlowApp>
 
 /// The shell, plus what the app does whatever tab is open: offer to add a
 /// board that says hello, offer to name an unknown NFC tag, show a rule's
-/// Notify step, forward NFC scans, and keep the packet log collecting.
+/// Notify step and forward NFC scans.
 class Home extends ConsumerStatefulWidget {
   const Home({super.key});
 
@@ -154,9 +154,6 @@ class _HomeState extends ConsumerState<Home> {
 
   @override
   Widget build(BuildContext context) {
-    // Keep the packet log collecting from launch, without rebuilding here
-    // on every packet.
-    ref.listen(packetsProvider, (_, _) {});
     final hubError = ref.watch(hubErrorProvider);
     return OmniShell(
       banner: hubError == null || _hubBannerClosed

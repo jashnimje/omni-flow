@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'alerts.dart';
+import 'auto_backup.dart';
 import 'automation_commands.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
@@ -12,7 +13,8 @@ import 'stored_flows.dart';
 import 'timer_commands.dart';
 
 /// The home helpers: house modes, named timers, a room as one light,
-/// scenes saved from how things are now, and the built-in alerts. The
+/// scenes saved from how things are now, the built-in alerts, and the
+/// daily automatic backup. The
 /// engine opens them once its flows are loaded, so a timer that ended
 /// while it was closed starts its rules.
 class HouseHelpers {
@@ -23,25 +25,38 @@ class HouseHelpers {
     this.alerts,
     this._rooms,
     this._scenes,
+    this.backups,
   );
 
   static Future<HouseHelpers> open(
     EngineCore core,
     Directory home,
     StoredFlows stored,
-    AutomationCommands automations,
-  ) async {
+    AutomationCommands automations, {
+    bool Function()? hubRunning,
+    Future<Map<String, Object?>> Function()? exportBackup,
+  }) async {
     final file = HomeFile(home);
     final helpers = HouseHelpers._(
       core,
       HouseModes(core, file),
       HouseTimers(core, home),
-      HouseAlerts(core, file),
+      HouseAlerts(core, file, hubRunning: hubRunning),
       RoomControl(core, stored),
       SceneCapture(core, stored, automations),
+      AutoBackup(
+        core,
+        home,
+        file,
+        export:
+            exportBackup ??
+            () async => throw StateError('this engine cannot export'),
+        hubRunning: hubRunning,
+      ),
     );
     await helpers.modes.open();
     await helpers.alerts.open();
+    await helpers.backups.open();
     core.builtInThings[houseModeThing] = helpers.modes.invoke;
     core.builtInThings[timersThing] = helpers.timers.invoke;
     await helpers.timers.open();
@@ -55,12 +70,16 @@ class HouseHelpers {
   final RoomControl _rooms;
   final SceneCapture _scenes;
 
+  /// The daily backup into the engine home's `backups/`.
+  final AutoBackup backups;
+
   Map<String, CommandHandler> get commands => {
     ...modes.commands,
     ...timers.commands,
     ...alerts.commands,
     ..._rooms.commands,
     ..._scenes.commands,
+    ...backups.commands,
   };
 
   /// What a backup keeps of them under `home`.
@@ -86,6 +105,7 @@ class HouseHelpers {
     _core.builtInThings.clear();
     await timers.close();
     await alerts.close();
+    await backups.close();
     await modes.close();
   }
 }

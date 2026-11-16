@@ -313,13 +313,17 @@ void main() {
       expect(find.byType(ReviewPage), findsOneWidget);
     });
 
-    testWidgets('the section hides with nothing to run', (tester) async {
+    testWidgets('with nothing to run the section offers to save a scene', (
+      tester,
+    ) async {
       final engine = household();
       engine.answers['scene.list'] = {'ok': true, 'scenes': []};
       await pump(tester, engine);
-      expect(find.byKey(const ValueKey('home-run')), findsNothing);
-      expect(find.text('Run'), findsNothing);
-      expect(find.text('Favourites'), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-run')), findsOneWidget);
+      expect(find.byType(RunTile), findsNothing);
+      await tapKey(tester, 'run-capture');
+      expect(find.text('Save how things are now'), findsWidgets);
+      expect(find.byKey(const ValueKey('capture-name')), findsOneWidget);
     });
   });
 

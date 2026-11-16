@@ -10,7 +10,7 @@
     { "method": "mdns", "service": "_omniflow._udp", "idInstance": true },
     { "method": "serial" }
   ],
-  "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}" }],
+  "settings": [{ "key": "pins", "label": "Pins, as name: {pin, mode, watch}", "help": "The pins you wired, each with a name and whether it is an output or an input.\nUse the pin picker on the board's page. It knows which pins your board has." }],
   "setup": ["configure:pins"],
   "reliability": { "timeoutMs": 800, "retries": 2 },
   "capabilities": [

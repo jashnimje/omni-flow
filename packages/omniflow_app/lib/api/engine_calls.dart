@@ -215,6 +215,7 @@ class NextStep {
     this.optional = const [],
     this.remaining = const [],
     this.method,
+    this.help = const {},
   });
 
   /// A step this app does not know is shown as done, so the user is never
@@ -244,6 +245,12 @@ class NextStep {
           if (r is String) r,
       ],
       method: map['method'] as String?,
+      help: {
+        for (final list in [map['keys'], map['optional']])
+          for (final k in (list as List? ?? const []).whereType<Map>())
+            if (k['key'] is String && k['help'] is String)
+              k['key'] as String: k['help'] as String,
+      },
     );
   }
 
@@ -260,6 +267,10 @@ class NextStep {
 
   /// On a done step, the optional settings and secrets still open.
   final List<StepKey> optional;
+
+  /// What each key is and where to find it, by key, from the driver's
+  /// manifest. Keys without help are left out.
+  final Map<String, String> help;
 
   /// A configure step for a board's pins, which the pin sheet sets.
   bool get isPins =>
@@ -575,6 +586,7 @@ class AutomationSummary {
     this.manualOnly = false,
     this.revision,
     this.conflicts = const [],
+    this.nextRun,
   });
 
   factory AutomationSummary.fromJson(Json json) => AutomationSummary(
@@ -602,6 +614,9 @@ class AutomationSummary {
     manualOnly: json['manualOnly'] == true,
     revision: json['revision'] as String?,
     conflicts: [for (final c in (json['conflicts'] as List? ?? const [])) '$c'],
+    nextRun: json['nextRun'] is String
+        ? DateTime.tryParse(json['nextRun'] as String)
+        : null,
   );
 
   final String id;
@@ -646,6 +661,10 @@ class AutomationSummary {
   /// way on the same trigger. Empty when it clashes with none.
   final List<String> conflicts;
 
+  /// When a time, sun or interval trigger runs it next, from the engine's
+  /// schedule. Null when it is off or has no such trigger.
+  final DateTime? nextRun;
+
   bool get isLink => source == 'link';
   bool get isScene => source == 'scene';
 }
@@ -676,17 +695,6 @@ class RunNode {
         ? Map<String, Object?>.from(json['output'] as Map)
         : null,
     seen: json['seen'],
-  );
-
-  RunNode withLabel(String? label) => RunNode(
-    node: node,
-    type: type,
-    label: label ?? this.label,
-    error: error,
-    duration: duration,
-    port: port,
-    output: output,
-    seen: seen,
   );
 
   final String node;
@@ -1275,6 +1283,20 @@ class EngineApi {
   /// settings: [{key, label, secret?}]}`.
   Future<Reply<List<Json>>> drivers() =>
       _call('driver.list', const {}, (r) => _rows(r['drivers']));
+
+  /// Stores [value] as the web secret [name], which a web request header
+  /// names with `{"secret": name}`. It stays in the secret store.
+  Future<Reply<void>> setWebSecret(String name, String value) =>
+      _call('web.secret.set', {'name': name, 'value': value}, (_) {});
+
+  /// The automations removed lately that can be put back: `{id, name,
+  /// form, removedAt, keptUntil, versions}`, newest first.
+  Future<Reply<List<Json>>> removedAutomations() =>
+      _call('automation.removed', const {}, (r) => _rows(r['removed']));
+
+  /// Puts the removed automation [id] back, switched off.
+  Future<Reply<void>> unremoveAutomation(String id) =>
+      _call('automation.unremove', {'id': id}, (_) {});
 }
 
 /// One GPIO a board offers and what it can do: `in`, `pullup`, `out`,

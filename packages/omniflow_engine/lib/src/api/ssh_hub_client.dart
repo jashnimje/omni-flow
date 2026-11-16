@@ -135,19 +135,33 @@ class SshHubTarget {
   String toString() => '$user@$host${port == 22 ? '' : ':$port'}';
 }
 
+/// How long connecting to a hub may take, from the first byte to the
+/// version check.
+const hubConnectTimeout = Duration(seconds: 10);
+
+/// How often a client pings each hub channel, and how long a ping may go
+/// unanswered before the channel counts as lost.
+const hubKeepAlive = Duration(seconds: 15);
+const hubPingTimeout = Duration(seconds: 10);
+
 /// Opens an SSH exec channel to [target] that runs [command], which the
-/// hub's `authorized_keys` line forces to `omni hub attach`.
+/// hub's `authorized_keys` line forces to `omni hub attach --phone NAME`.
 ///
-/// The host key is pinned on first use in [secrets], with the same key and
-/// fingerprint format as device SSH (`ssh/hostkey/<host>:<port>`,
-/// `<type> SHA256:<base64>`). A different key fails with `host_key` and both
-/// fingerprints until the user reviews it (`omni device hostkey`).
+/// With [expectedHostKey] (`<type> SHA256:<base64>`, the key the user
+/// matched against `omni hub fingerprint`), the hub must offer exactly that
+/// key: anything else fails with `host_key`, and nothing is pinned or read
+/// from [secrets]. Without it, as for `omni --hub`, the key is pinned on
+/// first use in [secrets] (`ssh/hostkey/<host>:<port>`), a different key
+/// fails with `host_key` and both fingerprints, and a pin that cannot be
+/// read stops the connection rather than counting as no pin.
 Future<HubChannel> openSshHubChannel({
   required SshHubTarget target,
   required String privateKeyPem,
   required SecretStore secrets,
+  String? expectedHostKey,
   String command = hubAttachCommand,
   Duration timeout = const Duration(seconds: 8),
+  Duration keepAlive = const Duration(seconds: 10),
   Future<SSHSocket> Function(String host, int port, Duration timeout)? socket,
 }) async {
   final List<SSHKeyPair> identities;
@@ -168,11 +182,19 @@ Future<HubChannel> openSshHubChannel({
   }
   final pins = HostKeyPins(secrets);
   HostKeyMismatchException? mismatch;
+  Object? pinError;
   final client = SSHClient(
     ssh,
     username: target.user,
     identities: identities,
+    keepAliveInterval: keepAlive,
     onVerifyHostKey: (type, fingerprint) async {
+      final offered = '$type ${utf8.decode(fingerprint)}';
+      if (expectedHostKey != null) {
+        if (offered == expectedHostKey) return true;
+        mismatch = HostKeyMismatchException(where, expectedHostKey, offered);
+        return false;
+      }
       try {
         await pins.verify(
           target.host,
@@ -183,6 +205,9 @@ Future<HubChannel> openSshHubChannel({
         return true;
       } on HostKeyMismatchException catch (e) {
         mismatch = e;
+        return false;
+      } catch (e) {
+        pinError = e;
         return false;
       }
     },
@@ -195,10 +220,18 @@ Future<HubChannel> openSshHubChannel({
     if (mismatch case final m?) {
       throw HubLinkException(
         'host_key',
-        'the hub at $where offered a different host key than the one pinned. '
-            'If the Mac was reinstalled, check the new fingerprint with '
-            'omni hub fingerprint on it, then accept it',
+        'the hub at $where offered a different host key than the one you '
+            'matched. If the Mac was reinstalled, check the new fingerprint '
+            'with omni hub fingerprint on it, then set the hub up again',
         details: {'pinned': m.pinned, 'offered': m.offered},
+      );
+    }
+    if (pinError case final p?) {
+      throw HubLinkException(
+        'host_key',
+        'cannot read the host key kept for the hub at $where ($p), so '
+            'nothing was sent. Try again, and set the hub up again if it '
+            'keeps failing',
       );
     }
     if (e is SSHAuthError) {
@@ -305,42 +338,67 @@ bool _older(String a, String b) {
 /// JSON as [LocalClient]. Commands share one channel, and each event
 /// subscription has its own, as on the local socket.
 ///
-/// A lost command channel is opened again on the next command. When that
-/// fails the command answers `unavailable`, and so do commands that were
-/// waiting when it was lost. An event stream that loses its channel emits
-/// `hub.connection {state: lost}`, keeps trying with [retryDelays], and
-/// emits `hub.connection {state: restored}` once it subscribed again.
+/// Every channel opens with a `hello` whose answer carries the hub's
+/// version, checked each time, and on a phone session the phone and person
+/// the hub took the key for. Each command has a deadline
+/// ([hubRequestDeadline], 10 s for most) after which it answers `timeout`,
+/// and each channel is pinged every [keepAlive]: a ping unanswered for
+/// [pingTimeout] drops it. A lost command channel is opened again on the
+/// next command. When that fails the command answers `unavailable`, and so
+/// do commands that were waiting when it was lost. An event stream that
+/// loses its channel emits `hub.connection {state: lost}`, keeps trying with
+/// [retryDelays], and emits `hub.connection {state: restored}` once it
+/// subscribed again.
 class HubConnection implements EngineConnection {
-  HubConnection._(this._open, this.name, this._hello, this.retryDelays);
+  HubConnection._(
+    this._open,
+    this.name,
+    this._hello,
+    this._localVersion,
+    this.retryDelays,
+    this.keepAlive,
+    this.pingTimeout,
+    this._deadline,
+  );
 
-  /// Opens the first channel, sends the hello, and checks the hub's version
-  /// with `engine.status`. Throws [HubLinkException] when the hub cannot be
-  /// reached or runs another major or minor version.
+  /// Opens the first channel, sends the hello, and checks the hub's
+  /// version, all within [timeout]. Throws [HubLinkException] when the hub
+  /// cannot be reached, refuses this client, or runs another major or minor
+  /// version.
   static Future<HubConnection> connect(
     HubChannelOpener open, {
     String name = 'the hub',
     Map<String, Object?> hello = const {'client': 'omni'},
     String localVersion = omniflowEngineVersion,
     List<Duration> retryDelays = defaultRetryDelays,
+    Duration timeout = hubConnectTimeout,
+    Duration keepAlive = hubKeepAlive,
+    Duration pingTimeout = hubPingTimeout,
+    Duration Function(String command, Map<String, Object?> args) deadline =
+        hubRequestDeadline,
   }) async {
-    final hub = HubConnection._(open, name, hello, retryDelays);
-    await hub._channel();
-    final status = await hub.handle('engine.status', const {});
-    if (status['ok'] != true) {
+    final hub = HubConnection._(
+      open,
+      name,
+      hello,
+      localVersion,
+      retryDelays,
+      keepAlive,
+      pingTimeout,
+      deadline,
+    );
+    try {
+      await hub._channel().timeout(timeout);
+    } on TimeoutException {
       await hub.close();
-      final error = status['error'];
       throw HubLinkException(
         'unavailable',
-        error is Map ? '${error['message']}' : '$name did not answer',
+        '$name did not answer within ${timeout.inSeconds} s',
       );
-    }
-    try {
-      checkHubVersion(status['version'], localVersion);
     } catch (_) {
       await hub.close();
       rethrow;
     }
-    hub.hubVersion = status['version'] as String;
     return hub;
   }
 
@@ -355,29 +413,70 @@ class HubConnection implements EngineConnection {
   final HubChannelOpener _open;
   final String name;
   final Map<String, Object?> _hello;
+  final String _localVersion;
 
   /// How long an event stream waits between tries after a loss. The last
   /// delay repeats.
   final List<Duration> retryDelays;
 
-  /// The hub's engine version, read on connect.
+  final Duration keepAlive;
+  final Duration pingTimeout;
+
+  /// How long each command may take, [hubRequestDeadline] unless a test
+  /// gives another.
+  final Duration Function(String, Map<String, Object?>) _deadline;
+
+  /// The hub's engine version, from its hello.
   String? hubVersion;
+
+  /// On a phone session, the phone and person the hub took this key for.
+  String? hubPhone;
+  String? hubPerson;
 
   _Link? _link;
   Future<_Link>? _opening;
   var _closed = false;
-  final _streams = <StreamController<Map<String, Object?>>>{};
+  final _streams =
+      <StreamController<Map<String, Object?>>, Future<void> Function()>{};
+
+  HubLinkException _closedError() =>
+      HubLinkException('unavailable', 'the connection to $name is closed');
 
   Future<_Link> _channel() async {
     if (_link case final l? when !l.lost) return l;
     return _opening ??= () async {
       try {
-        final link = _Link(await _open());
-        link.send({
-          'id': link.nextId(),
-          'command': helloCommand,
-          'args': _hello,
-        });
+        final channel = await _open();
+        if (_closed) {
+          await channel.close();
+          throw _closedError();
+        }
+        final link = _Link(channel);
+        final hello = await link.call(helloCommand, _hello, hubRequestTimeout);
+        if (_closed) {
+          link.lose('closed');
+          throw _closedError();
+        }
+        if (hello['ok'] != true) {
+          link.lose('refused');
+          final error = hello['error'];
+          throw HubLinkException(
+            error is Map && error['type'] is String
+                ? error['type'] as String
+                : 'unavailable',
+            error is Map ? '${error['message']}' : '$name did not answer',
+          );
+        }
+        try {
+          checkHubVersion(hello['version'], _localVersion);
+        } catch (_) {
+          link.lose('version');
+          rethrow;
+        }
+        hubVersion = hello['version'] as String;
+        hubPhone = hello['phone'] as String?;
+        hubPerson = hello['person'] as String?;
+        link.keepAlive(keepAlive, pingTimeout);
         return _link = link;
       } finally {
         _opening = null;
@@ -404,6 +503,7 @@ class HubConnection implements EngineConnection {
     } catch (e) {
       return _unavailable('$name is not reachable ($e)');
     }
+    if (_closed) return _unavailable('the connection to $name is closed');
     final id = link.nextId();
     final List<int> request;
     try {
@@ -430,40 +530,59 @@ class HubConnection implements EngineConnection {
     return link.request(
       id,
       request,
-      () => _unavailable(
-        link.channel.errors.isEmpty
-            ? '$name was lost before it replied'
-            : '$name: ${link.channel.errors}',
-      ),
+      () => link.lostReply(name),
+      command: command,
+      deadline: _deadline(command, args),
     );
   }
 
   @override
   Future<Stream<Map<String, Object?>>> events({bool packets = false}) async {
-    if (_closed) {
-      throw HubLinkException(
-        'unavailable',
-        'the connection to $name is closed',
-      );
-    }
+    if (_closed) throw _closedError();
     final out = StreamController<Map<String, Object?>>();
-    _streams.add(out);
     var cancelled = false;
     HubChannel? current;
     StreamSubscription<NdjsonLine>? lines;
+    Timer? pinger;
+    bool stopped() => cancelled || _closed;
 
     Future<void> drop() async {
+      pinger?.cancel();
+      pinger = null;
       // Not awaited: the line decoder is an async* generator parked on the
       // channel, and its cancel would wait for a line that never comes.
       lines?.cancel().ignore();
       lines = null;
-      await current?.close();
+      final channel = current;
       current = null;
+      await channel?.close();
     }
 
-    Future<void> subscribe() async {
+    _streams[out] = drop;
+    late final Future<void> Function() subscribe;
+
+    void lostChannel(HubChannel channel) {
+      if (current != channel || stopped()) return;
+      out.add({'event': 'hub.connection', 'state': 'lost'});
+      unawaited(
+        _resubscribe(stopped, drop, () async {
+          await subscribe();
+          if (!cancelled) {
+            out.add({'event': 'hub.connection', 'state': 'restored'});
+          }
+        }),
+      );
+    }
+
+    subscribe = () async {
       final subscribed = Completer<void>();
-      final channel = current = await _open();
+      final channel = await _open();
+      if (stopped()) {
+        await channel.close();
+        throw _closedError();
+      }
+      current = channel;
+      Completer<void>? pong;
       final request = {'id': 1, 'subscribe': 'events', 'packets': packets};
       lines = channel.input
           .cast<List<int>>()
@@ -471,9 +590,31 @@ class HubConnection implements EngineConnection {
           .listen(
             (line) {
               final json = line.json;
-              if (json == null || json['id'] != 1) return;
-              final event = json['event'];
+              if (json == null) return;
               final result = json['result'];
+              if (json['id'] == _pingId) {
+                if (pong case final p? when !p.isCompleted) p.complete();
+                return;
+              }
+              if (json['id'] == null &&
+                  result is Map &&
+                  result['ok'] == false &&
+                  !subscribed.isCompleted) {
+                final error = result['error'];
+                subscribed.completeError(
+                  HubLinkException(
+                    error is Map && error['type'] is String
+                        ? error['type'] as String
+                        : 'unavailable',
+                    error is Map
+                        ? '${error['message']}'
+                        : '$name refused the subscription',
+                  ),
+                );
+                return;
+              }
+              if (json['id'] != 1) return;
+              final event = json['event'];
               if (event is Map) {
                 if (!cancelled) out.add(Map<String, Object?>.from(event));
               } else if (result is Map && !subscribed.isCompleted) {
@@ -493,27 +634,25 @@ class HubConnection implements EngineConnection {
             onDone: () {
               if (!subscribed.isCompleted) {
                 subscribed.completeError(
-                  HubLinkException('unavailable', '$name closed the channel'),
+                  HubLinkException(
+                    'unavailable',
+                    channel.errors.isEmpty
+                        ? '$name closed the channel'
+                        : '$name: ${channel.errors}',
+                  ),
                 );
                 return;
               }
-              if (cancelled || _closed) return;
-              out.add({'event': 'hub.connection', 'state': 'lost'});
-              unawaited(
-                _resubscribe(() => cancelled || _closed, drop, () async {
-                  await subscribe();
-                  if (!cancelled) {
-                    out.add({'event': 'hub.connection', 'state': 'restored'});
-                  }
-                }),
-              );
+              lostChannel(channel);
             },
           );
-      channel
-        ..add(encodeNdjson({'id': 0, 'command': helloCommand, 'args': _hello}))
-        ..add(encodeNdjson(request));
       try {
-        await subscribed.future.timeout(LocalClient.connectTimeout * 4);
+        channel
+          ..add(
+            encodeNdjson({'id': 0, 'command': helloCommand, 'args': _hello}),
+          )
+          ..add(encodeNdjson(request));
+        await subscribed.future.timeout(hubRequestTimeout);
       } catch (e) {
         await drop();
         if (e is HubLinkException) rethrow;
@@ -522,7 +661,19 @@ class HubConnection implements EngineConnection {
           '$name did not answer the subscription',
         );
       }
-    }
+      pinger = Timer.periodic(keepAlive, (_) async {
+        if (pong != null || current != channel) return;
+        final waiting = pong = Completer<void>();
+        try {
+          channel.add(encodeNdjson({'id': _pingId, 'command': pingCommand}));
+          await waiting.future.timeout(pingTimeout);
+        } catch (_) {
+          lostChannel(channel);
+        } finally {
+          pong = null;
+        }
+      });
+    };
 
     out.onCancel = () async {
       cancelled = true;
@@ -533,11 +684,16 @@ class HubConnection implements EngineConnection {
       await subscribe();
     } catch (_) {
       _streams.remove(out);
-      await out.close();
+      // Not awaited: nobody listens yet, so the close would never finish.
+      out.close().ignore();
       rethrow;
     }
     return out.stream;
   }
+
+  /// The id an event channel's pings use: 0 is its hello, 1 its
+  /// subscription.
+  static const _pingId = 2;
 
   Future<void> _resubscribe(
     bool Function() stopped,
@@ -570,10 +726,13 @@ class HubConnection implements EngineConnection {
     _link = null;
     link?.lose('the connection to $name was closed');
     await link?.channel.close();
-    for (final s in _streams.toList()) {
-      await s.close();
-    }
+    final streams = Map.of(_streams);
     _streams.clear();
+    for (final MapEntry(key: stream, value: drop) in streams.entries) {
+      await drop();
+      // Not awaited: a stream nobody listens to never finishes closing.
+      stream.close().ignore();
+    }
   }
 }
 
@@ -599,21 +758,91 @@ class _Link {
       >{};
   var _id = 0;
   var lost = false;
+  Timer? _pinger;
+  var _pinging = false;
+
+  /// What the hub said when it refused this channel outright, such as a
+  /// phone socket that does not know the phone.
+  Map<String, Object?>? _refusal;
 
   int nextId() => ++_id;
 
-  void send(Map<String, Object?> message) => channel.add(encodeNdjson(message));
+  /// What a request answers when the channel went before its reply.
+  Map<String, Object?> lostReply(String name) {
+    if (_refusal case final r?) return {'ok': false, 'error': r};
+    return {
+      'ok': false,
+      'error': {
+        'type': 'unavailable',
+        'message': channel.errors.isEmpty
+            ? '$name was lost before it replied'
+            : '$name: ${channel.errors}',
+      },
+    };
+  }
+
+  /// Sends one command and waits for its reply, for the hello.
+  Future<Map<String, Object?>> call(
+    String command,
+    Map<String, Object?> args,
+    Duration deadline,
+  ) {
+    final id = nextId();
+    return request(
+      id,
+      encodeNdjson({'id': id, 'command': command, 'args': args}),
+      () => lostReply('the hub'),
+      command: command,
+      deadline: deadline,
+    );
+  }
 
   Future<Map<String, Object?>> request(
     int id,
     List<int> bytes,
-    Map<String, Object?> Function() whenLost,
-  ) {
+    Map<String, Object?> Function() whenLost, {
+    required String command,
+    required Duration deadline,
+  }) {
     if (lost) return Future.value(whenLost());
     final reply = Completer<Map<String, Object?>>();
     _pending[id] = (reply, whenLost);
-    channel.add(bytes);
-    return reply.future;
+    try {
+      channel.add(bytes);
+    } catch (_) {
+      lose('the channel failed');
+      return reply.future;
+    }
+    return reply.future.timeout(
+      deadline,
+      onTimeout: () {
+        _pending.remove(id);
+        return hubTimeoutReply(command, deadline);
+      },
+    );
+  }
+
+  /// Pings every [every]: a ping unanswered within [within] drops the
+  /// channel, so a half-open link is noticed in seconds.
+  void keepAlive(Duration every, Duration within) {
+    _pinger?.cancel();
+    _pinger = Timer.periodic(every, (_) async {
+      if (lost || _pinging) return;
+      _pinging = true;
+      final id = nextId();
+      final reply = await request(
+        id,
+        encodeNdjson({'id': id, 'command': pingCommand}),
+        () => const {'ok': false},
+        command: pingCommand,
+        deadline: within,
+      );
+      _pinging = false;
+      final error = reply['error'];
+      if (error is Map && error['type'] == 'timeout') {
+        lose('the hub stopped answering');
+      }
+    });
   }
 
   void _onLine(NdjsonLine line) {
@@ -622,14 +851,18 @@ class _Link {
     final result = json?['result'];
     if (id is int && result is Map) {
       _pending.remove(id)?.$1.complete(Map<String, Object?>.from(result));
+    } else if (id == null && result is Map && result['ok'] == false) {
+      final error = result['error'];
+      if (error is Map) _refusal = Map<String, Object?>.from(error);
     }
   }
 
   void lose(String why) {
     if (lost) return;
     lost = true;
+    _pinger?.cancel();
     for (final (reply, whenLost) in _pending.values) {
-      reply.complete(whenLost());
+      if (!reply.isCompleted) reply.complete(whenLost());
     }
     _pending.clear();
     _lines.cancel().ignore();
@@ -637,13 +870,16 @@ class _Link {
   }
 }
 
-/// Connects to the hub at [target] over SSH with [privateKeyPem], pinning
-/// its host key in [secrets], and checks its version. The CLI's
-/// `omni --hub user@host --hub-key FILE` and the app's hub mode use it.
+/// Connects to the hub at [target] over SSH with [privateKeyPem] and checks
+/// its version. With [expectedHostKey] the hub must offer that key, as the
+/// app's hub mode does with the one the user matched; without it the key is
+/// pinned in [secrets] on first use, as `omni --hub user@host --hub-key
+/// FILE` does.
 Future<HubConnection> connectSshHub({
   required SshHubTarget target,
   required String privateKeyPem,
   required SecretStore secrets,
+  String? expectedHostKey,
   Map<String, Object?> hello = const {'client': 'omni'},
   String localVersion = omniflowEngineVersion,
   Duration timeout = const Duration(seconds: 8),
@@ -653,6 +889,7 @@ Future<HubConnection> connectSshHub({
     target: target,
     privateKeyPem: privateKeyPem,
     secrets: secrets,
+    expectedHostKey: expectedHostKey,
     timeout: timeout,
   ),
   name: 'the hub at $target',

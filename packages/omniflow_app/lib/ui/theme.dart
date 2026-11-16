@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:omniflow_engine/omniflow_engine.dart';
 
 import 'design/tokens.dart';
 
@@ -308,12 +307,3 @@ class _MotionAwareTransitions extends PageTransitionsBuilder {
           child,
         );
 }
-
-/// The badge colour of a node, from the category the engine registers for it.
-Color categoryColor(String type) => switch (builtInNodeTypes[type]?.category) {
-  NodeCategory.trigger => OmniColors.trigger,
-  NodeCategory.condition => OmniColors.condition,
-  NodeCategory.transformer => OmniColors.transformer,
-  NodeCategory.gate || NodeCategory.flowControl => OmniColors.flowControl,
-  _ => OmniColors.action,
-};

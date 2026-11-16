@@ -41,14 +41,28 @@ class Permissions {
       await _invoke<bool>('localNetwork') ?? false;
 
   /// `{location, locationAlways, localNetwork, localNetworkNeeded,
-  /// usageAccess, notificationAccess, bluetooth, bluetoothNeeded}`, or null
-  /// off Android.
+  /// usageAccess, notificationAccess, bluetooth, bluetoothNeeded,
+  /// phoneState, calendar, dndAccess, fullScreen, locationOn, exactAlarms,
+  /// serviceRunning}`, or null off Android. `locationOn` is the location
+  /// switch: off, Android hides the Wi-Fi name and Wi-Fi places cannot see
+  /// the phone arrive. `exactAlarms` is Alarms and reminders: off, a killed
+  /// service cannot come back by itself and time triggers keep the phone
+  /// awake.
   Future<Map<String, Object?>?> status() async {
     final map = await _invoke<Map<Object?, Object?>>('status');
     return map == null
         ? null
         : {for (final e in map.entries) '${e.key}': e.value};
   }
+
+  /// Whether the location switch is on. Null off Android.
+  Future<bool?> locationOn() async => (await status())?['locationOn'] as bool?;
+
+  /// Opens Android's location switch page.
+  Future<bool> openLocationSwitch() => call('locationSwitch');
+
+  /// Opens Android's Alarms and reminders page for OmniFlow.
+  Future<bool> askForExactAlarms() => call('exactAlarms');
 
   /// Where the phone last was, from a fix Android already has, or null
   /// without location access or a fix.

@@ -118,6 +118,9 @@ class FakePairingPhone {
   /// The client's certificate and the public key line it sent, once paired.
   X509Certificate? clientCertificate;
   String? receivedKey;
+
+  /// Completes when the phone has finished with a pairing connection.
+  final done = Completer<void>();
   var closedOnBadKey = false;
 
   int get port => _server.port;
@@ -166,6 +169,7 @@ class FakePairingPhone {
     } finally {
       await reader.cancel();
       socket.destroy();
+      if (!done.isCompleted) done.complete();
     }
   }
 

@@ -6,6 +6,7 @@ import '../../api/plain_error.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import 'firmware_sheet.dart';
+import '../../api/screen_calls.dart';
 
 /// A board plugged into this phone with a USB cable, as `device.discover`
 /// finds it: its port, name and what it is.
@@ -13,7 +14,7 @@ typedef UsbBoard = ({String port, String? node, String? board});
 
 /// The boards on the phone's USB ports.
 Future<List<UsbBoard>> findUsbBoards(EngineClient engine) async {
-  final reply = await engine.call('device.discover', {
+  final reply = await engine.call(DeviceCalls.discover, {
     'driver': 'omniflow_board',
     'windowMs': 1500,
   });
@@ -71,7 +72,7 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
   }
 
   Future<void> _prefillWifi() async {
-    final phone = await ref.read(engineClientProvider).call('device.get', {
+    final phone = await ref.read(engineClientProvider).call(DeviceCalls.get, {
       'id': 'phone',
     });
     final ssid = ((phone['device'] as Map?)?['state'] as Map?)?['wifi_ssid'];
@@ -103,7 +104,7 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
       _result = null;
     });
     final engine = ref.read(engineClientProvider);
-    final reply = await engine.call('board.setup', {
+    final reply = await engine.call(BoardCalls.setup, {
       'port': board.port,
       if (_name.text.trim().isNotEmpty) 'name': _name.text.trim(),
       if (_ssid.text.trim().isNotEmpty) ...{
@@ -133,7 +134,7 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
     final display = _name.text.trim().isEmpty
         ? (node ?? 'Board')
         : _name.text.trim();
-    final added = await engine.call('thing.add', {
+    final added = await engine.call(DeviceCalls.add, {
       'driver': 'omniflow_board',
       // On Wi-Fi it works unplugged; otherwise it stays a USB board.
       'host': wifi['ip'] as String? ?? board.port,

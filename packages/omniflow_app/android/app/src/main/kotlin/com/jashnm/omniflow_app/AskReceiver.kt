@@ -42,7 +42,9 @@ class AskReceiver : BroadcastReceiver() {
         fun answer(context: Context, askId: String, answer: String, notificationId: Int, done: () -> Unit = {}) {
             val app = context.applicationContext
             EngineSocket.callAsync(app, "ask.answer", JSONObject().put("askId", askId).put("answer", answer)) { reply ->
-                (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(notificationId)
+                val shade = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                shade.cancel(NotifyBridge.QUESTIONS, notificationId)
+                shade.cancel(NotifyBridge.ASK_SUMMARY, notificationId)
                 if (!reply.optBoolean("ok")) {
                     Toast.makeText(app, EngineSocket.messageOf(reply), Toast.LENGTH_LONG).show()
                 }

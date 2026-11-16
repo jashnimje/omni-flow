@@ -143,25 +143,38 @@ class DiagramNodeCard extends StatelessWidget {
           };
     if (mark == null) return null;
     return Container(
-      width: 18,
-      height: 18,
+      width: _badgeSize,
+      height: _badgeSize,
       decoration: BoxDecoration(color: mark.$2, shape: BoxShape.circle),
       child: Icon(mark.$1, size: 13, color: OmniColors.background),
     );
   }
 
-  Widget _withBadge(Widget child) {
+  /// [child] with its run mark at its top right corner, or for a diamond
+  /// at the middle of its upper right side, so the mark sits on the shape
+  /// rather than in the empty corner of its box.
+  Widget _withBadge(Widget child, {bool diamond = false}) {
     final badge = _badge();
     if (badge == null) return child;
+    const half = _badgeSize / 2;
     return Stack(
       clipBehavior: Clip.none,
       fit: StackFit.passthrough,
       children: [
         child,
-        Positioned(top: -6, right: -6, child: badge),
+        if (diamond)
+          Positioned(
+            right: DiagramMetrics.diamondWidth / 4 - half,
+            top: DiagramMetrics.diamondHeight / 4 - half,
+            child: badge,
+          )
+        else
+          Positioned(top: -6, right: -6, child: badge),
       ],
     );
   }
+
+  static const _badgeSize = 18.0;
 
   /// Words in at most [lines] lines, and no more than the height given
   /// holds, so a large text size or a wide font ends in "…" instead of
@@ -238,21 +251,22 @@ class DiagramNodeCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _withBadge(diamond),
+        _withBadge(diamond, diamond: true),
         if (node.seen case final seen?)
           SizedBox(
             height: DiagramMetrics.seenHeight,
             child: Align(
-              alignment: Alignment.topLeft,
+              alignment: Alignment.topRight,
               child: SizedBox(
-                // Left of the yes line going down from the point.
+                // Right of the yes line going down from the point: its
+                // "Yes" label sits on the left, so the two never overlap.
                 width: DiagramMetrics.diamondWidth / 2 - 8,
                 child: Text(
                   node.saidNo ? 'Said no, saw $seen' : 'Saw $seen',
                   key: ValueKey('diagram-seen-${node.id}'),
-                  maxLines: 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
+                  textAlign: TextAlign.left,
                   style: OmniText.caption.copyWith(
                     color: node.saidNo ? RunColors.saidNo : OmniColors.text,
                   ),
@@ -450,13 +464,19 @@ class DiagramPlus extends StatelessWidget {
     required this.label,
     required this.onTap,
     required this.order,
+    this.size = DiagramPlus.drawn,
   });
 
   final String label;
   final VoidCallback onTap;
   final int order;
 
-  static const size = 36.0;
+  /// The tap area, in canvas units: grown when zoomed out so it stays
+  /// [OmniSpace.target] on screen. The circle drawn stays small.
+  final double size;
+
+  /// The smallest tap area, at full size.
+  static const drawn = 36.0;
 
   @override
   Widget build(BuildContext context) => Semantics(

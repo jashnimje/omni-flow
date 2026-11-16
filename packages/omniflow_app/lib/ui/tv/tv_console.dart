@@ -98,7 +98,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
         children: [
           OmniBanner.warning(
             'Commands run directly on the ${tv.noun}. Only you can use this, '
-            'never Claude.',
+            'never an agent.',
           ),
           Expanded(
             child: Container(
@@ -229,7 +229,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
         message:
             'OmniFlow does not check what you type. A command can delete '
             'files, remove apps, change settings or make the ${tv.noun} unusable '
-            'until it is reset. Only you can use it, never Claude.',
+            'until it is reset. Only you can use it, never an agent.',
         action: OmniButton(
           key: const ValueKey('console-accept'),
           label: 'I understand, open the console',

@@ -7,7 +7,7 @@
   "transport": { "type": "adb", "port": 5555 },
   "discovery": [{ "method": "mdns", "service": "_adb-tls-connect._tcp", "idInstance": true }],
   "settings": [
-    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)" }
+    { "key": "statePollSeconds", "label": "Seconds between state reads while the hub runs (0 turns them off, default 5)", "help": "How often the hub reads its state, in seconds. 5 is fine for most. 0 stops the reads, so the app shows its state only after a command." }
   ],
   "setup": ["pair"],
   "reliability": { "timeoutMs": 5000, "retries": 0 },

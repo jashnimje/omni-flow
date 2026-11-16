@@ -83,9 +83,6 @@ abstract final class TvCalls {
 
   static bool isPhone(Json device) => device['driver'] == phoneDriver;
 
-  /// Whether [device] gets the Android device page: a TV or a phone.
-  static bool isAndroid(Json device) => isTv(device) || isPhone(device);
-
   static Json notificationsArgs(String id, {String action = 'expand'}) => {
     'id': id,
     'action': action,

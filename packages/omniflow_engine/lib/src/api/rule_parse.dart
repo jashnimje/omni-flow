@@ -791,11 +791,23 @@ class _Reading {
     if (j >= words.length) return null;
     final sun = _sunWord(words[j]);
     if (sun == null) return null;
-    if (offset.abs() > sunOffsetLimit) {
+    var end = j + 1;
+    var by = offset;
+    // "sunset minus 30 minutes", "sunrise plus an hour".
+    if (offset == 0 &&
+        end < words.length &&
+        const {'minus', 'plus'}.contains(words[end])) {
+      final d = _durationAt(words, end + 1);
+      if (d != null) {
+        by = (words[end] == 'minus' ? -1 : 1) * (d.$1 ~/ 60000);
+        end = d.$2;
+      }
+    }
+    if (by.abs() > sunOffsetLimit) {
       throw _Refusal('A sun time can move at most 12 hours from $sun');
     }
-    _triggers.add({'sun': sun, if (offset != 0) 'offset': offset});
-    return j + 1;
+    _triggers.add({'sun': sun, if (by != 0) 'offset': by});
+    return end;
   }
 
   void _addTime(String hhmm) => _triggers.add({'time': hhmm});
@@ -1268,7 +1280,7 @@ class _Reading {
     final at = above ?? below;
     if (at == null || at >= words.length) return null;
     final n = num.tryParse(words[at].replaceAll(RegExp(r'[a-z]+$'), ''));
-    if (n == null) {
+    if (n == null || !n.isFinite) {
       throw _Refusal('${words[at]} is not a number', [words[at]]);
     }
     var end = at + 1;
@@ -1291,10 +1303,16 @@ class _Reading {
         'value': n,
       });
     } else {
+      // "above 28 for 10 minutes": the crossing has to hold that long.
+      final held = end < words.length && words[end] == 'for'
+          ? _durationAt(words, end + 1)
+          : null;
       _triggers.add({
         'on': '$thing.$key',
         'crosses': {above != null ? 'above' : 'below': n},
+        'for': ?held?.$1,
       });
+      if (held != null) end = held.$2;
     }
     return end;
   }

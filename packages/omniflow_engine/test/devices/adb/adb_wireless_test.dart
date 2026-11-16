@@ -7,6 +7,7 @@ import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:omniflow_engine/src/devices/adb/adb_connection.dart';
 import 'package:omniflow_engine/src/devices/adb/adb_key.dart';
 import 'package:omniflow_engine/src/devices/adb/adb_pairing.dart';
+import 'package:omniflow_engine/src/devices/adb/adb_protocol.dart';
 import 'package:omniflow_engine/src/devices/adb/adb_tls.dart';
 import 'package:pointycastle/export.dart';
 import 'package:test/test.dart';
@@ -18,6 +19,15 @@ Uint8List unhex(String s) => Uint8List.fromList([
   for (var i = 0; i < s.length; i += 2)
     int.parse(s.substring(i, i + 2), radix: 16),
 ]);
+
+/// The identity a device presenting [key]'s certificate pins.
+String identityOf(AdbHostKey key) {
+  final pem = adbCertificatePem(key)
+      .split('\n')
+      .where((l) => l.isNotEmpty && !l.startsWith('-----'))
+      .join();
+  return adbIdentitySha256(base64.decode(pem));
+}
 
 void main() {
   late AdbHostKey hostKey;
@@ -141,7 +151,7 @@ void main() {
         onExported: phone.exported.complete,
       );
       expect(result.guid, 'adb-FAKEPHONE01-AbC123');
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await phone.done.future.timeout(const Duration(seconds: 10));
       expect(
         phone.receivedKey,
         utf8
@@ -172,6 +182,51 @@ void main() {
       expect('$failure', isNot(contains('222222')));
       expect('$failure', isNot(contains('111111')));
     });
+
+    test(
+      'a peer that never finishes TLS times out the whole pairing',
+      () async {
+        phone = await FakePairingPhone.start(
+          phoneKey: phoneKey,
+          hostKey: hostKey,
+          code: '111111',
+        );
+        final silent = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        final held = <Socket>[];
+        var closedByClient = 0;
+        silent.listen((s) {
+          held.add(s);
+          s.listen((_) {}, onDone: () => closedByClient++);
+        });
+        final watch = Stopwatch()..start();
+        await expectLater(
+          pairAdbDevice(
+            host: '127.0.0.1',
+            port: silent.port,
+            code: '123456',
+            key: hostKey,
+            keyName: 'omniflow@test',
+            timeout: const Duration(milliseconds: 400),
+          ),
+          throwsA(
+            isA<AdbPairingFailedException>().having(
+              (e) => e.failure,
+              'failure',
+              AdbPairingFailure.timeout,
+            ),
+          ),
+        );
+        expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+        for (var i = 0; i < 40 && closedByClient == 0; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(closedByClient, 1);
+        for (final s in held) {
+          s.destroy();
+        }
+        await silent.close();
+      },
+    );
 
     test('a closed port is unreachable', () async {
       phone = await FakePairingPhone.start(
@@ -247,6 +302,10 @@ void main() {
       adbd = await FakeTlsAdbd.start(phoneKey: phoneKey, allowed: [hostKey]);
       final secrets = InMemorySecretStore();
       await secrets.write(adbHostKeySecret, hostKey.toPem());
+      await secrets.write(
+        deviceSecretKey('phone', adbIdentitySecret),
+        identityOf(phoneKey),
+      );
       final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final oldPort = closed.port;
       await closed.close();
@@ -280,6 +339,159 @@ void main() {
       expect(adbd.connections, 1);
       await channel.close();
     });
+
+    group('identity', () {
+      late AdbChannel channel;
+      late InMemorySecretStore secrets;
+      late int oldPort;
+      final moves = <String>[];
+      final manifest = DriverRegistry.withBuiltIns()['android_phone_adb']!;
+
+      Device phoneAt(int port) => Device(
+        id: 'phone',
+        name: 'Phone',
+        driverId: 'android_phone_adb',
+        host: '127.0.0.1',
+        port: port,
+        stableId: 'adb-FAKEPHONE01-AbC123',
+      );
+
+      setUp(() async {
+        moves.clear();
+        secrets = InMemorySecretStore();
+        await secrets.write(adbHostKeySecret, hostKey.toPem());
+        final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        oldPort = closed.port;
+        await closed.close();
+      });
+
+      tearDown(() => channel.close());
+
+      AdbChannel follower(int port) => channel = AdbChannel(
+        secrets,
+        locateTls: (_) async => (host: '127.0.0.1', port: port),
+        onMoved: (id, host, port) async => moves.add('$id $host:$port'),
+      );
+
+      test('the first TLS connection pins the key, and another key at the '
+          'same address is refused', () async {
+        adbd = await FakeTlsAdbd.start(phoneKey: phoneKey, allowed: [hostKey]);
+        channel = AdbChannel(secrets);
+        expect(
+          await channel.run(phoneAt(adbd.port), manifest, 'echo hi'),
+          'tls says hi\n',
+        );
+        final pin = deviceSecretKey('phone', adbIdentitySecret);
+        expect(await secrets.read(pin), identityOf(phoneKey));
+        await channel.close();
+        await adbd.close();
+        adbd = await FakeTlsAdbd.start(
+          phoneKey: strangerKey,
+          allowed: [hostKey],
+        );
+        channel = AdbChannel(secrets);
+        await expectLater(
+          channel.run(phoneAt(adbd.port), manifest, 'echo hi'),
+          throwsA(
+            isA<AdbPairingException>().having(
+              (e) => e.message,
+              'message',
+              contains('not the device that was paired'),
+            ),
+          ),
+        );
+        expect(adbd.shells, isEmpty, reason: 'nothing reaches an impostor');
+        expect(await secrets.read(pin), identityOf(phoneKey));
+      });
+
+      test('a device with no pinned key is not followed', () async {
+        adbd = await FakeTlsAdbd.start(phoneKey: phoneKey, allowed: [hostKey]);
+        await expectLater(
+          follower(adbd.port).run(phoneAt(oldPort), manifest, 'echo hi'),
+          throwsA(isA<TransportTimeoutException>()),
+        );
+        expect(moves, isEmpty);
+        expect(adbd.connections, 0);
+      });
+
+      test('a host announcing the guid with another key is refused and the '
+          'move is not saved', () async {
+        await secrets.write(
+          deviceSecretKey('phone', adbIdentitySecret),
+          identityOf(phoneKey),
+        );
+        adbd = await FakeTlsAdbd.start(
+          phoneKey: strangerKey,
+          allowed: [hostKey],
+        );
+        await expectLater(
+          follower(adbd.port).run(phoneAt(oldPort), manifest, 'echo hi'),
+          throwsA(isA<AdbPairingException>()),
+        );
+        expect(moves, isEmpty);
+        expect(adbd.shells, isEmpty);
+      });
+
+      test(
+        'forgetting the identity lets the next connection pin again',
+        () async {
+          await secrets.write(
+            deviceSecretKey('phone', adbIdentitySecret),
+            identityOf(strangerKey),
+          );
+          adbd = await FakeTlsAdbd.start(
+            phoneKey: phoneKey,
+            allowed: [hostKey],
+          );
+          channel = AdbChannel(secrets);
+          await channel.forgetIdentity('phone');
+          await channel.run(phoneAt(adbd.port), manifest, 'echo hi');
+          expect(
+            await secrets.read(deviceSecretKey('phone', adbIdentitySecret)),
+            identityOf(phoneKey),
+          );
+        },
+      );
+    });
+
+    test(
+      'a device silent during TLS times out and its socket is closed',
+      () async {
+        final silent = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        var closedByClient = 0;
+        final held = <Socket>[];
+        silent.listen((s) {
+          held.add(s);
+          var answered = false;
+          s.listen((_) {
+            if (answered) return;
+            answered = true;
+            s.add(AdbMessage(AdbCommand.stls, adbStlsVersion, 0).encode());
+          }, onDone: () => closedByClient++);
+        });
+        adbd = await FakeTlsAdbd.start(phoneKey: phoneKey, allowed: [hostKey]);
+        final watch = Stopwatch()..start();
+        await expectLater(
+          AdbConnection.connect(
+            '127.0.0.1',
+            silent.port,
+            key: hostKey,
+            keyName: 'omniflow@test',
+            handshakeTimeout: const Duration(milliseconds: 300),
+          ),
+          throwsA(isA<AdbHandshakeTimeoutException>()),
+        );
+        expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+        for (var i = 0; i < 40 && closedByClient == 0; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(closedByClient, 1);
+        for (final s in held) {
+          s.destroy();
+        }
+        await silent.close();
+      },
+    );
 
     test('a TV id without a guid suffix is never followed', () async {
       adbd = await FakeTlsAdbd.start(phoneKey: phoneKey, allowed: [hostKey]);

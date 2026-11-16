@@ -15,7 +15,10 @@ import 'automation_insights.dart' show AutomationConflictChip;
 import 'automation_page.dart';
 import 'automations_state.dart';
 import 'dialogs.dart';
+import '../help/screen_help.dart';
 import 'new_automation.dart';
+import 'next_run_line.dart';
+import 'removed_page.dart' show openRecentlyRemoved;
 import 'review_page.dart';
 import 'scenes.dart' show SceneRow, automationIconFor, openSceneEditor;
 import 'suggestions_page.dart';
@@ -73,6 +76,7 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
             if (!_searching) _query = '';
           }),
         ),
+        const ScreenHelpButton(HelpScreen.automations),
       ],
       body: switch (async) {
         AsyncData(:final value) => _list(value),
@@ -163,6 +167,9 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
             ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
+            // Room past the last chip, so it can scroll out from under the
+            // New button in landscape.
+            padding: const EdgeInsets.only(right: 88),
             child: Row(
               children: [
                 for (final f in AutomationFilter.values) ...[
@@ -199,14 +206,14 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
             const AutomationHelpers(),
           if (waiting.length == 1)
             OmniBanner.warning(
-              'Claude made "${waiting.single.name}". Review before it can run.',
+              'An agent made "${waiting.single.name}". Review before it can run.',
               key: const ValueKey('needs-review'),
               actionLabel: 'Review',
               onAction: () => _push(ReviewPage(id: waiting.single.id)),
             )
           else if (waiting.length > 1)
             OmniBanner.warning(
-              'Claude made ${waiting.length} automations. Review them before '
+              'An agent made ${waiting.length} automations. Review them before '
               'they can run.',
               key: const ValueKey('needs-review'),
               actionLabel: 'Show them',
@@ -265,6 +272,15 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                 automation: a,
                 onOpen: () => _push(AutomationPage(id: a.id, summary: a)),
               ),
+            ),
+          if (_filter == AutomationFilter.all && !_searching)
+            OmniListRow(
+              key: const ValueKey('automations-removed'),
+              icon: OmniIcons.delete,
+              title: 'Recently removed',
+              subtitle: 'Put back an automation you removed',
+              chevron: true,
+              onTap: () => openRecentlyRemoved(context),
             ),
           // Clear of the New button.
           const SizedBox(height: 88),
@@ -335,9 +351,8 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
     );
   }
 
-  /// Removes [a], keeping what it was so Undo can save it again as it was:
-  /// the same id and spec, trusted only if it was approved, and off if it
-  /// was off.
+  /// Removes [a]. Undo asks the engine to put it back as it was, with its
+  /// trust, its on or off and its versions.
   Future<void> _remove(AutomationSummary a) async {
     setState(() => _removing.add(a.id));
     final api = ref.read(engineApiProvider);
@@ -357,11 +372,8 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
       'Removed ${a.name}',
       action: 'Undo',
       onAction: () async {
-        if (await RuleCalls.restore(client, record)) {
-          if (record['enabled'] == false) {
-            await api.enableAutomation(a.id, false);
-          }
-        } else {
+        // The engine puts it back as it was, on or off, in one step.
+        if (!await RuleCalls.restore(client, record)) {
           showMessage('${a.name} could not be put back');
         }
         await automations.refresh();
@@ -581,6 +593,7 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
               padding: EdgeInsets.only(top: 6),
               child: Text('Link', style: OmniText.caption),
             ),
+          NextRunLine(a, enabled: enabled),
         ],
       ),
     );

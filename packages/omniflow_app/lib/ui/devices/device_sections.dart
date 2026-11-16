@@ -17,6 +17,7 @@ import '../settings/developer_page.dart';
 import '../shell/shell.dart';
 import '../tags/write_tag_sheet.dart';
 import 'device_text.dart';
+import '../../api/screen_calls.dart';
 
 /// The parts the device and sensor pages share: the favourite star and the
 /// more menu, the offline help, "Used in", the recent history and the
@@ -28,13 +29,15 @@ final deviceHistoryProvider = FutureProvider.family<List<HistoryEntry>, String>(
       (await ref.watch(engineApiProvider).history(id, limit: 20)).or(const []),
 );
 
-/// The live row of [id] from the devices list, or null.
+/// The live row of [id] from the devices list, or null. It rebuilds the
+/// page only when this device's row changes, not on every other device's
+/// state report.
 DeviceView? liveDevice(WidgetRef ref, String id) {
-  final json = ref
-      .watch(devicesProvider)
-      .value
-      ?.where((d) => d['id'] == id)
-      .firstOrNull;
+  final json = ref.watch(
+    devicesProvider.select(
+      (v) => v.value?.where((d) => d['id'] == id).firstOrNull,
+    ),
+  );
   return json == null ? null : DeviceView(json);
 }
 
@@ -317,7 +320,7 @@ class UsedInSection extends ConsumerWidget {
             title: a.name,
             subtitle: device.online
                 ? _drives(a)
-                : 'this step will be skipped while it is offline',
+                : 'Steps on it fail while it is offline',
             chevron: true,
             onTap: () =>
                 ref.read(shellControllerProvider).open(AutomationLink(a.id)),
@@ -599,7 +602,7 @@ class _FindAgainSheetState extends ConsumerState<_FindAgainSheet> {
       _error = null;
     });
     final d = widget.device;
-    final r = await ref.read(engineClientProvider).call('device.discover', {
+    final r = await ref.read(engineClientProvider).call(DeviceCalls.discover, {
       'driver': d.json['driver'],
       'windowMs': 3000,
       'serial': false,
@@ -621,17 +624,10 @@ class _FindAgainSheetState extends ConsumerState<_FindAgainSheet> {
   Future<void> _use(Json find) async {
     final d = widget.device;
     setState(() => _busy = true);
-    final r = await ref.read(engineClientProvider).call('thing.add', {
-      'driver': d.json['driver'],
-      'host': find['host'],
-      'port': ?find['port'],
-      'stableId': ?find['stableId'] ?? d.json['stableId'],
-      'id': d.id,
-      'name': d.name,
-      'room': ?d.roomId,
-      'settings': d.json['settings'] ?? const <String, Object?>{},
-      'replace': true,
-    });
+    // The engine adds it again in place: same name, room and automations.
+    final r = await ref
+        .read(engineClientProvider)
+        .call(DeviceCalls.move, DeviceCalls.moveArgs(d.id, find));
     if (!mounted) return;
     setState(() => _busy = false);
     if (r['ok'] != true) {

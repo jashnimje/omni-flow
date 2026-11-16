@@ -84,7 +84,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       context,
       title: 'Reject $_name?',
       body:
-          'It is deleted and never runs. Claude can make it again if you '
+          'It is deleted and never runs. The agent can make it again if you '
           'ask it to.',
       action: 'Reject',
       destructive: true,
@@ -133,7 +133,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               )
             else
               const OmniBanner.warning(
-                'Made by Claude. It runs only after you approve this exact '
+                'Made by an agent. It runs only after you approve this exact '
                 'version.',
               ),
             if (summary != null && summary.sentence.isNotEmpty)

@@ -12,8 +12,8 @@
     "permissions": ["CONTROL_AUDIO", "CONTROL_POWER", "LAUNCH", "WRITE_NOTIFICATION_TOAST"]
   },
   "settings": [
-    { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true },
-    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true }
+    { "key": "clientKey", "label": "Client key (issued when you accept the pairing prompt on the TV)", "secret": true, "help": "The key the TV gives OmniFlow when you accept it. You never type it: pair the TV and press Accept on the TV screen, and it is saved on this phone." },
+    { "key": "certSha256", "label": "Pinned TLS certificate SHA-256 (stored on first connect over wss)", "secret": true, "help": "A fingerprint of the TV's security certificate, saved the first time OmniFlow connects, so another device cannot pretend to be the TV. You never type it." }
   ],
   "setup": ["pair"],
   "statePoll": { "intervalSeconds": 60, "command": { "uri": "ssap://audio/getVolume" } },

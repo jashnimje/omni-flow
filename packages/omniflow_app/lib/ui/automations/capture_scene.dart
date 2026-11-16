@@ -5,7 +5,7 @@ import '../../api/engine_calls.dart' show DeviceView, Json;
 import '../../state/house_providers.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
-import '../devices/device_text.dart' show presenceDrivers;
+import '../devices/device_text.dart' show presenceDrivers, when;
 import 'automations_state.dart';
 
 /// The devices a scene can be saved from: not the phone, people, places
@@ -39,6 +39,7 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
   if (!context.mounted) return;
   final name = TextEditingController();
   final picked = <String>{};
+  var stale = const <String>[];
   final saved = await showOmniSheet<bool>(
     context,
     builder: (context) => Owning(
@@ -63,12 +64,24 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
                   key: ValueKey('capture-${d.id}'),
                   value: picked.contains(d.id),
                   title: Text(d.name),
-                  subtitle: d.room == null ? null : Text(d.room!),
+                  subtitle: switch (staleWords(d)) {
+                    final stale? => Text(
+                      stale,
+                      style: const TextStyle(color: OmniColors.warn),
+                    ),
+                    null => d.room == null ? null : Text(d.room!),
+                  },
                   onChanged: (on) => setState(
                     () => on == true ? picked.add(d.id) : picked.remove(d.id),
                   ),
                 ),
             const SizedBox(height: OmniSpace.md),
+            if (devices.any((d) => picked.contains(d.id) && !d.online))
+              const OmniBanner.warning(
+                'Some devices you picked have not answered for a while. The '
+                'scene keeps their last known state, which may be old.',
+                key: ValueKey('capture-stale'),
+              ),
             OmniButton(
               key: const ValueKey('capture-save'),
               label: picked.isEmpty
@@ -86,6 +99,10 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
                         showMessage(errorMessage(r));
                         return;
                       }
+                      stale = [
+                        for (final s in r['stale'] as List? ?? const [])
+                          if (s is Map) '${s['name'] ?? s['id']}',
+                      ];
                       Navigator.of(context).pop(true);
                     },
             ),
@@ -95,6 +112,21 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
     ),
   );
   if (saved != true) return;
-  showMessage('Scene saved');
+  showMessage(
+    stale.isEmpty
+        ? 'Scene saved'
+        : 'Scene saved. ${stale.join(', ')} had not answered for a while, '
+              'so the saved state may be old.',
+  );
   await ref.read(automationsProvider.notifier).refresh();
+}
+
+/// "Last known 8 Nov, so it may have changed" for a device whose state is
+/// older than its poll window (the engine counts it offline), else null.
+String? staleWords(DeviceView d) {
+  if (d.online) return null;
+  final seen = d.lastSeen?.toLocal();
+  return seen == null
+      ? 'Never read, so its state may be wrong'
+      : 'Last known ${when(seen)}, so it may have changed';
 }

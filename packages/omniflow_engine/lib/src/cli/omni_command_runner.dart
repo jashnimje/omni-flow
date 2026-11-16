@@ -24,6 +24,7 @@ import 'hub_cli.dart';
 import 'one_shot.dart';
 import 'house_cli.dart';
 import 'organize_cli.dart';
+import 'parity_cli.dart';
 import 'rule_cli.dart';
 import 'tv_cli.dart';
 
@@ -162,6 +163,7 @@ class OmniCommandRunner extends CommandRunner<int> {
       _Group('device', 'Add, inspect and control devices.', [
         _DeviceAdd(),
         _DeviceDiscover(),
+        deviceMoveVerb(),
         _ApiCommand(
           'list',
           'List devices with their state.',
@@ -217,6 +219,7 @@ class OmniCommandRunner extends CommandRunner<int> {
     );
     addCommand(
       _Group('board', 'Set up OmniFlow boards and name their pins.', [
+        ...boardFlashVerbs(),
         _BoardSetup(),
         _BoardPeriph(),
         _BoardPin(),
@@ -276,6 +279,10 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(alertsCommand());
     addCommand(automationCommand());
     addCommand(presenceCommand());
+    addCommand(energyCommand());
+    addCommand(weatherCommand());
+    addCommand(sunlightCommand());
+    addCommand(awayCommand());
     String id(List<String> rest) => _one(rest, 'ID');
     addCommand(
       _Group('flow', 'Validate, save, run and inspect flows.', [
@@ -605,6 +612,24 @@ class OmniCommandRunner extends CommandRunner<int> {
       _Group('config', 'Back the home up to one file, and restore it.', [
         _ConfigExport(),
         _ConfigImport(),
+        _ApiCommand(
+          'auto',
+          'The daily automatic backup: on or off, its folder, the last one.',
+          'backup.auto.get',
+          (_, _) async => const {},
+        ),
+        _ApiCommand(
+          'auto-set',
+          'Turn the daily backup on or off, or write one now.',
+          'backup.auto.set',
+          (rest, _) async => switch (rest) {
+            ['on'] => const {'on': true},
+            ['off'] => const {'on': false},
+            ['now'] => const {'now': true},
+            _ => throw UsageException('needs on, off or now', ''),
+          },
+          usage: 'on|off|now',
+        ),
       ]),
     );
     addCommand(
@@ -1358,8 +1383,9 @@ class _FlowRun extends _ApiCommand {
   _FlowRun()
     : super(
         'run',
-        'Fire a flow\'s manual triggers: omni flow run ID [key=value ...]',
-        'flow.run',
+        'Run it now: its manual triggers, or its first trigger as if that '
+            'fired, as the app\'s Run it now does: omni flow run ID [key=value ...]',
+        'automation.run',
         (_, _) async => {},
         usage: 'ID [key=value ...]',
       ) {

@@ -181,8 +181,8 @@ Future<RuleStep?> actionForm(
             key: ValueKey('act-${c['id']}'),
             title: '${c['label'] ?? c['id']}',
             subtitle: isHighRisk(c)
-                ? 'High risk: runs commands on ${thing.name}. Claude needs '
-                      'your approval before an automation it makes can do this'
+                ? 'High risk: runs commands on ${thing.name}. An automation an '
+                      'agent makes needs your approval before it can do this'
                 : null,
             icon: OmniIcons.forCapability(c['type'] as String?),
             warning: isHighRisk(c),
@@ -335,7 +335,7 @@ Future<WaitForStep?> waitTimeoutForm(
     context,
     title: 'Give up after',
     subtitle:
-        'If it has not happened by then, the rule runs what you put '
+        'If it has not happened by then, the automation runs what you put '
         'under "If the time runs out", then stops.',
     result: () => ms >= 1000
         ? WaitForStep(until, timeoutMs: ms, onTimeout: current?.onTimeout)
@@ -366,6 +366,7 @@ Future<HttpStep?> httpForm(
     },
   );
   var method = current?.method ?? 'GET';
+  final headers = WebHeadersController(current?.extra['headers']);
   bool ok() {
     final t = url.text.trim();
     if (t.startsWith('{{')) return true;
@@ -387,20 +388,21 @@ Future<HttpStep?> httpForm(
 
   return showFormSheet(
     context,
-    owns: [url, body],
+    owns: [url, body, headers],
     title: 'Send a web request',
     subtitle:
         'It counts as done when the address answers, and fails on an error '
         'reply, so a fallback can take over. Its reply goes into Web reply.',
-    result: () => ok()
+    result: () => ok() && headers.whyNot == null
         ? HttpStep(
             url.text.trim(),
             method: method,
             body: method == 'GET' ? null : bodyValue(),
-            extra: current?.extra,
+            extra: {...?current?.extra, 'headers': headers.headers}
+              ..removeWhere((k, v) => k == 'headers' && v == null),
           )
         : null,
-    whyNot: () => ok() ? null : 'Give an http:// or https:// address',
+    whyNot: () => ok() ? headers.whyNot : 'Give an http:// or https:// address',
     build: (context, setState) => [
       TokenField(
         key: const ValueKey('http-url'),
@@ -435,15 +437,11 @@ Future<HttpStep?> httpForm(
           onChanged: (_) => setState(() {}),
         ),
       ],
-      if (current != null && current.extra['headers'] is Map)
-        const Text(
-          'Its headers stay as they were set.',
-          style: OmniText.caption,
-        ),
+      WebHeadersEditor(controller: headers, onChanged: () => setState(() {})),
       const SizedBox(height: OmniSpace.xs),
       const Text(
-        'A rule with a web request is high risk: one Claude makes waits for '
-        'your approval.',
+        'A web request is high risk: when an agent makes an automation with '
+        'one, it waits for your approval.',
         style: OmniText.caption,
       ),
     ],

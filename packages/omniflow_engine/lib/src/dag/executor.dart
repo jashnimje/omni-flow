@@ -167,7 +167,7 @@ Map<String, Object?> _traced(Map<String, Object?> msg) {
       },
     };
   }
-  if (isNotificationMsg(msg)) {
+  if (isPrivateTextMsg(msg)) {
     out = {
       ...out,
       'payload': ?_withoutPrivate(out['payload']),
@@ -190,6 +190,25 @@ const _privateKeys = {'title', 'text'};
 bool isNotificationMsg(Map<String, Object?> msg) =>
     msg['key'] == notificationEvent ||
     (msg['event'] is Map && (msg['event'] as Map)['key'] == notificationEvent);
+
+/// The phone events whose payload can carry a person's words: a
+/// notification's title and text, what is playing, a calendar event's
+/// title. Their words stay with the run: the run log, `run.node` events and
+/// a diagram's `seen` keep only that the event matched.
+const privateTextEvents = {
+  notificationEvent,
+  'media_started',
+  'media_stopped',
+  'calendar_started',
+  'calendar_ended',
+};
+
+/// Whether [msg] came from one of the [privateTextEvents], as a trigger or
+/// what a wait matched.
+bool isPrivateTextMsg(Map<String, Object?> msg) =>
+    privateTextEvents.contains(msg['key']) ||
+    (msg['event'] is Map &&
+        privateTextEvents.contains((msg['event'] as Map)['key']));
 
 Object? _withoutPrivate(Object? value) {
   if (value is! Map) return value;
@@ -1116,8 +1135,7 @@ void _see(
     final ref = left['var'];
     if (ref is String && ref.startsWith('%')) return (false, null);
     final at = left['msg'];
-    if (at != null &&
-        (isNotificationMsg(msg) || '$at'.startsWith('response'))) {
+    if (at != null && (isPrivateTextMsg(msg) || '$at'.startsWith('response'))) {
       return (false, null);
     }
     final v = ctx.value(left);

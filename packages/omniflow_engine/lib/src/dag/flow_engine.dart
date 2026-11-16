@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'aligned_times.dart';
+import 'as_if.dart' show asIfEffects;
 import 'asks.dart';
 import 'canonical.dart';
 import 'conditions.dart';
@@ -106,6 +107,14 @@ class FlowEngine implements FlowEffects, PeopleSource {
 
   /// Held state triggers counting down, by `flow/node`.
   final _holds = <String, Timer>{};
+
+  /// When each held countdown ends by the wall clock, and what it does then.
+  final _holdDue = <String, ({DateTime at, void Function() go})>{};
+
+  /// When each time trigger's timer is due by the wall clock, and what it
+  /// does then. A [Timer] counts time the CPU is awake, so a phone that
+  /// slept wakes the engine with an alarm and calls [retime].
+  final _due = <Timer, ({DateTime at, void Function() go})>{};
 
   /// The person things, from the host and from the person states seen.
   Set<String>? _people;
@@ -226,6 +235,99 @@ class FlowEngine implements FlowEffects, PeopleSource {
     _cancelTimers();
   }
 
+  /// The earliest wall-clock time a time trigger, interval or held
+  /// countdown is due, or null when none is armed. A phone sets an exact
+  /// alarm for it instead of keeping the CPU awake all day.
+  DateTime? get nextTimeDue {
+    DateTime? next;
+    void consider(DateTime at) {
+      if (next == null || at.isBefore(next!)) next = at;
+    }
+
+    for (final d in _due.values) {
+      consider(d.at);
+    }
+    for (final e in _holdDue.entries) {
+      if (_holds.containsKey(e.key)) consider(e.value.at);
+    }
+    return next;
+  }
+
+  /// When a time, sun or interval trigger of [flowId] fires next, or null
+  /// when the automation is not running or has none. With timers armed it
+  /// is the earliest armed time. Without them (the CLI, a test) a daily
+  /// or clock-aligned trigger is worked out from now, and a plain interval
+  /// has no fixed next time.
+  DateTime? nextRunOf(String flowId) {
+    final runner = _runners[flowId];
+    if (runner == null) return null;
+    DateTime? next;
+    void consider(DateTime? at) {
+      if (at != null && (next == null || at.isBefore(next!))) next = at;
+    }
+
+    if (_timersOn) {
+      for (final t in _timers[flowId] ?? const <Timer>[]) {
+        consider(_due[t]?.at);
+      }
+      return next;
+    }
+    final now = _clock.now();
+    for (final n in runner.flow.nodes) {
+      if (n.type == 'time_of_day' || n.type == 'sun') {
+        consider(_dailyTime(n, now));
+      } else if (n.type == 'interval' &&
+          (n.config['offsetSeconds'] != null || n.config['between'] != null)) {
+        try {
+          consider(
+            nextAlignedTime(
+              now,
+              seconds: n.config['seconds'] as int,
+              offsetSeconds: n.config['offsetSeconds'] as int? ?? 0,
+              between: (n.config['between'] as List?)?.cast<String>(),
+            ),
+          );
+        } on StateError {
+          continue;
+        }
+      }
+    }
+    return next;
+  }
+
+  /// Arms every time trigger again from the wall clock: after the phone
+  /// slept (its timers lag by the time asleep), or the clock or the time
+  /// zone changed. Anything whose time passed within [catchUpWindow] runs
+  /// now, once (a daily trigger is skipped when it already ran for that
+  /// time). One further back, as after the clock was put hours forward, is
+  /// left to its next time, as a restart leaves it.
+  void retime() {
+    if (!_timersOn) return;
+    final now = _clock.now();
+    final overdue = [
+      for (final e in _due.entries)
+        if (!e.value.at.isAfter(now)) e,
+    ];
+    for (final e in overdue) {
+      _due.remove(e.key);
+      e.key.cancel();
+      if (now.difference(e.value.at) <= catchUpWindow) e.value.go();
+    }
+    for (final key in _holds.keys.toList()) {
+      final due = _holdDue[key];
+      if (due == null) continue;
+      _holds.remove(key)!.cancel();
+      if (!due.at.isAfter(now)) {
+        due.go();
+      } else {
+        _holds[key] = Timer(due.at.difference(now), due.go);
+      }
+    }
+    for (final r in _runners.values.toList()) {
+      _startTimers(r);
+    }
+  }
+
   final _dropped = <String, int>{};
 
   /// How many runs of each flow were dropped (running, cooldown, queue
@@ -268,7 +370,8 @@ class FlowEngine implements FlowEffects, PeopleSource {
     ]);
   }
 
-  /// A dry run of an enabled or disabled flow.
+  /// A dry run of an enabled or disabled flow. Started from a made-up
+  /// "as if" change, its checks see the made-up value.
   Future<RunTrace> dryRun(
     FlowSpec flow,
     String triggerId,
@@ -276,7 +379,7 @@ class FlowEngine implements FlowEffects, PeopleSource {
     DateTime at,
   ) => FlowRunner(
     flow,
-    this,
+    asIfEffects(this, msg),
     clock: InstantFlowClock(at),
   ).fire(triggerId, msg, dryRun: true);
 
@@ -525,14 +628,18 @@ class FlowEngine implements FlowEffects, PeopleSource {
   ) {
     final key = _holdKey(r, n);
     _holds.remove(key)?.cancel();
-    _holds[key] = Timer(wait, () {
+    void go() {
       _holds.remove(key);
+      _holdDue.remove(key);
       if (!identical(_runners[r.flow.id], r)) return;
       final c = n.config;
       final now = deviceStates[c['thing']]?[c['key']];
       if (holdsNow(c, now) != true) return;
       _fire(r, n, {...msg, 'value': now, 'heldMs': holdOf(c)!.inMilliseconds});
-    });
+    }
+
+    _holds[key] = Timer(wait, go);
+    _holdDue[key] = (at: _clock.now().add(wait), go: go);
   }
 
   /// After a restart or a reload, carries on each held trigger of [r]
@@ -726,9 +833,13 @@ class FlowEngine implements FlowEffects, PeopleSource {
         _scheduleAligned(r, n);
       } else if (n.type == 'interval') {
         final every = Duration(seconds: n.config['seconds'] as int);
-        _timers
-            .putIfAbsent(r.flow.id, () => [])
-            .add(Timer.periodic(every, (_) => _fire(r, n, {})));
+        void go() => _fire(r, n, {});
+        final timer = Timer.periodic(every, (t) {
+          _due[t] = (at: _clock.now().add(every), go: go);
+          go();
+        });
+        _due[timer] = (at: _clock.now().add(every), go: go);
+        _timers.putIfAbsent(r.flow.id, () => []).add(timer);
       } else if (n.type == 'time_of_day' || n.type == 'sun') {
         _scheduleDaily(r, n);
       }
@@ -750,7 +861,9 @@ class FlowEngine implements FlowEffects, PeopleSource {
     } on StateError {
       return;
     }
-    final timer = Timer(next.difference(_clock.now()), () {
+    late final Timer timer;
+    void go() {
+      _due.remove(timer);
       // As for daily times: a wall clock put back sets it off early.
       if (_clock.now().isBefore(next)) {
         _scheduleAligned(r, n);
@@ -758,7 +871,10 @@ class FlowEngine implements FlowEffects, PeopleSource {
       }
       _fire(r, n, {'scheduled': next.toIso8601String()});
       _scheduleAligned(r, n);
-    });
+    }
+
+    timer = Timer(next.difference(_clock.now()), go);
+    _due[timer] = (at: next, go: go);
     _timers.putIfAbsent(r.flow.id, () => []).add(timer);
   }
 
@@ -792,7 +908,9 @@ class FlowEngine implements FlowEffects, PeopleSource {
     _catchUp(r, n);
     final next = _dailyTime(n, _clock.now());
     if (next == null) return;
-    final timer = Timer(next.difference(_clock.now()), () {
+    late final Timer timer;
+    void go() {
+      _due.remove(timer);
       // A timer counts elapsed time, so when the wall clock went back (the
       // end of summer time, a clock fix) it goes off before its time, which
       // would run the trigger now and again when the time comes.
@@ -807,7 +925,10 @@ class FlowEngine implements FlowEffects, PeopleSource {
         _fire(r, n, {'scheduled': scheduled});
       }());
       _scheduleDaily(r, n);
-    });
+    }
+
+    timer = Timer(next.difference(_clock.now()), go);
+    _due[timer] = (at: next, go: go);
     _timers.putIfAbsent(r.flow.id, () => []).add(timer);
   }
 
@@ -837,6 +958,7 @@ class FlowEngine implements FlowEffects, PeopleSource {
     for (final id in flowId == null ? _timers.keys.toList() : [flowId]) {
       for (final t in _timers.remove(id) ?? const <Timer>[]) {
         t.cancel();
+        _due.remove(t);
       }
     }
   }

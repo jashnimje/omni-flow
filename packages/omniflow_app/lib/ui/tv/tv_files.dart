@@ -678,7 +678,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
                 children: [
                   Icon(icon, size: 20, color: color),
                   const SizedBox(height: 2),
-                  Text(label, style: TextStyle(fontSize: 11, color: color)),
+                  Text(label, style: OmniText.caption.copyWith(color: color)),
                 ],
               ),
             ),

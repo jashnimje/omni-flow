@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show appLabelFor;
 
 import '../../api/tv_calls.dart';
 import '../design/design.dart';
@@ -44,35 +45,10 @@ String formatDate(DateTime? time, {DateTime? now}) {
   return t.year == today.year ? day : '$day ${t.year}';
 }
 
-/// What the app in front is called: the label the TV gave, else a name made
-/// from its package (`com.netflix.ninja` reads "Netflix"), never the bare
-/// package.
-String appNameOf(String package, {String? label}) {
-  if (label != null && label.isNotEmpty) return label;
-  const generic = {
-    'com',
-    'org',
-    'net',
-    'in',
-    'co',
-    'io',
-    'tv',
-    'android',
-    'google',
-    'apps',
-    'app',
-    'mobile',
-    'amazon',
-  };
-  final word = package
-      .split('.')
-      .where((s) => s.isNotEmpty && !generic.contains(s.toLowerCase()))
-      .firstOrNull;
-  final name = word ?? package.split('.').last;
-  return name.isEmpty
-      ? package
-      : '${name[0].toUpperCase()}${name.substring(1)}';
-}
+/// What an app is called: the label the TV gave, else the engine's name
+/// for its package, never the bare package.
+String appNameOf(String package, {String? label}) =>
+    appLabelFor(package, label: label);
 
 /// Brand colours of apps people know at a glance; others get a stable
 /// colour of their own.

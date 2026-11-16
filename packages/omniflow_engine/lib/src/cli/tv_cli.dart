@@ -46,7 +46,10 @@ omni tv ID permission PACKAGE PERMISSION --grant|--revoke
 omni tv ID backup PACKAGE --to DIR [--overwrite]
 omni tv ID trim-caches [--yes]
 omni tv ID power reboot|shutdown [--yes]
-omni tv ID shell [COMMAND...]   (no COMMAND: an interactive shell)''';
+omni tv ID notifications [expand|settings|collapse]
+omni tv ID shell [COMMAND...]   (no COMMAND: an interactive shell)
+omni android find [--window-ms N]       (phones with Wireless debugging on)
+omni android pair HOST PORT [--id ID]   (reads the six-digit code from stdin)''';
 
 /// Flags the `omni tv` verbs take, wherever they appear before `shell`.
 const _flags = {
@@ -81,8 +84,10 @@ class TvCommand extends Command<int> {
 
   @override
   String get description =>
-      'Control an Android TV: remote, text, volume, state, apps, settings, files, '
-      'shell, screen, recording, system, permissions, backup and power.';
+      'Control an Android TV or phone: remote, text, volume, state, apps, '
+      'settings, files, notifications, '
+      'shell, screen, recording, system, permissions, backup and power, and '
+      'find and pair one by code: omni android find, omni android pair.';
 
   @override
   String get invocation => _tvUsage;
@@ -95,6 +100,8 @@ class TvCommand extends Command<int> {
   @override
   Future<int> run() async {
     final rest = argResults!.rest;
+    if (rest.isNotEmpty && rest.first == 'find') return _find(rest.sublist(1));
+    if (rest.isNotEmpty && rest.first == 'pair') return _pair(rest.sublist(1));
     if (rest.length < 2) throw UsageException('needs ID and a verb', usage);
     final id = rest[0];
     final verb = rest[1];
@@ -131,6 +138,52 @@ class TvCommand extends Command<int> {
       return _screenshotTo(omni, args, File(out).absolute);
     }
     return _send(omni, command, args, progress: _transfers.contains(command));
+  }
+
+  /// `omni android find`: the phones and TVs on this network with Wireless
+  /// debugging on.
+  Future<int> _find(List<String> words) async {
+    final window = words.length == 2 && words.first == '--window-ms'
+        ? int.tryParse(words[1])
+        : null;
+    if (words.isNotEmpty && window == null) {
+      throw UsageException('find takes only --window-ms N', usage);
+    }
+    return _send(omni, 'android.find', {'windowMs': ?window});
+  }
+
+  /// `omni android pair HOST PORT [--id ID]`: pairs with the "Pair device
+  /// with pairing code" screen. The six-digit code is read from stdin, so it
+  /// never sits in the shell history or the process list.
+  Future<int> _pair(List<String> words) async {
+    final args = [...words];
+    String? id;
+    final at = args.indexOf('--id');
+    if (at >= 0) {
+      if (at + 1 >= args.length) throw UsageException('--id needs ID', usage);
+      id = args[at + 1];
+      args.removeRange(at, at + 2);
+    }
+    final port = args.length == 2 ? int.tryParse(args[1]) : null;
+    if (port == null) {
+      throw UsageException('needs HOST PORT, the pairing address', usage);
+    }
+    omni.out.write('Pairing code shown on the phone: ');
+    String code;
+    try {
+      code =
+          (await const LineSplitter().bind(utf8.decoder.bind(omni.input)).first)
+              .trim();
+    } on StateError {
+      throw UsageException('no pairing code on stdin', usage);
+    }
+    omni.out.writeln();
+    return _send(omni, 'android.pair', {
+      'host': args[0],
+      'port': port,
+      'code': code,
+      'id': ?id,
+    });
   }
 
   Future<bool> _confirm(String question) async {
@@ -325,6 +378,11 @@ class TvCommand extends Command<int> {
         return ('tv.record.$sub', {'id': id});
       case 'system':
         return ('tv.system', {'id': id});
+      case 'notifications':
+        final action = words.isEmpty
+            ? 'expand'
+            : one('expand, settings or collapse');
+        return ('tv.notifications', {'id': id, 'action': action});
       case 'processes':
         return ('tv.processes', {'id': id});
       case 'permissions':

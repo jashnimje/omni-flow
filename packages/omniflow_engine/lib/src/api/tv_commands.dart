@@ -9,6 +9,7 @@ import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'stored_flows.dart';
+import '../devices/adb/adb_channel.dart' show adbTlsGuidPattern;
 import '../devices/adb/adb_commands.dart';
 import '../devices/adb/adb_sync.dart';
 import '../devices/adb/tv_keys.dart';
@@ -221,18 +222,51 @@ class TvCommands {
       _lastHeal[tv.device.id] = now;
       final host = await _core.discovery.locator(tv.manifest, stableId);
       if (host == null || host == tv.device.host) rethrow;
-      final moved = await _core.devices.updateDevice(
-        tv.device.id,
+      // Anyone on the network can announce the name, so the host there
+      // proves it is this device before anything is sent or saved: a TV
+      // by its serial, a phone by the key pinned at its first connection
+      // (checked by the ADB channel during TLS).
+      final before = tv.device;
+      final there = before.copyWith(host: host);
+      if (!await _sameTv(tv, there, stableId)) rethrow;
+      tv.device = there;
+      final T result;
+      try {
+        result = await op();
+      } catch (_) {
+        tv.device = before;
+        rethrow;
+      }
+      tv.device = await _core.devices.updateDevice(
+        before.id,
         (d) => d.copyWith(host: host),
       );
       _core.emit({
         'event': 'device.moved',
-        'deviceId': tv.device.id,
-        'from': tv.device.host,
+        'deviceId': before.id,
+        'from': before.host,
         'to': host,
       });
-      tv.device = moved;
-      return op();
+      return result;
+    }
+  }
+
+  /// Whether [there] answers as the device [stableId] names. A TV's id is
+  /// `adb-<serial>`, read back with getprop. A Wireless Debugging guid is
+  /// proved by its pinned key instead.
+  Future<bool> _sameTv(_Tv tv, Device there, String stableId) async {
+    if (adbTlsGuidPattern.hasMatch(stableId)) return true;
+    if (!stableId.startsWith('adb-')) return false;
+    try {
+      final serial = (await _core.adb.run(
+        there,
+        tv.manifest,
+        'getprop ro.serialno',
+        offerKey: tv.offerKey,
+      )).trim();
+      return 'adb-$serial' == stableId;
+    } on Exception {
+      return false;
     }
   }
 

@@ -230,7 +230,7 @@ class _TryAsIfButtonState extends ConsumerState<TryAsIfButton> {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => TestRunPage(
-          name: name.isEmpty ? 'New rule' : name,
+          name: name.isEmpty ? 'New automation' : name,
           dryRun: run,
           rule: draft.spec.toJson(),
           unsaved: true,

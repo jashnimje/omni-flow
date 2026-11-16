@@ -6,6 +6,7 @@ import '../../rules/things.dart';
 import '../../state/providers.dart';
 import '../design/automation_look.dart';
 import '../design/design.dart';
+import '../onboarding/home_setup.dart' show SetupStep, openHomeSetup;
 import 'automations_state.dart';
 import 'form_parts.dart';
 import 'link_sheet.dart';
@@ -367,11 +368,20 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
     if (choices.isEmpty) {
       return [
         header,
-        OmniBanner.warning(switch (p.kind) {
-          'person' => 'This needs a person. Add a place and a person first.',
-          'tag' => 'This needs an NFC tag. Add one with Add first.',
-          _ => 'Nothing you have added can do this yet.',
-        }, key: ValueKey('tpl-missing-${p.key}')),
+        OmniBanner.warning(
+          switch (p.kind) {
+            'person' =>
+              'This needs to know who you are and when you are home. Set up '
+                  'your home first, then come back.',
+            'tag' => 'This needs an NFC tag. Add one with Add first.',
+            _ => 'Nothing you have added can do this yet.',
+          },
+          key: ValueKey('tpl-missing-${p.key}'),
+          actionLabel: p.kind == 'person' ? 'Set up home' : null,
+          onAction: p.kind == 'person'
+              ? () => openHomeSetup(context, start: SetupStep.you)
+              : null,
+        ),
       ];
     }
     final many = p.kind == 'toggles';

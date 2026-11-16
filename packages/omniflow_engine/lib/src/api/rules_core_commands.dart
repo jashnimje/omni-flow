@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'api_error.dart';
 import 'automation_commands.dart';
 import 'automation_view.dart';
@@ -7,7 +9,6 @@ import 'engine_core.dart';
 import 'flow_commands.dart';
 import 'link_commands.dart';
 import 'versions.dart';
-import '../dag/canonical.dart';
 import '../dag/people_triggers.dart' show personDriver;
 import '../dag/skips.dart';
 import '../storage/database.dart';
@@ -28,6 +29,15 @@ import '../storage/database.dart';
 /// Every save through `automation.save`, `scene.save`, `flow.save` and
 /// `link.create` keeps the version it replaces, so these commands take over
 /// those names in the command table and pass each save on as it was.
+///
+/// Removing an automation keeps it, with its versions, in a recently
+/// removed list for 30 days:
+///
+/// - `automation.remove {id}` (and `flow.remove`, `scene.remove`): the
+///   reply says until when it can be put back.
+/// - `automation.removed`: what can be put back, newest first.
+/// - `automation.unremove {id}`: puts it back as it was, with its versions.
+///   Turned on only when it was on and every thing it uses is still there.
 /// `automation.list` passes through the same way, and adds to each row the
 /// `conflicts` it is in, as their reasons.
 class RulesCoreCommands {
@@ -46,39 +56,178 @@ class RulesCoreCommands {
   AutomationVersionStore get _versions => AutomationVersionStore(_core.db);
 
   Map<String, CommandHandler> get commands => {
+    'automation.removed': removedList,
+    'automation.unremove': unremove,
+    'automation.remove': keepingRemoved(_flowCommands.remove),
+    'flow.remove': keepingRemoved(_flowCommands.remove),
+    'scene.remove': keepingRemoved(_automations.removeScene),
+    'automation.enable': forgettingTurnedOff(_flowCommands.enable),
+    'flow.enable': forgettingTurnedOff(_flowCommands.enable),
     'automation.skips': skips,
     'automation.conflicts': conflicts,
     'automation.list': withConflicts(_automations.list),
     'automation.versions': versions,
     'automation.restore': restore,
-    'automation.save': keepingVersions(_automations.save),
+    'automation.save': warningLeave(keepingVersions(_automations.save)),
     'scene.save': keepingVersions(_automations.saveSceneCommand),
     'flow.save': keepingVersions(_flowCommands.save),
     'link.create': keepingVersions(_links.create),
   };
 
   /// [save] that keeps the stored version it replaces, when it changed.
-  CommandHandler keepingVersions(CommandHandler save) => (args) async {
-    final store = DriftFlowStore(_core.db);
-    final before = {for (final r in await store.all()) '${r.json['id']}': r};
+  CommandHandler keepingVersions(CommandHandler save) =>
+      (args) => keepingVersionsOf(_core.db, () => save(args));
+
+  /// Whether this engine runs on a phone, where no hub runs the home's
+  /// automations once the phone leaves. A hub's engine runs on a computer;
+  /// a phone in hub mode saves to the hub, never here. Tests set it.
+  static bool Function() onPhone = _isAndroid;
+
+  static bool _isAndroid() => Platform.isAndroid;
+
+  /// The words a save without a hub carries for a "when I leave" rule.
+  static const leaveWithoutHub =
+      'There is no hub, so once this phone leaves home only phone actions '
+      'and web requests can run. Steps for devices at home fail until a '
+      'hub runs this automation.';
+
+  /// [save] that adds [leaveWithoutHub] to the reply's `warnings` when the
+  /// rule starts on someone leaving and this engine is a phone's.
+  CommandHandler warningLeave(CommandHandler save) => (args) async {
     final saved = await save(args);
-    final id = saved['id'];
-    final old = id is String ? before[id] : null;
-    if (old != null) {
-      final now = await store.get(id as String);
-      if (now == null || _content(now) != _content(old)) {
-        await _versions.add(old, DateTime.now());
-      }
+    final spec = args['spec'];
+    if (!onPhone() ||
+        args['form'] != FlowRecord.rule ||
+        spec is! Map ||
+        !await _startsOnLeaving(spec['when'])) {
+      return saved;
     }
-    return saved;
+    return {
+      ...saved,
+      'warnings': [...?(saved['warnings'] as List?), leaveWithoutHub],
+    };
   };
 
-  /// What a version is, without its on or off.
-  static String _content(FlowRecord r) => canonicalJson({
-    'flow': {...r.json}..remove('enabled'),
-    'spec': r.spec,
-    'source': r.source,
-  });
+  /// Whether a rule's [when] starts on the last person leaving, or on a
+  /// person's `home` turning false.
+  Future<bool> _startsOnLeaving(Object? when) async {
+    if (when is! List) return false;
+    final people = {
+      for (final d in await DriftDeviceStore(_core.db).all())
+        if (d.driverId == personDriver) d.id,
+    };
+    for (final t in when.whereType<Map>()) {
+      if (t['people'] == 'last_leaves') return true;
+      final on = t['on'];
+      if (on is! String || !on.endsWith('.home')) continue;
+      if (!people.contains(on.substring(0, on.length - '.home'.length))) {
+        continue;
+      }
+      final change = t['change'];
+      if (change is! Map || change['to'] != true) return true;
+    }
+    return false;
+  }
+
+  /// [remove] that keeps what it removes in the recently removed list,
+  /// with its versions, and says so.
+  CommandHandler keepingRemoved(CommandHandler remove) =>
+      (args) => keepingVersionsOf(_core.db, () async {
+        final id = stringArg(args, 'id');
+        final record = await DriftFlowStore(_core.db).get(id);
+        final versions = await _versions.of(id);
+        final removed = await remove(args);
+        if (record == null || removed['removed'] != true) return removed;
+        final now = DateTime.now();
+        await RemovedAutomationStore(_core.db).add(record, versions, now);
+        await _versions.removeOf(id);
+        await TurnedOffByRemoval(_core.db).forgetFlow(id);
+        final until = now.add(removedKeptFor);
+        return {
+          ...removed,
+          'restorable': true,
+          'keptUntil': until.toUtc().toIso8601String(),
+          'message':
+              'Removed. You can put it back from Recently removed for '
+              '${removedKeptFor.inDays} days.',
+        };
+      });
+
+  /// [enable] that forgets a device removal turned it off, since the user
+  /// now chose.
+  CommandHandler forgettingTurnedOff(CommandHandler enable) => (args) async {
+    final result = await enable(args);
+    await TurnedOffByRemoval(_core.db).forgetFlow(stringArg(args, 'id'));
+    return result;
+  };
+
+  /// `automation.removed`: the automations that can be put back.
+  Future<Map<String, Object?>> removedList(Map<String, Object?> _) async => {
+    'removed': [
+      for (final r in await RemovedAutomationStore(
+        _core.db,
+      ).all(DateTime.now()))
+        r.toJson(),
+    ],
+    'keptDays': removedKeptFor.inDays,
+  };
+
+  /// `automation.unremove {id}`: puts a removed automation back.
+  Future<Map<String, Object?>> unremove(Map<String, Object?> args) =>
+      keepingVersionsOf(_core.db, () async {
+        final id = stringArg(args, 'id');
+        final store = RemovedAutomationStore(_core.db);
+        final removed = await store.get(id, DateTime.now());
+        if (removed == null) {
+          throw ApiError(
+            'not_found',
+            'there is no removed automation $id to put back. Removed ones are '
+                'kept for ${removedKeptFor.inDays} days',
+          );
+        }
+        if (await DriftFlowStore(_core.db).get(id) != null) {
+          throw ApiError(
+            'exists',
+            'an automation $id exists now. Rename or remove it first',
+          );
+        }
+        final r = removed.record;
+        await DriftFlowStore(_core.db).put(
+          id,
+          {...r.json, 'enabled': false},
+          enabled: false,
+          approved: r.approved,
+          trusted: r.trusted,
+          at: DateTime.now().toUtc(),
+          source: r.source,
+          spec: r.spec,
+        );
+        await _versions.putBack(removed.versions);
+        await store.forget(id);
+        var enabled = false;
+        String? offBecause;
+        if (r.enabled) {
+          try {
+            await _flowCommands.enable({'id': id, 'enabled': true});
+            enabled = true;
+          } on ApiError catch (e) {
+            offBecause = e.message;
+          }
+        }
+        if (!enabled) await _flowCommands.enable({'id': id, 'enabled': false});
+        _core.emit({
+          'event': 'automation.changed',
+          'command': 'automation.unremove',
+          'id': id,
+        });
+        return {
+          'id': id,
+          'name': removed.name,
+          'enabled': enabled,
+          'versions': removed.versions.length,
+          'offBecause': ?offBecause,
+        };
+      });
 
   Future<Map<String, Object?>> versions(Map<String, Object?> args) async {
     final id = stringArg(args, 'id');

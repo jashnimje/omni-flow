@@ -8,7 +8,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../state/providers.dart';
 import '../../state/reload_home.dart';
+import '../add/guided_steps_page.dart' show openSetup;
 import '../design/design.dart';
+import '../../api/screen_calls.dart';
 
 /// Opens Android's share sheet for a file: Save to Drive, Gmail, Files.
 /// Tests stand in for it.
@@ -53,7 +55,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
       _error = null;
       _saved = null;
     });
-    final r = await ref.read(engineClientProvider).call('config.export');
+    final r = await ref.read(engineClientProvider).call(BackupCalls.export);
     if (!mounted) return;
     if (r['ok'] != true) {
       setState(() {
@@ -95,6 +97,15 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     } on FormatException {
       setState(() => _error = '${files.first.name} is not an OmniFlow backup.');
       return;
+    } on FileSystemException {
+      // A file that went away, or one Android no longer lets OmniFlow read.
+      if (!mounted) return;
+      setState(
+        () => _error =
+            '${files.first.name} could not be read. Pick it again from '
+            'where it is saved.',
+      );
+      return;
     }
     final engine = ref.read(engineClientProvider);
     setState(() {
@@ -102,7 +113,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
       _error = null;
       _restored = null;
     });
-    final plan = await engine.call('config.import', {
+    final plan = await engine.call(BackupCalls.import, {
       'backup': backup,
       'mode': 'merge',
       'dryRun': true,
@@ -123,7 +134,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     );
     if (!ok || !mounted) return;
     setState(() => _busy = true);
-    final done = await engine.call('config.import', {
+    final done = await engine.call(BackupCalls.import, {
       'backup': backup,
       'mode': 'merge',
     });
@@ -226,8 +237,13 @@ class _BackupPageState extends ConsumerState<BackupPage> {
                   icon: OmniIcons.permissions,
                   title: '${s['name'] ?? s['id']}',
                   subtitle: s['pair'] == true
-                      ? 'pair it again from its page'
-                      : 'enter its key again from its page',
+                      ? 'pair it again: tap to start'
+                      : 'enter its key again: tap to start',
+                  chevron: true,
+                  onTap: () => openSetup(context, {
+                    'id': s['id'],
+                    'name': s['name'] ?? s['id'],
+                  }),
                 ),
             ],
           ],

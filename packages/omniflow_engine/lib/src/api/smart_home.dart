@@ -83,6 +83,18 @@ class SmartHome {
 
   void _stop() => _timer.cancel();
 
+  /// A removed device: its energy totals, its place in sun and away
+  /// lighting and what they last saw of it go, so a device added again
+  /// under the same id starts clean.
+  Future<void> forget(String id) async {
+    _seen.remove(id);
+    _weatherNext.remove(id);
+    energy.meter.forget(id);
+    await energy.forgetSaved();
+    await sun.forgetTarget(id);
+    await away.forgetLight(id);
+  }
+
   /// Stops the minute tick and saves what is not saved yet, as the engine
   /// closes.
   Future<void> close() async {
@@ -155,6 +167,9 @@ class SmartHome {
       return await _core.devices.mergeState(d.id, state);
     } catch (e) {
       _weatherNext[d.id] = now.add(weatherRetry);
+      if (weatherStalePatch(d.state, now) case final stale?) {
+        await _core.devices.mergeState(d.id, stale);
+      }
       _core.emit({
         'event': 'weather.failed',
         'device': d.id,

@@ -67,6 +67,10 @@ class AndroidPairCommands {
       };
     }
     if (id != null) {
+      // A new pairing is the user's say that this is the phone: its first
+      // TLS connection pins its identity again. The pairing port's own
+      // certificate is made fresh for each pairing, so it is no identity.
+      await _core.adb.forgetIdentity(id);
       await _core.devices.updateDevice(
         id,
         (d) => d.copyWith(stableId: result.guid),

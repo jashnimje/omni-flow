@@ -16,6 +16,8 @@ export 'src/api/ssh_hub_client.dart';
 export 'src/api/nfc_tags.dart' show normalizeUid, nfcTagDriverId;
 export 'src/api/adb_phone_connection.dart';
 export 'src/api/agent_policy.dart';
+export 'src/api/rule_words_commands.dart'
+    show keepStepsLast, ruleMissing, stepsFilled, typedValue;
 export 'src/api/omni_engine.dart';
 export 'src/api/thing_setup.dart'
     show nextSetupStep, pairingProofSecret, settingPresent;
@@ -45,6 +47,7 @@ export 'src/dag/transformers.dart';
 export 'src/dag/validator.dart';
 export 'src/devices/adb/adb_channel.dart';
 export 'src/devices/adb/adb_commands.dart' show AdbAction, TvShell, shellQuote;
+export 'src/devices/adb/app_labels.dart' show appLabelFor;
 export 'src/devices/adb/tv_keys.dart' show tvKeyCodes, tvKeyGroups;
 export 'src/devices/adb/adb_key.dart' show adbHostKeySecret;
 export 'src/devices/board.dart';

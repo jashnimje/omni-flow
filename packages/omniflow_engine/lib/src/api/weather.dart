@@ -13,6 +13,30 @@ const weatherEvery = Duration(hours: 1);
 /// How long to wait after a failed request before trying again.
 const weatherRetry = Duration(minutes: 15);
 
+/// Weather older than this is marked `stale`, and rain is no longer
+/// counted as expected, so rules do not act on yesterday's forecast.
+const weatherStaleAfter = Duration(hours: 3);
+
+/// What the weather thing says once its weather is [weatherStaleAfter] old.
+const weatherStaleWords =
+    'This weather is more than 3 hours old, since the weather service has '
+    'not answered. Rain is not counted as expected until it does';
+
+/// What to merge into a weather thing's [state] at [now] after a failed
+/// read: `stale`, the words, and no rain expected once its `updated_at`
+/// is [weatherStaleAfter] old. Null while it is fresh, or already marked.
+Map<String, Object?>? weatherStalePatch(
+  Map<String, Object?> state,
+  DateTime now,
+) {
+  final updated = DateTime.tryParse('${state['updated_at']}');
+  if (updated != null && now.difference(updated) < weatherStaleAfter) {
+    return null;
+  }
+  if (state['stale'] == true) return null;
+  return {'stale': true, 'rain_expected': false, 'problem': weatherStaleWords};
+}
+
 /// The forecast request for [home], rounded to two decimals (about a
 /// kilometre) so the exact address never leaves the phone.
 Uri weatherRequest(HomeLocation home, {Uri? base}) {
@@ -115,6 +139,7 @@ Map<String, Object?> weatherState(Object? reply, DateTime now) {
     'high_today': daily is Map ? _at(daily['temperature_2m_max'], 0) : null,
     'low_today': daily is Map ? _at(daily['temperature_2m_min'], 0) : null,
     'updated_at': now.toUtc().toIso8601String(),
+    'stale': false,
     'problem': null,
   };
 }

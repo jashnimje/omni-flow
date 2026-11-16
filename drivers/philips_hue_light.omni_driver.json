@@ -8,9 +8,9 @@
   "discovery": [{ "method": "mdns", "service": "_hue._tcp", "idTxt": "bridgeid", "usePort": false }],
   "pairing": { "method": "hue_bridge" },
   "settings": [
-    { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)" },
-    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true },
-    { "key": "gamut", "label": "Colour gamut the light reports as capabilities.control.colorgamuttype: A, B or C (the default)" }
+    { "key": "lightId", "label": "Light number on the bridge (1, 2, ...)", "help": "The light's number on the Hue bridge: 1 for the first light added, then 2 and so on.\nIn the Hue app open Settings, Lights, and count down the list, or let OmniFlow find the lights on the bridge." },
+    { "key": "username", "label": "Bridge username, stored by pairing after the link button is pressed", "secret": true, "help": "The key the bridge gives OmniFlow when you press its round link button during pairing. You never type it. It stays on this phone." },
+    { "key": "gamut", "label": "Colour gamut the light reports as capabilities.control.colorgamuttype: A, B or C (the default)", "help": "Which range of colours the bulb can show: A, B or C. Leave it empty for C, which newer bulbs use.\nIf colours look wrong on an older bulb, try A or B." }
   ],
   "setup": ["pair", "configure:lightId"],
   "statePoll": { "intervalSeconds": 30, "command": { "path": "/api/:secret:username/lights/{{device.lightId}}" }, "jsonPath": "$.state" },

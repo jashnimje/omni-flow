@@ -3,10 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/providers.dart';
 import '../design/design.dart';
+import '../../api/screen_calls.dart';
 
 /// What an AI agent may change through MCP: `read` or `setup`.
 final agentAccessProvider = FutureProvider<String?>((ref) async {
-  final reply = await ref.watch(engineClientProvider).call('agent.access');
+  final reply = await ref.watch(engineClientProvider).call(AgentCalls.access);
   return reply['ok'] == true ? reply['access'] as String? : null;
 });
 
@@ -26,7 +27,7 @@ const _levels = {
   ),
 };
 
-/// The row in Settings, Claude and agents, and its choice sheet.
+/// The row in Settings, Agents, and its choice sheet.
 class AgentAccessRow extends ConsumerWidget {
   const AgentAccessRow({super.key});
 
@@ -82,7 +83,7 @@ class AgentAccessRow extends ConsumerWidget {
     );
     if (picked == null || picked == current || !context.mounted) return;
     final reply = await ref.read(engineClientProvider).call(
-      'agent.access.set',
+      AgentCalls.setAccess,
       {'access': picked},
     );
     if (reply['ok'] != true) showMessage(errorMessage(reply));

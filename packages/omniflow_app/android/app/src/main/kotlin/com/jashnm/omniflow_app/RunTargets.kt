@@ -3,6 +3,7 @@ package com.jashnm.omniflow_app
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.widget.Toast
 import org.json.JSONException
 import java.io.IOException
@@ -149,7 +150,7 @@ object RunTargets {
         val (command, args) = runCall(target, msg)
         Thread {
             var sent = false
-            val reply = try {
+            fun attempt(): JSONObject? = try {
                 EngineSocket.call(app, command, args, RUN_TIMEOUT_MS) {
                     sent = true
                     main.post {
@@ -165,6 +166,20 @@ object RunTargets {
             } catch (_: JSONException) {
                 null
             }
+            var reply = attempt()
+            // A tap on a widget, tile or shortcut is a time Android lets the
+            // app start its service: start it, wait for the engine, and try
+            // once more.
+            if (!sent && reply?.optJSONObject("error")?.optString("type") == EngineSocket.UNREACHABLE) {
+                val failed = ServiceStarter.start(app)
+                reply = if (failed != null) {
+                    EngineSocket.failure(EngineSocket.UNREACHABLE, failed)
+                } else if (waitForEngine(app)) {
+                    attempt()
+                } else {
+                    EngineSocket.failure(EngineSocket.UNREACHABLE, STARTING)
+                }
+            }
             main.post {
                 if (!sent) started(false)
                 if (reply != null && !reply.optBoolean("ok")) {
@@ -174,5 +189,23 @@ object RunTargets {
         }.start()
     }
 
+    /** Waits up to [START_WAIT_MS] for the engine to answer on its socket. */
+    private fun waitForEngine(app: Context): Boolean {
+        val until = SystemClock.elapsedRealtime() + START_WAIT_MS
+        while (SystemClock.elapsedRealtime() < until) {
+            try {
+                EngineSocket.call(app, "engine.status", JSONObject(), 2_000)
+                return true
+            } catch (_: IOException) {
+            } catch (_: JSONException) {
+                return true
+            }
+            Thread.sleep(500)
+        }
+        return false
+    }
+
     private const val RUN_TIMEOUT_MS = 600_000
+    private const val START_WAIT_MS = 20_000L
+    private const val STARTING = "OmniFlow is starting. Try again in a moment"
 }

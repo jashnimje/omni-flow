@@ -7,6 +7,7 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 import '../home/home_data.dart' show roomsProvider;
 import '../home/tile_look.dart' show whiteOf;
+import '../settings/home_location_page.dart' show openHomeLocation;
 
 /// `sunlight.get`. Null when the engine has no such command, or the agent
 /// level hides it.
@@ -52,15 +53,21 @@ class FollowSunSwitch extends ConsumerWidget {
     final own = view.follows(device.id);
     final viaRoom = !own && view.followsLight(device.id);
     final paused = view.paused.contains(device.id);
+    final blocked = view.problem != null && !own && !viaRoom;
     return _FollowRow(
       key: ValueKey('follow-sun-${device.id}'),
       on: own || viaRoom,
-      subtitle: viaRoom
+      blocked: blocked,
+      subtitle: blocked
+          ? needsHomeWords
+          : viaRoom
           ? 'Follows the sun with its room'
           : paused
           ? 'Paused for an hour after a change by hand'
           : 'Warm and dim at night, cool and bright at midday',
-      onChanged: viaRoom ? null : (on) => _setFollow(ref, [device.id], on),
+      onChanged: viaRoom || blocked
+          ? null
+          : (on) => _setFollow(ref, [device.id], on),
     );
   }
 }
@@ -83,14 +90,21 @@ class RoomFollowSunSwitch extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final id = room.single;
+    final blocked = view.problem != null && !view.follows(id);
     return _FollowRow(
       key: ValueKey('follow-sun-room-$id'),
       on: view.follows(id),
-      subtitle: 'Every light in this room',
-      onChanged: (on) => _setFollow(ref, [id], on),
+      blocked: blocked,
+      subtitle: blocked ? needsHomeWords : 'Every light in this room',
+      onChanged: blocked ? null : (on) => _setFollow(ref, [id], on),
     );
   }
 }
+
+/// Why Follow the sun cannot be turned on yet.
+const needsHomeWords =
+    'Set where home is first: Settings, Your home, Home location. Tap to '
+    'set it.';
 
 class _FollowRow extends StatelessWidget {
   const _FollowRow({
@@ -98,19 +112,23 @@ class _FollowRow extends StatelessWidget {
     required this.on,
     required this.subtitle,
     required this.onChanged,
+    this.blocked = false,
   });
 
   final bool on;
   final String subtitle;
   final ValueChanged<bool>? onChanged;
 
+  /// No home location yet: a tap opens Home location instead.
+  final bool blocked;
+
   @override
   Widget build(BuildContext context) => OmniListRow(
     icon: OmniIcons.sun,
     title: 'Follow the sun',
     subtitle: subtitle,
-    subtitleLines: 2,
-    onTap: () => openSunLighting(context),
+    subtitleLines: 3,
+    onTap: () => blocked ? openHomeLocation(context) : openSunLighting(context),
     trailing: LabelledSwitch(
       value: on,
       onChanged: onChanged,
@@ -142,13 +160,19 @@ class _SunLightingPageState extends ConsumerState<SunLightingPage> {
     final saved = view?.targets.firstOrNull?.curve ?? view?.curve;
     final curve = _curve ?? saved ?? const SunCurveView();
     final targets = <String>[for (final t in view?.targets ?? const []) t.id];
+    final noHome = view?.problem != null;
     return OmniPage(
       title: 'Follow the sun',
       body: ListView(
         key: const ValueKey('sun-lighting-page'),
         children: [
           if (view?.problem case final p?)
-            OmniBanner.info(p, key: const ValueKey('sun-problem')),
+            OmniBanner.info(
+              p,
+              key: const ValueKey('sun-problem'),
+              actionLabel: 'Set home location',
+              onAction: () => openHomeLocation(context),
+            ),
           if (view != null && view.preview.isNotEmpty) ...[
             const OmniSectionHeader('Today'),
             SunCurvePreview(points: view.preview),
@@ -215,8 +239,14 @@ class _SunLightingPageState extends ConsumerState<SunLightingPage> {
                 trailing: LabelledSwitch(
                   value: targets.contains(r.id),
                   label: '${r.name} follows the sun',
-                  onChanged: (on) =>
-                      _setFollow(ref, [r.id], on, curve: on ? curve : null),
+                  onChanged: noHome && !targets.contains(r.id)
+                      ? null
+                      : (on) => _setFollow(
+                          ref,
+                          [r.id],
+                          on,
+                          curve: on ? curve : null,
+                        ),
                 ),
               ),
           ],
@@ -239,8 +269,10 @@ class _SunLightingPageState extends ConsumerState<SunLightingPage> {
               trailing: LabelledSwitch(
                 value: targets.contains(l.id),
                 label: '${l.name} follows the sun',
-                onChanged: (on) =>
-                    _setFollow(ref, [l.id], on, curve: on ? curve : null),
+                onChanged: noHome && !targets.contains(l.id)
+                    ? null
+                    : (on) =>
+                          _setFollow(ref, [l.id], on, curve: on ? curve : null),
               ),
             ),
         ],

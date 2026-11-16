@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../api/engine_client.dart';
 import '../startup.dart';
+import '../state/providers.dart' show errorMessage;
 import 'engine_host.dart';
 import 'engine_owner.dart';
 import 'engine_link.dart';
@@ -22,6 +23,7 @@ import 'notifier.dart';
 import 'phone_actions.dart';
 import 'phone_inputs.dart';
 import 'service_engine_client.dart';
+import 'service_power.dart';
 import 'usb_links.dart';
 
 /// The id of the notification's Stop button.
@@ -145,9 +147,10 @@ class ForegroundServiceControl implements ServiceControl, RefreshableService {
   }
 
   /// connectedDevice, not dataSync: Android 15 limits dataSync services to
-  /// 6 hours a day and does not start them at boot. The wake lock keeps
-  /// timers and debounce gates running with the screen off, and the Wi-Fi
-  /// lock keeps device pushes arriving.
+  /// 6 hours a day and does not start them at boot. No wake lock and no
+  /// Wi-Fi lock for the service's life: [ServicePower] holds them only
+  /// while a run, a short window or a near time trigger needs them, and
+  /// wakes the phone with an exact alarm for the next time trigger.
   static void _init() => FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'omniflow_service',
@@ -160,8 +163,8 @@ class ForegroundServiceControl implements ServiceControl, RefreshableService {
       eventAction: ForegroundTaskEventAction.nothing(),
       autoRunOnBoot: true,
       autoRunOnMyPackageReplaced: true,
-      allowWakeLock: true,
-      allowWifiLock: true,
+      allowWakeLock: false,
+      allowWifiLock: false,
       allowAutoRestart: true,
       stopWithTask: false,
     ),
@@ -231,6 +234,8 @@ void startOmniService() => FlutterForegroundTask.setTaskHandler(
     inputs: PhoneInputs.new,
     actions: PhoneActionRunner.new,
     owner: EngineOwner(),
+    power: servicePowerFor,
+    notice: PluginServiceNotice(),
   ),
 );
 
@@ -317,9 +322,91 @@ Future<Started> _openHubClient(HubSettingsStore store) async {
   return (client: client as EngineClient, hubError: null);
 }
 
-/// Owns the engine for as long as the service runs: holds the multicast
-/// lock, answers the UI through [EngineHost], and closes the engine when
-/// the service stops.
+/// The service notification and the "not running" notice, so tests can
+/// stand in for them.
+abstract interface class ServiceNotice {
+  /// Sets the always-on service notification.
+  Future<void> show(
+    String title,
+    String text,
+    List<NotificationButton> buttons,
+  );
+
+  /// Posts "Automations are not running" with [reason] and a Start button.
+  Future<void> notRunning(String reason);
+
+  /// Takes that notice down.
+  Future<void> running();
+}
+
+/// The plugin's service notification and PowerBridge's notice.
+class PluginServiceNotice implements ServiceNotice {
+  PluginServiceNotice([AndroidPowerHands? power])
+    : _power = power ?? AndroidPowerHands();
+
+  final AndroidPowerHands _power;
+
+  @override
+  Future<void> show(
+    String title,
+    String text,
+    List<NotificationButton> buttons,
+  ) async {
+    try {
+      await FlutterForegroundTask.updateService(
+        notificationTitle: title,
+        notificationText: text,
+        notificationIcon: serviceIcon,
+        notificationButtons: buttons,
+      );
+    } on Object catch (e) {
+      debugPrint('OmniFlow service notification not updated: $e');
+    }
+  }
+
+  @override
+  Future<void> notRunning(String reason) => _power.notRunning(reason);
+
+  @override
+  Future<void> running() => _power.running();
+}
+
+/// The Stop button asks first: these answer it.
+const stopConfirmId = 'stop_yes';
+const keepRunningId = 'keep';
+const stopConfirmTitle = 'Stop automations?';
+const stopConfirmText =
+    'Nothing runs until you start OmniFlow again from the app, a widget, '
+    'or the Start button on the notice that follows.';
+const stopConfirmButtons = [
+  NotificationButton(id: stopConfirmId, text: 'Stop'),
+  NotificationButton(id: keepRunningId, text: 'Keep running'),
+];
+const stoppedByYou =
+    'You stopped OmniFlow. Tap Start, or open the app, to run automations '
+    'again';
+
+/// The service notification when the engine or the hub did not start.
+const notArmedTitle = 'Automations are not running';
+
+/// How long a background start waits before each new try, then the last
+/// one again and again.
+const startRetryDelays = [
+  Duration(seconds: 10),
+  Duration(seconds: 30),
+  Duration(minutes: 1),
+  Duration(minutes: 2),
+  Duration(minutes: 5),
+  Duration(minutes: 15),
+];
+
+/// What `hub.start` binds: the WiZ push and board hello ports.
+const hubStartArgs = {'wizPort': 38900, 'helloPort': 38951};
+
+/// Owns the engine for as long as the service runs: answers the UI through
+/// [EngineHost], keeps the service notification true to what runs, tries
+/// again when the engine or the hub fails to start, and closes the engine
+/// when the service stops.
 class OmniTaskHandler extends TaskHandler {
   OmniTaskHandler({
     required this.open,
@@ -329,6 +416,10 @@ class OmniTaskHandler extends TaskHandler {
     this.inputs,
     this.actions,
     this.owner,
+    this.power,
+    this.notice,
+    this.retryDelays = startRetryDelays,
+    this.confirmFor = const Duration(seconds: 30),
   }) : _host = EngineHost(send: send),
        _lock = lock ?? MulticastLock();
 
@@ -347,31 +438,120 @@ class OmniTaskHandler extends TaskHandler {
   /// engine. Null for a lone handler (tests).
   final EngineOwner? owner;
 
+  /// The locks and alarms, planned from what the engine is doing. Null
+  /// holds the multicast lock for the task's life instead (tests).
+  final ServicePower Function(
+    EngineClient engine,
+    PhoneInputs? inputs,
+    PhoneActionRunner? actions,
+  )?
+  power;
+  ServicePower? _power;
+
+  /// The service notification and the "not running" notice. Null in tests
+  /// that do not look at them.
+  final ServiceNotice? notice;
+
+  final List<Duration> retryDelays;
+
+  /// How long the Stop question stays before the notification goes back.
+  final Duration confirmFor;
+
   final Future<Started> Function() open;
   final Future<Object?> Function() stopService;
   final EngineHost _host;
   final MulticastLock _lock;
   EngineClient? _engine;
+  Timer? _retry;
+  Timer? _confirm;
+  var _tries = 0;
+  var _destroyed = false;
+
+  /// Why automations are not running now, or null when they are.
+  String? get trouble => _trouble;
+  String? _trouble;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     await owner?.claim();
-    await _lock.acquire();
+    if (power == null) await _lock.acquire();
+    await _openEngine();
+  }
+
+  Duration _nextDelay() =>
+      retryDelays[(_tries++).clamp(0, retryDelays.length - 1)];
+
+  Future<void> _openEngine() async {
+    if (_destroyed) return;
+    final Started started;
     try {
-      final started = await open();
-      _engine = started.client;
-      _host.attach(started.client, hubError: started.hubError);
-      _inputs = inputs?.call(started.client)?..start();
-      _actions = actions?.call(started.client)?..start();
-      final client = started.client;
-      final notifier = _notifier = AutomationNotifier(
-        client,
-        shows: client is HubEngineClient ? client.showsOnThisPhone : null,
-      );
-      unawaited(notifier.start());
+      started = await open();
     } on Object catch (e) {
       _host.fail('$e');
+      await _failed('OmniFlow could not open its home: $e');
+      _retry = Timer(_nextDelay(), () => unawaited(_openEngine()));
+      return;
     }
+    if (_destroyed) return;
+    final client = started.client;
+    _engine = client;
+    _host.attach(client, hubError: started.hubError);
+    _inputs = inputs?.call(client)?..start();
+    _actions = actions?.call(client)?..start();
+    final notifier = _notifier = AutomationNotifier(
+      client,
+      shows: client is HubEngineClient ? client.showsOnThisPhone : null,
+    );
+    unawaited(notifier.start());
+    _power = power?.call(client, _inputs, _actions);
+    unawaited(_power?.start());
+    _tries = 0;
+    if (started.hubError case final error?) {
+      await _failed('Automations did not start: $error');
+      _retry = Timer(_nextDelay(), () => unawaited(_startHub()));
+    } else {
+      await _healthy();
+    }
+  }
+
+  /// `hub.start` again: it arms the time triggers and the listeners.
+  Future<void> _startHub() async {
+    final engine = _engine;
+    if (_destroyed || engine == null) return;
+    Map<String, Object?> reply;
+    try {
+      reply = await engine.call('hub.start', hubStartArgs);
+    } on Object catch (e) {
+      reply = {
+        'ok': false,
+        'error': {'message': '$e'},
+      };
+    }
+    if (_destroyed) return;
+    if (reply['ok'] == true) {
+      _host.hubStarted();
+      await _healthy();
+      unawaited(_power?.plan());
+      return;
+    }
+    await _failed('Automations did not start: ${errorMessage(reply)}');
+    _retry = Timer(_nextDelay(), () => unawaited(_startHub()));
+  }
+
+  Future<void> _failed(String reason) async {
+    _trouble = reason;
+    await notice?.show(
+      notArmedTitle,
+      '$reason. OmniFlow tries again by itself.',
+      serviceButtons,
+    );
+    await notice?.notRunning(reason);
+  }
+
+  Future<void> _healthy() async {
+    _trouble = null;
+    await notice?.show(serviceTitle, serviceText, serviceButtons);
+    await notice?.running();
   }
 
   @override
@@ -382,14 +562,50 @@ class OmniTaskHandler extends TaskHandler {
 
   @override
   void onNotificationButtonPressed(String id) {
-    if (id != stopButtonId) return;
+    switch (id) {
+      case stopButtonId:
+        // An accidental tap in the shade must not end every automation.
+        if (notice == null) return _stop();
+        unawaited(
+          notice!.show(stopConfirmTitle, stopConfirmText, stopConfirmButtons),
+        );
+        _confirm?.cancel();
+        _confirm = Timer(confirmFor, () => unawaited(_restoreNotice()));
+      case stopConfirmId:
+        _confirm?.cancel();
+        unawaited(notice?.notRunning(stoppedByYou));
+        _stop();
+      case keepRunningId:
+        _confirm?.cancel();
+        unawaited(_restoreNotice());
+    }
+  }
+
+  Future<void> _restoreNotice() async {
+    final trouble = _trouble;
+    if (trouble == null) {
+      await notice?.show(serviceTitle, serviceText, serviceButtons);
+    } else {
+      await notice?.show(
+        notArmedTitle,
+        '$trouble. OmniFlow tries again by itself.',
+        serviceButtons,
+      );
+    }
+  }
+
+  void _stop() {
     unawaited(_host.stop(stoppedFromNotification));
     unawaited(stopService());
   }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    _destroyed = true;
+    _retry?.cancel();
+    _confirm?.cancel();
     try {
+      await _power?.stop();
       await _inputs?.stop();
       await _actions?.stop();
       await _notifier?.stop();
@@ -408,9 +624,55 @@ class OmniTaskHandler extends TaskHandler {
         case final HubEngineClient client:
           await client.close();
       }
-      await _lock.release();
+      if (power == null) await _lock.release();
     } finally {
       owner?.release();
     }
   }
+}
+
+/// The locks and alarms for the service's engine. In hub mode the phone
+/// runs no timers, so only runs and windows count.
+ServicePower servicePowerFor(
+  EngineClient engine,
+  PhoneInputs? inputs,
+  PhoneActionRunner? actions,
+) {
+  final hands = AndroidPowerHands();
+  final flows = engine is InProcessEngineClient ? engine.engine.flows : null;
+  DateTime? nextDue() {
+    final times = [?flows?.nextTimeDue, ?actions?.nextCalendarDue]..sort();
+    return times.firstOrNull;
+  }
+
+  final power = ServicePower(
+    hands: hands,
+    events: engine.events,
+    nextDue: nextDue,
+    retime: () {
+      flows?.retime();
+      actions?.retime();
+    },
+    hasBoards: () async {
+      final reply = await engine.call('device.list');
+      return [
+        for (final d in reply['devices'] as List? ?? const [])
+          if (d is Map &&
+              d['board'] == true &&
+              !'${d['host']}'.startsWith('usb:'))
+            d,
+      ].isNotEmpty;
+    },
+    onCalendarChanged: actions?.calendarChanged,
+    explain: (title, body, open) => AutomationNotifier.platformPost(
+      channel: 'problems',
+      id: 'power/$open'.hashCode & 0x7fffffff,
+      title: title,
+      body: body,
+      open: open,
+    ),
+  );
+  inputs?.onWifiChanged = power.wifiChanged;
+  actions?.onCalendarTimed = () => unawaited(power.plan());
+  return power;
 }

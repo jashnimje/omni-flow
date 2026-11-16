@@ -1,6 +1,7 @@
 import '../board.dart' show isSerialHost;
 import '../device.dart';
 import '../discovery.dart';
+import '../../api/house_things.dart' show reservedThingIds;
 import '../../manifest/driver_manifest.dart';
 import 'board_hellos.dart';
 import 'mdns_discovery.dart';
@@ -341,7 +342,8 @@ String _tail(DiscoveredDevice d) {
 }
 
 /// [raw] as a lower snake case device id not in [taken]: `Philips Hue -
-/// 0A0B0C` becomes `philips_hue_0a0b0c`, then `_2`, `_3` on a clash.
+/// 0A0B0C` becomes `philips_hue_0a0b0c`, then `_2`, `_3` on a clash. A
+/// built-in thing's id counts as taken.
 String suggestThingId(String raw, Set<String> taken) {
   var base = raw
       .toLowerCase()
@@ -352,8 +354,9 @@ String suggestThingId(String raw, Set<String> taken) {
   }
   if (base.isEmpty || !RegExp(r'^[a-z]').hasMatch(base)) base = 'thing_$base';
   base = base.replaceAll(RegExp(r'_+$'), '');
-  if (!taken.contains(base)) return base;
+  final used = {...taken, ...reservedThingIds};
+  if (!used.contains(base)) return base;
   for (var n = 2; ; n++) {
-    if (!taken.contains('${base}_$n')) return '${base}_$n';
+    if (!used.contains('${base}_$n')) return '${base}_$n';
   }
 }

@@ -3,9 +3,11 @@ import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
 
+import '../api/agent_policy.dart';
 import '../api/local_client.dart';
 import '../api/omni_engine.dart';
 import '../version.dart';
+import 'tool_words.dart';
 
 typedef _Board = ({String fqbn, bool wifi, String pins});
 
@@ -84,7 +86,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'with each capability\'s params. Optionally only one room.',
     inputSchema: JsonSchema.object(properties: {'room': JsonSchema.string()}),
     callback: (args, _) async => reply(
-      await engine.handle('device.list', {
+      await asAgent('device.list', {
         'withCapabilities': true,
         if (args['room'] != null) 'room': args['room'],
       }),
@@ -249,7 +251,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'each level opens and the ones only the user may send. Plan from this, then make each '
         'change with omniflow_call or the specific tools.',
     inputSchema: JsonSchema.object(properties: {}),
-    callback: (_, _) async => reply(await engine.handle('agent.describe', {})),
+    callback: (_, _) async => reply(await asAgent('agent.describe', {})),
   );
 
   server.registerTool(
@@ -265,8 +267,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'automation.save {form: "rule", '
         'spec, replace?} (the rule language is in create_rule), automation.dry_run {form, spec} or '
         '{id}, automation.enable {id, enabled}, automation.run {id}, automation.remove {id}, '
-        'tv.apps {id}, tv.key {id, key}. Saves are untrusted, so a high-risk automation (TV '
-        'settings, app management, host commands) waits for the user to approve it. Commands '
+        'tv.apps {id}, tv.key {id, key}. ${highRiskWords()}. ${tvAccessWords()}. Commands '
         'only the user may send come back as needs_user with the reason.',
     inputSchema: JsonSchema.object(
       properties: {'command': JsonSchema.string(), 'args': freeObject},
@@ -287,12 +288,16 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'order. rule is {name, when: [...], onlyIf?: [...], then: [...], mode?}. '
         'A trigger is {on: "thing.key", event: true, match?} (an event like front_door.scanned), '
         '{on: "thing.key", change: {to?: value}} (a state change, like jade.home to true), '
-        '{on: "thing.key", crosses: {above | below: number}}, {time: "HH:MM", days?: ["mon", ...]}, '
+        '{on: "thing.key", crosses: {above | below: number}} (a change or crosses trigger takes '
+        'for?: ms, from 1000 to a week, to fire only once the state has held that long), '
+        '{time: "HH:MM", days?: ["mon", ...]}, '
         '{sun: "sunrise" | "sunset", offset?: minutes (negative is before), days?} (needs home.location.set '
         'first, describe_omniflow says homeLocationSet; no sunrise on a polar day or night means no run), '
-        '{interval: seconds} or {manual: true}. Several triggers start the same steps. '
+        '{interval: seconds, offset?: seconds, between?: ["HH:MM", "HH:MM"]} (aligned to the '
+        'clock), {people: "first_arrives" | "last_leaves"}, {event: "engine_started"} or '
+        '{manual: true}. Several triggers start the same steps. '
         'A condition is {state: "thing.key" | var: "\$Name" | msg: "key", op: "==" | "!=" | "<" | '
-        '"<=" | ">" | ">=", value}, {between: ["HH:MM", "HH:MM"]}, {days: [...]}, {not: condition}, '
+        '"<=" | ">" | ">=", value}, {between: ["HH:MM", "HH:MM"]}, {days: [...]}, {people: "all_away" | "anyone_home"}, {not: condition}, '
         '{anyOf: [...]} or {allOf: [...]}. '
         'A step is {do: "thing.action", params?}, {toggle: "thing.action"}, {wait: ms}, '
         '{waitFor: {on, event | change | crosses, timeoutMs, onTimeout?: [steps]}} (a timeout ends '
@@ -324,20 +329,21 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'drive {do: "{{%item}}.power"}). A do step stores the device\'s new state in %state and '
         'an http step its {status, body} in %reply; both take as. The trigger\'s details stay '
         '{{msg.value}}, {{msg.device}}, {{msg.payload.<key>}}, and a share into automation.run '
-        'gives {{msg.shared.text}}. The rule may also set color (one of #00F5D4 #4D9DFF '
+        'gives {{msg.shared.text}}. A rule you save may show what the trigger brought '
+        '(msg.payload, msg.shared) in notify and ask steps and keep it in run variables, but one '
+        'that sends it, or a run variable made from it, to a device, a web request, a global '
+        'variable or another automation is refused. The rule may also set color (one of #00F5D4 #4D9DFF '
         '#A78BFA #F472B6 #FB923C #FACC15 #34D399 #94A3B8), icon (bolt home sunrise moon tv '
         'lightbulb movie music fan lock car bell heart star leaf fire), askFirst: true (a '
         'trigger asks the person before the run, running it by hand does not) and '
-        'notifyOnRun: true (announce "<name> ran" after a run that completes). The phone '
-        'thing has events app_opened, app_closed, notification (payload package and label; '
-        'agents never see its words), bluetooth_connected and bluetooth_disconnected (name, '
-        'address), and states app_on_screen, bluetooth_devices, screen_on, dnd_on and '
-        'charging. rule.tokens {rule, path} lists the values a step at path can use. '
+        'notifyOnRun: true (announce "<name> ran" after a run that completes). '
+        '${phoneThingWords()}. ${ruleKindWords()}. '
+        'rule.tokens {rule, path} lists the values a step at path can use. '
         'Shorthand strings work in any list: '
         '"home:entered", "nfc:front_door", "time:18:00", "sunset-30m", "lamp.power=true", "wait:2s", '
         '"notify:Welcome home". Issues come back at rule paths like then[2].do. A rule whose id '
-        '(from its name) another rule has is refused with exists: give it another name. Saved untrusted: '
-        'a rule that drives a host-command device waits for the user to approve it.',
+        '(from its name) another rule has is refused with exists: give it another name. '
+        '${highRiskWords()}.',
     inputSchema: JsonSchema.object(
       properties: {'rule': freeObject},
       required: ['rule'],
@@ -353,8 +359,9 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'Looks for devices on the local network at once (UDP broadcast, mDNS, Tuya broadcasts, '
         'board hellos) and returns candidates grouped by driver, with a suggested id and '
         'knownAs when one is a device already. Drivers no method finds are listed under '
-        'manual. Adding a find is the user\'s step: they run omni add, or use Add in the app. '
-        'windowMs is how long to listen, 100 to 60000.',
+        'manual. Finding needs setup access (thing.add is ${agentLevelOf('thing.add')} level). '
+        'At setup you add a find yourself with omniflow_call thing.add {candidate, name?, room?}; '
+        'pairing and keys stay the user\'s. windowMs is how long to listen, 100 to 60000.',
     inputSchema: JsonSchema.object(
       properties: {
         'windowMs': JsonSchema.integer(),
@@ -380,7 +387,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['deviceId'],
     ),
     callback: (args, _) async =>
-        reply(await engine.handle('thing.next', {'id': args['deviceId']})),
+        reply(await asAgent('thing.next', {'id': args['deviceId']})),
   );
 
   server.registerTool(
@@ -416,7 +423,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['deviceId'],
     ),
     callback: (args, _) async =>
-        reply(await engine.handle('board.describe', {'id': args['deviceId']})),
+        reply(await asAgent('board.describe', {'id': args['deviceId']})),
   );
 
   server.registerTool(
@@ -484,7 +491,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     description:
         'Lists flows with whether they are enabled, approved and running.',
     inputSchema: JsonSchema.object(),
-    callback: (_, _) async => reply(await engine.handle('flow.list', {})),
+    callback: (_, _) async => reply(await asAgent('flow.list', {})),
   );
 
   server.registerTool(
@@ -503,7 +510,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       },
     ),
     callback: (args, _) async => reply(
-      await engine.handle('automation.list', {
+      await asAgent('automation.list', {
         for (final key in const ['device', 'tag', 'needsYou', 'source'])
           if (args[key] != null) key: args[key],
       }),
@@ -513,14 +520,13 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
   server.registerTool(
     'list_rule_templates',
     description:
-        'Lists rule templates (arrive home, leave home all off, motion light, tag toggle, '
-        'bedtime) with their placeholders. With id and values, returns that template\'s rule '
-        'filled in, ready for create_rule.',
+        'Lists the rule templates (${templateWords()}) with their placeholders. With id and '
+        'values, returns that template\'s rule filled in, ready for create_rule.',
     inputSchema: JsonSchema.object(
       properties: {'id': JsonSchema.string(), 'values': freeObject},
     ),
     callback: (args, _) async => reply(
-      await engine.handle('automation.templates', {
+      await asAgent('automation.templates', {
         if (args['id'] != null) 'id': args['id'],
         if (args['values'] != null) 'values': args['values'],
       }),
@@ -531,7 +537,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     'list_scenes',
     description: 'Lists scenes: named sets of device actions run together.',
     inputSchema: JsonSchema.object(),
-    callback: (_, _) async => reply(await engine.handle('scene.list', {})),
+    callback: (_, _) async => reply(await asAgent('scene.list', {})),
   );
 
   server.registerTool(
@@ -574,7 +580,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     description:
         'Lists the rooms in the user\'s order, with how many devices each has.',
     inputSchema: JsonSchema.object(),
-    callback: (_, _) async => reply(await engine.handle('room.list', {})),
+    callback: (_, _) async => reply(await asAgent('room.list', {})),
   );
 
   server.registerTool(
@@ -618,7 +624,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['deviceId'],
     ),
     callback: (args, _) async => reply(
-      await engine.handle('device.history', {
+      await asAgent('device.history', {
         'id': args['deviceId'],
         for (final key in const ['key', 'limit', 'since'])
           if (args[key] != null) key: args[key],
@@ -635,7 +641,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
         'when one is scanned ("when": ["nfc:<tag id>"]). Naming, writing and scanning '
         'a tag are the user\'s steps, in the app or with omni tag.',
     inputSchema: JsonSchema.object(),
-    callback: (_, _) async => reply(await engine.handle('tag.list', {})),
+    callback: (_, _) async => reply(await asAgent('tag.list', {})),
   );
 
   server.registerTool(
@@ -653,7 +659,7 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
       required: ['flowId'],
     ),
     callback: (args, _) async => reply(
-      await engine.handle('flow.dryRun', {
+      await asAgent('flow.dryRun', {
         'id': args['flowId'],
         if (args['at'] != null) 'at': args['at'],
         if (args['trigger'] != null) 'trigger': args['trigger'],
@@ -664,13 +670,20 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
 
   server.registerTool(
     'sniff_live_packets',
-    description: 'Captures packets the engine sends and receives for a few seconds (1 to 10).',
+    description:
+        'Captures packets the engine sends and receives for a few seconds (1 to 10). They carry '
+        'what devices report, so this needs setup access.',
     inputSchema: JsonSchema.object(
       properties: {'seconds': JsonSchema.number()},
     ),
     callback: (args, _) async {
       final seconds = (args['seconds'] is num ? args['seconds'] as num : 3)
           .clamp(1, 10);
+      final access = await engine.handle('agent.access', {});
+      final level = AgentAccess.parse(access['access']) ?? AgentAccess.read;
+      if (agentPacketsRefusal(level) case final why?) {
+        return refuse('needs_user', why);
+      }
       final packets = <Map<String, Object?>>[];
       final Stream<Map<String, Object?>> events;
       try {
@@ -750,21 +763,24 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
   return server;
 }
 
-/// The TV tools: an agent reads a TV's state, apps, settings and files.
-/// Every change (keys, text, volume, apps, settings, files, install and the
-/// shell) is the user's, so `tv_change` only says what the user runs.
+/// The TV tools: an agent reads a TV's state, apps, settings and files
+/// under its access level. `tv_change` says, from the agent policy, which
+/// changes the agent sends itself and which the user runs.
 void _registerTvTools(
   McpServer server,
   EngineConnection engine,
   CallToolResult Function(Map<String, Object?>) reply,
   CallToolResult Function(String, String) refuse,
 ) {
+  // Under the agent's access level, like every other tool: agent.call adds
+  // allowPairing false, and a refusal keeps its reason.
   Future<CallToolResult> read(String command, Map<String, Object?> args) async {
-    final result = await engine.handle(command, {
-      ...args,
-      'allowPairing': false,
+    final result = await engine.handle('agent.call', {
+      'command': command,
+      'args': args,
     });
-    if (result['error'] case {'type': 'needs_user'}) {
+    if (result['error'] case {'type': 'needs_user', 'message': final String m}
+        when m.contains('pair') && !m.contains('for the user only')) {
       return refuse('needs_user', _pairCommandFor('${args['id']}'));
     }
     return reply(result);
@@ -903,52 +919,100 @@ void _registerTvTools(
   server.registerTool(
     'tv_change',
     description:
-        'Changing an Android TV is the user\'s step: pressing keys, typing, volume, opening, '
-        'stopping, clearing, disabling, installing or uninstalling apps, changing or deleting '
-        'settings, copying, moving, uploading, downloading or deleting files, and the shell. '
-        'This tool changes nothing. It returns the omni command for the user to run, or the '
-        'app screen to use. For a change that should run on its own, deploy a rule: one '
-        'that changes settings or apps waits for the user to approve it.',
+        'Says how a change to an Android TV or another Android phone is made: whether you send '
+        'it yourself with omniflow_call (and which command) or the user runs it. This tool '
+        'changes nothing. ${tvAccessWords()}. For a change that should run on its own, deploy '
+        'a rule: one that changes settings or apps, or types, waits for the user to approve it.',
     inputSchema: JsonSchema.object(
       properties: {
         ...device,
-        'change': JsonSchema.string(
-          enumValues: [
-            'remote',
-            'text',
-            'volume',
-            'apps',
-            'install',
-            'settings',
-            'files',
-            'shell',
-          ],
-        ),
+        'change': JsonSchema.string(enumValues: _tvChanges.keys.toList()),
       },
       required: ['deviceId', 'change'],
     ),
     callback: (args, _) async {
       final id = args['deviceId'];
-      final example = switch (args['change']) {
-        'remote' => 'omni tv $id remote <key>',
-        'text' => 'omni tv $id text <text>',
-        'volume' => 'omni tv $id volume <level>',
-        'apps' =>
-          'omni tv $id apps open|stop|clear-cache|clear-data|disable|enable|uninstall <package>',
-        'install' => 'omni tv $id apps install <file.apk>',
-        'settings' =>
-          'omni tv $id settings set|delete <namespace> <key> [value]',
-        'files' => 'omni tv $id files get|put|cp|mv|rm|mkdir|rename ...',
-        _ => 'omni tv $id shell',
-      };
+      final change = _tvChanges[args['change']] ?? _tvChanges['shell']!;
+      final got = await engine.handle('agent.call', {
+        'command': 'device.get',
+        'args': {'id': id},
+      });
+      final category = (got['device'] as Map?)?['category'];
+      final level = AgentAccess.parse(
+        (await engine.handle('agent.access', {}))['access'],
+      );
+      final why = agentRefusal(
+        change.command,
+        change.args,
+        AgentAccess.setup,
+        onPhone: category == 'phone',
+      );
+      if (why == null) {
+        return reply({
+          'ok': true,
+          'yours': true,
+          'needs': 'setup',
+          'access': level?.name,
+          'command': change.command,
+          'example': {
+            'command': 'omniflow_call',
+            'args': {
+              'command': change.command,
+              'args': {'id': id, ...change.args},
+            },
+          },
+        });
+      }
       return refuse(
         'needs_user',
-        'only the user can change $id: ask them to run $example on this computer, '
+        '$why. Ask the user to run ${change.user.replaceAll('ID', '$id')} on this computer, '
             'or to use the TV screen in the OmniFlow app',
       );
     },
   );
 }
+
+/// Each change tv_change answers for: the command an agent would send, an
+/// example of its arguments, and the omni command the user runs.
+const _tvChanges =
+    <String, ({String command, Map<String, Object?> args, String user})>{
+      'remote': (
+        command: 'tv.key',
+        args: {'key': 'volume_up'},
+        user: 'omni tv ID remote <key>',
+      ),
+      'text': (
+        command: 'tv.text',
+        args: {'text': '...'},
+        user: 'omni tv ID text <text>',
+      ),
+      'volume': (
+        command: 'tv.volume',
+        args: {'level': 10},
+        user: 'omni tv ID volume <level>',
+      ),
+      'apps': (
+        command: 'tv.app',
+        args: {'action': 'open', 'package': '<package>'},
+        user: 'omni tv ID apps open|stop|clear-cache|clear-data|disable|enable|uninstall <package>',
+      ),
+      'install': (
+        command: 'tv.install',
+        args: {},
+        user: 'omni tv ID apps install <file.apk>',
+      ),
+      'settings': (
+        command: 'tv.settings.put',
+        args: {},
+        user: 'omni tv ID settings set|delete <namespace> <key> [value]',
+      ),
+      'files': (
+        command: 'tv.files.delete',
+        args: {},
+        user: 'omni tv ID files get|put|cp|mv|rm|mkdir|rename ...',
+      ),
+      'shell': (command: 'tv.shell', args: {}, user: 'omni tv ID shell'),
+    };
 
 Future<String?> _driverIdOf(
   EngineConnection engine,

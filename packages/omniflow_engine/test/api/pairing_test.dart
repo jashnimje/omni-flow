@@ -431,11 +431,17 @@ void main() {
     expect(drivers['place']!['icon'], 'place');
     expect(drivers['place']!['category'], 'presence');
     expect(drivers['tuya_plug']!['settings'], [
-      {'key': 'devId', 'label': 'Device id'},
-      {'key': 'localKey', 'label': 'Local key', 'secret': true},
+      {'key': 'devId', 'label': 'Device id', 'help': isA<String>()},
+      {
+        'key': 'localKey',
+        'label': 'Local key',
+        'secret': true,
+        'help': contains('tinytuya'),
+      },
       {
         'key': 'version',
         'label': 'Tuya protocol version: 3.3 (the default), 3.4 or 3.5',
+        'help': isA<String>(),
       },
     ]);
   });

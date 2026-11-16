@@ -11,11 +11,16 @@ import '../storage/database.dart';
 
 /// `home.json` read and written a key at a time, so the home location,
 /// the mode and the alert switches share it without losing each other.
+/// Every writer of one file, in any instance, waits on one lock, and each
+/// write goes through its own temporary file.
 class HomeFile {
-  HomeFile(Directory home) : _file = File('${home.path}/home.json');
+  HomeFile(Directory home) : _file = File('${home.absolute.path}/home.json');
 
   final File _file;
-  Future<void> _last = Future.value();
+
+  /// The last write queued per file path, shared by every instance.
+  static final _locks = <String, Future<void>>{};
+  static var _temps = 0;
 
   Future<Map<String, Object?>> read() async {
     try {
@@ -29,15 +34,34 @@ class HomeFile {
     return {};
   }
 
-  /// Sets [values] and keeps every other key. Writes run one at a time.
-  Future<void> update(Map<String, Object?> values) {
-    final next = _last.then((_) async {
+  /// Sets [values], drops the keys in [remove], and keeps every other key.
+  /// Writes run one at a time.
+  Future<void> update(
+    Map<String, Object?> values, {
+    Iterable<String> remove = const [],
+  }) {
+    final path = _file.path;
+    final next = (_locks[path] ?? Future<void>.value()).then((_) async {
       final json = {...await read(), ...values};
-      final temp = File('${_file.path}.tmp');
-      await temp.writeAsString(jsonEncode(json), flush: true);
-      await temp.rename(_file.path);
+      for (final key in remove) {
+        json.remove(key);
+      }
+      final temp = File('$path.$pid.${_temps++}.tmp');
+      try {
+        await temp.writeAsString(jsonEncode(json), flush: true);
+        await temp.rename(path);
+      } catch (_) {
+        if (await temp.exists()) await temp.delete();
+        rethrow;
+      }
     });
-    _last = next.catchError((Object _) {});
+    final done = next.catchError((Object _) {});
+    _locks[path] = done;
+    unawaited(
+      done.then((_) {
+        if (identical(_locks[path], done)) _locks.remove(path);
+      }),
+    );
     return next;
   }
 }

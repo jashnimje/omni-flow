@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import '../../api/screen_calls.dart';
 
 /// Whether [d] runs commands over SSH, so it has a host key to check.
 bool usesSsh(DeviceView d) =>
@@ -36,7 +37,7 @@ class _HostKeySheetState extends ConsumerState<_HostKeySheet> {
 
   Future<void> _call(String action, [Json extra = const {}]) async {
     setState(() => _busy = true);
-    final r = await ref.read(engineClientProvider).call('device.hostkey', {
+    final r = await ref.read(engineClientProvider).call(DeviceCalls.hostKey, {
       'id': widget.device.id,
       'action': action,
       ...extra,

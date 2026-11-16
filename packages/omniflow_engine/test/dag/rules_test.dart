@@ -861,10 +861,10 @@ void main() {
       );
     });
 
-    test('the step\'s words leave out the query and the user', () {
+    test('the step\'s words leave out the query and the fragment', () {
       final flow = compileRule(
         normalizeRule(
-          rule({'url': 'https://me:pw@hub.test:8123/api/x?token=abc#f'}),
+          rule({'url': 'https://hub.test:8123/api/x?room=den#f'}),
           context: context,
         ),
       ).flow;
@@ -872,6 +872,37 @@ void main() {
         nodeOf(flow, 'then_0_try_0')['label'],
         'GET https://hub.test:8123/api/x',
       );
+    });
+
+    test('credentials in the address are refused with the secret header '
+        'hint', () {
+      for (final url in [
+        'https://me:pw@hub.test/api',
+        'https://hub.test/api?token=abc',
+        'https://hub.test/api?q=1&apikey=abc',
+        'https://hub.test/api?access_token={{%t}}',
+        'https://hub.test/api?API-KEY=abc',
+        'https://hub.test/api?client_secret=abc',
+        'https://hub.test/api?bot_token=abc',
+      ]) {
+        expect(
+          webAddressProblem(url),
+          allOf(contains('secret'), contains('X-Api-Key')),
+          reason: url,
+        );
+        expect(
+          () => normalizeRule(rule({'url': url}), context: context),
+          throwsA(isA<ValidationException>()),
+          reason: url,
+        );
+      }
+      for (final url in [
+        'https://hub.test/api?room=den',
+        'https://hub.test/api?q={{%item}}&page=2',
+        'https://hub.test/keys/list',
+      ]) {
+        expect(webAddressProblem(url), isNull, reason: url);
+      }
     });
 
     test('a secret header is read when it sends, and never traced', () async {

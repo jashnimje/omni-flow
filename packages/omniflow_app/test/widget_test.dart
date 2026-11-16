@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omniflow_app/state/providers.dart' show packetsCommand;
 import 'package:omniflow_app/ui/design/design.dart';
 
 import 'fake_engine.dart';
@@ -162,6 +163,7 @@ void main() {
 
   testWidgets('the inspector lists packets from events', (tester) async {
     await pumpApp(tester, engine);
+    await openDeveloper(tester);
     engine.eventsOut.add({
       'event': 'packet.captured',
       'transport': 'udp',
@@ -170,9 +172,31 @@ void main() {
       'text': '{"method":"setPilot"}',
       'at': '2026-11-06T19:00:00Z',
     });
-    await openDeveloper(tester);
     await tester.pumpAndSettle();
     expect(find.text('{"method":"setPilot"}'), findsOneWidget);
+  });
+
+  testWidgets('packets are taken only while the inspector is open', (
+    tester,
+  ) async {
+    await pumpApp(tester, engine);
+    expect(engine.callsOf(packetsCommand), isEmpty);
+    engine.eventsOut.add({
+      'event': 'packet.captured',
+      'transport': 'udp',
+      'direction': 'outgoing',
+      'remote': '192.168.1.40:38899',
+      'text': 'before it opened',
+      'at': '2026-11-06T19:00:00Z',
+    });
+    await tester.pumpAndSettle();
+    await openDeveloper(tester);
+    await tester.pumpAndSettle();
+    expect(engine.callsOf(packetsCommand).single.$2, {'on': true});
+    expect(find.text('before it opened'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(engine.callsOf(packetsCommand).last.$2, {'on': false});
   });
 
   testWidgets('an engine error shows as a snackbar', (tester) async {

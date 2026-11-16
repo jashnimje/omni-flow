@@ -56,7 +56,7 @@ void main() {
   testWidgets('builds a rule from the pickers in plain words and saves it '
       'as a trusted rule', (tester) async {
     await pumpPushed(tester, engine, const RuleEditorPage());
-    expect(find.text('New rule'), findsOneWidget);
+    expect(find.text('New automation'), findsOneWidget);
     expect(buttonEnabled(tester, 'rule-save'), isFalse);
     expect(find.text('Add a trigger and a step to save.'), findsOneWidget);
 

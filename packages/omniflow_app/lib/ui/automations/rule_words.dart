@@ -1,7 +1,9 @@
 import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:omniflow_engine/omniflow_engine.dart' show daysWords;
 
 import '../../api/engine_calls.dart' show Json;
+import '../../api/rule_calls.dart' show RuleWordPiece, RuleWordsReply;
 import '../../rules/house_words.dart';
 import '../../rules/rule_spec.dart';
 import '../../rules/things.dart';
@@ -115,24 +117,11 @@ const _dayNames = {
 
 String dayName(String day) => _dayNames[day] ?? day;
 
-/// "every day", "on weekdays", "on weekends" or "on Mon, Wed and Fri".
-String daysText(List<String> days) {
-  final set = days.toSet();
-  if (set.isEmpty || set.length == 7) return 'every day';
-  if (set.length == 5 && !set.contains('sat') && !set.contains('sun')) {
-    return 'on weekdays';
-  }
-  if (set.length == 2 && set.containsAll(const ['sat', 'sun'])) {
-    return 'on weekends';
-  }
-  final names = [
-    for (final d in weekDays)
-      if (set.contains(d)) dayName(d),
-  ];
-  return 'on ${andList(names)}';
-}
+/// "every day", "on weekdays", "on weekends" or "on Mon, Wed and Fri",
+/// in the engine's words.
+String daysText(List<String> days) => daysWords(days);
 
-/// "a", "a and b", "a, b and c".
+/// "a", "a or b", "a, b or c".
 String orList(List<String> items) => switch (items.length) {
   0 => '',
   1 => items.single,
@@ -286,7 +275,34 @@ class RuleWords {
     this.things, [
     this.automations = const {},
     Map<String, String>? tokenLabels,
-  ]) : tokenLabels = tokenLabels ?? {};
+    Map<String, List<RuleWordPiece>>? served,
+  ]) : tokenLabels = tokenLabels ?? {},
+       served = served ?? {};
+
+  /// The engine's words for the parts of the rule being edited, from
+  /// `rule.words`, by each part's JSON. A part found here reads exactly as
+  /// the automation card and the diagram read it. The words below are
+  /// only for a part the engine has not answered for yet.
+  final Map<String, List<RuleWordPiece>> served;
+
+  List<WordPart>? _served(Json part) {
+    if (served.isEmpty) return null;
+    final pieces = served[RuleWordsReply.keyOf(part)];
+    if (pieces == null || pieces.isEmpty) return null;
+    return [
+      for (final p in pieces)
+        WordPart(
+          p.token == null ? p.text : (tokenLabels[p.token] ?? p.text),
+          blank: Blank.values.where((b) => b.name == p.blank).firstOrNull,
+          token: p.token,
+        ),
+    ];
+  }
+
+  String? _servedText(Json part) {
+    final parts = _served(part);
+    return parts == null ? null : joinParts(parts);
+  }
 
   final List<Thing> things;
 
@@ -331,7 +347,9 @@ class RuleWords {
 
   // Triggers.
 
-  String trigger(RuleTrigger t) => switch (t) {
+  String trigger(RuleTrigger t) => _servedText(t.toJson()) ?? _trigger(t);
+
+  String _trigger(RuleTrigger t) => switch (t) {
     OnTrigger(forMs: final int ms) when t.canHold => _held(t, ms),
     OnTrigger() => _on(t),
     TimeTrigger() =>
@@ -478,7 +496,9 @@ class RuleWords {
 
   // Conditions.
 
-  String condition(RuleCondition c) => switch (c) {
+  String condition(RuleCondition c) => _servedText(c.toJson()) ?? _condition(c);
+
+  String _condition(RuleCondition c) => switch (c) {
     CompareCondition(source: 'state') => _state(c),
     CompareCondition(source: 'var') =>
       '${c.ref.replaceFirst(r'$', '')} ${_op(c.op)} ${_value(c.value)}',
@@ -597,7 +617,10 @@ class RuleWords {
   // Sentences with blanks.
 
   /// A trigger as words, with the parts a tap edits on their own.
-  List<WordPart> triggerParts(RuleTrigger t) => switch (t) {
+  List<WordPart> triggerParts(RuleTrigger t) =>
+      _served(t.toJson()) ?? _triggerParts(t);
+
+  List<WordPart> _triggerParts(RuleTrigger t) => switch (t) {
     TimeTrigger() => [
       const WordPart('At '),
       WordPart(t.at, blank: Blank.time),
@@ -610,7 +633,10 @@ class RuleWords {
   };
 
   /// A condition as words, with the parts a tap edits on their own.
-  List<WordPart> conditionParts(RuleCondition c) => switch (c) {
+  List<WordPart> conditionParts(RuleCondition c) =>
+      _served(c.toJson()) ?? _conditionParts(c);
+
+  List<WordPart> _conditionParts(RuleCondition c) => switch (c) {
     BetweenCondition() => [
       const WordPart('Between '),
       WordPart(c.start, blank: Blank.start),
@@ -622,7 +648,9 @@ class RuleWords {
 
   /// A step as words, with the parts a tap edits on their own: the device,
   /// what it does, how long, the text. [step] is these parts joined.
-  List<WordPart> stepParts(RuleStep s) => switch (s) {
+  List<WordPart> stepParts(RuleStep s) => _served(s.toJson()) ?? _stepParts(s);
+
+  List<WordPart> _stepParts(RuleStep s) => switch (s) {
     DoStep() when houseStepText(s) != null => [
       WordPart(houseStepText(s)!, blank: Blank.form),
     ],

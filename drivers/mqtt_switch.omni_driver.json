@@ -6,10 +6,10 @@
   "icon": "power",
   "transport": { "type": "mqtt", "port": 1883 },
   "settings": [
-    { "key": "commandTopic", "label": "Command topic, for ESPHome <node>/switch/<name>/command" },
-    { "key": "stateTopic", "label": "State topic, for ESPHome <node>/switch/<name>/state" },
-    { "key": "username", "label": "Broker user" },
-    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true }
+    { "key": "commandTopic", "label": "Command topic, for ESPHome <node>/switch/<name>/command", "help": "The topic the switch listens on for ON and OFF.\nFor ESPHome it is <node>/switch/<name>/command, where node is the device name in its YAML and name is the switch name in lower case with underscores." },
+    { "key": "stateTopic", "label": "State topic, for ESPHome <node>/switch/<name>/state", "help": "The topic the switch reports ON or OFF on.\nFor ESPHome it is <node>/switch/<name>/state." },
+    { "key": "username", "label": "Broker user", "help": "The user name your MQTT broker asks for. Leave it empty if the broker takes anyone. It is in the broker's settings, for example the Mosquitto add-on's Logins in Home Assistant." },
+    { "key": "password", "label": "Broker password (one per broker and user, shared by its devices)", "secret": true, "help": "The password for the broker user. It stays on this phone and is never shown again. Leave it empty if the broker has no password." }
   ],
   "setup": ["configure:commandTopic", "configure:stateTopic", "configure:username?", "secret:password?"],
   "statePush": { "topics": [{ "topic": "{{device.stateTopic}}", "key": "state" }] },

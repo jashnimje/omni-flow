@@ -18,17 +18,6 @@ import 'tv_system.dart';
 import 'tv_settings.dart';
 import 'tv_widgets.dart';
 
-Future<void> openTv(BuildContext context, Json device) =>
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => TvPage(
-          id: '${device['id']}',
-          name: '${device['name'] ?? device['id']}',
-          phone: TvCalls.isPhone(device),
-        ),
-      ),
-    );
-
 /// The Android device page's tabs. A TV and a phone show different ones
 /// as chips, and the rest under More.
 enum TvTab {
@@ -432,6 +421,3 @@ abstract final class Keycodes {
   static const wakeup = 224;
   static const mute = 164;
 }
-
-/// Whether [device] gets the TV card and control centre.
-bool isTvDevice(Json device) => TvCalls.isTv(device);

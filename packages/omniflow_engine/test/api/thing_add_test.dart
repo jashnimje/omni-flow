@@ -137,7 +137,12 @@ void main() {
         'settings': {'entityId': 'light.kitchen'},
       });
       expect(nextOf(half)['keys'], [
-        {'step': 'configure', 'key': 'domain', 'label': isA<String>()},
+        {
+          'step': 'configure',
+          'key': 'domain',
+          'label': isA<String>(),
+          'help': isA<String>(),
+        },
       ]);
       final done = await ok('thing.configure', {
         'id': 'kitchen',
@@ -308,6 +313,7 @@ void main() {
         'step': 'configure',
         'key': 'mac',
         'label': isA<String>(),
+        'help': contains('wake it'),
         'optional': true,
       },
     ]);

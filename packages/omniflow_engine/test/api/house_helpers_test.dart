@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:omniflow_engine/src/api/alerts.dart';
 import 'package:omniflow_engine/src/api/room_control.dart';
+import 'package:omniflow_engine/src/api/scene_capture.dart';
 import 'package:omniflow_engine/src/api/mode_commands.dart' show HomeFile;
 import 'package:test/test.dart';
 
@@ -75,6 +76,52 @@ const _plug = {
       'command': {'set': 'power', 'value': '{{value}}'},
       'stateJsonPath': r'$.power',
     },
+  ],
+};
+
+/// A light on its own scales, like Hue (1 to 254, white in mireds) or
+/// Tuya (10 to 1000, white 0 to 1000), and with on and off words when
+/// [words] is given.
+Map<String, Object?> _scaledLight(
+  String id,
+  num min,
+  num max, {
+  Map<String, Object?>? white,
+  List<String>? words,
+}) => {
+  'schemaVersion': 1,
+  'id': id,
+  'name': id,
+  'category': 'lighting',
+  'transport': {'type': 'virtual'},
+  'capabilities': [
+    {
+      'id': 'power',
+      'type': 'toggle',
+      'label': 'Power',
+      'command': {'set': 'power', 'value': '{{value}}'},
+      'stateJsonPath': r'$.power',
+      'onOff': ?words,
+    },
+    {
+      'id': 'brightness',
+      'type': 'level',
+      'label': 'Brightness',
+      'params': {
+        'value': {'type': 'number', 'integer': true, 'min': min, 'max': max},
+      },
+      'command': {'set': 'brightness', 'value': '{{value}}'},
+      'stateJsonPath': r'$.brightness',
+    },
+    if (white != null)
+      {
+        'id': 'color_temp',
+        'type': 'level',
+        'label': 'White',
+        'params': {'value': white},
+        'command': {'set': 'temp', 'value': '{{value}}'},
+        'stateJsonPath': r'$.temp',
+      },
   ],
 };
 
@@ -424,13 +471,14 @@ void main() {
       ], ['ceiling', 'lamp']..sort());
       expect((await stateOf('heater'))['power'], isTrue);
       expect((await stateOf('lamp'))['power'], isFalse);
-      final failed = await ok('room.invoke', {
-        'room': 'Living room',
-        'capability': 'brightness',
-        'params': {'value': 500},
-      });
-      expect(failed['sent'], 0);
-      expect(((failed['results'] as List).first as Map)['ok'], isFalse);
+      expect(
+        (await fails('room.invoke', {
+          'room': 'Living room',
+          'capability': 'brightness',
+          'params': {'value': 500},
+        }))['type'],
+        'invalid',
+      );
       expect(
         (await fails('room.invoke', {
           'room': 'Kitchen',
@@ -512,6 +560,116 @@ void main() {
     }
   });
 
+  test('a room sends brightness and white in percent and kelvin through '
+      'each light\'s own scale, and averages in percent', () async {
+    await ok('driver.register', {
+      'manifest': _scaledLight(
+        'hue_like',
+        1,
+        254,
+        white: {
+          'type': 'number',
+          'integer': true,
+          'min': 153,
+          'max': 500,
+          'unit': 'mired',
+        },
+      ),
+    });
+    await ok('driver.register', {
+      'manifest': _scaledLight(
+        'tuya_like',
+        10,
+        1000,
+        white: {'type': 'number', 'integer': true, 'min': 0, 'max': 1000},
+      ),
+    });
+    for (final (id, driver) in [
+      ('hue', 'hue_like'),
+      ('tuya', 'tuya_like'),
+      ('wiz', 'test_bulb'),
+    ]) {
+      await ok('device.add', {
+        'id': id,
+        'name': id,
+        'driver': driver,
+        'room': 'Bedroom',
+      });
+    }
+    await ok('room.invoke', {
+      'room': 'Bedroom',
+      'capability': 'power',
+      'params': {'value': true},
+    });
+    await ok('room.invoke', {
+      'room': 'Bedroom',
+      'capability': 'brightness',
+      'params': {'value': 50},
+    });
+    expect(
+      [
+        for (final id in ['hue', 'tuya', 'wiz'])
+          (await stateOf(id))['brightness'],
+      ],
+      [127, 500, 50],
+    );
+    await ok('room.invoke', {
+      'room': 'Bedroom',
+      'capability': 'color_temp',
+      'params': {'value': 4000},
+    });
+    expect(
+      [
+        for (final id in ['hue', 'tuya', 'wiz']) (await stateOf(id))['temp'],
+      ],
+      [250, 342, 4000],
+    );
+    final state = await ok('room.state', {'room': 'Bedroom'});
+    expect(state['brightness'], 50);
+    expect([
+      for (final t in (state['things'] as List).cast<Map>()) t['brightness'],
+    ], everyElement(50));
+  });
+
+  test('a light with on and off words: room.state counts it, and a capture '
+      'of it off keeps power only', () async {
+    await ok('driver.register', {
+      'manifest': _scaledLight('worded', 0, 100, words: ['ON', 'OFF']),
+    });
+    await ok('device.add', {
+      'id': 'strip',
+      'name': 'Strip',
+      'driver': 'worded',
+      'room': 'Study',
+    });
+    await ok('device.invoke', {
+      'id': 'strip',
+      'capability': 'brightness',
+      'params': {'value': 40},
+    });
+    await ok('device.invoke', {
+      'id': 'strip',
+      'capability': 'power',
+      'params': {'value': true},
+    });
+    expect((await ok('room.state', {'room': 'Study'}))['lightsOn'], 1);
+    await ok('device.invoke', {
+      'id': 'strip',
+      'capability': 'power',
+      'params': {'value': false},
+    });
+    final saved = await ok('scene.capture', {
+      'name': 'Study off',
+      'devices': ['strip'],
+    });
+    expect(saved['actions'], [
+      {
+        'do': 'strip.power',
+        'params': {'value': false},
+      },
+    ]);
+  });
+
   group('save how things are now', () {
     test('scene.capture keeps power, brightness and white, and only power '
         'for one that is off', () async {
@@ -583,6 +741,55 @@ void main() {
       );
       expect((await fails('scene.capture', {'name': 'X'}))['type'], 'invalid');
     });
+
+    test('scene.capture names each device whose state is older than its '
+        'poll window', () async {
+      final dir = await Directory.systemTemp.createTemp('omni_capture_stale');
+      final harness = await AutomationHarness.open(dir, addThings: false);
+      try {
+        final now = DateTime.now();
+        final old = now.subtract(const Duration(days: 5));
+        for (final (id, name, seen) in [
+          ('near', 'Desk', now),
+          ('gone', 'Hall light', old),
+        ]) {
+          await DriftDeviceStore(harness.db).put(
+            Device(
+              id: id,
+              name: name,
+              driverId: 'philips_wiz_udp',
+              host: '127.0.0.1',
+              lastSeen: seen,
+              state: const {'state': true, 'dimming': 80},
+            ),
+          );
+        }
+        final saved =
+            await SceneCapture(
+              harness.core,
+              harness.stored,
+              harness.automations,
+            ).capture({
+              'name': 'Stale',
+              'devices': ['near', 'gone'],
+              'trusted': true,
+            });
+        final stale = (saved['stale'] as List).cast<Map>();
+        expect(
+          [for (final s in stale) (s['id'], s['name'])],
+          [('gone', 'Hall light')],
+        );
+        expect(
+          DateTime.parse('${stale.single['lastSeen']}')
+              .difference(old)
+              .inSeconds,
+          0,
+        );
+      } finally {
+        await harness.close();
+        await dir.delete(recursive: true);
+      }
+    });
   });
 
   group('alerts', () {
@@ -626,7 +833,7 @@ void main() {
           ),
         );
         final alerts = HouseAlerts(harness.core, HomeFile(dir));
-        await alerts.check(at: now);
+        await alerts.check(at: now.subtract(const Duration(minutes: 5)));
         await alerts.check(at: now.add(const Duration(minutes: 9)));
         await alerts.check(at: now.add(const Duration(minutes: 10)));
         await Future<void>.delayed(Duration.zero);
@@ -653,6 +860,74 @@ void main() {
         await dir.delete(recursive: true);
       }
     });
+  });
+
+  test('alerts wait for the hub to poll, count from when it started, say '
+      'how long, and are not told again after a restart', () async {
+    final dir = await Directory.systemTemp.createTemp('omni_alerts_hub');
+    final harness = await AutomationHarness.open(dir, addThings: false);
+    final seen = <Map<String, Object?>>[];
+    final s = harness.core.events.listen(seen.add);
+    try {
+      final now = DateTime.now();
+      await DriftDeviceStore(harness.db).put(
+        Device(
+          id: 'bulb',
+          name: 'Hall bulb',
+          driverId: 'philips_wiz_udp',
+          host: '127.0.0.1',
+          lastSeen: now.subtract(const Duration(days: 3)),
+        ),
+      );
+      var running = false;
+      final alerts = HouseAlerts(
+        harness.core,
+        HomeFile(dir),
+        hubRunning: () => running,
+      );
+      await alerts.open();
+      await alerts.check(at: now);
+      running = true;
+      await alerts.check(at: now.add(const Duration(minutes: 1)));
+      await alerts.check(at: now.add(const Duration(minutes: 10)));
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        seen.where((e) => e['event'] == 'flow.announce'),
+        isEmpty,
+        reason: 'not offline until polled for its window and 10 minutes',
+      );
+      await alerts.check(at: now.add(const Duration(minutes: 16)));
+      await Future<void>.delayed(Duration.zero);
+      final told = [
+        for (final e in seen)
+          if (e['event'] == 'flow.announce') e['body'],
+      ];
+      expect(told, ['Not heard from for 3 days']);
+      await alerts.close();
+
+      final again = HouseAlerts(
+        harness.core,
+        HomeFile(dir),
+        hubRunning: () => true,
+      );
+      await again.open();
+      await again.check(at: now.add(const Duration(hours: 1)));
+      await again.check(at: now.add(const Duration(hours: 2)));
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        seen.where((e) => e['event'] == 'flow.announce'),
+        hasLength(1),
+        reason: 'what was told is remembered',
+      );
+      await again.close();
+      expect(durationWords(const Duration(minutes: 1)), '1 minute');
+      expect(durationWords(const Duration(minutes: 90)), '90 minutes');
+      expect(durationWords(const Duration(hours: 5)), '5 hours');
+    } finally {
+      await s.cancel();
+      await harness.shutdown();
+      await dir.delete(recursive: true);
+    }
   });
 
   test('agents: room.state is a read, the rest need setup', () async {

@@ -97,6 +97,8 @@ class MainActivity : FlutterActivity() {
                 "dndAccess" -> openSettings(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS), result)
                 "fullScreen" -> openSettings(fullScreenIntent(), result)
                 "usageAccess" -> openSettings(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS), result)
+                "locationSwitch" -> openSettings(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS), result)
+                "exactAlarms" -> openSettings(exactAlarmsIntent(), result)
                 "notificationAccess" -> openSettings(notificationAccessIntent(), result)
                 "pickTiles" -> openSettings(Intent(this, TilePickerActivity::class.java), result)
                 "pickShortcuts" -> openSettings(Intent(this, ShortcutsPickerActivity::class.java), result)
@@ -116,6 +118,13 @@ class MainActivity : FlutterActivity() {
                         "dndAccess" to (getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager)
                             .isNotificationPolicyAccessGranted,
                         "fullScreen" to fullScreenAllowed(),
+                        // Off, Android hides the Wi-Fi name: Wi-Fi places
+                        // cannot see the phone arrive.
+                        "locationOn" to PhoneSensorsBridge.locationEnabled(this),
+                        // Off, the watchdog cannot bring a killed service
+                        // back and time triggers keep the CPU awake.
+                        "exactAlarms" to ServiceStarter.exactAlarmsAllowed(this),
+                        "serviceRunning" to ServiceStarter.isRunning(this),
                     ),
                 )
                 "appSettings" -> {
@@ -175,6 +184,14 @@ class MainActivity : FlutterActivity() {
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
     }
 
+    /** Android 12 and later have a page for Alarms and reminders; before
+     * that exact alarms need no grant, so the app's own page opens. */
+    private fun exactAlarmsIntent(): Intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", packageName, null))
+    } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+    }
+
     private fun askForBluetooth(result: MethodChannel.Result) {
         if (bluetoothAllowed()) return result.success(true)
         ask(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), BLUETOOTH_REQUEST, result)
@@ -183,6 +200,9 @@ class MainActivity : FlutterActivity() {
     /** Names on widgets, tiles and shortcuts follow renames made in the app. */
     override fun onResume() {
         super.onResume()
+        // Back from Settings: a permission granted there starts the call,
+        // media and notification watches the rules wait on.
+        PhoneActionsBridge.recheck()
         val app = applicationContext
         Thread {
             if (RunTargets.refreshNames(app)) {

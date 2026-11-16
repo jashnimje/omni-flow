@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -11,6 +10,7 @@ import '../../api/tv_calls.dart';
 import '../../state/providers.dart' show showMessage;
 import '../design/design.dart';
 import 'tv_controller.dart';
+import 'tv_frame.dart';
 import 'tv_page.dart' show Keycodes;
 
 /// Whether the TV runs OmniFlow's pointer helper, which draws a live
@@ -66,9 +66,24 @@ class _TvMouseState extends State<TvMouse> {
 
   bool get _live => _helper == _Helper.running;
 
+  /// Whether the app is in front: the picture stops refreshing behind the
+  /// lock screen or another app.
+  var _inFront = true;
+  late final AppLifecycleListener _lifecycle;
+
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(
+      onHide: () {
+        _inFront = false;
+        _sync();
+      },
+      onShow: () {
+        _inFront = true;
+        _sync();
+      },
+    );
     _sync();
   }
 
@@ -84,6 +99,7 @@ class _TvMouseState extends State<TvMouse> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _holdTimer?.cancel();
     _refresh?.cancel();
     _sendTimer?.cancel();
@@ -95,7 +111,7 @@ class _TvMouseState extends State<TvMouse> {
       unawaited(_checkHelper());
     }
     // The picture waits for the answer, as a TV with the helper needs none.
-    if (widget.active && _helper != _Helper.unknown && !_live) {
+    if (widget.active && _inFront && _helper != _Helper.unknown && !_live) {
       if (_refresh != null) return;
       unawaited(_read());
       _refresh = Timer.periodic(
@@ -219,9 +235,11 @@ class _TvMouseState extends State<TvMouse> {
       }
       final w = (r['width'] as num?)?.toDouble();
       final h = (r['height'] as num?)?.toDouble();
+      final png = await decodeFrame('${r['png']}');
+      if (!mounted) return;
       setState(() {
         _error = null;
-        _frame = base64Decode('${r['png']}');
+        _frame = png;
         if (w != null && h != null && w > 0 && h > 0) _screen = Size(w, h);
       });
     } finally {
@@ -413,12 +431,7 @@ class _TvMouseState extends State<TvMouse> {
               fit: StackFit.expand,
               children: [
                 if (frame != null)
-                  Image.memory(
-                    frame,
-                    gaplessPlayback: true,
-                    fit: BoxFit.fill,
-                    filterQuality: FilterQuality.medium,
-                  )
+                  TvFrame(frame, fit: BoxFit.fill)
                 else if (_error case final e?)
                   Center(
                     child: Padding(

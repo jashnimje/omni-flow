@@ -94,6 +94,59 @@ String adbCertificatePem(AdbHostKey key, {DateTime? now}) {
   ].join('\n');
 }
 
+/// SHA-256 of the public key in the DER certificate [der] (its
+/// SubjectPublicKeyInfo), lowercase hex: the device's identity, which
+/// stays the same when it issues itself a fresh certificate. A certificate
+/// this cannot read is hashed whole.
+String adbIdentitySha256(Uint8List der) {
+  final spki = _spkiOf(der) ?? der;
+  return SHA256Digest()
+      .process(Uint8List.fromList(spki))
+      .map((b) => b.toRadixString(16).padLeft(2, '0'))
+      .join();
+}
+
+/// The SubjectPublicKeyInfo of an X.509 certificate: the seventh field of
+/// its tbsCertificate counting the optional `[0]` version, or null.
+List<int>? _spkiOf(Uint8List der) {
+  (int start, int end)? tlv(int at, int limit) {
+    if (at + 2 > limit) return null;
+    var length = der[at + 1];
+    var head = 2;
+    if (length & 0x80 != 0) {
+      final bytes = length & 0x7f;
+      if (bytes == 0 || bytes > 4 || at + 2 + bytes > limit) return null;
+      length = 0;
+      for (var i = 0; i < bytes; i++) {
+        length = (length << 8) | der[at + 2 + i];
+      }
+      head += bytes;
+    }
+    final end = at + head + length;
+    return end > limit ? null : (at + head, end);
+  }
+
+  final cert = tlv(0, der.length);
+  if (cert == null || der[0] != 0x30) return null;
+  final tbs = tlv(cert.$1, cert.$2);
+  if (tbs == null || der[cert.$1] != 0x30) return null;
+  var at = tbs.$1;
+  if (at < tbs.$2 && der[at] == 0xa0) {
+    final version = tlv(at, tbs.$2);
+    if (version == null) return null;
+    at = version.$2;
+  }
+  // serial, signature, issuer, validity, subject, then the key.
+  for (var field = 0; field < 5; field++) {
+    final f = tlv(at, tbs.$2);
+    if (f == null) return null;
+    at = f.$2;
+  }
+  final spki = tlv(at, tbs.$2);
+  if (spki == null || der[at] != 0x30) return null;
+  return Uint8List.sublistView(der, at, spki.$2);
+}
+
 /// The secret a TLS 1.3 keyLog line names [label] for (`EXPORTER_SECRET`
 /// and so on), or null when [line] is another label.
 Uint8List? keyLogSecret(String line, String label) {

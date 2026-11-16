@@ -12,6 +12,10 @@ const houseModeThing = 'house_mode';
 /// `timers.ended` with `{timer, name}`, matched on `timer`.
 const timersThing = 'timers';
 
+/// The ids of the engine's own things, which no device may take: one
+/// would hide the built-in thing from rules and the device list.
+const reservedThingIds = {houseModeThing, timersThing};
+
 /// The modes every home has, in the order the picker shows them.
 const builtInModes = ['home', 'away', 'night', 'vacation'];
 

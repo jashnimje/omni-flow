@@ -283,7 +283,7 @@ void main() {
     testWidgets('greets the person and says what is on', (tester) async {
       await pump(tester, engine);
       expect(find.textContaining(', Jade'), findsOneWidget);
-      expect(find.text('Home · 2 on · 1 automation active'), findsOneWidget);
+      expect(find.text('Home · 1 automation active'), findsOneWidget);
       expect(find.text('You are home'), findsOneWidget);
       expect(find.text('Netflix playing'), findsOneWidget);
       expect(find.text('Hall bulb offline'), findsOneWidget);
@@ -415,9 +415,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(OmniTileSkeleton), findsNothing);
       expect(find.byKey(const ValueKey('tile-desk_lamp')), findsWidgets);
-      // Let the slow reads Home started after the list finish.
+      // Let the slow reads Home started after the list finish. Home keeps
+      // reading energy every minute while shown, so close it first.
       await tester.pump(const Duration(minutes: 2));
-      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 31));
     });
 
     testWidgets('an engine that does not answer says so with Try again', (
@@ -534,7 +536,7 @@ void main() {
       await pump(tester, engine);
       await openSearch(tester);
       await tester.enterText(find.byKey(const ValueKey('command-bar')), 'desk');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 800));
       await tester.pumpAndSettle();
       expect(find.text('Do it'), findsOneWidget);
       expect(find.text('Desk lamp: 50%'), findsOneWidget);
@@ -547,14 +549,14 @@ void main() {
         findsOneWidget,
       );
       await tester.enterText(find.byKey(const ValueKey('command-bar')), 'room');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 800));
       await tester.pumpAndSettle();
       expect(find.text('Rooms'), findsOneWidget);
       await tester.enterText(
         find.byKey(const ValueKey('command-bar')),
         'desk lamp 50',
       );
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 800));
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('search-thing-desk_lamp')),
@@ -589,14 +591,65 @@ void main() {
       await pump(tester, engine);
       await openSearch(tester);
       expect(find.text('Try'), findsOneWidget);
-      await tapKey(tester, 'try-desk lamp 50');
+      await tapKey(tester, 'try-desk lamp 50%');
       expect(
         tester
             .widget<TextField>(find.byKey(const ValueKey('command-bar')))
             .controller!
             .text,
-        'desk lamp 50',
+        'desk lamp 50%',
       );
+    });
+
+    testWidgets('a line not understood yet says so only after Enter', (
+      tester,
+    ) async {
+      engine.answers['command.interpret'] = {
+        'ok': true,
+        'kind': 'ask',
+        'text': 'desk',
+        'summary': 'Ask the architect',
+      };
+      await pump(tester, engine);
+      await openSearch(tester);
+      await tester.enterText(find.byKey(const ValueKey('command-bar')), 'desk');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        engine.callsOf('command.interpret'),
+        isEmpty,
+        reason: 'it waits for typing to pause',
+      );
+      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('search-do-it')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('search-thing-desk_lamp')),
+        findsOneWidget,
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.go);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('search-do-it')), findsOneWidget);
+    });
+
+    testWidgets('suggestions are only the documented quick commands', (
+      tester,
+    ) async {
+      await pump(tester, engine);
+      await openSearch(tester);
+      final chips = tester
+          .widgetList<OmniFilterChip>(find.byType(OmniFilterChip))
+          .map((c) => c.label)
+          .toList();
+      expect(chips, isNotEmpty);
+      for (final c in chips) {
+        expect(
+          RegExp(r'^(run .+|.+ 50%|.+ off)$').hasMatch(c),
+          isTrue,
+          reason: c,
+        );
+      }
+      expect(chips.where((c) => c.contains('tv')), isEmpty);
+      expect(chips.where((c) => c.contains('phone')), isEmpty);
     });
 
     testWidgets('a thing in the results opens its page', (tester) async {
@@ -606,7 +659,7 @@ void main() {
         find.byKey(const ValueKey('command-bar')),
         'lounge',
       );
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 800));
       await tester.pumpAndSettle();
       await tapKey(tester, 'search-thing-lounge_tv');
       expect(find.byType(TvPage), findsOneWidget);
@@ -764,18 +817,20 @@ void main() {
           {'host': '192.168.1.77', 'stableId': 'a8bb50000001'},
         ],
       };
-      engine.answers['thing.add'] = {'ok': true, 'id': 'hall_bulb'};
+      engine.answers['device.move'] = {'ok': true, 'id': 'hall_bulb'};
       await pump(tester, engine);
       await openDevicePage(tester, 'hall_bulb');
       await tapKey(tester, 'device-find');
       expect(engine.callsOf('device.discover').single.$2['serial'], false);
       await tapKey(tester, 'find-again-192.168.1.77');
-      final add = engine.callsOf('thing.add').single.$2;
-      expect(add['id'], 'hall_bulb');
-      expect(add['host'], '192.168.1.77');
-      expect(add['replace'], isTrue);
-      expect(add['room'], 'hall');
-      expect(add['name'], 'Hall bulb');
+      // The engine keeps its name, room and settings: the app sends only
+      // where it is now.
+      expect(engine.callsOf('device.move').single.$2, {
+        'id': 'hall_bulb',
+        'host': '192.168.1.77',
+        'stableId': 'a8bb50000001',
+      });
+      expect(engine.callsOf('thing.add'), isEmpty);
     });
 
     testWidgets('8.3: offline shows what to try and what it affects', (
@@ -797,10 +852,7 @@ void main() {
       await openDevicePage(tester, 'hall_bulb');
       expect(find.textContaining('Not answering since'), findsOneWidget);
       expect(find.text('Automations that use it'), findsOneWidget);
-      expect(
-        find.text('this step will be skipped while it is offline'),
-        findsOneWidget,
-      );
+      expect(find.text('Steps on it fail while it is offline'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('device-power-hall_bulb')),
         findsNothing,
@@ -1137,6 +1189,7 @@ void main() {
         ],
       };
       await pump(tester, engine);
+      await openDeveloper(tester);
       for (final (transport, text) in [
         ('udp', 'setPilot'),
         ('adb', 'keyevent'),
@@ -1150,7 +1203,7 @@ void main() {
           'at': '2026-11-08T13:30:00Z',
         });
       }
-      await openDeveloper(tester);
+      await tester.pumpAndSettle();
       expect(find.text('setPilot'), findsOneWidget);
       expect(find.text('keyevent'), findsOneWidget);
       await tester.enterText(
@@ -1193,6 +1246,10 @@ void main() {
       expect(access.asked, ['localNetwork', 'notifications', 'battery']);
       expect(firstRun.isDone, isTrue);
       expect(find.byType(FirstRunScreen), findsNothing);
+      // The home setup follows, and Not now leaves it for Settings.
+      expect(find.text('Who are you?'), findsOneWidget);
+      await tapKey(tester, 'setup-not-now');
+      await tester.pumpAndSettle();
       expect(find.text('Nothing added yet'), findsOneWidget);
       expect(find.byKey(const ValueKey('shell-tabs')), findsOneWidget);
     });

@@ -131,6 +131,23 @@ class RuleCommand extends Command<int> {
         usage: 'ID VERSION',
       ),
     );
+    addSubcommand(
+      _RuleApiCommand(
+        'removed',
+        'Automations removed in the last 30 days, which can be put back.',
+        'automation.removed',
+        (rest) => const {},
+      ),
+    );
+    addSubcommand(
+      _RuleApiCommand(
+        'unremove',
+        'Put a removed automation back, with its versions.',
+        'automation.unremove',
+        (rest) => {'id': _one(rest)},
+        usage: 'ID',
+      ),
+    );
   }
 
   @override
