@@ -66,27 +66,30 @@ class RoomsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final rooms = ref.watch(roomsProvider);
     final list = rooms.value ?? const <Room>[];
-    OmniButton addButton() => OmniButton(
-      key: const ValueKey('rooms-add'),
-      label: 'Add a room',
-      icon: OmniIcons.add,
-      onPressed: () => _add(context, ref),
-    );
     return ListPage.custom(
       title: 'Rooms',
+      actions: [
+        OmniIconAction(
+          key: const ValueKey('rooms-add'),
+          icon: OmniIcons.add,
+          label: 'Add a room',
+          onPressed: () => _add(context, ref),
+        ),
+      ],
       state: OmniLoad.of(
         rooms,
         isEmpty: (r) => r.isEmpty,
         error: 'The rooms did not load.',
         onRetry: () => ref.invalidate(roomsProvider),
       ),
-      empty: OmniEmptyState(
+      empty: const OmniEmptyState(
+        key: ValueKey('rooms-empty'),
         icon: OmniIcons.room,
         title: 'No rooms yet',
-        message: 'Rooms group your devices on Home and in Devices.',
-        action: addButton(),
+        message:
+            'Rooms group your devices on Home and in Devices. Tap the plus '
+            'at the top to add one.',
       ),
-      bottom: OmniActionBar(primary: addButton()),
       body: (context, padding) => ReorderableListView(
         key: const ValueKey('rooms-list'),
         padding: padding,

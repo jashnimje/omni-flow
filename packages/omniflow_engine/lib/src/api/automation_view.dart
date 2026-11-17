@@ -232,8 +232,10 @@ class SentenceContext {
         if (_isMe(thing)) return home ? 'I am home' : 'I am away';
         return '${name(thing)} is ${home ? 'home' : 'away'}';
       }
+      // A power sensor compared with true (a TV's "power is on" written
+      // as `=on`) reads as the thing, like its toggle would.
       if (right is bool &&
-          isOnOff(thing, key) &&
+          (isOnOff(thing, key) || _isPowerChoice(thing, key)) &&
           (c['op'] == '==' || c['op'] == '!=')) {
         final on = (c['op'] == '==') == right;
         return '${name(thing)} is ${on ? 'on' : 'off'}';

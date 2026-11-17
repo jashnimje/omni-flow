@@ -43,13 +43,15 @@ void main() {
   });
 
   testWidgets('each automation shows its sentence, switch and last run, '
-      'scenes stay out, and the review waiting is flagged', (tester) async {
+      'scenes stay off the cards but count under All, and the review '
+      'waiting is flagged', (tester) async {
     await pumpPage(tester, engine, const AutomationsScreen());
     expect(find.text('Arrive home'), findsOneWidget);
     expect(find.text('When I get home'), findsOneWidget);
     expect(find.text('after 6 pm'), findsOneWidget);
     expect(find.byKey(const ValueKey('automation-movie')), findsNothing);
-    expect(find.text('All 5'), findsOneWidget);
+    expect(find.text('All 6'), findsOneWidget);
+    expect(find.text('Quick links 1'), findsOneWidget);
     expect(find.text('Needs you 1'), findsOneWidget);
     expect(
       find.text('An agent made "Movie night". Review before it can run.'),
@@ -79,10 +81,24 @@ void main() {
     tester,
   ) async {
     await pumpPage(tester, engine, const AutomationsScreen());
-    expect(find.text('Movie'), findsNothing, reason: 'not under All');
+    // All is all: the scene follows the rules under its own header.
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('scene-movie')),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.byKey(const ValueKey('all-scenes')), findsOneWidget);
+    expect(
+      find.byType(AutomationCard).evaluate().map((e) {
+        return (e.widget as AutomationCard).automation.id;
+      }),
+      isNot(contains('movie')),
+      reason: 'not as a rule card',
+    );
     await tapKey(tester, 'filter-scenes');
     expect(find.byKey(const ValueKey('scene-movie')), findsOneWidget);
-    expect(find.byKey(const ValueKey('scene-new')), findsOneWidget);
+    // New, a scene among them, is the tab's button, not one in the list.
+    expect(find.byKey(const ValueKey('scene-new')), findsNothing);
     await tapKey(tester, 'scene-run-movie');
     expect(engine.callsOf('scene.run').single.$2['id'], 'movie');
   });
@@ -210,7 +226,9 @@ void main() {
       ),
     );
     expect(find.byKey(const ValueKey('automations-empty')), findsNothing);
-    expect(find.byKey(const ValueKey('filter-empty')), findsOneWidget);
+    // All lists the scenes, so it is not empty.
+    expect(find.byKey(const ValueKey('filter-empty')), findsNothing);
+    expect(find.byKey(const ValueKey('all-scenes')), findsOneWidget);
     expect(empty, isFalse);
   });
 

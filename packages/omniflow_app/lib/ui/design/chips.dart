@@ -181,9 +181,11 @@ class OmniSegmented<T> extends StatelessWidget {
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
+                // Two lines at large text sizes rather than a cut count.
                 child: Text(
                   text,
-                  maxLines: 1,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,

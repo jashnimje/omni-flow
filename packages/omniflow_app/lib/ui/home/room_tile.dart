@@ -77,11 +77,15 @@ class RoomTile extends ConsumerWidget {
     );
   }
 
+  /// No light in the room answers, so the tile is the muted offline tile.
+  bool get _offline => room.lights > 0 && room.offline >= room.lights;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) => OmniTile(
     key: ValueKey('room-tile-${room.id}'),
     icon: OmniIcons.light,
-    wash: OmniPalette.of(context).accent,
+    wash: _offline ? null : OmniPalette.of(context).accent,
+    offline: _offline,
     name: room.name,
     state: room.summary,
     on: room.anyOn,
@@ -91,11 +95,15 @@ class RoomTile extends ConsumerWidget {
     tapHint: 'Opens the room',
     onTap: () => _open(context, ref),
     iconKey: ValueKey('room-power-${room.id}'),
-    iconLabel: room.anyOn
+    iconLabel: _offline
+        ? null
+        : room.anyOn
         ? 'Turn the lights in ${room.name} off'
         : 'Turn the lights in ${room.name} on',
-    onIconTap: () => _send(ref, 'power', {'value': !room.anyOn}),
-    onLongPress: () => _brightness(context, ref),
+    onIconTap: _offline
+        ? null
+        : () => _send(ref, 'power', {'value': !room.anyOn}),
+    onLongPress: _offline ? null : () => _brightness(context, ref),
   );
 
   Future<void> _brightness(BuildContext context, WidgetRef ref) =>

@@ -5,10 +5,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/rules/rule_spec.dart';
 import 'package:omniflow_app/service/phone_actions.dart';
 import 'package:omniflow_app/service/phone_inputs.dart';
+import 'package:omniflow_app/api/engine_calls.dart' show Json;
 import 'package:omniflow_app/ui/automations/automations.dart';
+import 'package:omniflow_app/ui/automations/form_parts.dart' show ParamControls;
+import 'package:omniflow_app/ui/devices/capability_control.dart'
+    show ParamsForm;
 import 'package:omniflow_app/ui/automations/phone_words.dart';
 
 import 'automations_fixtures.dart';
+import 'design_test.dart' show pumpDesign;
 import 'fake_engine.dart';
 import 'service_fake_engine.dart';
 
@@ -287,6 +292,53 @@ void main() {
         'open example.com',
       );
       expect(phoneStepWhat('power', const {}), isNull);
+    });
+  });
+
+  group('the phone page', () {
+    testWidgets('Open an app names the app and picks it from "Choose an '
+        'app", not a raw Package field', (tester) async {
+      Json? sent;
+      await pumpDesign(
+        tester,
+        SingleChildScrollView(
+          child: ParamsForm(
+            label: 'Open an app',
+            heading: false,
+            params: const {
+              'package': {'type': 'string'},
+            },
+            choices: {
+              'package': () async => [
+                (value: 'com.netflix.mediaclient', label: 'Netflix'),
+              ],
+            },
+            onSubmit: (values) async {
+              sent = values;
+              return true;
+            },
+          ),
+        ),
+      );
+      expect(find.text('App'), findsOneWidget);
+      expect(find.text('Package'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('param-package-pick')));
+      await tester.pumpAndSettle();
+      expect(find.text('Choose an app'), findsOneWidget);
+      await tester.tap(find.text('Netflix'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('params-run-Open an app')));
+      await tester.pumpAndSettle();
+      expect(sent, {'package': 'com.netflix.mediaclient'});
+    });
+
+    test('param fields read as words', () {
+      expect(ParamControls.labelOf('url'), 'Link');
+      expect(ParamControls.labelOf('key'), 'Button');
+      expect(ParamControls.labelOf('phoneMac'), 'Phone MAC address');
+      expect(ParamControls.labelOf('long_press'), 'Long press');
+      expect(ParamControls.labelOf('minutes'), 'Minutes');
+      expect(ParamControls.choiceTitleOf('package'), 'Choose an app');
     });
   });
 

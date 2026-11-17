@@ -63,11 +63,15 @@ class PoppingCheck extends StatelessWidget {
     child: Container(
       width: size + 6,
       height: size + 6,
-      decoration: const BoxDecoration(
-        color: OmniColors.accentSoft,
+      decoration: BoxDecoration(
+        color: OmniPalette.of(context).accentSoft,
         shape: BoxShape.circle,
       ),
-      child: Icon(OmniIcons.check, size: size, color: OmniColors.accent),
+      child: Icon(
+        OmniIcons.check,
+        size: size,
+        color: OmniPalette.of(context).accent,
+      ),
     ),
   );
 }

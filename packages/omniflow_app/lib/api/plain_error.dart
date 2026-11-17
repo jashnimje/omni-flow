@@ -7,6 +7,10 @@
 /// to do in the app, and falls back to a sentence per error type.
 library;
 
+import 'package:omniflow_engine/omniflow_engine.dart' show asSentence;
+
+export 'package:omniflow_engine/omniflow_engine.dart' show asSentence;
+
 final _cliHint = RegExp(
   r'[.,;:]?\s*[^.]*\bomni [a-z]+[^.]*\.?',
   caseSensitive: false,
@@ -41,7 +45,7 @@ String plainError(String type, String? message) {
   text = text.replaceFirst(_typeName, '');
   final hadCli = _cliHint.hasMatch(text);
   if (hadCli) text = text.replaceAll(_cliHint, '').trim();
-  if (text.isNotEmpty && !text.endsWith('.')) text = '$text.';
+  text = asSentence(text);
   if (hadCli && _inApp[type] != null) text = '$text ${_inApp[type]}'.trim();
   if (text.isEmpty || (hadType && type == 'internal')) {
     return _byType[type] ?? 'Something went wrong.';

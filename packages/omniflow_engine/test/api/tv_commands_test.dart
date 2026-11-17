@@ -146,6 +146,67 @@ void main() {
       );
     });
 
+    test('a TV that answers again after a failed read is marked seen and '
+        'sends device.changed, with no save while nothing changes', () async {
+      await ok('tv.state', {});
+      Future<Map> device() async =>
+          (await engine.handle('device.get', {'id': 'tv'}))['device'] as Map;
+      final seenBefore = DateTime.parse('${(await device())['lastSeen']}');
+      final events = <Map<String, Object?>>[];
+      final sub = engine.events
+          .where(
+            (e) =>
+                e['event'] == 'device.changed' ||
+                e['event'] == 'device.stateChanged',
+          )
+          .listen(events.add);
+      addTearDown(sub.cancel);
+
+      await ok('tv.state', {});
+      await Future<void>.delayed(Duration.zero);
+      expect(events, isEmpty, reason: 'an unchanged read within a minute');
+
+      adbd.dropOnOpen = true;
+      await err('tv.state', {});
+      adbd.dropOnOpen = false;
+      // The store keeps whole seconds.
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      await ok('tv.state', {});
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        events.map((e) => e['event']),
+        unorderedEquals(['device.stateChanged', 'device.changed']),
+      );
+      expect(
+        events.firstWhere((e) => e['event'] == 'device.changed')['id'],
+        'tv',
+      );
+      final seenAfter = DateTime.parse('${(await device())['lastSeen']}');
+      expect(seenAfter.isAfter(seenBefore), isTrue);
+
+      events.clear();
+      await ok('tv.state', {});
+      await Future<void>.delayed(Duration.zero);
+      expect(events, isEmpty, reason: 'only the first answer after a failure');
+    });
+
+    test('a TV that times out reads as off without counting as answered, '
+        'so it is not marked back', () async {
+      await ok('tv.state', {});
+      adbd.dropOnOpen = true;
+      await err('tv.state', {});
+      final changed = <Map>[];
+      final sub = engine.events
+          .where((e) => e['event'] == 'device.changed')
+          .listen(changed.add);
+      addTearDown(sub.cancel);
+      await adbd.close();
+      final state = await ok('tv.state', {});
+      await Future<void>.delayed(Duration.zero);
+      expect(state['power'], 'off');
+      expect(changed, isEmpty);
+    });
+
     test('a device that is not a TV over ADB is refused', () async {
       await engine.handle('device.add', {
         'id': 'lamp',

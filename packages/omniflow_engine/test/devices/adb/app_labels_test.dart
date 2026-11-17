@@ -20,6 +20,34 @@ void main() {
       expect(appLabelFor('com.example.tv.launcher'), 'Example');
       expect(appLabelFor('android'), 'Android');
     });
+
+    test('system packages read by their APK label, else as a system '
+        'package, never as a word cut from the id', () {
+      expect(appLabelFor('com.android.se'), 'Secure Element');
+      expect(appLabelFor('com.android.dynsystem'), 'Dynamic System Updates');
+      expect(
+        appLabelFor('com.google.android.providers.media.module'),
+        'Media picker',
+      );
+      expect(appLabelFor('com.android.externalstorage'), 'External Storage');
+      expect(
+        appLabelFor('com.android.imsserviceentitlement'),
+        'System (com.android.imsserviceentitlement)',
+      );
+      expect(
+        appLabelFor('com.android.localtransport'),
+        'System (com.android.localtransport)',
+      );
+      expect(
+        appLabelFor('com.google.android.ondevicepersonalization.services'),
+        'Ondevicepersonalization',
+      );
+      expect(
+        appLabelFor('com.google.android.apps'),
+        'System (com.google.android.apps)',
+      );
+      expect(appLabelFor('com.android.chrome'), 'Chrome');
+    });
   });
 
   test('parseActivityLabels keeps text labels and skips resource ones', () {

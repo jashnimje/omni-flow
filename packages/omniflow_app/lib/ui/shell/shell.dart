@@ -195,19 +195,25 @@ class _OmniShellState extends ConsumerState<OmniShell> {
     final fab = spec?.hiddenWhen?.call(ref) == true ? null : spec;
     final fullScreen = shellTabs[tab]!.fullScreenWhen?.call(ref) == true;
     final wide = OmniWidth.of(context) != OmniWidth.compact;
-    Widget tabs = IndexedStack(
-      index: tab.index,
-      children: [
-        for (final t in ShellTab.values)
-          TickerMode(
-            enabled: t == tab,
-            child: _TabEntrance(
-              active: t == tab,
-              forward: forward,
-              child: _built.contains(t) ? _navigator(t) : const SizedBox(),
+    // A tab's page route blocks the semantics painted before it, so the
+    // tabs get their own boundary and the banner and rail stay readable.
+    Widget tabs = Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: IndexedStack(
+        index: tab.index,
+        children: [
+          for (final t in ShellTab.values)
+            TickerMode(
+              enabled: t == tab,
+              child: _TabEntrance(
+                active: t == tab,
+                forward: forward,
+                child: _built.contains(t) ? _navigator(t) : const SizedBox(),
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
     if (hubBanner(ref) ?? widget.banner case final banner?) {
       tabs = Column(
@@ -239,7 +245,7 @@ class _OmniShellState extends ConsumerState<OmniShell> {
     if (wide && !fullScreen) {
       tabs = Row(
         children: [
-          _rail(context, tab, palette),
+          _rail(context, tab, palette, fab),
           VerticalDivider(width: 1, color: palette.line),
           Expanded(
             child: MediaQuery.removePadding(
@@ -258,18 +264,9 @@ class _OmniShellState extends ConsumerState<OmniShell> {
       },
       child: Scaffold(
         body: tabs,
-        floatingActionButton: fab == null
+        floatingActionButton: fab == null || (wide && !fullScreen)
             ? null
-            : FloatingActionButton.extended(
-                key: fab.key,
-                heroTag: null,
-                onPressed: () {
-                  final nav = _shell.navigators[tab]!.currentContext;
-                  if (nav != null) fab.onPressed(nav);
-                },
-                icon: Icon(fab.icon, weight: 600),
-                label: Text(fab.label),
-              ),
+            : _fabButton(context, fab, tab),
         bottomNavigationBar: fullScreen || wide
             ? null
             : DecoratedBox(
@@ -318,28 +315,79 @@ class _OmniShellState extends ConsumerState<OmniShell> {
 
   static const _maxLabelScale = 1.5;
 
-  /// The rail of a foldable or tablet.
-  Widget _rail(BuildContext context, ShellTab tab, OmniPalette palette) =>
-      MediaQuery.withClampedTextScaling(
-        maxScaleFactor: _maxLabelScale,
-        child: SafeArea(
-          right: false,
-          child: NavigationRail(
-            key: const ValueKey('shell-rail'),
-            selectedIndex: tab.index,
-            onDestinationSelected: _select,
-            groupAlignment: -0.9,
-            destinations: [
-              for (final t in ShellTab.values)
-                NavigationRailDestination(
-                  icon: Icon(shellTabs[t]!.icon),
-                  selectedIcon: Icon(shellTabs[t]!.icon, fill: 1),
-                  label: Text(shellTabs[t]!.label),
-                ),
-            ],
-          ),
+  /// The tab root's Add or New. Extended on a phone at normal text sizes;
+  /// just the icon at large text sizes and in the rail, so it never sits
+  /// over a row the list cannot scroll clear of it. The label is still
+  /// read out and shown on a long press.
+  Widget _fabButton(BuildContext context, ShellFab fab, ShellTab tab) {
+    void press() {
+      final nav = _shell.navigators[tab]!.currentContext;
+      if (nav != null) fab.onPressed(nav);
+    }
+
+    final large =
+        MediaQuery.textScalerOf(context).scale(OmniText.body.fontSize!) /
+            OmniText.body.fontSize! >=
+        largeTextScale;
+    final wide = OmniWidth.of(context) != OmniWidth.compact;
+    if (large || wide) {
+      return MediaQuery.withNoTextScaling(
+        child: FloatingActionButton(
+          key: fab.key,
+          heroTag: null,
+          tooltip: fab.label,
+          elevation: wide ? 0 : null,
+          onPressed: press,
+          child: Icon(fab.icon, weight: 600),
         ),
       );
+    }
+    return FloatingActionButton.extended(
+      key: fab.key,
+      heroTag: null,
+      onPressed: press,
+      icon: Icon(fab.icon, weight: 600),
+      label: Text(fab.label),
+    );
+  }
+
+  /// From this text size the floating button shows only its icon.
+  static const largeTextScale = 1.3;
+
+  /// The rail of a foldable, a tablet or a phone on its side. The tab
+  /// root's button sits at its top, so it covers nothing; the space stays
+  /// when a page hides it, so the tabs do not move.
+  Widget _rail(
+    BuildContext context,
+    ShellTab tab,
+    OmniPalette palette,
+    ShellFab? fab,
+  ) => MediaQuery.withClampedTextScaling(
+    maxScaleFactor: _maxLabelScale,
+    child: SafeArea(
+      right: false,
+      child: NavigationRail(
+        key: const ValueKey('shell-rail'),
+        selectedIndex: tab.index,
+        onDestinationSelected: _select,
+        leading: Padding(
+          padding: const EdgeInsets.only(top: OmniSpace.sm),
+          child: fab == null
+              ? const SizedBox.square(dimension: 56)
+              : _fabButton(context, fab, tab),
+        ),
+        groupAlignment: -0.9,
+        destinations: [
+          for (final t in ShellTab.values)
+            NavigationRailDestination(
+              icon: Icon(shellTabs[t]!.icon),
+              selectedIcon: Icon(shellTabs[t]!.icon, fill: 1),
+              label: Text(shellTabs[t]!.label),
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// A tab arriving: it slides a little from the side it comes from and

@@ -879,6 +879,13 @@ class RuleWords {
     }
     final cap = th?.capability(capability);
     final label = '${cap?['label'] ?? capability}'.toLowerCase();
+    // As the action picker says it: "Turn off", not "power off".
+    if (label == 'power' &&
+        cap?['type'] == 'toggle' &&
+        params.length == 1 &&
+        params['value'] is bool) {
+      return params['value'] == true ? 'turn on' : 'turn off';
+    }
     final shown = [
       for (final e in params.entries)
         if (e.key == 'value')

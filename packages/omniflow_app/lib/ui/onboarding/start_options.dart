@@ -42,7 +42,7 @@ class StartOptions extends StatelessWidget {
         title: 'Connect to a hub',
         subtitle: 'Use the home a computer at home already runs',
         chevron: true,
-        onTap: () => _push(context, const HubPage()),
+        onTap: () => _push(context, const HubSetupPage()),
       ),
     ],
   );

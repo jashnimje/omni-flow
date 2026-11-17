@@ -217,7 +217,12 @@ void main() {
           return null;
         },
       );
-      await pumpScreen(tester, engine, const HubPage(), overrides: overrides());
+      await pumpScreen(
+        tester,
+        engine,
+        const HubSetupPage(),
+        overrides: overrides(),
+      );
       expect(find.byKey(const ValueKey('hub-setup')), findsOneWidget);
       // Next waits for an address, a user and a name for the phone.
       expect(
@@ -276,7 +281,7 @@ void main() {
       await pumpScreen(
         tester,
         FakeEngine(),
-        const HubPage(),
+        const HubSetupPage(),
         overrides: overrides(),
       );
       await tester.enterText(
@@ -304,7 +309,7 @@ void main() {
       await pumpScreen(
         tester,
         FakeEngine(),
-        const HubPage(),
+        const HubSetupPage(),
         overrides: overrides(),
       );
       await tester.enterText(find.byKey(const ValueKey('hub-host')), 'mac');
@@ -328,7 +333,12 @@ void main() {
         'ok': false,
         'error': {'type': 'not_found', 'message': 'unknown command'},
       };
-      await pumpScreen(tester, engine, const HubPage(), overrides: overrides());
+      await pumpScreen(
+        tester,
+        engine,
+        const HubSetupPage(),
+        overrides: overrides(),
+      );
       await tester.tap(find.byKey(const ValueKey('hub-look')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('hub-none-found')), findsOneWidget);
@@ -408,6 +418,47 @@ void main() {
       expect(await store.mode(), HomeMode.hub);
       expect(tools.restarts, 0);
     });
+  });
+
+  testWidgets('Home runs on is the one hub place: Stop asks first, and the '
+      'Mac mini steps open as a task with a cross', (tester) async {
+    final engine = FakeEngine()
+      ..answers['engine.status'] = {
+        'ok': true,
+        'hubRunning': true,
+        'flows': ['desk_button'],
+      };
+    await pumpApp(tester, engine, overrides: overrides());
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('shell-tabs')),
+        matching: find.text('Settings'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('settings-hubs')), findsNothing);
+    expect(find.text('Hubs'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('settings-home-runs-on')));
+    await tester.pumpAndSettle();
+    expect(find.text('This phone runs the hub'), findsOneWidget);
+    expect(find.text('1 automation loaded'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('hub-stop')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(engine.callsOf('hub.stop'), isEmpty);
+    await tester.tap(find.byKey(const ValueKey('hub-stop')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm')));
+    await tester.pumpAndSettle();
+    expect(engine.callsOf('hub.stop'), hasLength(1));
+
+    await tester.tap(find.byKey(const ValueKey('hub-connect')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('hub-setup')), findsOneWidget);
+    expect(find.text(HubSetupPage.title), findsWidgets);
+    expect(find.byTooltip('Close'), findsOneWidget);
+    expect(find.byTooltip('Back'), findsNothing);
   });
 
   testWidgets('Settings shows where the home runs', (tester) async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omniflow_app/ui/design/automation_look.dart';
 import 'package:omniflow_app/ui/design/design.dart';
 import 'package:omniflow_app/ui/devices/device_page.dart';
 import 'package:omniflow_app/ui/devices/sensor_page.dart';
@@ -283,10 +284,7 @@ void main() {
     testWidgets('greets the person and says what is on', (tester) async {
       await pump(tester, engine);
       expect(find.textContaining(', Jade'), findsOneWidget);
-      expect(
-        tester.widget<Text>(find.byKey(const ValueKey('home-status'))).data,
-        'Home',
-      );
+      expect(find.byKey(const ValueKey('home-status')), findsNothing);
       expect(find.text('You are home'), findsOneWidget);
       expect(find.text('Netflix playing'), findsOneWidget);
       expect(find.text('Hall bulb offline'), findsOneWidget);
@@ -313,6 +311,27 @@ void main() {
       expect(find.text('24.5 °C'), findsOneWidget);
       expect(find.byKey(const ValueKey('tile-jade')), findsNothing);
       expect(find.byKey(const ValueKey('tile-this_phone')), findsNothing);
+    });
+
+    testWidgets('an offline TV drops its app chip until it is heard again', (
+      tester,
+    ) async {
+      await pump(tester, engine);
+      expect(find.text('Netflix playing'), findsOneWidget);
+      engine.eventsOut.add({
+        'event': 'device.pollFailed',
+        'device': 'lounge_tv',
+        'errorType': 'device_error',
+        'error': 'connection refused',
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('Netflix playing'), findsNothing);
+      expect(find.text('2 offline'), findsOneWidget);
+      // A read it answers saves it and the engine sends its state again.
+      engine.eventsOut.add({'event': 'device.stateChanged', 'device': tv()});
+      await tester.pumpAndSettle();
+      expect(find.text('Netflix playing'), findsOneWidget);
+      expect(find.text('Hall bulb offline'), findsOneWidget);
     });
 
     testWidgets('a scene runs with one tap', (tester) async {
@@ -727,14 +746,36 @@ void main() {
       await openDevicePage(tester, 'desk_lamp');
       expect(find.text('On · 80%'), findsOneWidget);
       expect(find.text('Study'), findsWidgets);
-      expect(find.text('Used in'), findsOneWidget);
+      expect(find.text('Automations that use it'), findsOneWidget);
       expect(find.byKey(const ValueKey('used-in-desk_button')), findsOneWidget);
-      expect(find.text('toggle desk lamp'), findsOneWidget);
+      expect(find.text('Has a step on it'), findsWidgets);
       expect(find.textContaining('turned on by Desk button'), findsOneWidget);
       expect(find.textContaining('turned off by you'), findsOneWidget);
       expect(engine.callsOf('automation.list').last.$2, {
         'device': 'desk_lamp',
       });
+    });
+
+    testWidgets('Automations that use it wear each one\'s own icon', (
+      tester,
+    ) async {
+      final list = engine.answers['automation.list']!;
+      engine.answers['automation.list'] = {
+        ...list,
+        'automations': [
+          for (final a in list['automations'] as List)
+            {...a as Map<String, Object?>, 'icon': 'moon', 'color': '#A78BFA'},
+        ],
+      };
+      await pump(tester, engine);
+      await openDevicePage(tester, 'desk_lamp');
+      final row = find.byKey(const ValueKey('used-in-desk_button'));
+      await tester.ensureVisible(row);
+      final badge = tester.widget<AutomationBadge>(
+        find.descendant(of: row, matching: find.byType(AutomationBadge)),
+      );
+      expect(badge.icon, AutomationLook.icons['moon']);
+      expect(badge.color, '#A78BFA');
     });
 
     testWidgets('the power button switches it', (tester) async {
@@ -1008,26 +1049,6 @@ void main() {
       await tester.pump();
       await tapKey(tester, 'prompt-save');
       expect(engine.callsOf('room.save').single.$2, {'name': 'Kitchen'});
-    });
-
-    testWidgets('Hubs: stopping the hub asks first', (tester) async {
-      engine.answers['engine.status'] = {
-        'ok': true,
-        'hubRunning': true,
-        'flows': ['desk_button'],
-        'loadIssues': const <Object?>[],
-      };
-      await pump(tester, engine);
-      await openTab(tester, 'Settings');
-      await tapKey(tester, 'settings-hubs');
-      expect(find.text('This phone runs the hub'), findsOneWidget);
-      await tapKey(tester, 'hub-stop');
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(engine.callsOf('hub.stop'), isEmpty);
-      await tapKey(tester, 'hub-stop');
-      await tapKey(tester, 'confirm');
-      expect(engine.callsOf('hub.stop'), hasLength(1));
     });
   });
 

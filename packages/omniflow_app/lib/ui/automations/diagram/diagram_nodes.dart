@@ -51,9 +51,22 @@ String? nodeStatusWords(DiagramNode n) {
   };
 }
 
-/// Everything a screen reader says for [n].
+/// The words drawn on [n], capitalised like the sentence rows. An end
+/// with no words of its own says where the run stops.
+String nodeText(DiagramNode n) {
+  final text = n.words.isEmpty && n.kind == NodeKind.end
+      ? 'Stops here'
+      : n.words;
+  return text.isEmpty ? text : text[0].toUpperCase() + text.substring(1);
+}
+
+/// Everything a screen reader says for [n]: the words drawn on it first,
+/// so it reads what the eye sees.
 String nodeSemantics(DiagramNode n, {String? error}) => [
-  n.words.isEmpty ? nodeKindWords(n.kind) : n.words,
+  switch (nodeText(n)) {
+    '' => nodeKindWords(n.kind),
+    final text => text,
+  },
   nodeKindWords(n.kind),
   ?nodeStatusWords(n),
   if (n.seen case final seen?) 'saw $seen',
@@ -180,8 +193,6 @@ class DiagramNodeCard extends StatelessWidget {
   /// holds, so a large text size or a wide font ends in "…" instead of
   /// spilling out of the node.
   Widget _text(String text, {int lines = 3, TextAlign? align, double? size}) {
-    // Capitalised like the sentence rows.
-    if (text.isNotEmpty) text = text[0].toUpperCase() + text.substring(1);
     final style = OmniText.step.copyWith(
       fontSize: size ?? OmniText.step.fontSize,
       height: 1.3,
@@ -223,7 +234,7 @@ class DiagramNodeCard extends StatelessWidget {
         children: [
           Icon(icon ?? OmniIcons.event, size: 18, color: OmniColors.trigger),
           const SizedBox(width: OmniSpace.sm),
-          Expanded(child: _text(node.words, lines: 2, size: 12)),
+          Expanded(child: _text(nodeText(node), lines: 2, size: 12)),
         ],
       ),
     ),
@@ -243,7 +254,7 @@ class DiagramNodeCard extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 46),
             child: _text(
-              node.words,
+              nodeText(node),
               lines: 3,
               align: TextAlign.center,
               size: 12,
@@ -317,7 +328,10 @@ class DiagramNodeCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Flexible(
-                    child: _text(node.words, lines: node.seen == null ? 3 : 2),
+                    child: _text(
+                      nodeText(node),
+                      lines: node.seen == null ? 3 : 2,
+                    ),
                   ),
                   if (node.seen case final seen?)
                     Text(
@@ -367,7 +381,7 @@ class DiagramNodeCard extends StatelessWidget {
         ),
       ),
       child: Text(
-        node.words.isEmpty ? 'Stops here' : node.words,
+        nodeText(node),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: OmniText.caption.copyWith(color: OmniColors.text),
@@ -396,7 +410,7 @@ class DiagramNodeCard extends StatelessWidget {
         const SizedBox(width: OmniSpace.xs),
         Flexible(
           child: Text(
-            node.words,
+            nodeText(node),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: OmniText.labelMedium,

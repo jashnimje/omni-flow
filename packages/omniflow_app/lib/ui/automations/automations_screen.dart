@@ -23,7 +23,7 @@ import 'new_automation.dart';
 import 'next_run_line.dart';
 import 'removed_page.dart' show openRecentlyRemoved;
 import 'review_page.dart';
-import 'scenes.dart' show SceneRow, automationIconFor, openSceneEditor;
+import 'scenes.dart' show SceneRow, automationIconFor;
 import 'suggestions_page.dart';
 import 'test_run.dart';
 
@@ -199,12 +199,12 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                     AutomationFilter.off => 'Off',
                     AutomationFilter.needsYou => 'Needs you',
                   },
-                  // Each chip counts what it shows, and a zero shows none.
-                  count: switch (f == AutomationFilter.scenes
-                      ? scenes.length
-                      : list.where((a) => _inFilter(a, f)).length) {
-                    0 => null,
-                    final n => n,
+                  // Each chip counts what it shows, a zero too, and All
+                  // counts the scenes it lists.
+                  count: switch (f) {
+                    AutomationFilter.all => list.length + scenes.length,
+                    AutomationFilter.scenes => scenes.length,
+                    _ => list.where((a) => _inFilter(a, f)).length,
                   },
                   dot: f == AutomationFilter.needsYou && needsYou > 0
                       ? StatusKind.warning
@@ -282,18 +282,10 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                 title: 'Nothing matches "$_query"',
                 compact: true,
               ),
+            // New, a scene among them, is the tab's button.
             for (final s in shownScenes) SceneRow(scene: s),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OmniButton.ghost(
-                key: const ValueKey('scene-new'),
-                label: 'New scene',
-                icon: OmniIcons.add,
-                expand: false,
-                onPressed: () => openSceneEditor(context),
-              ),
-            ),
-          ] else if (shown.isEmpty)
+          ] else if (shown.isEmpty &&
+              (_filter != AutomationFilter.all || shownScenes.isEmpty))
             OmniEmptyState(
               key: const ValueKey('filter-empty'),
               icon: OmniIcons.search,
@@ -317,6 +309,15 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                 onOpen: () => _push(AutomationPage(id: a.id, summary: a)),
               ),
             ),
+          // All is all: the scenes follow the rules and links.
+          if (_filter == AutomationFilter.all && shownScenes.isNotEmpty) ...[
+            OmniSectionHeader(
+              'Scenes',
+              key: const ValueKey('all-scenes'),
+              trailingText: '${shownScenes.length}',
+            ),
+            for (final s in shownScenes) SceneRow(scene: s),
+          ],
           if (_filter == AutomationFilter.all && !_searching)
             OmniListRow(
               key: const ValueKey('automations-removed'),

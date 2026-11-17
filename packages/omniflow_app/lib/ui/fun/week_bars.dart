@@ -46,10 +46,10 @@ class WeekBars extends StatelessWidget {
                         : (2 + (height - 2) * runs[i] / most * grow),
                     decoration: BoxDecoration(
                       color: i == runs.length - 1
-                          ? OmniColors.accent
+                          ? OmniPalette.of(context).accent
                           : runs[i] == 0
-                          ? OmniColors.line
-                          : OmniColors.accentLine,
+                          ? OmniPalette.of(context).line
+                          : OmniPalette.of(context).accentLine,
                       borderRadius: BorderRadius.circular(barWidth / 2),
                     ),
                   ),

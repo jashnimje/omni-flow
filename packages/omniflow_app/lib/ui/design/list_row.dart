@@ -75,6 +75,7 @@ class OmniListRow extends StatelessWidget {
     this.semanticLabel,
     this.subtitleLines = 1,
     this.selected = false,
+    this.enabled = true,
   });
 
   final String title;
@@ -102,6 +103,9 @@ class OmniListRow extends StatelessWidget {
 
   /// The row shown beside the list (two panes on a wide screen).
   final bool selected;
+
+  /// False draws the row muted and tells a screen reader it is unavailable.
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -145,11 +149,19 @@ class OmniListRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(title, style: OmniText.body),
+                Text(
+                  title,
+                  style: enabled
+                      ? OmniText.body
+                      : OmniText.body.copyWith(color: OmniColors.muted),
+                ),
                 if (subtitle != null)
                   Text(
                     subtitle!,
-                    maxLines: subtitleLines,
+                    // Large text wraps rather than cutting off the end.
+                    maxLines: MediaQuery.textScalerOf(context).scale(10) >= 13
+                        ? subtitleLines * 3
+                        : subtitleLines,
                     overflow: TextOverflow.ellipsis,
                     style: OmniText.caption,
                   ),
@@ -165,6 +177,7 @@ class OmniListRow extends StatelessWidget {
       container: true,
       button: tappable,
       selected: selected ? true : null,
+      enabled: enabled ? null : false,
       label: semanticLabel,
       excludeSemantics: semanticLabel != null,
       onTap: semanticLabel != null ? onTap : null,

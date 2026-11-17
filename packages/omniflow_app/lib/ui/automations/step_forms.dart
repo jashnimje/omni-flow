@@ -1298,7 +1298,7 @@ Future<RunStep?> runForm(
         ChoiceRow(
           key: ValueKey('run-${a.id}'),
           title: a.name,
-          icon: OmniIcons.automations,
+          icon: automationIconFor(a),
           selected: a.id == id,
           onTap: () => setState(() => id = a.id),
         ),

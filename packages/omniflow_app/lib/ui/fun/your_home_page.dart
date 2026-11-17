@@ -219,13 +219,31 @@ class _AchievementGrid extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       final columns = box.maxWidth >= 520 ? 4 : (box.maxWidth >= 340 ? 3 : 2);
-      final width = (box.maxWidth - OmniSpace.gap * (columns - 1)) / columns;
-      return Wrap(
-        spacing: OmniSpace.gap,
-        runSpacing: OmniSpace.gap,
+      // Row by row, each as tall as its tallest tile, so a longer name
+      // does not leave its neighbours short.
+      return Column(
         children: [
-          for (final a in achievements)
-            SizedBox(width: width, child: _AchievementTile(a)),
+          for (var i = 0; i < achievements.length; i += columns)
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: i + columns < achievements.length ? OmniSpace.gap : 0,
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var c = 0; c < columns; c++) ...[
+                      if (c > 0) const SizedBox(width: OmniSpace.gap),
+                      Expanded(
+                        child: i + c < achievements.length
+                            ? _AchievementTile(achievements[i + c])
+                            : const SizedBox(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
         ],
       );
     },
@@ -244,8 +262,10 @@ class _AchievementTile extends StatelessWidget {
     final detail = a.earned
         ? (at == null ? 'Earned' : 'Earned ${shortDate(at)}')
         : a.how;
+    // Its own node, so a screen reader reads one achievement at a time.
     return Semantics(
       key: ValueKey('achievement-${a.id}'),
+      container: true,
       label: '${a.title}, ${a.earned ? detail : 'not earned yet. ${a.how}'}',
       excludeSemantics: true,
       child: Container(

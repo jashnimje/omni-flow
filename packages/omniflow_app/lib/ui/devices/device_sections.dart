@@ -10,6 +10,7 @@ import '../add/guided_steps_page.dart';
 import '../add/pair_sheet.dart';
 import '../automations/automations.dart';
 import '../boards/pin_sheet.dart';
+import '../design/automation_look.dart' show AutomationBadge;
 import '../design/design.dart';
 import 'host_key_sheet.dart';
 import '../../state/reload_home.dart';
@@ -252,6 +253,7 @@ class _AdvancedState extends State<_Advanced> {
           expanded: _open,
           child: OmniListRow(
             key: const ValueKey('device-advanced'),
+            icon: OmniIcons.developer,
             title: 'Advanced',
             subtitle: 'ids and the messages sent to it',
             trailing: Icon(
@@ -262,9 +264,15 @@ class _AdvancedState extends State<_Advanced> {
           ),
         ),
         if (_open) ...[
-          OmniListRow(title: 'Id', value: d.id, valueColor: OmniColors.muted),
+          OmniListRow(
+            icon: OmniIcons.info,
+            title: 'Id',
+            value: d.id,
+            valueColor: OmniColors.muted,
+          ),
           if (d.json['stableId'] case final String stable)
             OmniListRow(
+              icon: OmniIcons.device,
               title: 'Hardware id',
               value: stable,
               valueColor: OmniColors.muted,
@@ -286,21 +294,23 @@ class _AdvancedState extends State<_Advanced> {
   }
 }
 
-/// The automations that read or drive a device. While it is offline each
-/// row says its step fails.
+/// The automations that read or drive a device, the same on every device
+/// page and in the TV's more sheet. Each row says what the automation does
+/// with it, and while it is offline, what that means.
 class UsedInSection extends ConsumerWidget {
   const UsedInSection({super.key, required this.device});
 
   final DeviceView device;
 
-  static String _drives(AutomationSummary a) {
-    final then = [
-      for (final p in a.sentence)
-        if (p.kind == SentenceKind.then) p.text,
-    ];
-    return then.isEmpty
-        ? a.sentence.map((p) => p.text).join(' ')
-        : then.join(', then ');
+  /// What [a] does with [d]: a step on it, or it starts or checks on it.
+  static String roleOf(AutomationSummary a, DeviceView d) {
+    final drives = a.controls.isEmpty || a.controls.contains(d.id);
+    if (d.online) {
+      return drives ? 'Has a step on it' : 'Starts or checks on it';
+    }
+    return drives
+        ? 'Steps on it fail while it is offline'
+        : 'Does not start or check it while it is offline';
   }
 
   /// A new rule that already turns [d] on, when it can be, so only the
@@ -329,9 +339,7 @@ class UsedInSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        OmniSectionHeader(
-          device.online ? 'Used in' : 'Automations that use it',
-        ),
+        const OmniSectionHeader('Automations that use it'),
         if (used.isEmpty)
           OmniListRow(
             key: ValueKey('used-in-new-${device.id}'),
@@ -344,13 +352,14 @@ class UsedInSection extends ConsumerWidget {
         for (final a in used)
           OmniListRow(
             key: ValueKey('used-in-${a.id}'),
-            icon: a.isScene ? OmniIcons.scene : OmniIcons.automations,
+            // The automation's own look, as on its card.
+            leading: AutomationBadge(
+              icon: automationIconFor(a),
+              color: a.color,
+              size: 32,
+            ),
             title: a.name,
-            subtitle: device.online
-                ? _drives(a)
-                : a.controls.isEmpty || a.controls.contains(device.id)
-                ? 'Steps on it fail while it is offline'
-                : 'Does not start or check it while it is offline',
+            subtitle: roleOf(a, device),
             chevron: true,
             onTap: () =>
                 ref.read(shellControllerProvider).open(AutomationLink(a.id)),
@@ -434,6 +443,7 @@ class DeviceSection extends ConsumerWidget {
         const OmniSectionHeader('Device'),
         OmniListRow(
           key: ValueKey('device-room-${d.id}'),
+          icon: OmniIcons.room,
           title: 'Room',
           subtitle: d.room ?? 'Not in a room',
           chevron: true,
@@ -441,6 +451,7 @@ class DeviceSection extends ConsumerWidget {
         ),
         OmniListRow(
           key: ValueKey('device-details-${d.id}'),
+          icon: OmniIcons.edit,
           title: 'Name, address and settings',
           subtitle: address.isEmpty ? d.name : address,
           chevron: true,
@@ -449,6 +460,7 @@ class DeviceSection extends ConsumerWidget {
         if (usesSsh(d))
           OmniListRow(
             key: ValueKey('device-hostkey-${d.id}'),
+            icon: OmniIcons.permissions,
             title: 'SSH host key',
             subtitle: 'check it, or trust a new one after a reinstall',
             chevron: true,
@@ -501,6 +513,7 @@ class DeviceSection extends ConsumerWidget {
             ),
             if (d.host != null)
               OmniListRow(
+                icon: OmniIcons.network,
                 title: 'Address',
                 value: d.host,
                 valueColor: OmniColors.muted,

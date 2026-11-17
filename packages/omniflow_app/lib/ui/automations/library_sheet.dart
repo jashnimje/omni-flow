@@ -136,12 +136,21 @@ class _LibraryState extends State<_Library> {
               ],
             ),
       ].where((s) => s.$2.isNotEmpty).toList();
+      // A suggestion named like a "Show only" chip (Wait) would show the
+      // same word twice, so the chip alone keeps it.
+      final chips = {for (final c in widget.categories) c.toLowerCase()};
+      final suggestions = [
+        for (final s in widget.suggestions)
+          if (!chips.contains(s.label.trim().toLowerCase())) s,
+      ];
       return SheetTemplate(
         title: widget.title,
         // Stays in view while the list scrolls under it.
         pinned: TextField(
           key: const ValueKey('picker-search'),
-          autofocus: true,
+          // The list shows first. The keyboard comes up when the field is
+          // tapped.
+          autofocus: false,
           decoration: InputDecoration(
             hintText: widget.hint,
             prefixIcon: const Icon(OmniIcons.search),
@@ -149,14 +158,14 @@ class _LibraryState extends State<_Library> {
           onChanged: _search,
         ),
         children: (context) => [
-          if (!searching && widget.suggestions.isNotEmpty) ...[
+          if (!searching && suggestions.isNotEmpty) ...[
             const OmniSectionHeader('Suggestions'),
             Wrap(
               key: const ValueKey('library-suggestions'),
               spacing: OmniSpace.sm,
               runSpacing: OmniSpace.sm,
               children: [
-                for (final s in widget.suggestions)
+                for (final s in suggestions)
                   OmniFilterChip(
                     key: ValueKey(s.key),
                     label: s.label,

@@ -38,18 +38,27 @@ class SentenceChip extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
     decoration: BoxDecoration(
       color: SentenceColors.softOf(kind),
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(OmniShape.sm),
     ),
     child: Text(
       text,
-      style: TextStyle(fontSize: 12, color: SentenceColors.of(kind)),
+      style: OmniText.caption.copyWith(color: SentenceColors.of(kind)),
     ),
   );
 }
 
+/// An automation's sentence as one plain line: the arrows the card draws
+/// between its parts read as commas.
+String sentenceText(List<SentencePart> parts) => parts
+    .map((p) => p.text)
+    .join(' ')
+    .replaceAll(' → ', ', ')
+    .replaceAll('→', ',');
+
 /// An automation written as its sentence: chips for the WHEN, ONLY IF and
 /// THEN parts and plain muted words ("then", "→") between them, wrapping.
-/// Screen readers hear the whole sentence as one line.
+/// Screen readers hear the whole sentence as one line, the arrows as
+/// commas ([sentenceText]).
 class AutomationSentence extends StatelessWidget {
   const AutomationSentence(this.parts, {super.key});
 
@@ -57,7 +66,7 @@ class AutomationSentence extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-    label: parts.map((p) => p.text).join(' '),
+    label: sentenceText(parts),
     excludeSemantics: true,
     child: Wrap(
       spacing: 5,
@@ -66,7 +75,7 @@ class AutomationSentence extends StatelessWidget {
       children: [
         for (final p in parts)
           if (p.kind == SentenceKind.text)
-            Text(p.text, style: OmniText.caption.copyWith(fontSize: 13))
+            Text(p.text, style: OmniText.step.copyWith(color: OmniColors.muted))
           else
             SentenceChip(p.kind, p.text),
       ],
@@ -132,10 +141,10 @@ class OmniRuleBlock extends StatelessWidget {
                 icon: const Icon(OmniIcons.add, size: 18),
                 label: Text(addLabel!),
                 style: TextButton.styleFrom(
-                  foregroundColor: OmniColors.accent,
+                  foregroundColor: OmniPalette.of(context).accent,
                   minimumSize: const Size(OmniSpace.target, OmniSpace.target),
                   padding: const EdgeInsets.symmetric(horizontal: 2),
-                  textStyle: const TextStyle(fontSize: 12),
+                  textStyle: OmniText.caption,
                 ),
               ),
             ),

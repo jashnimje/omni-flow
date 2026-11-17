@@ -178,8 +178,14 @@ class _SunLightingPageState extends ConsumerState<SunLightingPage> {
       commitLabel: 'Save the range',
       commitKey: const ValueKey('sun-save'),
       onCommit: _curve != null && targets.isNotEmpty ? saveRange : null,
-      missing: targets.isEmpty
-          ? 'Turn on a room or a light first.'
+      // The range is kept with each light or room that follows, so it
+      // saves once one does.
+      missing: lights.isEmpty && targets.isEmpty
+          ? 'Add a light with brightness or white first. The range is saved '
+                'with the lights that follow it.'
+          : targets.isEmpty
+          ? 'Turn on a room or a light below first. The range is saved with '
+                'the lights that follow it.'
           : 'Move a slider to change the range.',
       children: (context) => [
         if (view?.problem case final p?)
@@ -258,7 +264,10 @@ class _SunLightingPageState extends ConsumerState<SunLightingPage> {
         if (lights.isEmpty)
           const OmniEmptyState(
             icon: OmniIcons.light,
-            title: 'No light with a brightness or white setting yet',
+            title: 'No lights to follow the sun yet',
+            message:
+                'A light with brightness or white can follow it. Add one '
+                'from Devices.',
             compact: true,
           ),
         for (final l in lights)
@@ -314,14 +323,28 @@ class _RangeRow extends StatelessWidget {
         'at midday',
         style: OmniText.body,
       ),
-      RangeSlider(
-        values: values,
-        min: min,
-        max: max,
-        divisions: divisions,
-        labels: RangeLabels(words(values.start), words(values.end)),
-        semanticFormatterCallback: words,
-        onChanged: onChanged,
+      // Both ranges drawn alike: the app's thick track and round thumbs,
+      // with no tick dots however many steps they have.
+      SliderTheme(
+        data: SliderTheme.of(context).copyWith(
+          trackHeight: 6,
+          rangeTickMarkShape: const RoundRangeSliderTickMarkShape(
+            tickMarkRadius: 0,
+          ),
+          rangeThumbShape: const RoundRangeSliderThumbShape(
+            enabledThumbRadius: 10,
+          ),
+          overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
+        ),
+        child: RangeSlider(
+          values: values,
+          min: min,
+          max: max,
+          divisions: divisions,
+          labels: RangeLabels(words(values.start), words(values.end)),
+          semanticFormatterCallback: words,
+          onChanged: onChanged,
+        ),
       ),
     ],
   );
@@ -349,30 +372,54 @@ class SunCurvePreview extends StatelessWidget {
           '${dimmest.brightness}%, brightest ${brightest.kelvin} K at '
           '${brightest.brightness}% around ${time(brightest.at)}',
       excludeSemantics: true,
-      child: SizedBox(
-        key: const ValueKey('sun-curve'),
-        height: 80,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            for (final p in points)
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 0.5),
-                  child: Container(
-                    height: 6 + 74 * p.brightness / 100,
-                    decoration: BoxDecoration(
-                      color: whiteOf(p.kelvin.toDouble()),
-                      borderRadius: BorderRadius.circular(OmniShape.xs),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            key: const ValueKey('sun-curve'),
+            height: 80,
+            child: _bars(),
+          ),
+          const SizedBox(height: OmniSpace.xs),
+          // The time under the bars: the first, a quarter of the day
+          // apart, and the last.
+          Row(
+            key: const ValueKey('sun-curve-axis'),
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              for (final i in {
+                0,
+                points.length ~/ 4,
+                points.length ~/ 2,
+                points.length * 3 ~/ 4,
+                points.length - 1,
+              })
+                Text(time(points[i].at), style: OmniText.caption),
+            ],
+          ),
+        ],
       ),
     );
   }
+
+  Widget _bars() => Row(
+    crossAxisAlignment: CrossAxisAlignment.end,
+    children: [
+      for (final p in points)
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 0.5),
+            child: Container(
+              height: 6 + 74 * p.brightness / 100,
+              decoration: BoxDecoration(
+                color: whiteOf(p.kelvin.toDouble()),
+                borderRadius: BorderRadius.circular(OmniShape.xs),
+              ),
+            ),
+          ),
+        ),
+    ],
+  );
 }
 
 /// A switch that a screen reader names, since Switch takes no label.

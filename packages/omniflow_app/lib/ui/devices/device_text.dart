@@ -105,8 +105,9 @@ const _months = [
 ];
 
 /// "19:02" today, "Yesterday 18:47", "3 Nov 18:10" before that.
-String when(DateTime at, {DateTime? now, bool hour12 = false}) {
-  final today = now ?? DateTime.now();
+String when(DateTime instant, {DateTime? now, bool hour12 = false}) {
+  final at = instant.toLocal();
+  final today = (now ?? DateTime.now()).toLocal();
   final day = DateTime(at.year, at.month, at.day);
   final start = DateTime(today.year, today.month, today.day);
   final days = start.difference(day).inDays;
@@ -275,11 +276,18 @@ String? _phoneLine(DeviceView d) {
 }
 
 /// A Devices row's subtitle: the driver, then what it is doing.
-String rowSubtitle(DeviceView d, String driverName, {DateTime? now}) {
+String rowSubtitle(
+  DeviceView d,
+  String driverName, {
+  DateTime? now,
+  bool hour12 = false,
+}) {
   final String detail;
   if (!d.online) {
     final seen = d.lastSeen;
-    detail = seen == null ? 'offline' : 'offline since ${when(seen, now: now)}';
+    detail = seen == null
+        ? 'offline'
+        : 'offline since ${when(seen, now: now, hour12: hour12)}';
   } else {
     detail = switch (kindOf(d)) {
       DeviceKind.tag => switch (lastScanned(d)) {

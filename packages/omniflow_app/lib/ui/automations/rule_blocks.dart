@@ -24,11 +24,19 @@ import 'token_field.dart';
 /// open, so an edit anywhere rebuilds every page and clears the errors the
 /// last save or test run named (their rule paths no longer line up).
 class RuleDraft extends ChangeNotifier {
-  RuleDraft(this.spec, {required this.words, this.automations = const []})
-    : _saved = jsonEncode(spec.toJson());
+  RuleDraft(
+    this.spec, {
+    required this.words,
+    this.automations = const [],
+    this.id,
+  }) : _saved = jsonEncode(spec.toJson());
 
   final RuleSpec spec;
   RuleWords words;
+
+  /// The stored rule this edits, or null for one not saved yet, so a dry
+  /// run from inside the editor (Try as if) can offer to run it for real.
+  final String? id;
 
   /// What a run step can start: every other automation.
   List<AutomationSummary> automations;

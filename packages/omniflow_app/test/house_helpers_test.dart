@@ -57,11 +57,11 @@ void main() {
       engine.answers['home.mode'] = _modes;
     });
 
-    testWidgets('the mode chip shows the mode, the subtitle says it, and the '
-        'picker sets another', (tester) async {
+    testWidgets('the mode chip shows the mode once, and the picker sets '
+        'another', (tester) async {
       await pumpApp(tester, engine);
       expect(find.text('Mode: Night'), findsOneWidget);
-      expect(find.textContaining('Night mode'), findsOneWidget);
+      expect(find.textContaining('Night mode'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('mode-chip')));
       await tester.pumpAndSettle();
       expect(find.text('Guests'), findsOneWidget);

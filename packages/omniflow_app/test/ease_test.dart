@@ -63,15 +63,16 @@ void main() {
       );
     });
 
-    testWidgets('opens with the search focused and the categories in one '
-        'row that scrolls sideways', (tester) async {
+    testWidgets('opens with the list in view, not the keyboard, and the '
+        'categories in one row that scrolls sideways', (tester) async {
       final engine = automationsEngine();
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
       await tapText(tester, 'Add step');
       final search = tester.widget<TextField>(
         find.byKey(const ValueKey('picker-search')),
       );
-      expect(search.autofocus, isTrue);
+      // The keyboard comes up only when the field is tapped (N7).
+      expect(search.autofocus, isFalse);
       final row = tester.widget<SingleChildScrollView>(
         find.byKey(const ValueKey('library-categories')),
       );

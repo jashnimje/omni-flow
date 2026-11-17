@@ -151,7 +151,9 @@ class _LauncherState extends State<Launcher> {
           key: const ValueKey('stopped-reason'),
           icon: OmniIcons.power,
           title: 'OmniFlow is stopped',
-          message: '$reason. Automations do not run until it starts again.',
+          message:
+              '${asSentence(reason)} Automations do not run until it starts '
+              'again.',
           action: OmniButton(
             key: const ValueKey('service-start'),
             label: 'Start',

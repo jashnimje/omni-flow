@@ -99,7 +99,7 @@ Each template takes `state:`, an `OmniLoad`, and draws the loading skeleton, the
 
 ### T1 TabPage (`tab_page.dart`)
 
-`TabPage({required String title, required List<Widget> Function(BuildContext) children, [String? subtitle, List<Widget> actions, Widget? house, Widget? filters, bool heroTitle = false, bool fab = true, OmniLoad state, OmniSkeleton skeleton = OmniSkeleton.rows, Widget? empty, List<Widget> banners, ScrollController? controller]})`, and `TabPage.custom({..., required Widget Function(BuildContext, EdgeInsets padding) body})` for a body that is not a plain list. `fab` pads the end of the list with `OmniInsets.fabClearance`, so the last row is never under the shell's button. Set it false on Settings.
+`TabPage({required String title, required List<Widget> Function(BuildContext) children, [String? subtitle, List<Widget> actions, Widget? house, Widget? filters, bool heroTitle = false, bool fab = true, OmniLoad state, OmniSkeleton skeleton = OmniSkeleton.rows, Widget? empty, List<Widget> banners, ScrollController? controller]})`, and `TabPage.custom({..., required Widget Function(BuildContext, EdgeInsets padding) body})` for a body that is not a plain list. `fab` pads the end of the list with `OmniInsets.fabClearance`, so the last row is never under the shell's button. Set it false on Settings. The shell draws that button extended (icon and label) on a phone at normal text sizes, as just its icon from 130 % text, and at the top of the rail on a wide screen or a phone on its side, where it covers nothing.
 
 ```dart
 final devices = ref.watch(devicesProvider);

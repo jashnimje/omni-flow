@@ -75,7 +75,9 @@ void main() {
     expect(buttonEnabled(tester, 'scene-save'), isFalse);
     await tester.enterText(find.byKey(const ValueKey('scene-name')), 'Sleep');
     await tester.pump();
-    await tapKey(tester, 'scene-icon-bedtime');
+    await tapKey(tester, 'scene-look');
+    await tapKey(tester, 'look-icon-moon');
+    await tapKey(tester, 'look-done');
     await tapText(tester, 'Add an action');
     await tapKey(tester, 'pick-device-desk_lamp');
     expect(find.byKey(const ValueKey('act-toggle-power')), findsNothing);
@@ -85,12 +87,12 @@ void main() {
     await tapKey(tester, 'pick-device-desk_lamp');
     await tapKey(tester, 'act-brightness');
     await tapKey(tester, 'form-done');
-    expect(find.text('Desk lamp · power off'), findsOneWidget);
+    expect(find.text('Desk lamp · turn off'), findsOneWidget);
     expect(find.text('Desk lamp · brightness 55%'), findsOneWidget);
     await tapKey(tester, 'scene-save');
     expect(engine.callsOf('scene.save').single.$2, {
       'name': 'Sleep',
-      'icon': 'bedtime',
+      'icon': 'moon',
       'actions': [
         {
           'do': 'desk_lamp.power',
@@ -112,8 +114,8 @@ void main() {
   ) async {
     await pumpPushed(tester, engine, const SceneEditorPage(id: 'movie'));
     expect(find.text('Desk lamp · brightness 20%'), findsOneWidget);
-    expect(find.text('Hall bulb · power off'), findsOneWidget);
-    await tester.tap(find.byTooltip('Remove Hall bulb · power off'));
+    expect(find.text('Hall bulb · turn off'), findsOneWidget);
+    await tester.tap(find.byTooltip('Remove Hall bulb · turn off'));
     await tester.pumpAndSettle();
     await tapKey(tester, 'scene-save');
     final call = engine.callsOf('scene.save').single.$2;

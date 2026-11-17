@@ -12,6 +12,7 @@ import 'form_parts.dart';
 import 'link_sheet.dart';
 import 'rule_editor.dart';
 import 'rule_words.dart';
+import 'scenes.dart' show openSceneEditor;
 
 /// The New button of Automations: a rule, a quick link, or a template.
 /// [tabContext] is inside the Automations tab, so what it opens keeps the
@@ -27,6 +28,8 @@ Future<void> openNewAutomation(BuildContext tabContext) async {
       await openRuleEditor(tabContext);
     case _NewLink():
       await showOmniSheet<void>(tabContext, builder: (_) => const LinkSheet());
+    case _NewScene():
+      await openSceneEditor(tabContext);
     case _NewTemplate(:final template):
       await Navigator.of(tabContext).push<void>(
         MaterialPageRoute(builder: (_) => TemplatePage(template: template)),
@@ -44,6 +47,10 @@ class _NewRule extends _NewChoice {
 
 class _NewLink extends _NewChoice {
   const _NewLink();
+}
+
+class _NewScene extends _NewChoice {
+  const _NewScene();
 }
 
 class _NewTemplate extends _NewChoice {
@@ -84,6 +91,14 @@ class _NewSheet extends ConsumerWidget {
           subtitle: 'This to that: a button toggles a light',
           chevron: true,
           onTap: () => pick(const _NewLink()),
+        ),
+        OmniListRow(
+          key: const ValueKey('new-scene'),
+          icon: OmniIcons.scene,
+          title: 'A scene',
+          subtitle: 'Several things set at once, run with one tap',
+          chevron: true,
+          onTap: () => pick(const _NewScene()),
         ),
         // A caption, so it does not stack on the first group's heading.
         const Padding(

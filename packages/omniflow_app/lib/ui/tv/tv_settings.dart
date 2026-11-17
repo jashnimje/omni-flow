@@ -132,17 +132,22 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
               ),
             for (final c in categories) ...[
               OmniSectionHeader(c.category),
-              for (final s in c.settings)
-                SettingCard(
-                  key: ValueKey('setting-${s.namespace}.${s.key}'),
-                  tv: tv,
-                  setting: s,
-                  risky: isNetwork(c.category),
-                ),
+              SettingGroup(
+                children: [
+                  for (final s in c.settings)
+                    SettingCard(
+                      key: ValueKey('setting-${s.namespace}.${s.key}'),
+                      tv: tv,
+                      setting: s,
+                      risky: isNetwork(c.category),
+                    ),
+                ],
+              ),
             ],
             const SizedBox(height: OmniSpace.sm),
             OmniListRow(
               key: const ValueKey('settings-all'),
+              icon: OmniIcons.settings,
               title: 'All settings',
               subtitle: _raw.isEmpty
                   ? 'every key per namespace'
@@ -187,14 +192,20 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
       ];
     }
     return [
-      if (curated.isNotEmpty) const OmniSectionHeader('Settings'),
-      for (final (c, s) in curated)
-        SettingCard(
-          key: ValueKey('setting-${s.namespace}.${s.key}'),
-          tv: tv,
-          setting: s,
-          risky: isNetwork(c.category),
+      if (curated.isNotEmpty) ...[
+        const OmniSectionHeader('Settings'),
+        SettingGroup(
+          children: [
+            for (final (c, s) in curated)
+              SettingCard(
+                key: ValueKey('setting-${s.namespace}.${s.key}'),
+                tv: tv,
+                setting: s,
+                risky: isNetwork(c.category),
+              ),
+          ],
         ),
+      ],
       if (raw.isNotEmpty)
         OmniSectionHeader('Raw keys', trailingText: '${raw.length}'),
       for (final s in raw.take(100))
@@ -211,7 +222,8 @@ class _TvSettingsTabState extends State<TvSettingsTab> {
 
 bool isNetwork(String category) => category.toLowerCase().contains('network');
 
-/// One curated setting with the control its type calls for, in a card. A
+/// One curated setting with the control its type calls for, a row of its
+/// group's card. A
 /// change is written straight away, after a confirm for [risky] ones, and
 /// the shown value moves only when the TV accepted it.
 class SettingCard extends StatefulWidget {
@@ -298,7 +310,7 @@ class _SettingCardState extends State<SettingCard> {
     final s = _s;
     switch (s.type) {
       case 'bool':
-        return OmniCard(
+        return _SettingTile(
           title: s.label,
           trailing: Semantics(
             label: s.label,
@@ -316,7 +328,7 @@ class _SettingCardState extends State<SettingCard> {
         final step = (s.step ?? (s.type == 'int' ? 1 : (max - min) / 100))
             .toDouble();
         final current = s.numValue?.toDouble();
-        return OmniCard(
+        return _SettingTile(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -329,7 +341,7 @@ class _SettingCardState extends State<SettingCard> {
                 value: (current ?? min).clamp(min, max),
                 format: (v) => current == null && v == min
                     ? 'Not set'
-                    : '${_fmt(v)}$_unit',
+                    : _shown(v, min, max),
                 onChangeEnd: _busy
                     ? null
                     : (v) {
@@ -347,7 +359,7 @@ class _SettingCardState extends State<SettingCard> {
         final value = s.options.any((o) => o.value == s.textValue)
             ? s.textValue
             : null;
-        return OmniCard(
+        return _SettingTile(
           title: s.label,
           trailing: DropdownButton<String>(
             key: ValueKey('setting-enum-${s.key}'),
@@ -372,50 +384,49 @@ class _SettingCardState extends State<SettingCard> {
         );
       default:
         final numeric = s.type == 'int' || s.type == 'float';
-        return OmniCard(
+        return _SettingTile(
           title: s.label,
-          trailing: Text(
-            s.type == 'string' ? 'text' : s.type,
-            style: OmniText.caption,
-          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               ?_description,
               const SizedBox(height: OmniSpace.xs),
-              TextField(
-                key: ValueKey('setting-text-${s.key}'),
-                controller: _text,
-                keyboardType: numeric
-                    ? const TextInputType.numberWithOptions(
-                        decimal: true,
-                        signed: true,
-                      )
-                    : TextInputType.text,
-                decoration: InputDecoration(
-                  labelText: s.label,
-                  hintText: 'Not set',
-                  suffixText: s.unit,
-                  suffixIcon: OmniIconAction(
-                    key: ValueKey('setting-save-${s.key}'),
-                    icon: OmniIcons.check,
-                    label: 'Save ${s.label}',
-                    color: OmniPalette.of(context).accent,
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            final text = _text.text.trim();
-                            if (numeric) {
-                              final n = num.tryParse(text);
-                              if (n == null) {
-                                showMessage('${s.label} must be a number');
-                                return;
+              // The row's title names the field, so it is read with it.
+              Semantics(
+                label: s.label,
+                child: TextField(
+                  key: ValueKey('setting-text-${s.key}'),
+                  controller: _text,
+                  keyboardType: numeric
+                      ? const TextInputType.numberWithOptions(
+                          decimal: true,
+                          signed: true,
+                        )
+                      : TextInputType.text,
+                  decoration: InputDecoration(
+                    hintText: 'Not set',
+                    suffixText: s.unit,
+                    suffixIcon: OmniIconAction(
+                      key: ValueKey('setting-save-${s.key}'),
+                      icon: OmniIcons.check,
+                      label: 'Save ${s.label}',
+                      color: OmniPalette.of(context).accent,
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              final text = _text.text.trim();
+                              if (numeric) {
+                                final n = num.tryParse(text);
+                                if (n == null) {
+                                  showMessage('${s.label} must be a number');
+                                  return;
+                                }
+                                _put(s.type == 'int' ? n.round() : n);
+                              } else {
+                                _put(text);
                               }
-                              _put(s.type == 'int' ? n.round() : n);
-                            } else {
-                              _put(text);
-                            }
-                          },
+                            },
+                    ),
                   ),
                 ),
               ),
@@ -427,8 +438,74 @@ class _SettingCardState extends State<SettingCard> {
 
   static double _round(double v) => (v * 100).round() / 100;
 
+  /// A value with its unit. One with no unit over a wide range (screen
+  /// brightness, 0 to 255) reads as a share of the range, "40%".
+  String _shown(double v, double min, double max) =>
+      _s.unit == null && max - min >= 100
+      ? '${((v - min) / (max - min) * 100).round()}%'
+      : '${_fmt(v)}$_unit';
+
   static String _fmt(double v) =>
       v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(2);
+}
+
+/// One setting's row inside its group's card: the name with its control,
+/// then the description or the field.
+class _SettingTile extends StatelessWidget {
+  const _SettingTile({this.title, this.trailing, this.child});
+
+  final String? title;
+  final Widget? trailing;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: OmniSpace.md),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (title != null || trailing != null)
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 24),
+            child: Row(
+              children: [
+                Expanded(
+                  child: title == null
+                      ? const SizedBox.shrink()
+                      : Text(title!, style: OmniText.bodyStrong),
+                ),
+                ?trailing,
+              ],
+            ),
+          ),
+        if ((title != null || trailing != null) && child != null)
+          const SizedBox(height: 6),
+        ?child,
+      ],
+    ),
+  );
+}
+
+/// The settings of one group in one card, a line between each.
+class SettingGroup extends StatelessWidget {
+  const SettingGroup({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => OmniCard(
+    padding: const EdgeInsets.symmetric(horizontal: OmniSpace.screen),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (i, c) in children.indexed) ...[
+          if (i > 0) Divider(height: 1, color: OmniPalette.of(context).line),
+          c,
+        ],
+      ],
+    ),
+  );
 }
 
 /// Every setting the TV has, per namespace, with search, raw edit and

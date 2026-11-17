@@ -40,6 +40,7 @@ class _AddPageState extends ConsumerState<AddPage> {
   ApiFailure? _failure;
   var _looking = true;
   Map<String, Json> _drivers = const {};
+  var _driversRead = false;
   String? _adding;
 
   @override
@@ -50,21 +51,44 @@ class _AddPageState extends ConsumerState<AddPage> {
 
   EngineApi get _quiet => EngineApi(ref.read(engineClientProvider));
 
+  /// Each found thing's place in the list, the order it was first seen,
+  /// so a later look never moves what is already shown.
+  final _seen = <String, int>{};
+
+  static String _keyOf(FoundThing f) =>
+      '${f.candidate['id'] ?? f.candidate['stableId'] ?? f.candidate['host'] ?? f.driverName}';
+
   Future<void> _discover() async {
     setState(() {
       _looking = true;
       _failure = null;
     });
-    final drivers = await _quiet.drivers();
+    // The drivers decide the add-by-hand list, so they come first and on
+    // their own: that list is whole from the start and never grows above
+    // what is already shown when the slower look finishes.
+    if (!_driversRead) {
+      final drivers = await _quiet.drivers();
+      if (!mounted) return;
+      setState(() {
+        _driversRead = drivers.ok;
+        _drivers = {for (final d in drivers.or(const [])) '${d['id']}': d};
+      });
+    }
     final find = await _quiet.discover();
     if (!mounted) return;
     setState(() {
       _looking = false;
-      _drivers = {for (final d in drivers.or(const [])) '${d['id']}': d};
       _find = find.value ?? _find;
       _failure = find.failure;
+      for (final f in _find?.found ?? const <FoundThing>[]) {
+        _seen.putIfAbsent(_keyOf(f), () => _seen.length);
+      }
     });
   }
+
+  /// [things] in the order they were first seen.
+  List<FoundThing> _stable(Iterable<FoundThing> things) => things.toList()
+    ..sort((a, b) => (_seen[_keyOf(a)] ?? 0).compareTo(_seen[_keyOf(b)] ?? 0));
 
   String _knownName(String id) =>
       '${ref.read(devicesProvider).value?.where((d) => d['id'] == id).firstOrNull?['name'] ?? id}';
@@ -117,14 +141,15 @@ class _AddPageState extends ConsumerState<AddPage> {
   Widget build(BuildContext context) {
     final wifi = _wifi(ref.watch(devicesProvider).value ?? const []);
     final find = _find;
-    final found = [
+    final kindsReady = _driversRead || !_looking;
+    final found = _stable([
       for (final f in find?.found ?? const <FoundThing>[])
         if (f.candidate['knownAs'] == null) f,
-    ];
-    final known = [
+    ]);
+    final known = _stable([
       for (final f in find?.found ?? const <FoundThing>[])
         if (f.candidate['knownAs'] != null) f,
-    ];
+    ]);
     final place = find?.manual.where((m) => m['driver'] == 'place').firstOrNull;
     final others = [
       for (final m in find?.manual ?? const <Json>[])
@@ -219,23 +244,31 @@ class _AddPageState extends ConsumerState<AddPage> {
             ],
             const OmniSectionHeader('Or add by hand'),
             // The common kinds first, in plain words. Another phone has its
-            // own steps.
+            // own steps. Until the drivers are read the kinds wait as one
+            // skeleton, so none is inserted above another later.
+            if (!kindsReady)
+              const OmniListSkeleton(
+                key: ValueKey('add-kinds-loading'),
+                rows: 3,
+                label: 'Loading the kinds',
+              ),
             for (final k in addKinds)
-              if (k.id == 'phones' || _drivers.values.any(k.has))
-                OmniListRow(
-                  key: ValueKey(
-                    k.id == 'phones'
-                        ? 'add-another-phone'
-                        : 'manual-kind-${k.id}',
+              if (kindsReady)
+                if (k.id == 'phones' || _drivers.values.any(k.has))
+                  OmniListRow(
+                    key: ValueKey(
+                      k.id == 'phones'
+                          ? 'add-another-phone'
+                          : 'manual-kind-${k.id}',
+                    ),
+                    icon: k.icon,
+                    title: k.title,
+                    subtitle: k.subtitle,
+                    chevron: true,
+                    onTap: () => k.id == 'phones'
+                        ? openAddPhone(context)
+                        : _byHand(kind: k.id),
                   ),
-                  icon: k.icon,
-                  title: k.title,
-                  subtitle: k.subtitle,
-                  chevron: true,
-                  onTap: () => k.id == 'phones'
-                      ? openAddPhone(context)
-                      : _byHand(kind: k.id),
-                ),
             OmniListRow(
               key: const ValueKey('manual-tag'),
               icon: OmniIcons.tag,

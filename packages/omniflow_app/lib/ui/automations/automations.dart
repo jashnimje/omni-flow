@@ -14,9 +14,11 @@ export 'scenes.dart'
     show
         ScenesPage,
         SceneEditorPage,
+        automationIconFor,
         openScenes,
         openSceneEditor,
         runScene,
         sceneIconFor,
         sceneIcons;
 export 'test_run.dart' show RunPage, TestRunPage, runSummary;
+export 'waiting_page.dart' show WaitingPage, openWaitingForApproval;

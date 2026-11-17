@@ -7,6 +7,7 @@ import 'package:flutter/semantics.dart';
 import '../../../api/diagram_calls.dart';
 import '../../design/design.dart';
 import '../rule_words.dart' show AutomationIcons;
+import '../run_words.dart' show stepWords;
 import 'diagram_layout.dart';
 import 'diagram_nodes.dart';
 import 'diagram_painter.dart';
@@ -422,7 +423,11 @@ class DiagramList extends StatelessWidget {
               key: ValueKey('diagram-row-${n.id}'),
               icon: h.iconOf?.call(n) ?? _kindIcon(n.kind),
               iconForeground: RunColors.of(n),
-              title: n.words.isEmpty ? nodeKindWords(n.kind) : n.words,
+              // Capitalised like the diagram's nodes and the sentence.
+              title: stepWords(
+                n.words.isEmpty ? nodeKindWords(n.kind) : n.words,
+                hour12: false,
+              ),
               subtitle: [
                 ?branches[n.id]?.words,
                 nodeKindWords(n.kind),

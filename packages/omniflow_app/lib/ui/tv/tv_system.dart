@@ -43,6 +43,13 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
 
   TvSystem? _system;
   List<TvProcess>? _apps;
+
+  /// Every package on the TV, read once, and which of them the user
+  /// installed: only those get Stop. A system app, or a process that is no
+  /// app at all (android.process.media), starts again by itself. Null
+  /// until read.
+  Set<String>? _packages;
+  Set<String>? _userApps;
   String? _error;
   ({int rx, int tx, DateTime at})? _lastNet;
   ({double rx, double tx})? _rates;
@@ -96,9 +103,66 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
     }
   }
 
+  /// Reads the apps once, with their names, for the running list.
+  Future<void> _readSystemApps() async {
+    final r = await tv.client.call(
+      TvCalls.apps,
+      TvCalls.appsArgs(tv.id, AppFilter.all),
+    );
+    if (!mounted) return;
+    final apps = r['ok'] == true ? TvCalls.appsOf(r) : const <TvApp>[];
+    for (final a in apps) {
+      if (a.label case final l? when l.isNotEmpty) tv.appLabels[a.package] = l;
+    }
+    setState(() {
+      _packages = {for (final a in apps) a.package};
+      _userApps = {
+        for (final a in apps)
+          if (!a.system) a.package,
+      };
+    });
+  }
+
+  /// The package a process belongs to: its own, or the listed package its
+  /// name starts with (`com.google.android.gms.unstable` is Play services).
+  String _packageOf(String process) {
+    if (tv.appLabels.containsKey(process) ||
+        (_packages?.contains(process) ?? false)) {
+      return process;
+    }
+    final known = {...tv.appLabels.keys, ...?_packages};
+    String? best;
+    for (final k in known) {
+      if (process.startsWith('$k.') && k.length > (best?.length ?? 0)) {
+        best = k;
+      }
+    }
+    return best ?? process;
+  }
+
+  /// One row per app: its processes together, memory added up.
+  List<TvProcess> _byApp(List<TvProcess> processes) {
+    final out = <String, TvProcess>{};
+    for (final p in processes) {
+      final package = _packageOf(p.package);
+      final seen = out[package];
+      out[package] = (
+        package: package,
+        pid: seen?.pid ?? p.pid,
+        memoryKb: (seen?.memoryKb ?? 0) + p.memoryKb,
+        foreground: (seen?.foreground ?? false) || p.foreground,
+      );
+    }
+    return out.values.toList()
+      ..sort((a, b) => b.memoryKb.compareTo(a.memoryKb));
+  }
+
+  bool _isSystem(String package) => !(_userApps?.contains(package) ?? false);
+
   Future<void> _read() async {
     if (_reading) return;
     _reading = true;
+    if (_packages == null) unawaited(_readSystemApps());
     try {
       final results = await Future.wait([
         tv.client.call(TvCalls.system, TvCalls.readArgs(tv.id)),
@@ -141,9 +205,7 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
     final ok = await confirm(
       context,
       title: 'Stop $name?',
-      body:
-          'It closes at once and anything not saved in it is lost. A system '
-          'app may start again by itself.',
+      body: 'It closes at once and anything not saved in it is lost.',
       action: 'Stop',
       destructive: true,
     );
@@ -312,19 +374,28 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
             compact: true,
           )
         else
-          for (final p in apps ?? const <TvProcess>[])
+          for (final p in _byApp(apps ?? const <TvProcess>[]))
             OmniListRow(
               key: ValueKey('tv-process-${p.package}'),
               icon: p.foreground ? OmniIcons.play : OmniIcons.system,
               title: appNameOf(p.package, label: tv.appLabels[p.package]),
-              subtitle:
-                  '${p.foreground ? 'on screen · ' : ''}${sizeText(p.memoryKb)}',
-              trailing: TextButton(
-                key: ValueKey('tv-process-stop-${p.package}'),
-                onPressed: () => _stopApp(p),
-                style: TextButton.styleFrom(foregroundColor: OmniColors.bad),
-                child: const Text('Stop'),
-              ),
+              subtitle: [
+                if (p.foreground) 'on screen',
+                if (_isSystem(p.package)) 'part of the system',
+                sizeText(p.memoryKb),
+              ].join(' · '),
+              // A system app is not stopped from here: it starts again by
+              // itself, and stopping one can freeze the TV.
+              trailing: _isSystem(p.package)
+                  ? null
+                  : TextButton(
+                      key: ValueKey('tv-process-stop-${p.package}'),
+                      onPressed: () => _stopApp(p),
+                      style: TextButton.styleFrom(
+                        foregroundColor: OmniColors.bad,
+                      ),
+                      child: const Text('Stop'),
+                    ),
             ),
         OmniSectionHeader('The whole ${tv.noun}'),
         OmniListRow(

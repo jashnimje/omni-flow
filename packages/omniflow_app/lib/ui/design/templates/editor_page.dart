@@ -33,6 +33,7 @@ class EditorPage extends StatelessWidget {
     this.missing,
     this.dirty = false,
     this.discardWhat = 'this automation',
+    this.discardNew = false,
     this.onDiscard,
     this.state = const OmniLoad.data(),
     this.empty,
@@ -60,6 +61,9 @@ class EditorPage extends StatelessWidget {
   final String? missing;
   final bool dirty;
   final String discardWhat;
+
+  /// Whether it was never saved (see [OmniDiscardGuard.isNew]).
+  final bool discardNew;
   final VoidCallback? onDiscard;
   final OmniLoad state;
 
@@ -71,6 +75,7 @@ class EditorPage extends StatelessWidget {
     return OmniDiscardGuard(
       dirty: dirty,
       what: discardWhat,
+      isNew: discardNew,
       onDiscard: onDiscard,
       child: OmniPage(
         title: title,

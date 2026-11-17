@@ -6,6 +6,7 @@ import 'api_error.dart';
 import 'command_args.dart';
 import 'engine_core.dart';
 import 'nfc_tags.dart' show nfcTagDriverId;
+import 'versions.dart' show RemovedAutomationStore;
 import '../dag/node_types.dart';
 import '../devices/board.dart' show isBoardDriver;
 import '../storage/database.dart';
@@ -126,10 +127,6 @@ class HomeStatsStore {
   }
 }
 
-/// What the busiest automation is called once it has been removed, so
-/// nobody sees its id.
-const removedAutomationName = 'A removed automation';
-
 /// A run from the log, reduced to what the numbers need.
 class StatsRun {
   const StatsRun({
@@ -214,7 +211,9 @@ Map<String, Object?> homeStatsOf({
   final names = {for (final f in flows) f.id: f.name};
   final byFlow = <String, int>{};
   for (final r in runs) {
-    if (r.completed && inWindow(r.at, first)) {
+    // Removed automations' runs still count in the totals, but only one
+    // still there can be named the busiest.
+    if (r.completed && inWindow(r.at, first) && names.containsKey(r.flowId)) {
       byFlow[r.flowId] = (byFlow[r.flowId] ?? 0) + 1;
     }
   }
@@ -262,7 +261,7 @@ Map<String, Object?> homeStatsOf({
         ? null
         : {
             'id': busiest.key,
-            'name': names[busiest.key] ?? removedAutomationName,
+            'name': names[busiest.key],
             'runs': busiest.value,
           },
     'totalRuns': totalRuns,
@@ -412,12 +411,21 @@ class HomeStatsCommands {
             (houses.flowHouses['${f.json['id']}'] ?? house) == house)
           f,
     ];
+    Map<String, Map<Object?, Object?>> nodesOf(FlowRecord f) => {
+      for (final n in (f.json['nodes'] as List? ?? const []))
+        if (n is Map) '${n['id']}': n,
+    };
     final flowNodes = {
-      for (final f in flowRecords)
-        '${f.json['id']}': {
-          for (final n in (f.json['nodes'] as List? ?? const []))
-            if (n is Map) '${n['id']}': n,
-        },
+      for (final f in flowRecords) '${f.json['id']}': nodesOf(f),
+    };
+    // A house's runs include those of automations since removed from it,
+    // which the removed list still places in that house. Their runs count
+    // as in the whole home's numbers, with the busiest named as removed.
+    final ranNodes = {
+      if (house != null)
+        for (final r in await RemovedAutomationStore(db).all(now))
+          if ((r.house ?? house) == house) r.id: nodesOf(r.record),
+      ...flowNodes,
     };
     final flows = [
       for (final f in flowRecords)
@@ -449,8 +457,8 @@ class HomeStatsCommands {
         continue;
       }
       if (trace is! Map || trace['dryRun'] == true) continue;
-      if (house != null && !flowNodes.containsKey(trace['flow'])) continue;
-      final run = _runOf(Map<String, Object?>.from(trace), flowNodes);
+      if (house != null && !ranNodes.containsKey(trace['flow'])) continue;
+      final run = _runOf(Map<String, Object?>.from(trace), ranNodes);
       if (run == null) continue;
       runs.add(run);
       if (id > record.lastLogId && run.completed) newRuns++;

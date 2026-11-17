@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/house.dart' show houseInViewProvider;
 import '../../state/providers.dart';
 import '../automations/capture_scene.dart' show showCaptureScene;
 import '../automations/scenes.dart'
@@ -77,18 +78,23 @@ List<RunItem>? surpriseScenes(List<RunItem> items) {
 
 /// The Run header and a grid of coloured tiles, then Surprise me with two
 /// scenes or more, and last "Save how things are now", which makes a
-/// scene of the devices as they are.
-class RunSection extends StatelessWidget {
+/// scene of the devices as they are. Each tile is keyed by the house and
+/// what it runs, so the last result of one house's tile never shows on
+/// another's in the same place.
+class RunSection extends ConsumerWidget {
   const RunSection({super.key, required this.items});
 
   final List<RunItem> items;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final house = ref.watch(houseInViewProvider).value;
     final surprise = surpriseScenes(items);
     final tiles = <Widget>[
-      for (final item in items) RunTile(item: item),
-      if (surprise != null) SurpriseTile(scenes: surprise),
+      for (final item in items)
+        RunTile(key: ValueKey('run-tile-$house-${item.id}'), item: item),
+      if (surprise != null)
+        SurpriseTile(key: ValueKey('run-surprise-$house'), scenes: surprise),
       const CaptureTile(),
     ];
     return Column(
@@ -102,7 +108,14 @@ class RunSection extends StatelessWidget {
         ),
         LayoutBuilder(
           builder: (context, box) {
-            final columns = box.maxWidth >= 340 ? 3 : 2;
+            // Columns by the width the text needs, so large text gets
+            // wider tiles rather than cut-off names.
+            final width = box.maxWidth / runTextScale(context);
+            final columns = width >= 340
+                ? 3
+                : width >= 150
+                ? 2
+                : 1;
             return Column(
               children: [
                 for (var i = 0; i < tiles.length; i += columns)
@@ -134,6 +147,15 @@ class RunSection extends StatelessWidget {
 }
 
 enum _RunState { idle, running, done, failed }
+
+/// How much larger than normal the system draws text.
+double runTextScale(BuildContext context) =>
+    MediaQuery.textScalerOf(context).scale(OmniText.body.fontSize!) /
+    OmniText.body.fontSize!;
+
+/// [lines] at normal text sizes, more at large ones so nothing is cut.
+int runLines(BuildContext context, int lines) =>
+    runTextScale(context) >= 1.3 ? lines * 2 : lines;
 
 /// A coloured tile: a tap runs it (a short progress, then a check or the
 /// plain reason it failed), a long press opens it.
@@ -293,14 +315,14 @@ class _RunTileState extends ConsumerState<RunTile> {
                         const SizedBox(height: OmniSpace.gap),
                         Text(
                           item.name,
-                          maxLines: 2,
+                          maxLines: runLines(context, 2),
                           overflow: TextOverflow.ellipsis,
                           style: OmniText.label,
                         ),
                         Text(
                           _stateText,
                           key: ValueKey('run-state-${item.id}'),
-                          maxLines: failed ? 3 : 1,
+                          maxLines: runLines(context, failed ? 3 : 1),
                           overflow: TextOverflow.ellipsis,
                           style: OmniText.caption.copyWith(
                             color: failed
@@ -434,15 +456,15 @@ class CaptureTile extends ConsumerWidget {
                         size: 32,
                       ),
                       const SizedBox(height: OmniSpace.gap),
-                      const Text(
+                      Text(
                         'Save how things are now',
-                        maxLines: 2,
+                        maxLines: runLines(context, 2),
                         overflow: TextOverflow.ellipsis,
                         style: OmniText.label,
                       ),
                       Text(
                         'As a new scene',
-                        maxLines: 1,
+                        maxLines: runLines(context, 1),
                         overflow: TextOverflow.ellipsis,
                         style: OmniText.caption.copyWith(
                           color: OmniDepth.captionOn(card),

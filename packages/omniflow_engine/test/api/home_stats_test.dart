@@ -122,19 +122,17 @@ void main() {
       expect(s['busiest'], {'id': 'b', 'name': 'Bedtime', 'runs': 2});
     });
 
-    test('a busiest automation that was removed is named as removed', () {
+    test('a removed automation is never the busiest', () {
       final s = stats(
         runs: [
           run(now, flow: 'call_test'),
           run(now, flow: 'call_test'),
+          run(now, flow: 'b'),
         ],
-        flows: const [],
+        flows: [(id: 'b', name: 'Bedtime', source: 'rule', sunset: false)],
       );
-      expect(s['busiest'], {
-        'id': 'call_test',
-        'name': 'A removed automation',
-        'runs': 2,
-      });
+      expect(s['busiest'], {'id': 'b', 'name': 'Bedtime', 'runs': 1});
+      expect((s['week'] as Map)['automationsRun'], 3);
     });
 
     test(
@@ -297,6 +295,54 @@ void main() {
       final reopened = await engine.handle('home.stats', const {});
       expect(reopened['totalRuns'], 1);
       expect(reopened['newlyEarned'], isEmpty);
+    });
+
+    test('a house counts its own runs, also of an automation removed since, '
+        'and not the other house\'s', () async {
+      expect(
+        (await engine.handle('house.add', {'name': 'Bangalore'}))['ok'],
+        isTrue,
+      );
+      final saved = await engine.handle('automation.save', {
+        'form': 'rule',
+        'trusted': true,
+        'house': 'home',
+        'spec': {
+          'name': 'Ask test',
+          'when': ['manual'],
+          'then': [
+            {
+              'notify': {'title': 'Hi'},
+            },
+          ],
+        },
+      });
+      expect(saved['ok'], isTrue, reason: '$saved');
+      final ran = await engine.handle('automation.run', {'id': saved['id']});
+      expect(ran['ok'], isTrue, reason: '$ran');
+
+      Future<int> runsIn(String? house) async {
+        final s = await engine.handle('home.stats', {'house': ?house});
+        expect(s['ok'], isTrue, reason: '$s');
+        return (s['week'] as Map)['automationsRun'] as int;
+      }
+
+      expect(await runsIn('home'), 1);
+      expect(await runsIn('bangalore'), 0);
+
+      final removed = await engine.handle('automation.remove', {
+        'id': saved['id'],
+      });
+      expect(removed['ok'], isTrue, reason: '$removed');
+      expect(await runsIn(null), 1);
+      expect(await runsIn('home'), 1);
+      expect(await runsIn('bangalore'), 0);
+      final s = await engine.handle('home.stats', {'house': 'home'});
+      expect(
+        s['busiest'],
+        isNull,
+        reason: 'a removed automation is never the busiest',
+      );
     });
 
     test('days out of range is invalid, and an agent may read it', () async {

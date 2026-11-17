@@ -12,6 +12,18 @@ String withoutTypeName(String text) {
   return out;
 }
 
+/// [text] as a sentence: trimmed, with a full stop unless it already ends
+/// with one, a question mark or an exclamation mark, so words joined after
+/// a plain error never read "switched on?." or "Wi-Fi..". Empty stays
+/// empty.
+String asSentence(String text) {
+  final out = text.trim();
+  if (out.isEmpty || _sentenceEnd.hasMatch(out)) return out;
+  return '$out.';
+}
+
+final _sentenceEnd = RegExp(r'[.?!]["\)]?$');
+
 /// A step that failed, in words a person can act on ("Desk lamp did not
 /// answer. Is it switched on?"), with the technical text ("no reply from
 /// 10.0.2.81:38899 after 3 attempts") in [details] for the run log's

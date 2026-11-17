@@ -32,7 +32,8 @@ void main() {
       expect(find.text('Network'), findsOneWidget);
       expect(find.text('Developer'), findsOneWidget);
       expect(find.textContaining('Backlight level'), findsOneWidget);
-      expect(sliderShows('screen_brightness', '128'), isTrue);
+      // 0 to 255 with no unit reads as a share of the range.
+      expect(sliderShows('screen_brightness', '50%'), isTrue);
       expect(find.text('Search 4 settings'), findsOneWidget);
       expect(find.text('system 2 · secure 1 · global 1'), findsOneWidget);
     });
@@ -115,7 +116,7 @@ void main() {
             const Offset(40, 24),
       );
       await tester.pumpAndSettle();
-      expect(sliderShows('screen_brightness', '77'), isTrue);
+      expect(sliderShows('screen_brightness', '30%'), isTrue);
     });
 
     testWidgets('a switch writes true or false', (tester) async {

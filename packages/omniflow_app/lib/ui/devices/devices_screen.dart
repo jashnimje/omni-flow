@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/clock.dart';
 import '../../state/providers.dart';
 import '../add/add_page.dart';
 import '../design/design.dart';
@@ -27,9 +28,10 @@ final devicesViewProvider = NotifierProvider<DevicesViewNotifier, DevicesView>(
   DevicesViewNotifier.new,
 );
 
-/// Whether a device needs the user: offline, or waiting to be paired.
+/// Whether a device needs the user: offline (the muted dot every screen
+/// uses for offline), or waiting to be paired.
 StatusKind? statusOf(DeviceView d) {
-  if (!d.online) return StatusKind.problem;
+  if (!d.online) return StatusKind.offline;
   if (d.json['paired'] == false) return StatusKind.warning;
   if (d.json.containsKey('online')) return StatusKind.online;
   return null;
@@ -37,7 +39,7 @@ StatusKind? statusOf(DeviceView d) {
 
 bool hasProblem(DeviceView d) {
   final s = statusOf(d);
-  return s == StatusKind.problem || s == StatusKind.warning;
+  return s == StatusKind.offline || s == StatusKind.warning;
 }
 
 /// The things Devices lists: everything except people and places, which
@@ -155,6 +157,9 @@ bool devicesAreEmpty(WidgetRef ref) =>
       null => false,
     };
 
+/// Below this height (logical pixels) Devices scrolls its filters.
+const shortScreen = 520.0;
+
 /// 3.1: every thing, by room, by type or only the ones with a problem,
 /// with a search field over the list. A row opens its page; on a wide
 /// screen the page shows beside the list instead.
@@ -191,7 +196,33 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
     final problems = listed?.where(hasProblem).length ?? 0;
     final twoPanes = OmniWidth.of(context) == OmniWidth.expanded;
     final query = _search.text;
+    // Beside a detail pane, or on a screen too short to keep them pinned
+    // (a phone on its side), the view and the search scroll with the list.
+    final inlineFilters =
+        twoPanes || MediaQuery.sizeOf(context).height < shortScreen;
+    final filters = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OmniSegmented<DevicesView>(
+          key: const ValueKey('devices-view'),
+          segments: [
+            const OmniSegment(DevicesView.byRoom, 'By room'),
+            const OmniSegment(DevicesView.byType, 'By type'),
+            OmniSegment(
+              DevicesView.problems,
+              'Problems',
+              count: problems == 0 ? null : problems,
+            ),
+          ],
+          selected: view,
+          onChanged: ref.read(devicesViewProvider.notifier).show,
+        ),
+        if (listed != null && listed.isNotEmpty)
+          _SearchField(controller: _search),
+      ],
+    );
     Widget list(EdgeInsets padding) => _DeviceList(
+      header: inlineFilters ? filters : null,
       devices: [
         for (final d in listed!)
           if (matchesQuery(d, query, drivers)) d,
@@ -204,40 +235,13 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
       selected: twoPanes ? _selected : null,
       onOpen: twoPanes ? (id) => setState(() => _selected = id) : null,
     );
+    // One search: the field over the list. Search and commands is on
+    // Home.
     return TabPage.custom(
       title: 'Devices',
-      actions: [
-        OmniIconAction(
-          key: const ValueKey('devices-search'),
-          icon: OmniIcons.search,
-          label: 'Search and commands',
-          onPressed: () =>
-              ref.read(shellControllerProvider).open(const SearchLink()),
-        ),
-        const ScreenHelpButton(HelpScreen.devices),
-      ],
+      actions: const [ScreenHelpButton(HelpScreen.devices)],
       house: const HouseSwitcher(),
-      filters: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          OmniSegmented<DevicesView>(
-            key: const ValueKey('devices-view'),
-            segments: [
-              const OmniSegment(DevicesView.byRoom, 'By room'),
-              const OmniSegment(DevicesView.byType, 'By type'),
-              OmniSegment(
-                DevicesView.problems,
-                'Problems',
-                count: problems == 0 ? null : problems,
-              ),
-            ],
-            selected: view,
-            onChanged: ref.read(devicesViewProvider.notifier).show,
-          ),
-          if (listed != null && listed.isNotEmpty)
-            _SearchField(controller: _search),
-        ],
-      ),
+      filters: inlineFilters ? null : filters,
       state: OmniLoad.of(
         devices,
         isEmpty: (_) => listed?.isEmpty ?? false,
@@ -352,6 +356,7 @@ class _DetailPane extends StatelessWidget {
 
 class _DeviceList extends ConsumerWidget {
   const _DeviceList({
+    this.header,
     required this.devices,
     required this.query,
     required this.view,
@@ -362,6 +367,8 @@ class _DeviceList extends ConsumerWidget {
     this.onOpen,
   });
 
+  /// The view and the search, when they scroll with the list.
+  final Widget? header;
   final List<DeviceView> devices;
   final String query;
 
@@ -384,6 +391,7 @@ class _DeviceList extends ConsumerWidget {
         key: const ValueKey('devices-list'),
         padding: padding,
         children: [
+          ?header,
           if (groups.isEmpty)
             query.trim().isNotEmpty
                 ? OmniEmptyState(
@@ -408,6 +416,7 @@ class _DeviceList extends ConsumerWidget {
                 subtitle: rowSubtitle(
                   d,
                   shortDriverName(drivers[d.driver], d.driver),
+                  hour12: ref.watch(hour12Provider),
                 ),
                 dot: statusOf(d),
                 selected: selected == d.id,

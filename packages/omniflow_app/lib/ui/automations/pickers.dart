@@ -19,6 +19,7 @@ import 'library_sheet.dart';
 import 'phone_words.dart';
 import 'rule_words.dart';
 import 'rules_core_forms.dart';
+import 'scenes.dart' show automationIconFor;
 import 'timer_forms.dart';
 import 'token_field.dart';
 import 'web_headers.dart';

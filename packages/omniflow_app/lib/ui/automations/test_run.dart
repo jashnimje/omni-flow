@@ -5,12 +5,13 @@ import 'package:omniflow_engine/omniflow_engine.dart'
 
 import '../../api/engine_calls.dart';
 import '../../api/plain_error.dart';
-import '../../state/clock.dart' show hour12Provider;
+import '../../state/clock.dart' show hour12Provider, timeOfDayText;
 import '../../state/providers.dart';
 import '../design/design.dart';
 import 'diagram/run_view.dart' show DryRunDiagram;
 import 'dialogs.dart';
 import 'rule_words.dart';
+import 'run_words.dart';
 
 /// 2.4: what a dry run would do now, node by node, then the last real
 /// runs, each opening the same view for that run.
@@ -53,7 +54,14 @@ String _failureText(String raw) =>
 /// What a node did, or in a dry run would do, in plain words.
 /// [goesOn] is whether the run went past [n]: a check that does not hold
 /// stops a rule, but in an if it takes the otherwise way instead.
-String? _detail(RunNode n, {required bool dry, bool goesOn = false}) {
+/// [now] is whether a dry run was judged at the time it was made, not at
+/// its trigger's own time (a test run against Try as if).
+String? _detail(
+  RunNode n, {
+  required bool dry,
+  bool goesOn = false,
+  bool now = false,
+}) {
   if (n.error case final e?) {
     final plain = _failureText(e);
     return dry ? 'would fail: $plain' : plain;
@@ -63,7 +71,11 @@ String? _detail(RunNode n, {required bool dry, bool goesOn = false}) {
   final result = own ? (n.output?['result']) : null;
   switch (c) {
     case NodeCategory.trigger:
-      return dry ? 'pretended it happened' : 'started this run';
+      return !dry
+          ? 'started this run'
+          : now
+          ? 'pretended it happened now'
+          : 'pretended it happened';
     case NodeCategory.condition:
       return switch (n.port) {
         'true' => 'holds',
@@ -101,22 +113,40 @@ String? _detail(RunNode n, {required bool dry, bool goesOn = false}) {
 /// Each node of a run as a row: a dot in its category colour, the step,
 /// what it did, and a check, an arrow or a cross.
 class RunNodeRows extends StatelessWidget {
-  const RunNodeRows({super.key, required this.run, this.labels = const {}});
+  const RunNodeRows({
+    super.key,
+    required this.run,
+    this.labels = const {},
+    this.now = false,
+  });
 
   final RunRecord run;
   final Map<String, String> labels;
 
+  /// A dry run judged at the time it was made (a test run), so its
+  /// trigger reads "pretended it happened now".
+  final bool now;
+
   @override
   Widget build(BuildContext context) {
     final dry = run.dryRun;
+    final hour12 = ProviderScope.containerOf(context).read(hour12Provider);
     return Column(
       children: [
         for (final (i, n) in run.steps.indexed)
           OmniListRow(
             key: ValueKey('node-$i'),
             leading: _Dot(_color(_category(n.type))),
-            title: n.label ?? labels[n.node] ?? n.type.replaceAll('_', ' '),
-            subtitle: _detail(n, dry: dry, goesOn: i < run.steps.length - 1),
+            title: stepWords(
+              n.label ?? labels[n.node] ?? n.type.replaceAll('_', ' '),
+              hour12: hour12,
+            ),
+            subtitle: _detail(
+              n,
+              dry: dry,
+              goesOn: i < run.steps.length - 1,
+              now: now,
+            ),
             subtitleLines: 3,
             trailing: _verdict(
               context,
@@ -237,9 +267,28 @@ class RunRow extends StatelessWidget {
   }
 }
 
+/// What a [TestRunPage] is for. Each entry to it has its own purpose and
+/// title, so two of them never answer the same question two ways.
+enum TestRunKind {
+  /// A link's page: a test of it now, then its real runs.
+  testAndRuns,
+
+  /// The editor's Test run: what the rule would do if it started now,
+  /// judged at the time of the test.
+  test,
+
+  /// Try as if this happens: what the rule would do if one trigger
+  /// happened, judged at that trigger's own time.
+  tryAsIf,
+
+  /// Runs: the real runs only, newest first.
+  runs,
+}
+
 /// The test of an automation: the dry run, then its real runs. [dryRun] is
 /// the dry run the editor already made of the rule as it stands; without
-/// it the page dry-runs the stored automation [id].
+/// it the page dry-runs the stored automation [id]. [kind] picks which of
+/// those it shows.
 class TestRunPage extends ConsumerStatefulWidget {
   const TestRunPage({
     super.key,
@@ -250,7 +299,10 @@ class TestRunPage extends ConsumerStatefulWidget {
     this.unsaved = false,
     this.rule,
     this.header,
+    this.kind = TestRunKind.testAndRuns,
   });
+
+  final TestRunKind kind;
 
   /// The rule the dry run tested, when it is not saved, so its diagram
   /// draws the rule as it stands.
@@ -284,18 +336,23 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
   ApiFailure? _runsFailure;
   var _labels = <String, String>{};
 
+  bool get _tests => widget.kind != TestRunKind.runs;
+
+  bool get _lists =>
+      widget.kind == TestRunKind.testAndRuns || widget.kind == TestRunKind.runs;
+
   @override
   void initState() {
     super.initState();
     _dry = widget.dryRun;
-    _dryDone = widget.dryRun != null || widget.id == null;
+    _dryDone = widget.dryRun != null || widget.id == null || !_tests;
     _load();
   }
 
   Future<void> _load() async {
     final api = ref.read(engineApiProvider);
     final id = widget.id;
-    if (_dry == null && id != null) {
+    if (_dry == null && id != null && _tests) {
       final dry = await api.dryRun(id: id);
       if (!mounted) return;
       setState(() {
@@ -306,15 +363,16 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
     }
     if (id == null) return;
     final got = await api.automation(id);
-    final runs = await api.runLog(id: id, limit: 20);
+    // A test alone lists no runs, so it reads none.
+    final runs = _lists ? await api.runLog(id: id, limit: 20) : null;
     if (!mounted) return;
     setState(() {
       _labels = labelsOf(got.value?['flow'] as Json?);
       _runs = [
-        for (final r in runs.or(const []))
+        for (final r in runs?.or(const []) ?? const <RunRecord>[])
           if (!r.dryRun) r,
       ];
-      _runsFailure = runs.failure;
+      _runsFailure = runs?.failure;
     });
   }
 
@@ -347,8 +405,33 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
     final dry = _dry;
     final runs = _runs;
     final canRun = _dryDone && widget.id != null && !widget.unsaved;
+    final hour12 = ref.watch(hour12Provider);
+    final trigger = dry?.steps
+        .where((n) => _category(n.type) == NodeCategory.trigger)
+        .firstOrNull;
+    final triggerWords = trigger == null
+        ? null
+        : stepWords(
+            trigger.label ?? _labels[trigger.node] ?? '',
+            hour12: hour12,
+          );
+    final told = switch (widget.kind) {
+      TestRunKind.test when dry != null =>
+        'Nothing was sent. This is what would happen if it started now, at '
+            '${timeOfDayText(hour12, dry.startedAt)}.',
+      TestRunKind.tryAsIf
+          when triggerWords != null && triggerWords.isNotEmpty =>
+        'Nothing was sent. This is what would happen if this happened: '
+            '$triggerWords.',
+      _ => 'Nothing was sent. This is what would happen.',
+    };
     return DetailPage(
-      title: '${widget.name} · test',
+      title: switch (widget.kind) {
+        TestRunKind.testAndRuns => '${widget.name} · test',
+        TestRunKind.test => '${widget.name} · test run',
+        TestRunKind.tryAsIf => '${widget.name} · try as if',
+        TestRunKind.runs => '${widget.name} · runs',
+      },
       actions: widget.actions,
       bottom: canRun
           ? OmniActionBar(
@@ -361,7 +444,9 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
           : null,
       children: (context) => [
         ?widget.header,
-        if (_dryFailure != null)
+        if (!_tests)
+          const SizedBox.shrink()
+        else if (_dryFailure != null)
           OmniErrorBanner(
             'The test could not run: ${_dryFailure!.message}',
             onRetry: () {
@@ -375,10 +460,7 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
         else if (!_dryDone)
           const OmniListSkeleton(rows: 3, label: 'Testing it')
         else ...[
-          const OmniBanner.info(
-            'Nothing was sent. This is what would happen.',
-            key: ValueKey('dry-run-banner'),
-          ),
+          OmniBanner.info(told, key: const ValueKey('dry-run-banner')),
           if (dry == null || dry.steps.isEmpty)
             const OmniEmptyState(
               icon: OmniIcons.info,
@@ -389,7 +471,14 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
           else ...[
             // The same run twice: on the diagram, then step by step.
             DryRunDiagram(run: dry, rule: widget.rule, id: widget.id),
-            RunNodeRows(key: const ValueKey('dry-run'), run: dry),
+            RunNodeRows(
+              key: const ValueKey('dry-run'),
+              run: dry,
+              labels: _labels,
+              now:
+                  widget.kind == TestRunKind.test ||
+                  widget.kind == TestRunKind.testAndRuns,
+            ),
           ],
           if (widget.id == null || widget.unsaved)
             Padding(
@@ -403,8 +492,8 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
               ),
             ),
         ],
-        if (widget.id != null) ...[
-          const OmniSectionHeader('Last runs'),
+        if (widget.id != null && _lists) ...[
+          if (_tests) const OmniSectionHeader('Last runs'),
           if (_runsFailure != null)
             OmniErrorBanner(
               'The run log did not load. ${_runsFailure!.message}',
@@ -550,7 +639,8 @@ class _RunPageState extends ConsumerState<RunPage> {
           )
         else
           OmniBanner.error(
-            'This run failed${failed == null ? '' : ': $failed'}. '
+            'This run failed'
+            '${failed == null ? '.' : ': ${asSentence(failed)}'} '
             'Steps after a failed one still run unless the automation stops at '
             'the first failure.',
           ),

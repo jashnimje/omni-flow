@@ -30,12 +30,30 @@ Future<void> openRuleEditor(BuildContext context, {String? id, Json? spec}) =>
       ),
     );
 
+/// The spec a duplicate starts from: the same rule named "Evening copy",
+/// without the original's id, so saving it makes a new rule from its own
+/// name instead of colliding with the one it was copied from.
+Json duplicateSpec(Json spec) {
+  final name = '${spec['name'] ?? ''}'.trim();
+  return {
+    for (final e in spec.entries)
+      if (e.key != 'id') e.key: e.value,
+    'name': name.isEmpty ? 'New automation copy' : '$name copy',
+  };
+}
+
 /// 2.2: WHEN any of these, ONLY IF all of these, THEN in order. The engine
 /// compiles and checks the rule; the editor edits its JSON, shows the
 /// engine's errors on the rows their rule paths name, dry-runs it and
 /// saves it.
 class RuleEditorPage extends ConsumerStatefulWidget {
-  const RuleEditorPage({super.key, this.id, this.initial, this.name});
+  const RuleEditorPage({
+    super.key,
+    this.id,
+    this.initial,
+    this.name,
+    this.startOff = false,
+  });
 
   /// The rule to reopen, or null for a new one.
   final String? id;
@@ -45,6 +63,9 @@ class RuleEditorPage extends ConsumerStatefulWidget {
 
   /// Where a new rule starts.
   final Json? initial;
+
+  /// A copy saves switched off, so it never fires beside its original.
+  final bool startOff;
 
   @override
   ConsumerState<RuleEditorPage> createState() => _RuleEditorPageState();
@@ -109,6 +130,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
           Map<String, Object?>.from(automation['spec'] as Map? ?? const {}),
         ),
         words: RuleWords(const []),
+        id: widget.id,
       );
     });
     _loadLabels();
@@ -170,6 +192,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
           dryRun: reply.value!.firstOrNull,
           rule: draft.spec.toJson(),
           unsaved: _draft?.dirty ?? false,
+          kind: TestRunKind.test,
         ),
       ),
     );
@@ -212,7 +235,15 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
       );
       return;
     }
-    showMessage('Saved $_name');
+    if (widget.startOff && widget.id == null && saved['id'] is String) {
+      await ref
+          .read(engineApiProvider)
+          .enableAutomation(saved['id'] as String, false);
+      await ref.read(automationsProvider.notifier).refresh();
+      showMessage('Saved $_name. It stays off until you turn it on');
+    } else {
+      showMessage('Saved $_name');
+    }
     navigator.pop();
   }
 
@@ -304,20 +335,23 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
         draft.changed();
       case _Menu.duplicate:
         // A copy of what is on screen, as a new rule that is not saved yet.
-        await Navigator.of(context).push<void>(
-          MaterialPageRoute(
-            builder: (_) => RuleEditorPage(
-              initial: {
-                ...draft.spec.toJson(),
-                'name': _name.isEmpty ? 'New automation copy' : '$_name copy',
-              },
-            ),
+        // It takes this page's place unless this page has unsaved edits,
+        // so saving the copy goes back to the list.
+        final copy = MaterialPageRoute<void>(
+          builder: (_) => RuleEditorPage(
+            initial: duplicateSpec(draft.spec.toJson()),
+            startOff: true,
           ),
         );
+        final navigator = Navigator.of(context);
+        await (draft.dirty
+            ? navigator.push<void>(copy)
+            : navigator.pushReplacement<void, void>(copy));
       case _Menu.history:
         await Navigator.of(context).push<void>(
           MaterialPageRoute(
-            builder: (_) => TestRunPage(name: _name, id: widget.id),
+            builder: (_) =>
+                TestRunPage(name: _name, id: widget.id, kind: TestRunKind.runs),
           ),
         );
       case _Menu.remove:
@@ -380,6 +414,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
               : _name.isEmpty
               ? 'this automation'
               : _name,
+          discardNew: widget.id == null,
           onDiscard: () => draft.dirty = false,
           actions: [
             PopupMenuButton<_Menu>(
@@ -402,7 +437,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                   ),
                   const PopupMenuItem(
                     value: _Menu.history,
-                    child: Text('Runs and test'),
+                    child: Text('Runs'),
                   ),
                   PopupMenuItem(
                     value: _Menu.remove,
@@ -527,9 +562,7 @@ class _LookAndAsk extends StatelessWidget {
             child: Icon(automationIcon(spec.icon), color: color, size: 22),
           ),
           title: 'Colour and icon',
-          subtitle:
-              '${colorNames[spec.color] ?? 'Teal'}, '
-              '${spec.icon ?? automationIconNames.first}',
+          subtitle: lookWords((color: spec.color, icon: spec.icon)),
           chevron: true,
           onTap: () async {
             final look = await pickLook(context, (

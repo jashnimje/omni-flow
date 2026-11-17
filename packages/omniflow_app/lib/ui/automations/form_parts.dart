@@ -349,9 +349,24 @@ class ParamControls extends StatefulWidget {
     }
   }
 
-  static String labelOf(String key) => key == 'value'
-      ? 'Value'
-      : '${key[0].toUpperCase()}${key.substring(1)}'.replaceAll('_', ' ');
+  /// What a field for the param [key] is called: plain words for the
+  /// names that are not ([paramWords]), else the name spaced out.
+  static String labelOf(String key) {
+    if (paramWords[key] case final words?) return words;
+    final spaced = key
+        .replaceAll('_', ' ')
+        .replaceAllMapped(RegExp('([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+        .toLowerCase();
+    return spaced.isEmpty
+        ? key
+        : '${spaced[0].toUpperCase()}${spaced.substring(1)}';
+  }
+
+  /// The title of the sheet that picks [key]'s value from a list.
+  static String choiceTitleOf(String key) => switch (key) {
+    'package' => 'Choose an app',
+    _ => labelOf(key),
+  };
 
   @override
   State<ParamControls> createState() => _ParamControlsState();
@@ -474,7 +489,10 @@ class _ParamControlsState extends State<ParamControls> {
           onTap: () async {
             final choice = await showOmniSheet<ParamChoice>(
               context,
-              builder: (_) => ChoiceSheet(title: label, load: load),
+              builder: (_) => ChoiceSheet(
+                title: ParamControls.choiceTitleOf(key),
+                load: load,
+              ),
             );
             if (choice == null || !mounted) return;
             c.text = choice.value;
@@ -492,6 +510,15 @@ class _ParamControlsState extends State<ParamControls> {
 
 /// One value a param can take, with the words for it.
 typedef ParamChoice = ({String value, String label});
+
+/// Plain words for the param names drivers use that do not read as words
+/// on their own: an app is picked by its package, a link is a URL.
+const paramWords = <String, String>{
+  'package': 'App',
+  'url': 'Link',
+  'key': 'Button',
+  'phoneMac': 'Phone MAC address',
+};
 
 /// A searchable list of choices, loaded when it opens, that pops the one
 /// picked.

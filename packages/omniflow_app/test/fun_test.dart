@@ -24,6 +24,7 @@ Map<String, Object?> statsReply({
   int streak = 3,
   int totalRuns = 40,
   List<String> newly = const [],
+  List<Map<String, Object?>>? achievements,
 }) => {
   'ok': true,
   'today': {
@@ -50,21 +51,23 @@ Map<String, Object?> statsReply({
   'streak': {'days': streak, 'best': 9},
   'busiest': {'id': 'evening', 'name': 'Evening desk', 'runs': 14},
   'totalRuns': totalRuns,
-  'achievements': [
-    {
-      'id': 'first_automation',
-      'title': 'First automation',
-      'how': 'Save one',
-      'earned': true,
-      'earnedAt': '2026-11-10T09:00:00.000Z',
-    },
-    {
-      'id': 'runs_100',
-      'title': '100 runs',
-      'how': 'Let automations run 100 times',
-      'earned': false,
-    },
-  ],
+  'achievements':
+      achievements ??
+      [
+        {
+          'id': 'first_automation',
+          'title': 'First automation',
+          'how': 'Save one',
+          'earned': true,
+          'earnedAt': '2026-11-10T09:00:00.000Z',
+        },
+        {
+          'id': 'runs_100',
+          'title': '100 runs',
+          'how': 'Let automations run 100 times',
+          'earned': false,
+        },
+      ],
   'newlyEarned': newly,
 };
 
@@ -150,6 +153,33 @@ void main() {
         find.bySemanticsLabel(RegExp('100 runs, not earned yet')),
         findsOneWidget,
       );
+    });
+
+    testWidgets('achievement tiles in a row are the same height', (
+      tester,
+    ) async {
+      final engine = FakeEngine()
+        ..answers['home.stats'] = statsReply(
+          achievements: [
+            {
+              'id': 'first_device',
+              'title': 'First device',
+              'how': 'Add one',
+              'earned': false,
+            },
+            {
+              'id': 'first_automation',
+              'title': 'First automation that runs on its own every evening',
+              'how': 'Save one that starts by itself, on a time or a device',
+              'earned': false,
+            },
+          ],
+        );
+      await pumpScreen(tester, engine, const YourHomePage());
+      Rect tile(String id) =>
+          tester.getRect(find.byKey(ValueKey('achievement-$id')));
+      expect(tile('first_device').top, tile('first_automation').top);
+      expect(tile('first_device').height, tile('first_automation').height);
     });
 
     testWidgets('a run that finishes reads the numbers again', (tester) async {

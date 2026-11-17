@@ -860,6 +860,7 @@ class AutomationTemplate {
     'Watch and listen',
     'Away and safety',
     'Buttons and tags',
+    'Web and data',
   ];
 
   /// Whether a toggle step flips placeholder [key]. A TV turns on and off

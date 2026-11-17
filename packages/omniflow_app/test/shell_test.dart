@@ -183,7 +183,7 @@ void main() {
     await pumpApp(tester, engine);
     await openDeveloper(tester);
     expect(find.byType(Inspector), findsOneWidget);
-    expect(find.text('No packets yet.'), findsOneWidget);
+    expect(find.text('No packets yet'), findsOneWidget);
   });
 
   group('links from notifications', () {

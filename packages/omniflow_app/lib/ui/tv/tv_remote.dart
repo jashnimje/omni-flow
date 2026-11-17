@@ -158,7 +158,17 @@ abstract final class RemoteLayout {
   };
 }
 
-enum _RemoteMode { remote, gamepad, mouse }
+enum _RemoteMode {
+  remote('Buttons', OmniIcons.remote, 'The remote\'s keys'),
+  gamepad('Gamepad', OmniIcons.gamepad, 'A game controller\'s buttons'),
+  mouse('Mouse', OmniIcons.action, 'A pointer you move with a finger');
+
+  const _RemoteMode(this.label, this.icon, this.how);
+
+  final String label;
+  final IconData icon;
+  final String how;
+}
 
 class TvRemoteTab extends StatefulWidget {
   const TvRemoteTab({super.key, required this.tv, this.active = true});
@@ -202,6 +212,27 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
         onLongPress: () => _press(k, long: true),
       );
 
+  Future<void> _pickMode() async {
+    final picked = await showPickerSheet<_RemoteMode>(
+      context,
+      title: 'Keys',
+      selected: _mode,
+      sections: [
+        PickerSection([
+          for (final m in _RemoteMode.values)
+            PickerItem(
+              key: ValueKey('tv-remote-mode-${m.name}'),
+              value: m,
+              title: m.label,
+              subtitle: m.how,
+              icon: m.icon,
+            ),
+        ]),
+      ],
+    );
+    if (picked != null && mounted) setState(() => _mode = picked);
+  }
+
   Future<void> _sendText() async {
     final text = _text.text;
     if (text.isEmpty) return;
@@ -221,15 +252,16 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
           : null,
       padding: omniBodyPadding(OmniInsets.bottom(context)),
       children: [
-        OmniSegmented<_RemoteMode>(
-          key: const ValueKey('tv-remote-mode'),
-          segments: const [
-            OmniSegment(_RemoteMode.remote, 'Buttons'),
-            OmniSegment(_RemoteMode.gamepad, 'Gamepad'),
-            OmniSegment(_RemoteMode.mouse, 'Mouse'),
-          ],
-          selected: _mode,
-          onChanged: (v) => setState(() => _mode = v),
+        // One row of tabs above (the page's chips): how the remote works is
+        // a choice inside it, not a second row of tabs.
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: OmniStatusChip(
+            key: const ValueKey('tv-remote-mode'),
+            icon: _mode.icon,
+            label: 'Keys: ${_mode.label}',
+            onTap: _pickMode,
+          ),
         ),
         const SizedBox(height: OmniSpace.sm),
         if (_mode == _RemoteMode.gamepad)

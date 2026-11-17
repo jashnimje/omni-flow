@@ -33,7 +33,7 @@ const stopButtonId = 'stop';
 /// started with, even across an app update, so the app sets them again on
 /// every start.
 const serviceTitle = 'OmniFlow is running';
-const serviceText = 'Flows keep running with the screen off';
+const serviceText = 'Automations keep running with the screen off';
 const serviceIcon = NotificationIcon(
   metaDataName: 'com.jashnm.omniflow_app.SERVICE_ICON',
   backgroundColor: Color(0xFF00F5D4),
@@ -542,7 +542,7 @@ class OmniTaskHandler extends TaskHandler {
     _trouble = reason;
     await notice?.show(
       notArmedTitle,
-      '$reason. OmniFlow tries again by itself.',
+      '${asSentence(reason)} OmniFlow tries again by itself.',
       serviceButtons,
     );
     await notice?.notRunning(reason);

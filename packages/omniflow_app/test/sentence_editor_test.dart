@@ -283,7 +283,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Which device?'), findsOneWidget);
       await tapKey(tester, 'pick-device-hall_bulb');
-      expect(find.text('Hall bulb · power on'), findsOneWidget);
+      expect(find.text('Hall bulb · turn on'), findsOneWidget);
       await tapKey(tester, 'rule-save');
       expect(savedSpec(engine)['then'], [
         {'wait': 10000},
@@ -543,7 +543,7 @@ void main() {
       await tapKey(tester, 'look-color-FB923C');
       await tapKey(tester, 'look-icon-movie');
       await tapKey(tester, 'look-done');
-      expect(find.text('Orange, movie'), findsOneWidget);
+      expect(find.text('Orange, Film'), findsOneWidget);
       await tapKey(tester, 'rule-save');
       final spec = savedSpec(engine);
       expect(spec['askFirst'], isTrue);

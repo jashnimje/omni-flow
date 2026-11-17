@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/providers.dart';
+
+import 'package:material_symbols_icons/symbols.dart';
+
+import '../automations/form_parts.dart'
+    show ChoiceSheet, ParamChoice, ParamControls;
+import '../automations/pickers.dart' show phoneAppChoices;
 import '../design/design.dart';
 import 'device_controls.dart' show ColourSwatches;
 
@@ -31,6 +37,9 @@ class CapabilityControl extends ConsumerStatefulWidget {
 
 class _CapabilityControlState extends ConsumerState<CapabilityControl> {
   double? _dragging;
+
+  /// What a switch the device does not report was last set to here.
+  bool? _sent;
   final _text = TextEditingController();
 
   Json get cap => widget.capability;
@@ -79,34 +88,32 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
     final known = cap['stateKey'] != null && state.containsKey(cap['stateKey']);
     switch (cap['type']) {
       case 'toggle':
-        if (!known) {
-          return OmniListRow(
-            key: key,
-            icon: OmniIcons.forCapability('toggle'),
-            title: '${cap['label']}',
-            subtitle: 'Not read yet',
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextButton(
-                  onPressed: () => _invoke({'value': false}),
-                  child: Text('Off', semanticsLabel: '${cap['label']} off'),
-                ),
-                TextButton(
-                  onPressed: () => _invoke({'value': true}),
-                  child: Text('On', semanticsLabel: '${cap['label']} on'),
-                ),
-              ],
-            ),
-          );
-        }
-        return SwitchListTile(
+        // A switch like every other. One the device never reports (a
+        // phone's torch) shows what was last set here.
+        final name = '${cap['label']}';
+        final readable = cap['stateKey'] != null;
+        final on = known ? current == true : _sent ?? false;
+        return OmniListRow(
           key: key,
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          title: label,
-          value: current == true,
-          onChanged: (v) => _invoke({'value': v}),
+          icon: actionIconOf(cap),
+          title: name,
+          subtitle: known
+              ? null
+              : !readable
+              ? (_sent == null
+                    ? 'It does not report whether it is on'
+                    : 'Last set ${_sent! ? 'on' : 'off'} here')
+              : 'Not read yet',
+          trailing: Switch(
+            key: ValueKey('switch-$deviceId.$id'),
+            value: on,
+            onChanged: (v) async {
+              if (await _invoke({'value': v}) && mounted) {
+                setState(() => _sent = v);
+              }
+            },
+          ),
+          semanticLabel: name,
         );
       case 'level' || 'color_temp':
         final min = (valueParam['min'] as num? ?? 0).toDouble();
@@ -155,9 +162,8 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
         if (inputs.isNotEmpty) {
           return OmniListRow(
             key: key,
-            icon: OmniIcons.forCapability('action'),
+            icon: actionIconOf(cap),
             title: name,
-            subtitle: [for (final k in inputs.keys) _words(k)].join(', '),
             chevron: true,
             onTap: () => SheetTemplate.show<void>(
               context,
@@ -168,6 +174,10 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
                     label: name,
                     heading: false,
                     params: inputs,
+                    choices: {
+                      if (widget.device['driver'] == 'phone')
+                        'package': phoneAppChoices,
+                    },
                     onSubmit: (values) async {
                       final ok = await _invoke(values);
                       if (ok && sheet.mounted) Navigator.of(sheet).pop();
@@ -181,7 +191,7 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
         }
         return OmniListRow(
           key: key,
-          icon: OmniIcons.forCapability('action'),
+          icon: actionIconOf(cap),
           title: name,
           value: 'Run',
           semanticLabel: 'Run $name',
@@ -264,10 +274,15 @@ class ParamsForm extends StatefulWidget {
     this.submitLabel,
     this.initial = const {},
     this.heading = true,
+    this.choices = const {},
   });
 
   /// Shows [label] above the fields. Off inside a sheet titled with it.
   final bool heading;
+
+  /// For a text param, a list to pick its value from (the phone's apps
+  /// for an app's package). The field stays for a value not listed.
+  final Map<String, Future<List<ParamChoice>> Function()> choices;
 
   final String label;
   final Map<String, Json> params;
@@ -295,6 +310,9 @@ class _ParamsFormState extends State<ParamsForm> {
     for (final e in widget.initial.entries)
       if (!_text.containsKey(e.key)) e.key: e.value,
   };
+
+  /// The words for a value picked from a list, by param.
+  final _picked = <String, String>{};
 
   @override
   void dispose() {
@@ -357,7 +375,29 @@ class _ParamsFormState extends State<ParamsForm> {
             child: Text(widget.label),
           ),
         for (final e in widget.params.entries)
-          if (_text[e.key] case final c?)
+          if (_text[e.key] case final c?) ...[
+            if (widget.choices[e.key] case final load?)
+              OmniListRow(
+                key: ValueKey('param-${e.key}-pick'),
+                icon: OmniIcons.search,
+                title: 'Choose from the list',
+                subtitle: _picked[e.key],
+                chevron: true,
+                onTap: () async {
+                  final choice = await showOmniSheet<ParamChoice>(
+                    context,
+                    builder: (_) => ChoiceSheet(
+                      title: ParamControls.choiceTitleOf(e.key),
+                      load: load,
+                    ),
+                  );
+                  if (choice == null || !mounted) return;
+                  setState(() {
+                    c.text = choice.value;
+                    _picked[e.key] = choice.label;
+                  });
+                },
+              ),
             TextField(
               key: ValueKey('param-${e.key}'),
               controller: c,
@@ -366,8 +406,8 @@ class _ParamsFormState extends State<ParamsForm> {
                   : TextInputType.text,
               decoration: InputDecoration(
                 labelText: e.value['optional'] == true
-                    ? '${_words(e.key)} (optional)'
-                    : _words(e.key),
+                    ? '${ParamControls.labelOf(e.key)} (optional)'
+                    : ParamControls.labelOf(e.key),
                 helperText: _rangeHelp(e.value),
                 errorText: switch (num.tryParse(c.text.trim())) {
                   final n? when _outOfRange(e.value, n) =>
@@ -380,12 +420,14 @@ class _ParamsFormState extends State<ParamsForm> {
                 },
               ),
               onChanged: (_) => setState(() {}),
-            )
-          else if (e.value['values'] case final List options)
+            ),
+          ] else if (e.value['values'] case final List options)
             DropdownButtonFormField<Object>(
               key: ValueKey('param-${e.key}'),
               initialValue: _choice[e.key],
-              decoration: InputDecoration(labelText: _words(e.key)),
+              decoration: InputDecoration(
+                labelText: ParamControls.labelOf(e.key),
+              ),
               items: [
                 for (final o in options)
                   DropdownMenuItem(
@@ -400,7 +442,7 @@ class _ParamsFormState extends State<ParamsForm> {
               key: ValueKey('param-${e.key}'),
               dense: true,
               contentPadding: EdgeInsets.zero,
-              title: Text(_words(e.key)),
+              title: Text(ParamControls.labelOf(e.key)),
               value: _choice[e.key] == true,
               onChanged: (v) => setState(() => _choice[e.key] = v),
             ),
@@ -415,7 +457,35 @@ class _ParamsFormState extends State<ParamsForm> {
   }
 }
 
-/// A param or value as words: `long_press` reads "Long press".
+/// The icon of an action or switch: the manifest's own, else one for
+/// what its id says it does, else the generic action icon.
+IconData actionIconOf(Json cap) {
+  if (OmniIcons.forManifestIcon(cap['icon'] as String?) case final named?) {
+    return named;
+  }
+  final id = '${cap['id']}'.toLowerCase();
+  for (final (words, icon) in _actionIcons) {
+    if (words.any(id.contains)) return icon;
+  }
+  return OmniIcons.forCapability(cap['type'] == 'toggle' ? 'toggle' : 'action');
+}
+
+const _actionIcons = <(List<String>, IconData)>[
+  (['speak', 'say'], Symbols.record_voice_over_rounded),
+  (['vibrat'], Symbols.vibration_rounded),
+  (['torch', 'flash'], Symbols.flashlight_on_rounded),
+  (['dnd', 'disturb'], Symbols.do_not_disturb_on_rounded),
+  (['sound', 'ring'], Symbols.notifications_active_rounded),
+  (['volume'], Symbols.volume_up_rounded),
+  (['media'], Symbols.play_pause_rounded),
+  (['open_app', 'launch'], Symbols.apps_rounded),
+  (['link', 'url'], Symbols.link_rounded),
+  (['alarm'], Symbols.alarm_rounded),
+  (['timer'], Symbols.timer_rounded),
+  (['message', 'notify'], Symbols.chat_rounded),
+];
+
+/// An option value as words: `long_press` reads "Long press".
 String _words(String key) {
   final spaced = key
       .replaceAll('_', ' ')

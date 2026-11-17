@@ -101,6 +101,8 @@ void main() {
   testWidgets('Gamepad sends A as the controller key', (tester) async {
     final engine = tvEngine();
     await pumpTv(tester, engine);
+    await tester.tap(find.byKey(const ValueKey('tv-remote-mode')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Gamepad'));
     await tester.pumpAndSettle();
     await tapKey(tester, 'key-96');
@@ -122,6 +124,8 @@ void main() {
         'tv.input.tap': {'ok': true},
       });
     await pumpTv(tester, engine);
+    await tester.tap(find.byKey(const ValueKey('tv-remote-mode')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Mouse'));
     await tester.pumpAndSettle();
     // Its picture refreshes on its own, so it never raises the TV's prompt.

@@ -12,7 +12,7 @@ import '../design/design.dart';
 import 'automations_state.dart';
 import 'dialogs.dart';
 import 'rule_blocks.dart' show RuleDraft;
-import 'test_run.dart' show TestRunPage;
+import 'test_run.dart' show TestRunKind, TestRunPage;
 
 /// Why [id] clashes with other automations, from the automation list the
 /// engine sends with each row's clashes.
@@ -91,6 +91,10 @@ class _AutomationInsightsState extends ConsumerState<AutomationInsights> {
   List<VersionRecord>? _versions;
   var _restoring = false;
 
+  /// Whether it has a real run in the log, so "nothing was stopped" is
+  /// not said of a rule that was never set off.
+  var _everRan = false;
+
   @override
   void initState() {
     super.initState();
@@ -102,8 +106,14 @@ class _AutomationInsightsState extends ConsumerState<AutomationInsights> {
     final args = RulesCoreCalls.idArgs(widget.id);
     final skips = await client.call(RulesCoreCalls.skips, args);
     final versions = await client.call(RulesCoreCalls.versions, args);
+    final runs = await ref
+        .read(engineApiProvider)
+        .runLog(id: widget.id, limit: 20);
     if (!mounted) return;
     setState(() {
+      // A failed read keeps the plain "nothing was stopped" words.
+      _everRan =
+          runs.failure != null || runs.or(const []).any((r) => !r.dryRun);
       _skips = skips['ok'] == true ? RulesCoreCalls.skipsOf(skips) : const [];
       _versions = versions['ok'] == true
           ? RulesCoreCalls.versionsOf(versions)
@@ -159,12 +169,24 @@ class _AutomationInsightsState extends ConsumerState<AutomationInsights> {
           ),
         const OmniSectionHeader('Why didn\'t it run?'),
         if (skips == null)
-          const LinearProgressIndicator()
+          const OmniListSkeleton(rows: 1, label: 'Reading why it did not run')
+        else if (skips.isEmpty && !_everRan)
+          const OmniEmptyState(
+            key: ValueKey('skips-never-ran'),
+            icon: OmniIcons.time,
+            title: 'It has not been set off yet',
+            message:
+                'When its trigger happens and a check or a setting stops '
+                'it, the reason shows here.',
+            compact: true,
+          )
         else if (skips.isEmpty)
-          const Text(
-            'Nothing was stopped. Each time it was set off, it ran.',
+          const OmniEmptyState(
             key: ValueKey('skips-none'),
-            style: OmniText.caption,
+            icon: OmniIcons.check,
+            title: 'Nothing was stopped',
+            message: 'Each time it was set off, it ran.',
+            compact: true,
           )
         else
           for (final (i, s) in skips.indexed)
@@ -176,13 +198,14 @@ class _AutomationInsightsState extends ConsumerState<AutomationInsights> {
             ),
         const OmniSectionHeader('History'),
         if (versions == null)
-          const LinearProgressIndicator()
+          const OmniListSkeleton(rows: 1, label: 'Reading its history')
         else if (versions.isEmpty)
-          const Text(
-            'No earlier versions yet. Each save keeps the one before, up '
-            'to 10.',
+          const OmniEmptyState(
             key: ValueKey('versions-none'),
-            style: OmniText.caption,
+            icon: OmniIcons.time,
+            title: 'No earlier versions yet',
+            message: 'Each save keeps the one before, up to 10.',
+            compact: true,
           )
         else
           for (final v in versions)
@@ -213,12 +236,14 @@ class _TryAsIfButtonState extends ConsumerState<TryAsIfButton> {
 
   Future<void> _try() async {
     final draft = widget.draft;
+    // A saved rule carries its id, so the page can run it for real.
+    final id = draft.id;
     setState(() => _busy = true);
     final result = await ref
         .read(engineClientProvider)
         .call(
           EngineCalls.automationDryRun,
-          RulesCoreCalls.tryAsIfArgs(draft.spec.toJson(), widget.index),
+          RulesCoreCalls.tryAsIfArgs(draft.spec.toJson(), widget.index, id: id),
         );
     if (!mounted) return;
     setState(() => _busy = false);
@@ -234,9 +259,11 @@ class _TryAsIfButtonState extends ConsumerState<TryAsIfButton> {
       MaterialPageRoute(
         builder: (_) => TestRunPage(
           name: name.isEmpty ? 'New automation' : name,
+          id: id,
           dryRun: run,
           rule: draft.spec.toJson(),
-          unsaved: true,
+          unsaved: id == null || draft.dirty,
+          kind: TestRunKind.tryAsIf,
         ),
       ),
     );

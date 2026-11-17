@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -9,6 +11,7 @@ import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automations_state.dart';
 import 'capture_scene.dart';
+import 'look_picker.dart';
 import 'pickers.dart';
 import 'review_page.dart';
 import 'rule_words.dart';
@@ -50,7 +53,19 @@ const sceneIconWords = <String, String>{
 };
 
 /// A scene's icon, the scene icon when it names none this app knows.
-IconData sceneIconFor(String? name) => sceneIcons[name] ?? OmniIcons.scene;
+/// A scene picks from the same icons as a rule ([AutomationLook.icons]);
+/// [sceneIcons] still draws the names scenes saved before.
+IconData sceneIconFor(String? name) =>
+    AutomationLook.icons[name] ?? sceneIcons[name] ?? OmniIcons.scene;
+
+/// [name] in the icon set the look picker offers: the older scene names
+/// that have a match there take it, any other is kept as it is.
+String? sceneLookIcon(String? name) => switch (name) {
+  'bedtime' => 'moon',
+  'music_note' => 'music',
+  'spa' => 'leaf',
+  _ => name,
+};
 
 /// The icon an automation.list row wears: a scene keeps its own icons, a
 /// rule or link takes one from [AutomationLook.icons].
@@ -60,6 +75,18 @@ IconData automationIconFor(AutomationSummary a) => a.isScene
         a.icon,
         fallback: a.isLink ? AutomationIcons.link : AutomationIcons.rule,
       );
+
+/// Whether [a] and [b] do the same thing to the same device.
+/// A number matches by value, so 55 and 55.0 are the same.
+bool sameSceneAction(SceneAction a, SceneAction b) =>
+    a.action == b.action &&
+    a.params.length == b.params.length &&
+    a.params.entries.every(
+      (e) =>
+          b.params.containsKey(e.key) &&
+          (e.value == b.params[e.key] ||
+              jsonEncode(e.value) == jsonEncode(b.params[e.key])),
+    );
 
 Future<void> openScenes(BuildContext context) =>
     Navigator.of(context)
@@ -259,10 +286,14 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
     if (thing == null) return;
     final edited = await actionForm(context, thing, step, false);
     if (edited is! DoStep) return;
-    _actions![i] = SceneAction(
+    final next = SceneAction(
       '${edited.thing}.${edited.capability}',
       edited.params,
     );
+    // Done on an action left as it was changes nothing, so Back does not
+    // ask to discard.
+    if (sameSceneAction(_actions![i], next)) return;
+    _actions![i] = next;
     _changed();
   }
 
@@ -336,7 +367,8 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
     return FormPage(
       title: title,
       dirty: _dirty,
-      discardWhat: 'this scene',
+      discardWhat: widget.id == null ? 'this new scene' : 'this scene',
+      discardNew: widget.id == null,
       onDiscard: () => _dirty = false,
       commitKey: const ValueKey('scene-save'),
       onCommit: _ready ? _save : null,
@@ -396,45 +428,44 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
               onChanged: (_) => _changed(),
             ),
           ),
-          const OmniSectionHeader('Icon'),
-          Wrap(
-            children: [
-              for (final e in sceneIcons.entries)
-                OmniIconAction(
-                  key: ValueKey('scene-icon-${e.key}'),
-                  icon: e.value,
-                  label: 'Icon ${sceneIconWords[e.key] ?? e.key}',
-                  // No icon of its own wears the film, so that one is marked.
-                  selected: (_icon ?? 'movie') == e.key,
-                  onPressed: () {
-                    _icon = e.key;
-                    _changed();
-                  },
-                ),
-            ],
+          // The same row and sheet as a rule's look, with the film as the
+          // icon a scene wears with none of its own.
+          OmniListRow(
+            key: const ValueKey('scene-look'),
+            leading: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: automationColor(_color).withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(OmniRadii.iconBox),
+              ),
+              child: Icon(
+                sceneIconFor(_icon),
+                color: automationColor(_color),
+                size: 22,
+              ),
+            ),
+            title: 'Colour and icon',
+            subtitle: lookWords((
+              color: _color,
+              icon: sceneLookIcon(_icon),
+            ), fallbackIcon: 'movie'),
+            chevron: true,
+            onTap: () async {
+              final look = await pickLook(context, (
+                color: _color,
+                icon: sceneLookIcon(_icon),
+              ), fallbackIcon: 'movie');
+              if (look == null ||
+                  (look.color == _color && look.icon == sceneLookIcon(_icon))) {
+                return;
+              }
+              _color = look.color;
+              _icon = look.icon;
+              _changed();
+            },
           ),
-          const OmniSectionHeader('Colour'),
-          Wrap(
-            children: [
-              for (final e in AutomationLook.colors.entries)
-                ColorSwatchButton(
-                  key: ValueKey('scene-color-${e.key.substring(1)}'),
-                  color: e.value.color,
-                  label: 'Colour ${e.value.name.toLowerCase()}',
-                  // No colour of its own shows in the first one.
-                  selected:
-                      (_color ?? AutomationLook.colors.keys.first) == e.key,
-                  onPressed: () {
-                    _color = _color == e.key ? null : e.key;
-                    _changed();
-                  },
-                ),
-            ],
-          ),
-          OmniSectionHeader(
-            'What it does',
-            trailingText: list.isEmpty ? null : 'all at once',
-          ),
+          const OmniSectionHeader('What it does'),
           OmniRuleBlock(
             kind: SentenceKind.then,
             heading: 'Then',

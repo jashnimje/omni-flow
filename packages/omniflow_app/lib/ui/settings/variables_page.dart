@@ -27,6 +27,12 @@ bool isSystemVariable(String name) =>
 bool isInternalVariable(String name) =>
     name.startsWith('_') || name.startsWith('keep_');
 
+/// How a variable comes to be, under an empty list. The header's Add is
+/// named in words, so no lone + ends up on a line of its own.
+const _howToAdd =
+    'Tap the plus at the top to add one, or a rule\'s "Set a variable" '
+    'step makes one.';
+
 class _VariablesPageState extends ConsumerState<VariablesPage> {
   Map<String, Object?>? _vars;
   String? _error;
@@ -164,25 +170,18 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
         ),
         const SizedBox(height: OmniSpace.md),
         if (own.isEmpty && system.isEmpty)
-          OmniEmptyState(
-            key: const ValueKey('vars-empty'),
+          const OmniEmptyState(
+            key: ValueKey('vars-empty'),
             icon: OmniIcons.level,
             title: 'No variables yet',
-            message: 'A rule\'s "Set a variable" step makes one.',
-            action: OmniButton.ghost(
-              label: 'Add a variable',
-              icon: OmniIcons.add,
-              expand: false,
-              onPressed: () => _edit(),
-            ),
+            message: _howToAdd,
           )
         else if (own.isEmpty)
           const OmniEmptyState(
             key: ValueKey('vars-empty'),
             icon: OmniIcons.level,
             title: 'None of your own yet',
-            message:
-                'A rule\'s "Set a variable" step makes one, or add one with +.',
+            message: _howToAdd,
             compact: true,
           ),
         for (final n in own)

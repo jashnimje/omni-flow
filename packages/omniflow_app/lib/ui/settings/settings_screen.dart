@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import '../../state/house.dart' show houseShownProvider;
 import '../../state/house_providers.dart' show houseModeProvider;
 import '../../state/providers.dart';
 import '../automations/scenes.dart' show ScenesPage;
+import '../automations/waiting_page.dart' show openWaitingForApproval;
 import '../boards/usb_board.dart' show showUsbBoardSheet;
 import '../design/design.dart';
 import '../devices/device_text.dart';
@@ -25,7 +28,6 @@ import 'backup_page.dart';
 import 'developer_page.dart';
 import 'hub_page.dart';
 import 'home_location_page.dart' show HomeLocationPage, HomeLocationRow;
-import 'hubs_page.dart';
 import 'phone_access.dart';
 import 'places_page.dart';
 import 'rooms_page.dart';
@@ -56,7 +58,7 @@ final settingsPlaces = [
   SettingsPlace('Phone setup', OmniIcons.settings, PhoneAccessPage.new),
   SettingsPlace('Appearance', OmniIcons.color, AppearancePage.new),
   SettingsPlace('Permissions', OmniIcons.permissions, PhoneAccessPage.new),
-  SettingsPlace('Hubs', OmniIcons.hub, HubsPage.new),
+  SettingsPlace('Hubs', OmniIcons.hub, HubPage.new),
   SettingsPlace('Home runs on', OmniIcons.server, HubPage.new),
   SettingsPlace('Backup and restore', OmniIcons.backup, BackupPage.new),
   SettingsPlace('Your activity', OmniIcons.automations, YourHomePage.new),
@@ -64,11 +66,27 @@ final settingsPlaces = [
   SettingsPlace('Developer', OmniIcons.developer, DeveloperScreen.new),
 ];
 
-/// The engine's own status, for Hubs and the Developer engine tab.
-final engineStatusProvider = FutureProvider<Json>(
-  (ref) async =>
-      (await ref.watch(engineApiProvider).engineStatus()).or(const {}),
-);
+/// The engine's own status, for Home runs on and the Developer engine tab.
+/// It reads again when automations or things change anywhere (the CLI, an
+/// agent, another phone), so the loaded count stays true.
+final engineStatusProvider = FutureProvider<Json>((ref) async {
+  Timer? again;
+  final sub = ref
+      .watch(engineClientProvider)
+      .events
+      .where((e) => engineStatusEvents.contains(e['event']))
+      .listen(
+        (_) => again ??= Timer(DevicesNotifier.settle, ref.invalidateSelf),
+      );
+  ref.onDispose(() {
+    sub.cancel();
+    again?.cancel();
+  });
+  return (await ref.watch(engineApiProvider).engineStatus()).or(const {});
+});
+
+/// The events after which the engine's status may read differently.
+const engineStatusEvents = {'automation.changed', deviceChangedEvent};
 
 /// 7.1: this house (places, location, mode, rooms, tags, alerts and the
 /// smart home settings, all for the house in view), this phone
@@ -95,8 +113,6 @@ class SettingsScreen extends ConsumerWidget {
     final rooms = ref.watch(roomsProvider).value;
     final summaries = ref.watch(summariesProvider).value;
     final access = ref.watch(phoneAccessStateProvider).value;
-    final hub = ref.watch(engineStatusProvider).value;
-    final hubError = ref.watch(hubErrorProvider);
     final appearance = ref.watch(appearanceProvider).value;
     final tags = devices.where((d) => d.driver == 'nfc_tag').length;
     final waiting = summaries?.where((a) => a.needsApproval).toList();
@@ -184,6 +200,7 @@ class SettingsScreen extends ConsumerWidget {
               : access.backgroundOk
               ? StatusKind.online
               : StatusKind.warning,
+          chevron: true,
           onTap: () => _push(context, const PhoneAccessPage()),
         ),
         OmniListRow(
@@ -195,23 +212,6 @@ class SettingsScreen extends ConsumerWidget {
               : AppearancePage.summary(appearance),
           chevron: true,
           onTap: () => _push(context, const AppearancePage()),
-        ),
-        OmniListRow(
-          key: const ValueKey('settings-hubs'),
-          icon: OmniIcons.hub,
-          title: 'Hubs',
-          subtitle: hubError != null
-              ? 'The hub did not start'
-              : switch (hub?['hubRunning']) {
-                  true => 'This phone runs the hub',
-                  false => 'The hub is stopped',
-                  _ => 'What runs your automations',
-                },
-          dot: hubError != null || hub?['hubRunning'] == false
-              ? StatusKind.warning
-              : null,
-          chevron: true,
-          onTap: () => _push(context, const HubsPage()),
         ),
         OmniListRow(
           key: const ValueKey('settings-usb'),
@@ -238,7 +238,7 @@ class SettingsScreen extends ConsumerWidget {
           chevron: true,
           onTap: () => waiting != null && waiting.length == 1
               ? shell.open(ReviewLink(waiting.single.id))
-              : shell.select(ShellTab.automations),
+              : openWaitingForApproval(context),
         ),
         const OmniSectionHeader('Your data'),
         OmniListRow(

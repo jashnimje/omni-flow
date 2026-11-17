@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'mode_picker.dart';
 import 'room_tile.dart';
 import 'timer_strip.dart';
 
 export '../../state/house_providers.dart' show houseModeProvider;
 
-/// The top of Home: the house mode chip, the running timers, and one tile
+/// Under Home's status chips: the running timers, and one tile
 /// per room with lights. Each part shows only when it has something.
 class HomeHelpers extends StatelessWidget {
   const HomeHelpers({super.key});
@@ -14,6 +13,6 @@ class HomeHelpers extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [ModeChip(), TimerStrip(), RoomTileRow()],
+    children: [TimerStrip(), RoomTileRow()],
   );
 }

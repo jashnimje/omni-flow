@@ -32,6 +32,7 @@ export 'src/dag/asks.dart';
 export 'src/dag/cards.dart';
 export 'src/dag/conditions.dart';
 export 'src/dag/data_steps.dart';
+export 'src/dag/error_text.dart' show asSentence;
 export 'src/dag/executor.dart';
 export 'src/dag/flow_engine.dart';
 export 'src/dag/links.dart';

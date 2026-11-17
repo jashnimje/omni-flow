@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LengthLimitingTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart' show DeviceView, Json;
 import '../../state/house_providers.dart';
+import '../../state/clock.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
-import '../devices/device_text.dart' show presenceDrivers, when;
+import '../devices/device_text.dart' show iconOf, presenceDrivers, when;
+import '../home/home_data.dart' show driversProvider;
 import 'automations_state.dart';
 
 /// The devices a scene can be saved from: not the phone, people, places
@@ -44,7 +47,11 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
             ? a.name.compareTo(b.name)
             : (a.online ? -1 : 1),
       );
+  final drivers = await ref
+      .read(driversProvider.future)
+      .catchError((Object _) => <String, Json>{});
   if (!context.mounted) return;
+  final hour12 = ref.read(hour12Provider);
   final name = TextEditingController();
   final picked = <String>{};
   var stale = const <String>[];
@@ -85,19 +92,12 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
                 : picked.isEmpty
                 ? 'Pick at least one device.'
                 : 'Give the scene a name first.',
-            banners: [
-              if (devices.any((d) => picked.contains(d.id) && !d.online))
-                const OmniBanner.warning(
-                  'Some devices you picked have not answered for a while. '
-                  'The scene keeps their last known state, which may be old.',
-                  key: ValueKey('capture-stale'),
-                ),
-            ],
             children: (context) => [
               TextField(
                 key: const ValueKey('capture-name'),
                 controller: name,
-                maxLength: 60,
+                // The same 60 as before, without a counter under the field.
+                inputFormatters: [LengthLimitingTextInputFormatter(60)],
                 decoration: const InputDecoration(labelText: 'Scene name'),
                 onChanged: (_) => setState(() {}),
               ),
@@ -107,25 +107,43 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
                   title: 'Add a device first',
                   compact: true,
                 )
-              else
+              else ...[
+                const OmniSectionHeader('Devices'),
                 for (final d in devices)
-                  CheckboxListTile(
+                  // A device that is not answering has no state now to
+                  // keep, so it cannot be picked.
+                  OmniListRow(
                     key: ValueKey('capture-${d.id}'),
-                    value: picked.contains(d.id),
-                    title: Text(d.name),
-                    subtitle: switch (staleWords(d)) {
-                      final stale? => Text(
-                        'Offline. $stale',
-                        style: OmniText.caption.copyWith(
-                          color: OmniColors.warn,
-                        ),
-                      ),
-                      null => d.room == null ? null : Text(d.room!),
+                    icon: iconOf(d, drivers),
+                    iconForeground: d.online ? null : OmniColors.muted,
+                    title: d.name,
+                    subtitle: switch (staleWords(d, hour12: hour12)) {
+                      final stale? => 'Offline. $stale',
+                      null => d.room,
                     },
-                    onChanged: (on) => setState(
-                      () => on == true ? picked.add(d.id) : picked.remove(d.id),
+                    subtitleLines: 2,
+                    dot: d.online ? null : StatusKind.offline,
+                    selected: picked.contains(d.id),
+                    enabled: d.online,
+                    trailing: Checkbox(
+                      value: picked.contains(d.id),
+                      onChanged: d.online
+                          ? (on) => setState(
+                              () => on == true
+                                  ? picked.add(d.id)
+                                  : picked.remove(d.id),
+                            )
+                          : null,
                     ),
+                    onTap: d.online
+                        ? () => setState(
+                            () => picked.contains(d.id)
+                                ? picked.remove(d.id)
+                                : picked.add(d.id),
+                          )
+                        : null,
                   ),
+              ],
             ],
           );
         },
@@ -144,10 +162,10 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
 
 /// "Last known 8 Nov, so it may have changed" for a device whose state is
 /// older than its poll window (the engine counts it offline), else null.
-String? staleWords(DeviceView d) {
+String? staleWords(DeviceView d, {bool hour12 = false}) {
   if (d.online) return null;
   final seen = d.lastSeen?.toLocal();
   return seen == null
       ? 'Never read, so its state may be wrong'
-      : 'Last known ${when(seen)}, so it may have changed';
+      : 'Last known ${when(seen, hour12: hour12)}, so it may have changed';
 }

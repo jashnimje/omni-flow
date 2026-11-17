@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:omniflow_app/ui/automations/automations.dart';
 import 'package:omniflow_app/ui/automations/sentence_row.dart';
 import 'package:omniflow_app/ui/design/design.dart';
@@ -78,7 +79,7 @@ void main() {
     await tapKey(tester, 'pick-device-desk_lamp');
     await tapKey(tester, 'act-on-power');
     await tapKey(tester, 'form-done');
-    expect(find.text('Desk lamp · power on'), findsOneWidget);
+    expect(find.text('Desk lamp · turn on'), findsOneWidget);
 
     await tapText(tester, 'Add step');
     await tapKey(tester, 'pick-wait');
@@ -274,7 +275,11 @@ void main() {
     await tapText(tester, 'Add step');
     await tapKey(tester, 'pick-device-tv');
     await tapKey(tester, 'act-launch_app');
+    // The field and the sheet name the app, not the raw package param.
+    expect(find.text('App'), findsOneWidget);
+    expect(find.text('Package'), findsNothing);
     await tapKey(tester, 'param-package-pick');
+    expect(find.text('Choose an app'), findsOneWidget);
     expect(engine.callsOf('tv.apps').single.$2, {'id': 'tv', 'filter': 'all'});
     expect(
       find.byKey(const ValueKey('choice-com.android.shell')),
@@ -366,6 +371,27 @@ void main() {
     );
   });
 
+  testWidgets('Run a scene wears the scene\'s own icon, not the bolt', (
+    tester,
+  ) async {
+    await pumpPushed(tester, engine, const RuleEditorPage());
+    await tapText(tester, 'Add step');
+    await tester.enterText(
+      find.byKey(const ValueKey('picker-search')),
+      'movie',
+    );
+    await tester.pumpAndSettle();
+    final row = find.byKey(const ValueKey('pick-scene-movie'));
+    expect(
+      find.descendant(of: row, matching: find.byIcon(Symbols.movie_rounded)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: row, matching: find.byIcon(OmniIcons.automations)),
+      findsNothing,
+    );
+  });
+
   testWidgets('an engine error shows on the row its rule path names', (
     tester,
   ) async {
@@ -453,11 +479,13 @@ void main() {
       'spec': _arrive,
     });
     expect(find.byType(TestRunPage), findsOneWidget);
+    // A test run is judged now, and says so.
+    expect(find.textContaining('· test run'), findsWidgets);
     expect(
-      find.text('Nothing was sent. This is what would happen.'),
+      find.textContaining('This is what would happen if it started now, at'),
       findsOneWidget,
     );
-    expect(find.text('pretended it happened'), findsOneWidget);
+    expect(find.text('pretended it happened now'), findsOneWidget);
     expect(find.text('holds'), findsOneWidget);
     expect(find.text('pass'), findsOneWidget);
     expect(find.text('would send power on'), findsOneWidget);
@@ -472,7 +500,7 @@ void main() {
     expect(find.text('Arrive home'), findsOneWidget);
     expect(find.text('I get home'), findsOneWidget);
     expect(find.text('Wait 3 s'), findsOneWidget);
-    expect(find.text('Hall bulb · power on'), findsOneWidget);
+    expect(find.text('Hall bulb · turn on'), findsOneWidget);
     await tapKey(tester, 'rule-save');
     final call = engine.callsOf('automation.save').single.$2;
     expect(call['id'], 'arrive_home');

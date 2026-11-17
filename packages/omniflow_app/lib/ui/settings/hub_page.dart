@@ -3,12 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_client_hub.dart';
+import '../../api/plain_error.dart' show asSentence;
 import '../../service/hub_connection.dart';
 import '../../service/hub_engine_client.dart' show versionMismatchText;
 import '../../service/hub_key.dart';
 import '../../state/hub_mode.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import 'settings_screen.dart' show engineStatusProvider;
 
 /// The Settings row for where the home runs.
 class HomeRunsOnRow extends ConsumerWidget {
@@ -20,18 +22,28 @@ class HomeRunsOnRow extends ConsumerWidget {
     final settings = ref.watch(hubSettingsProvider).value;
     final link = ref.watch(hubLinkProvider);
     final hub = mode == HomeMode.hub;
+    final hubError = ref.watch(hubErrorProvider);
+    final stopped =
+        !hub &&
+        (hubError != null ||
+            ref.watch(engineStatusProvider).value?['hubRunning'] == false);
     return OmniListRow(
       key: const ValueKey('settings-home-runs-on'),
       icon: OmniIcons.server,
       title: 'Home runs on',
       subtitle: switch (mode) {
         null => 'Checking',
+        HomeMode.phone when hubError != null =>
+          'This phone · the hub did not start',
+        HomeMode.phone when stopped => 'This phone · the hub is stopped',
         HomeMode.phone => 'This phone',
         HomeMode.hub when link != null && !link.connected =>
           'Mac mini hub · not reachable',
         HomeMode.hub => 'Mac mini hub · ${settings?.host ?? ''}',
       },
-      dot: hub && link != null && !link.connected ? StatusKind.warning : null,
+      dot: stopped || (hub && link != null && !link.connected)
+          ? StatusKind.warning
+          : null,
       chevron: true,
       onTap: () =>
           Navigator.of(context)
@@ -40,8 +52,10 @@ class HomeRunsOnRow extends ConsumerWidget {
   }
 }
 
-/// Settings, Home runs on: set this phone up as a client of the Mac mini
-/// hub, see how the link stands, or move the home back to this phone.
+/// Settings, Home runs on: the one place for what runs the home. On this
+/// phone, whether its hub runs, with Start and Stop, and the way to move
+/// the home to a Mac mini. On a Mac mini, how the link stands, or move the
+/// home back to this phone.
 class HubPage extends ConsumerWidget {
   const HubPage({super.key});
 
@@ -59,9 +73,115 @@ class HubPage extends ConsumerWidget {
         ),
         children: (_) => const [],
       ),
-      HomeMode.phone => const _HubSetup(),
+      HomeMode.phone => const _PhoneHub(),
       HomeMode.hub => const _HubStatus(),
     };
+  }
+}
+
+/// The steps that move the home to a Mac mini hub, a task opened from
+/// Home runs on or from an empty home, left with the cross.
+class HubSetupPage extends StatelessWidget {
+  const HubSetupPage({super.key});
+
+  static const title = 'Connect to a hub';
+
+  @override
+  Widget build(BuildContext context) => const _HubSetup();
+}
+
+/// This phone runs the home: its hub, which runs each automation when its
+/// trigger happens, can be stopped and started again.
+class _PhoneHub extends ConsumerWidget {
+  const _PhoneHub();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(engineStatusProvider).value;
+    final hubError = ref.watch(hubErrorProvider);
+    final running = status?['hubRunning'] == true;
+    final loaded = (status?['flows'] as List?)?.length;
+    final api = ref.read(engineApiProvider);
+    return DetailPage(
+      key: const ValueKey('hub-phone'),
+      title: HubPage.title,
+      banners: [
+        if (hubError != null)
+          OmniBanner.error(
+            'The hub did not start, so automations only run when you run '
+            'them. Try starting it again below.',
+            key: const ValueKey('hubs-error'),
+          ),
+      ],
+      hero: OmniHeroCard(
+        key: const ValueKey('hub-hero'),
+        title: status == null
+            ? 'Checking the hub'
+            : running
+            ? 'This phone runs the hub'
+            : 'The hub is stopped',
+        subtitle: loaded == null
+            ? null
+            : '$loaded automation${loaded == 1 ? '' : 's'} loaded',
+        tone: running ? HeroTone.accent : HeroTone.plain,
+      ),
+      children: (context) => [
+        const Text(
+          'The hub listens for your devices, keeps time and runs each '
+          'automation when its trigger happens, with the screen off too.',
+          style: OmniText.caption,
+        ),
+        const SizedBox(height: OmniSpace.lg),
+        if (status != null && !running)
+          OmniButton(
+            key: const ValueKey('hub-start'),
+            label: 'Start the hub',
+            onPressed: () async {
+              if ((await api.startHub()).ok) {
+                ref.invalidate(engineStatusProvider);
+              }
+            },
+          ),
+        if (running)
+          OmniButton.danger(
+            key: const ValueKey('hub-stop'),
+            label: 'Stop the hub',
+            onPressed: () async {
+              final ok = await confirm(
+                context,
+                title: 'Stop the hub?',
+                body:
+                    'Automations stop running on their own until you start '
+                    'it again. You can still run them by hand.',
+                action: 'Stop',
+                destructive: true,
+              );
+              if (!ok) return;
+              if ((await api.stopHub()).ok) {
+                ref.invalidate(engineStatusProvider);
+              }
+            },
+          ),
+        const OmniSectionHeader('A Mac mini instead'),
+        OmniListRow(
+          key: const ValueKey('hub-connect'),
+          icon: OmniIcons.computer,
+          title: 'Connect to a hub',
+          subtitle:
+              'A Mac mini runs the home for every phone, with this one as '
+              'its screen and sensors',
+          subtitleLines: 2,
+          chevron: true,
+          divider: false,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              fullscreenDialog: true,
+              builder: (_) => const HubSetupPage(),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -342,16 +462,18 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
               'The Mac mini offered a different host key just now. Check '
                   'the fingerprint again.',
             _ =>
-              'The hub did not answer: ${e.message}. Check the address and '
-                  'try again.',
+              'The hub did not answer: ${asSentence(e.message)} Check the '
+                  'address and try again.',
           };
         });
       }
       return;
     }
     await switchToHub(ref, settings, hostKey: offered);
-    if (mounted) setState(() => _busy = false);
     showMessage('Switching to the Mac mini hub');
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await Navigator.of(context).maybePop();
   }
 
   @override
@@ -369,8 +491,8 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
       [_host, _port, _user, _phone],
       child: StepFlow(
         key: const ValueKey('hub-setup'),
-        title: HubPage.title,
-        close: false,
+        title: HubSetupPage.title,
+        close: true,
         count: 3,
         current: _step,
         heading: switch (_step) {

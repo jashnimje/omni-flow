@@ -134,10 +134,23 @@ bool compareValues(Object? left, String op, Object? right) => switch (op) {
 Iterable<Map<String, Object?>> _rules(Map<String, Object?> rule) =>
     (rule['rules'] as List).map((r) => Map<String, Object?>.from(r as Map));
 
-/// Numbers by value (80 equals 80.0), lists and objects by content.
-bool valuesEqual(Object? a, Object? b) => (a is List || a is Map)
-    ? (b is List || b is Map) && canonicalJson(a) == canonicalJson(b)
-    : a == b;
+/// Numbers by value (80 equals 80.0), lists and objects by content. A
+/// boolean also matches the word a device reports for it, so `on` written
+/// as true holds for a TV whose power reads "on".
+bool valuesEqual(Object? a, Object? b) {
+  if (a is List || a is Map) {
+    return (b is List || b is Map) && canonicalJson(a) == canonicalJson(b);
+  }
+  if (a is bool && b is String) return _boolWord(b) == a;
+  if (b is bool && a is String) return _boolWord(a) == b;
+  return a == b;
+}
+
+bool? _boolWord(String word) => switch (word.trim().toLowerCase()) {
+  'on' || 'yes' || 'true' => true,
+  'off' || 'no' || 'false' => false,
+  _ => null,
+};
 
 /// True when [now] is inside `start..end`, both `HH:MM`. A window whose end
 /// is earlier than its start crosses midnight, so 18:00 to 05:00 includes

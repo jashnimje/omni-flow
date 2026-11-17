@@ -8,11 +8,26 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.9.0';
+const appVersion = '0.10.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.10.0',
+    date: '17 Nov 2026',
+    notes: [
+      'Every screen is rebuilt on one set of page layouts, so lists, '
+          'details, forms and editors look and behave the same everywhere.',
+      'Large text wraps instead of cutting off, and in landscape the add '
+          'button sits in the side rail.',
+      'Automations: Test run, Try as if and Runs are separate pages, '
+          'Duplicate saves a copy that starts off, and filters show counts.',
+      'Times follow your phone\'s 12 or 24-hour setting, and errors read '
+          'as plain sentences.',
+      'A TV that answers again shows as online on every screen.',
+    ],
+  ),
   (
     version: '0.9.0',
     date: '17 Nov 2026',

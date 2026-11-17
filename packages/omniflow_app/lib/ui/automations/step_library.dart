@@ -269,7 +269,7 @@ Future<RuleStep?> pickStep(
         r,
         'pick-scene-${s.id}',
         'Run ${s.name}',
-        OmniIcons.automations,
+        automationIconFor(s),
         () => RunStep(s.id),
         subtitle: 'a scene',
       ),

@@ -284,6 +284,28 @@ void main() {
       expectAllIn(engine, 'home.location', 'bangalore');
     });
 
+    testWidgets('another house opens Home at its top', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final engine = twoHouses();
+      await pumpHouses(tester, engine);
+      final list = find.byKey(const ValueKey('home-list'));
+      double offset() => tester.widget<ListView>(list).controller!.offset;
+      await tester.drag(list, const Offset(0, -400));
+      await tester.pumpAndSettle();
+      expect(offset(), greaterThan(0));
+      // An arrival or another screen can switch it with Home scrolled.
+      await ProviderScope.containerOf(tester.element(list))
+          .read(houseInViewProvider.notifier)
+          .show('bangalore');
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('house-name'))).data,
+        'Bangalore',
+      );
+      expect(offset(), 0);
+    });
+
     testWidgets('search and commands are about the house shown', (
       tester,
     ) async {
@@ -470,10 +492,9 @@ void main() {
       await pumpHouses(tester, engine);
       expect(find.byKey(const ValueKey('home-greeting')), findsOneWidget);
       expect(find.byKey(const ValueKey('house-switcher')), findsOneWidget);
-      expect(
-        tester.widget<Text>(find.byKey(const ValueKey('home-status'))).data,
-        'Home · Home mode',
-      );
+      // The mode and presence are chips under the hero, not repeated in it.
+      expect(find.byKey(const ValueKey('home-status')), findsNothing);
+      expect(find.text('Mode: Home'), findsOneWidget);
       expect(find.byKey(const ValueKey('home-today')), findsNothing);
       expect(find.textContaining('taps saved'), findsNothing);
       expect(find.textContaining('streak'), findsNothing);

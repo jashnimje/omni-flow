@@ -264,7 +264,7 @@ const ruleTemplates = <RuleTemplate>[
   RuleTemplate(
     id: 'web_value_notify',
     name: 'Read a web value into a notification',
-    category: 'Morning and night',
+    category: 'Web and data',
     icon: 'bell',
     color: '#F472B6',
     description:
@@ -311,6 +311,7 @@ const templateCategories = [
   'Watch and listen',
   'Away and safety',
   'Buttons and tags',
+  'Web and data',
 ];
 
 class TemplateFillException implements Exception {

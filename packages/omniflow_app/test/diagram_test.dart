@@ -367,7 +367,7 @@ void main() {
         tester
             .widget<SentenceRow>(find.byKey(const ValueKey('row-then[0]')))
             .text,
-        'Desk lamp · power on',
+        'Desk lamp · turn on',
       );
       await tester.tap(find.text('Diagram'));
       await _refetch(tester);
@@ -397,13 +397,16 @@ void main() {
       final handle = tester.ensureSemantics();
       await _openEditor(tester, engine);
       expect(
-        find.bySemanticsLabel(RegExp(r'^room temp temp is above 28, Check$')),
+        find.bySemanticsLabel(RegExp(r'^Room temp temp is above 28, Check$')),
         findsOneWidget,
       );
       expect(
-        find.bySemanticsLabel(RegExp(r'^desk lamp power on, Step$')),
+        find.bySemanticsLabel(RegExp(r'^Desk lamp power on, Step$')),
         findsOneWidget,
       );
+      // Read as drawn: capitalised, not in the engine's lower case.
+      expect(find.text('Room temp temp is above 28'), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp(r'^desk lamp')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('diagram-as-list')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('diagram-list')), findsOneWidget);

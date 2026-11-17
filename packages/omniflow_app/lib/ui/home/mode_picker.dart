@@ -14,7 +14,7 @@ IconData modeIcon(String id) => switch (id) {
   _ => Icons.label_rounded,
 };
 
-/// The house mode at the top of Home: a chip that opens the picker.
+/// The house mode in Home's status chips: a chip that opens the picker.
 /// Nothing shows while the engine has no mode.
 class ModeChip extends ConsumerWidget {
   const ModeChip({super.key});
@@ -23,20 +23,14 @@ class ModeChip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final modes = ref.watch(houseModeProvider).value;
     if (modes == null) return const SizedBox.shrink();
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-        child: Semantics(
-          container: true,
-          hint: 'Opens the house modes',
-          child: OmniFilterChip(
-            key: const ValueKey('mode-chip'),
-            label: 'Mode: ${modes.name}',
-            icon: modeIcon(modes.mode),
-            onTap: () => showModePicker(context, ref),
-          ),
-        ),
+    return Semantics(
+      container: true,
+      hint: 'Opens the house modes',
+      child: OmniFilterChip(
+        key: const ValueKey('mode-chip'),
+        label: 'Mode: ${modes.name}',
+        icon: modeIcon(modes.mode),
+        onTap: () => showModePicker(context, ref),
       ),
     );
   }

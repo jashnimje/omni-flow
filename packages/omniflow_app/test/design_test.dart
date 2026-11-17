@@ -318,10 +318,12 @@ void main() {
     final onlyIf = tester.widget<Text>(find.text('after 6 pm'));
     expect(onlyIf.style?.color, OmniColors.condition);
     expect(find.byType(SentenceChip), findsNWidgets(3));
+    // The arrow is drawn, and read as a pause, not as "right arrow".
     expect(
-      find.bySemanticsLabel('When I get home after 6 pm → TV on'),
+      find.bySemanticsLabel('When I get home after 6 pm, TV on'),
       findsOneWidget,
     );
+    expect(find.bySemanticsLabel(RegExp('→')), findsNothing);
     await expectLater(tester, meetsGuideline(textContrastGuideline));
   });
 

@@ -107,6 +107,7 @@ class AwayLightingPage extends ConsumerWidget {
       children: (context) => [
         OmniListRow(
           key: const ValueKey('away-enabled'),
+          icon: OmniIcons.light,
           title: 'Away lighting',
           subtitle: view?.status ?? 'Loading',
           subtitleLines: 2,
@@ -129,7 +130,9 @@ class AwayLightingPage extends ConsumerWidget {
         if (lights.isEmpty)
           const OmniEmptyState(
             icon: OmniIcons.light,
+            key: ValueKey('away-lights-empty'),
             title: 'No lights added yet',
+            message: 'Add a light from Home or Devices, then pick it here.',
             compact: true,
           ),
         for (final l in lights)

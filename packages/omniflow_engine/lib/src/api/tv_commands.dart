@@ -124,6 +124,9 @@ const _progressEvery = Duration(milliseconds: 250);
 /// off is not searched for on every poll.
 const _healEvery = Duration(minutes: 1);
 
+/// How often a TV that answers with nothing changed is marked seen.
+const _seenEvery = Duration(minutes: 1);
+
 final _serialPattern = RegExp(r'^[A-Za-z0-9]{4,64}$');
 
 /// The `tv.*` commands: remote keys, text and volume, apps, settings, files
@@ -138,6 +141,10 @@ class TvCommands {
   final _random = Random.secure();
   final _lastHeal = <String, DateTime>{};
   final _askedSerial = <String>{};
+
+  /// The devices whose last state read failed, so the next one they
+  /// answer tells the lists they are back.
+  final _failed = <String>{};
 
   /// The screen size `input` works in, kept on the ADB connection it was
   /// read on, so a TV whose display mode changed is read again after it
@@ -364,68 +371,109 @@ class TvCommands {
 
   Future<Map<String, Object?>> state(Map<String, Object?> args) async {
     final tv = await _tv(args);
-    final result = await _readState(tv);
-    await _record(tv.device.id, result);
-    return {'id': tv.device.id, ...result};
+    return {'id': tv.device.id, ...await _readAndRecord(tv)};
   }
 
-  /// The TV's power, app, playback and volume. A TV that does not answer
-  /// at all is off: Android TVs drop off the network in deep standby.
-  Future<Map<String, Object?>> _readState(_Tv tv) async {
+  /// Reads the state and keeps it. A read that fails marks the device
+  /// failed, as the hub's `device.pollFailed` lists it offline. The next
+  /// read it answers marks it seen and sends `device.changed`, so every
+  /// list that showed it offline reads it again.
+  Future<Map<String, Object?>> _readAndRecord(_Tv tv) async {
+    final id = tv.device.id;
+    final ({Map<String, Object?> state, bool answered}) read;
+    try {
+      read = await _readState(tv);
+    } catch (_) {
+      _failed.add(id);
+      rethrow;
+    }
+    final recovered = read.answered && _failed.remove(id);
+    await _record(id, read.state, answered: read.answered, force: recovered);
+    if (recovered) {
+      _core.emit({'event': 'device.changed', 'command': 'tv.state', 'id': id});
+    }
+    return read.state;
+  }
+
+  /// The TV's power, app, playback and volume, and whether the TV answered.
+  /// A TV that does not answer at all is off: Android TVs drop off the
+  /// network in deep standby.
+  Future<({Map<String, Object?> state, bool answered})> _readState(
+    _Tv tv,
+  ) async {
     if (tv.isPhone) return _readPhoneState(tv);
     try {
       final output = await _run(tv, tvSections(tvStateCommands));
-      return parseTvState(splitTvSections(output));
+      return (state: parseTvState(splitTvSections(output)), answered: true);
     } on TransportTimeoutException {
-      return {
-        'power': 'off',
-        'app': null,
-        'activity': null,
-        'playing': null,
-        'volume': null,
-        'volumeMax': null,
-      };
+      return (
+        state: <String, Object?>{
+          'power': 'off',
+          'app': null,
+          'activity': null,
+          'playing': null,
+          'volume': null,
+          'volumeMax': null,
+        },
+        answered: false,
+      );
     }
   }
 
   /// A phone's state, with its screen `on` or `off`. A phone that does not
   /// answer is not off: Wireless debugging went off, usually on a restart.
-  Future<Map<String, Object?>> _readPhoneState(_Tv tv) async {
+  Future<({Map<String, Object?> state, bool answered})> _readPhoneState(
+    _Tv tv,
+  ) async {
     try {
       final output = await _run(tv, tvSections(tvStateCommands));
       final state = parseTvState(splitTvSections(output));
-      return {
-        ...state,
-        'kind': 'phone',
-        'screen': state['power'] == 'on' ? 'on' : 'off',
-        'reachable': true,
-      };
+      return (
+        state: {
+          ...state,
+          'kind': 'phone',
+          'screen': state['power'] == 'on' ? 'on' : 'off',
+          'reachable': true,
+        },
+        answered: true,
+      );
     } on TransportTimeoutException {
-      return {
-        'kind': 'phone',
-        'power': null,
-        'screen': null,
-        'app': null,
-        'activity': null,
-        'playing': null,
-        'volume': null,
-        'volumeMax': null,
-        'reachable': false,
-        'message':
-            '${tv.device.id} did not answer. Wireless debugging turns off '
-            'when the phone restarts, so turn it on again on that phone',
-      };
+      return (
+        state: <String, Object?>{
+          'kind': 'phone',
+          'power': null,
+          'screen': null,
+          'app': null,
+          'activity': null,
+          'playing': null,
+          'volume': null,
+          'volumeMax': null,
+          'reachable': false,
+          'message':
+              '${tv.device.id} did not answer. Wireless debugging turns off '
+              'when the phone restarts, so turn it on again on that phone',
+        },
+        answered: false,
+      );
     }
   }
 
   /// One hub poll: reads the TV state into the device state, and only
   /// saves it when a key changed, so rules see changes and not heartbeats.
   Future<void> poll(String deviceId) async {
-    final tv = await _tv({'id': deviceId, 'allowPairing': false});
-    await _record(deviceId, await _readState(tv));
+    await _readAndRecord(await _tv({'id': deviceId, 'allowPairing': false}));
   }
 
-  Future<void> _record(String deviceId, Map<String, Object?> state) async {
+  /// Saves [state] when a key changed. A read the TV [answered] with
+  /// nothing changed still marks it seen, at most once a [_seenEvery] or
+  /// at once when [force] says it failed before, so its last seen time
+  /// stays current without a save on every poll.
+  Future<void> _record(
+    String deviceId,
+    Map<String, Object?> state, {
+    required bool answered,
+    bool force = false,
+  }) async {
     final device = await _core.devices.device(deviceId);
     if (device == null) return;
     final keys = state['kind'] == 'phone' ? androidPhoneStateKeys : tvStateKeys;
@@ -433,6 +481,14 @@ class TvCommands {
     final changed = values.entries.any((e) => device.state[e.key] != e.value);
     if (changed || !keys.every(device.state.containsKey)) {
       await _core.devices.mergeState(deviceId, values);
+      return;
+    }
+    final seen = device.lastSeen;
+    if (answered &&
+        (force ||
+            seen == null ||
+            DateTime.now().difference(seen) >= _seenEvery)) {
+      await _core.devices.mergeState(deviceId, const {});
     }
   }
 

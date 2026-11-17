@@ -59,17 +59,31 @@ class _InspectorState extends ConsumerState<Inspector> {
           onChanged: (_) => setState(() {}),
           decoration: const InputDecoration(
             prefixIcon: Icon(OmniIcons.search, color: OmniColors.muted),
-            hintText: 'Filter: udp, mqtt, adb, a device...',
+            hintText: 'Filter by udp, mqtt, adb or a device',
           ),
         ),
         const SizedBox(height: OmniSpace.gap),
         Expanded(
           child: packets.isEmpty
-              ? Center(
-                  child: Text(
-                    query.isEmpty ? 'No packets yet.' : 'No packets match.',
-                    style: OmniText.caption,
-                  ),
+              ? ListView(
+                  children: [
+                    if (query.isEmpty)
+                      const OmniEmptyState(
+                        key: ValueKey('packets-empty'),
+                        icon: OmniIcons.developer,
+                        title: 'No packets yet',
+                        message:
+                            'What OmniFlow sends to your devices and hears '
+                            'back shows here as it happens.',
+                      )
+                    else
+                      OmniEmptyState(
+                        key: const ValueKey('packets-empty'),
+                        icon: OmniIcons.search,
+                        title: 'No packet matches "${_filter.text.trim()}"',
+                        compact: true,
+                      ),
+                  ],
                 )
               : ListView.builder(
                   key: const ValueKey('packets-list'),
@@ -77,7 +91,9 @@ class _InspectorState extends ConsumerState<Inspector> {
                   itemBuilder: (context, i) {
                     final p = packets[i];
                     final out = p['direction'] == 'outgoing';
-                    final colour = out ? OmniColors.accent : OmniColors.trigger;
+                    final colour = out
+                        ? OmniPalette.of(context).accent
+                        : OmniColors.trigger;
                     return OmniCard(
                       padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                       margin: const EdgeInsets.only(bottom: OmniSpace.sm),

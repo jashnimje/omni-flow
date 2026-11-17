@@ -273,8 +273,6 @@ Future<void> editEnergyPrice(
           value: double.tryParse(price.text.trim().replaceAll(',', '.')),
           money: symbol.text.trim(),
         )),
-        secondaryLabel: 'Cancel',
-        onSecondary: () => Navigator.of(sheet).pop(),
         children: (context) => [
           TextField(
             key: const ValueKey('energy-price-value'),

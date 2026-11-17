@@ -497,6 +497,8 @@ void main() {
           },
         });
       await pumpTv(tester, engine);
+      await tester.tap(find.byKey(const ValueKey('tv-remote-mode')));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Mouse'));
       await tester.pumpAndSettle();
       int shots() => engine.callsOf(TvCalls.screenshot).length;

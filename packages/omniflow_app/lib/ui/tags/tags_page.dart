@@ -44,17 +44,14 @@ class TagsPage extends ConsumerWidget {
         error: 'The tags could not be read. Try again in a moment.',
       ),
       skeletonRows: 3,
-      empty: OmniEmptyState(
+      empty: const OmniEmptyState(
+        key: ValueKey('tags-empty'),
         icon: OmniIcons.tag,
         title: 'No NFC tags yet',
         message:
-            'Write a tag, or hold one to the phone and OmniFlow offers '
-            'to name it. A scan can then run an automation.',
-        action: OmniButton(
-          label: 'Add a tag',
-          icon: OmniIcons.add,
-          onPressed: () => showAddTagSheet(context),
-        ),
+            'Tap the plus at the top to write a tag, or hold one to the '
+            'phone and OmniFlow offers to name it. A scan can then run an '
+            'automation.',
       ),
       itemCount: tags.length,
       itemBuilder: (context, i) {

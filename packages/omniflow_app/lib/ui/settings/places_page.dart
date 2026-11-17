@@ -41,6 +41,9 @@ String sourceWord(PresenceSource s) => switch (s) {
 class PlacesPage extends ConsumerStatefulWidget {
   const PlacesPage({super.key});
 
+  /// The same words as its row in Settings.
+  static const title = 'Places and people';
+
   @override
   ConsumerState<PlacesPage> createState() => _PlacesPageState();
 }
@@ -150,7 +153,6 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
     final zone =
         homeZone(zones.value ?? const []) ??
         newHomePlace(ref.watch(houseShownProvider));
-    final title = '${zone['name'] ?? 'Home'}';
     final wifi = zone['wifi'] is Map ? zone['wifi'] as Map : const {};
     final ssids = (wifi['ssids'] as List? ?? const []).cast<String>();
     final ble = zone['ble'] is Map ? zone['ble'] as Map : null;
@@ -158,7 +160,7 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
     final awayMs = (wifi['awayAfterMs'] as num?)?.toInt() ?? _defaultAwayMs;
     return DetailPage(
       key: const ValueKey('places-list'),
-      title: title,
+      title: PlacesPage.title,
       actions: [
         if (person != null)
           PopupMenuButton<bool>(

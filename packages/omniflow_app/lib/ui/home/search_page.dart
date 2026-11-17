@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../automations/automations.dart';
+import '../design/automation_look.dart' show AutomationBadge;
 import '../design/design.dart';
 import '../devices/device_text.dart';
 import '../devices/open_device.dart';
@@ -157,7 +158,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final places = query.isEmpty
         ? const <SettingsPlace>[]
         : _byHits(settingsPlaces, (p) => _hits(query, p.title)).toList();
-    final reading = _reading;
+    // A reading of what was typed before is not shown for what is typed
+    // now, when the new text could not be read.
+    final reading = _readFor == _field.text ? _reading : null;
     final runnable = reading != null && reading['kind'] != 'ask';
     final showReading = runnable || (reading != null && _asked);
     final target = runnable && reading['args'] is Map
@@ -165,6 +168,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               .where((d) => d.id == (reading['args'] as Map)['id'])
               .firstOrNull
         : null;
+    final nothing =
+        query.isNotEmpty &&
+        !showReading &&
+        things.isEmpty &&
+        matching.isEmpty &&
+        places.isEmpty;
     return ListPage(
       key: const ValueKey('search-list'),
       title: 'Search',
@@ -234,9 +243,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           for (final a in matching)
             OmniListRow(
               key: ValueKey('search-automation-${a.id}'),
-              icon: OmniIcons.automations,
+              // The automation's own look, as on its card.
+              leading: AutomationBadge(
+                icon: automationIconFor(a),
+                color: a.color,
+                size: 32,
+              ),
               title: a.name,
-              subtitle: a.sentence.map((p) => p.text).join(' '),
+              subtitle: sentenceText(a.sentence),
               chevron: true,
               onTap: () =>
                   ref.read(shellControllerProvider).open(AutomationLink(a.id)),
@@ -252,11 +266,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               onTap: () => p.open(context, ref),
             ),
         ],
-        if (query.isNotEmpty &&
-            !showReading &&
-            things.isEmpty &&
-            matching.isEmpty &&
-            places.isEmpty)
+        if (nothing)
           OmniEmptyState(
             key: const ValueKey('search-none'),
             icon: OmniIcons.search,
@@ -264,19 +274,23 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             message: 'Try a device, a room or an automation name.',
             compact: true,
           ),
-        const OmniSectionHeader('Try'),
-        Wrap(
-          spacing: OmniSpace.sm,
-          runSpacing: OmniSpace.xs,
-          children: [
-            for (final s in _suggestions(devices, automations, drivers))
-              OmniFilterChip(
-                key: ValueKey('try-$s'),
-                label: s,
-                onTap: () => _fill(s),
-              ),
-          ],
-        ),
+        // No commands to try under no results, so a search that found
+        // nothing is not answered with something unrelated.
+        if (!nothing) ...[
+          const OmniSectionHeader('Try'),
+          Wrap(
+            spacing: OmniSpace.sm,
+            runSpacing: OmniSpace.xs,
+            children: [
+              for (final s in _suggestions(devices, automations, drivers))
+                OmniFilterChip(
+                  key: ValueKey('try-$s'),
+                  label: s,
+                  onTap: () => _fill(s),
+                ),
+            ],
+          ),
+        ],
       ],
     );
   }

@@ -10,9 +10,12 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 import 'guided_steps_page.dart';
 
-Future<void> openAddPhone(BuildContext context) =>
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const AddPhonePage()));
+Future<void> openAddPhone(BuildContext context) => Navigator.of(context).push(
+  MaterialPageRoute<void>(
+    fullscreenDialog: true,
+    builder: (_) => const AddPhonePage(),
+  ),
+);
 
 /// How the other phone is reached.
 enum PhoneRoute {
@@ -276,7 +279,7 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
     return StepFlow(
       key: const ValueKey('add-phone'),
       title: 'Another phone',
-      close: false,
+      close: true,
       count: wireless ? 3 : 2,
       current: current,
       heading: switch (current) {

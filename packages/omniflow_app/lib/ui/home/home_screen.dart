@@ -9,10 +9,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../api/tv_calls.dart';
+import '../../state/clock.dart';
 import '../../state/providers.dart';
+import '../../state/house.dart' show houseInViewProvider;
 import '../../state/reload_home.dart';
 import '../design/design.dart';
 import '../devices/device_controls.dart';
+import '../devices/device_sections.dart' show askRoomName;
+import '../../api/house_calls.dart' show RoomLights;
+import '../../state/house_providers.dart'
+    show houseApiProvider, roomLightsProvider;
 import '../devices/device_text.dart';
 import '../devices/devices_screen.dart';
 import '../devices/open_device.dart';
@@ -28,6 +34,7 @@ import 'suggestion_card.dart';
 import 'tile_look.dart';
 import 'home_hero.dart';
 import 'home_notices.dart';
+import 'mode_picker.dart' show ModeChip;
 import 'home_presence.dart';
 import 'energy_card.dart' show SmartHomeCards;
 import '../help/screen_help.dart';
@@ -115,18 +122,36 @@ List<Widget> _homeActions(BuildContext context, WidgetRef ref) => [
   const ScreenHelpButton(HelpScreen.home),
 ];
 
-class _Overview extends ConsumerWidget {
+class _Overview extends ConsumerStatefulWidget {
   const _Overview({required this.devices});
 
   /// Null while the list loads.
   final List<Json>? devices;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Overview> createState() => _OverviewState();
+}
+
+class _OverviewState extends ConsumerState<_Overview> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Another house is another Home, so it opens at its top.
+    ref.listen(houseInViewProvider.select((h) => h.value), (before, after) {
+      if (before != after && _scroll.hasClients) _scroll.jumpTo(0);
+    });
+    final devices = widget.devices;
     final all = devices == null
         ? const <DeviceView>[]
-        : [for (final j in devices!) DeviceView(j)];
-    final tiles = devices == null ? null : tileDevices(devices!);
+        : [for (final j in devices) DeviceView(j)];
+    final tiles = devices == null ? null : tileDevices(devices);
     final person = personOf(all);
     final presence = person == null ? null : Presence.of(person.json);
     final summaries = ref.watch(summariesProvider).value;
@@ -136,15 +161,6 @@ class _Overview extends ConsumerWidget {
     final now = DateTime.now();
     final name = person?.name;
     final shown = watchPresence(ref, all);
-    final status = [
-      switch (shown) {
-        PresenceShown.home => 'Home',
-        PresenceShown.away => 'Away',
-        _ => null,
-      },
-      if (ref.watch(houseModeProvider).value?.name case final mode?)
-        '$mode mode',
-    ].whereType<String>().join(' · ');
     final offline = tiles?.where((d) => !d.online).toList() ?? const [];
     final title = name == null ? greeting(now) : '${greeting(now)}, $name';
     return TabPage.custom(
@@ -157,9 +173,10 @@ class _Overview extends ConsumerWidget {
         onRefresh: () => reloadHome(ref),
         child: ListView(
           key: const ValueKey('home-list'),
+          controller: _scroll,
           padding: padding,
           children: [
-            HomeHero(title: title, subtitle: status.isEmpty ? null : status),
+            HomeHero(title: title),
             if (tiles == null) ...[
               const SizedBox(height: OmniSpace.lg),
               OmniTileGridSkeleton(
@@ -168,9 +185,6 @@ class _Overview extends ConsumerWidget {
               ),
             ] else ...[
               HomeNotices(devices: all),
-              const HomeHelpers(),
-              const SuggestionCard(),
-              const SmartHomeCards(),
               _StatusChips(
                 tiles: tiles,
                 presence: shown == PresenceShown.notSetUp ? null : presence,
@@ -182,6 +196,9 @@ class _Overview extends ConsumerWidget {
                     shown != PresenceShown.notSetUp &&
                     presence?.home == null,
               ),
+              const HomeHelpers(),
+              const SuggestionCard(),
+              const SmartHomeCards(),
               RunSection(items: runItems(scenes, summaries)),
               ..._favourites(context, ref, tiles, drivers),
               for (final g in _roomGroups(
@@ -369,7 +386,7 @@ class OfflineRow extends ConsumerWidget {
           subtitle: one == null
               ? devices.map((d) => d.name).join(', ')
               : 'Tap to see what to try',
-          dot: StatusKind.warning,
+          dot: StatusKind.offline,
           chevron: true,
           divider: false,
           onTap: () {
@@ -405,10 +422,15 @@ class _StatusChips extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // An offline TV's state is the last one read, so it has no chip.
     final playing = tiles.where(
-      (d) => kindOf(d) == DeviceKind.tv && TvState.ofDevice(d.json).isOn,
+      (d) =>
+          d.online &&
+          kindOf(d) == DeviceKind.tv &&
+          TvState.ofDevice(d.json).isOn,
     );
     final chips = <Widget>[
+      if (ref.watch(houseModeProvider).value != null) const ModeChip(),
       if (presence?.home case final bool home)
         OmniStatusChip(
           key: const ValueKey('chip-presence'),
@@ -441,10 +463,13 @@ class _StatusChips extends ConsumerWidget {
         ),
     ];
     if (chips.isEmpty) return const SizedBox(height: OmniSpace.xs);
-    return Wrap(
-      spacing: OmniSpace.sm,
-      runSpacing: OmniSpace.xs,
-      children: chips,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+      child: Wrap(
+        spacing: OmniSpace.sm,
+        runSpacing: OmniSpace.xs,
+        children: chips,
+      ),
     );
   }
 }
@@ -457,6 +482,7 @@ Future<void> showFavourites(BuildContext context, List<DeviceView> tiles) =>
         builder: (context, ref, _) {
           final live = tileDevices(ref.watch(devicesProvider).value ?? const [])
             ..sort(byOrderThenName);
+          final drivers = ref.watch(driversProvider).value ?? const {};
           return SheetTemplate(
             title: 'Favourites',
             subtitle: 'Starred devices show first on Home',
@@ -464,6 +490,7 @@ Future<void> showFavourites(BuildContext context, List<DeviceView> tiles) =>
               for (final d in live)
                 OmniListRow(
                   key: ValueKey('favourite-${d.id}'),
+                  icon: iconOf(d, drivers),
                   title: d.name,
                   subtitle: d.room,
                   trailing: OmniIconAction(
@@ -579,12 +606,25 @@ Future<void> showNeedsYou(BuildContext context, WidgetRef ref) {
   );
 }
 
-/// One room's devices as rows, from Home's "All".
+/// One room's devices as rows, from Home's "All" and a room tile: rename
+/// in the header, the devices, then the room's lights (all on or off, and
+/// Follow the sun).
 class RoomDevicesPage extends ConsumerWidget {
   const RoomDevicesPage({super.key, required this.title, required this.ids});
 
   final String title;
   final List<String> ids;
+
+  Future<void> _rename(BuildContext context, WidgetRef ref, Room room) async {
+    final name = await askRoomName(context, initial: room.name);
+    if (name == null || name == room.name) return;
+    final saved = await ref
+        .read(engineApiProvider)
+        .saveRoom(id: room.id, name: name, order: room.order);
+    if (!saved.ok) return;
+    ref.invalidate(roomsProvider);
+    await ref.read(devicesProvider.notifier).refresh();
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -594,8 +634,29 @@ class RoomDevicesPage extends ConsumerWidget {
         if (ids.contains(j['id'])) DeviceView(j),
     ]..sort(byOrderThenName);
     final read = ref.watch(devicesProvider);
+    // The room these devices share, when they share one.
+    final roomIds = devices.map((d) => d.roomId).whereType<String>().toSet();
+    final room = roomIds.length == 1
+        ? (ref.watch(roomsProvider).value ?? const <Room>[])
+              .where((r) => r.id == roomIds.single)
+              .firstOrNull
+        : null;
+    final lights = room == null
+        ? null
+        : (ref.watch(roomLightsProvider).value ?? const <RoomLights>[])
+              .where((l) => l.id == room.id && l.lights > l.offline)
+              .firstOrNull;
     return ListPage(
-      title: title,
+      title: room?.name ?? title,
+      actions: [
+        if (room != null)
+          OmniIconAction(
+            key: const ValueKey('room-rename'),
+            icon: OmniIcons.edit,
+            label: 'Rename ${room.name}',
+            onPressed: () => _rename(context, ref, room),
+          ),
+      ],
       state: OmniLoad.of(
         read,
         error: 'The devices did not load.',
@@ -619,12 +680,31 @@ class RoomDevicesPage extends ConsumerWidget {
             subtitle: rowSubtitle(
               d,
               shortDriverName(drivers[d.driver], d.driver),
+              hour12: ref.watch(hour12Provider),
             ),
             dot: statusOf(d),
             onTap: () => openDevice(context, d.id),
             onLongPress: () => showQuickSheet(context, d.id),
           ),
-        RoomFollowSunSwitch(ids: ids),
+        if (lights != null) ...[
+          const OmniSectionHeader('Lights'),
+          OmniListRow(
+            key: ValueKey('room-lights-${lights.id}'),
+            icon: OmniIcons.light,
+            title: lights.anyOn ? 'Turn all lights off' : 'Turn all lights on',
+            subtitle: lights.summary,
+            onTap: () async {
+              final r = await ref.read(houseApiProvider).roomLights(
+                lights.id,
+                'power',
+                {'value': !lights.anyOn},
+              );
+              if (r['ok'] != true) showMessage(errorMessage(r));
+              await ref.read(roomLightsProvider.notifier).refresh();
+            },
+          ),
+          RoomFollowSunSwitch(ids: ids),
+        ],
       ],
     );
   }

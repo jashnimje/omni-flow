@@ -17,6 +17,7 @@ class OmniDiscardGuard extends StatelessWidget {
     required this.child,
     this.what = 'this',
     this.onDiscard,
+    this.isNew = false,
   });
 
   final bool dirty;
@@ -26,6 +27,10 @@ class OmniDiscardGuard extends StatelessWidget {
   final String what;
   final VoidCallback? onDiscard;
 
+  /// It was never saved, so there are no changes to lose, only [what]
+  /// itself: "Discard [what]?".
+  final bool isNew;
+
   @override
   Widget build(BuildContext context) => PopScope<Object?>(
     canPop: !dirty,
@@ -33,8 +38,10 @@ class OmniDiscardGuard extends StatelessWidget {
       if (didPop) return;
       final ok = await confirm(
         context,
-        title: 'Discard changes?',
-        body: 'What you changed in $what is not saved and will be lost.',
+        title: isNew ? 'Discard $what?' : 'Discard changes?',
+        body: isNew
+            ? 'It has not been saved, so it will be lost.'
+            : 'What you changed in $what is not saved and will be lost.',
         action: 'Discard',
         destructive: true,
       );
@@ -68,6 +75,7 @@ class FormPage extends StatelessWidget {
     this.saveError,
     this.dirty = false,
     this.discardWhat = 'this',
+    this.discardNew = false,
     this.onDiscard,
     this.close = false,
     this.actions = const [],
@@ -94,6 +102,7 @@ class FormPage extends StatelessWidget {
        saveError = null,
        dirty = false,
        discardWhat = '',
+       discardNew = false,
        onDiscard = null,
        close = false;
 
@@ -109,6 +118,9 @@ class FormPage extends StatelessWidget {
   final String? saveError;
   final bool dirty;
   final String discardWhat;
+
+  /// Whether it was never saved (see [OmniDiscardGuard.isNew]).
+  final bool discardNew;
   final VoidCallback? onDiscard;
   final bool close;
   final List<Widget> actions;
@@ -140,6 +152,7 @@ class FormPage extends StatelessWidget {
     return OmniDiscardGuard(
       dirty: dirty,
       what: discardWhat,
+      isNew: discardNew,
       onDiscard: onDiscard,
       child: OmniPage(
         title: title,

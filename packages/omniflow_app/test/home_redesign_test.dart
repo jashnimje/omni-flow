@@ -17,6 +17,7 @@ import 'package:omniflow_app/ui/settings/home_location_page.dart';
 import 'package:omniflow_app/ui/settings/phone_access.dart';
 import 'package:omniflow_app/ui/settings/places_page.dart';
 
+import 'automations_fixtures.dart' show buttonEnabled;
 import 'fake_engine.dart';
 import 'home_devices_test.dart'
     show
@@ -142,7 +143,7 @@ void main() {
   });
 
   group('Home', () {
-    testWidgets('the hero holds the greeting and the status line, once', (
+    testWidgets('the hero holds the greeting, the mode chip sits under it', (
       tester,
     ) async {
       final engine = household();
@@ -156,7 +157,7 @@ void main() {
       await pumpHome(tester, engine);
       expect(find.byKey(const ValueKey('home-hero')), findsOneWidget);
       expect(find.textContaining(', Jade'), findsOneWidget);
-      expect(find.text('Home · Home mode'), findsOneWidget);
+      expect(find.text('Home · Home mode'), findsNothing);
       final hero = tester.getTopLeft(find.byKey(const ValueKey('home-hero')));
       final chip = tester.getTopLeft(find.byKey(const ValueKey('mode-chip')));
       expect(hero.dy, lessThan(chip.dy));
@@ -434,8 +435,8 @@ void main() {
   });
 
   group('saving how things are now', () {
-    testWidgets('a device past its poll window is marked last known, and '
-        'the save names it', (tester) async {
+    testWidgets('a device past its poll window is marked last known and '
+        'cannot be picked, and a stale save names it', (tester) async {
       final engine = household();
       engine.answers['scene.capture'] = {
         'ok': true,
@@ -464,7 +465,9 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('capture-hall_bulb')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('capture-stale')), findsOneWidget);
+      expect(buttonEnabled(tester, 'capture-save'), isFalse);
+      await tester.tap(find.byKey(const ValueKey('capture-desk_lamp')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('capture-save')));
       await tester.pumpAndSettle();
       expect(find.textContaining('Hall bulb had not answered'), findsWidgets);

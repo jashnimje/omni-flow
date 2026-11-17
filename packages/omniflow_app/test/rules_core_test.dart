@@ -271,6 +271,18 @@ void main() {
     testWidgets('nothing stopped, and no history yet', (tester) async {
       engine.answers['automation.skips'] = {'ok': true, 'skips': []};
       engine.answers['automation.versions'] = {'ok': true, 'versions': []};
+      engine.answers['automation.log'] = {
+        'ok': true,
+        'runs': [
+          {
+            'run': 'r1',
+            'flow': 'lamp_left_on',
+            'outcome': 'completed',
+            'startedAt': DateTime.now().toIso8601String(),
+            'nodes': [],
+          },
+        ],
+      };
       await pumpPushed(
         tester,
         engine,
@@ -278,6 +290,22 @@ void main() {
       );
       expect(find.byKey(const ValueKey('skips-none')), findsOneWidget);
       expect(find.byKey(const ValueKey('versions-none')), findsOneWidget);
+    });
+
+    testWidgets('a rule that never ran is not said to have run each time', (
+      tester,
+    ) async {
+      engine.answers['automation.skips'] = {'ok': true, 'skips': []};
+      engine.answers['automation.log'] = {'ok': true, 'runs': []};
+      await pumpPushed(
+        tester,
+        engine,
+        const RuleEditorPage(id: 'lamp_left_on'),
+      );
+      expect(find.byKey(const ValueKey('skips-never-ran')), findsOneWidget);
+      expect(find.text('It has not been set off yet'), findsOneWidget);
+      expect(find.byKey(const ValueKey('skips-none')), findsNothing);
+      expect(find.textContaining('Each time it was set off'), findsNothing);
     });
 
     testWidgets('History lists the earlier versions and Restore brings one '
