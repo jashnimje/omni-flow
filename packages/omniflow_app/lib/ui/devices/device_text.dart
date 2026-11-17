@@ -260,7 +260,18 @@ String stateLine(DeviceView d, {DateTime? now}) {
       if (d.hasPower) {
         final on = powerOf(d);
         if (on == null) return 'Not read yet';
-        return on ? (_lightLine(d) ?? 'On') : 'Off';
+        if (!on) return 'Off';
+        // A light that says what it is in: "On · Ocean · 60%".
+        if (d.json['mode'] case {'label': final String mode}) {
+          final level = d.capabilityOf('level');
+          final v = level == null ? null : d.state[level['stateKey']];
+          return [
+            'On',
+            mode,
+            if (v is num) formatValue(v, rangeOf(level!).unit),
+          ].join(' · ');
+        }
+        return _lightLine(d) ?? 'On';
       }
       return sensorReading(d) ??
           (d.lastSeen == null ? '' : 'seen ${ago(d.lastSeen!, now: now)}');

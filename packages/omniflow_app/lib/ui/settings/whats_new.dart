@@ -8,11 +8,24 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.10.0';
+const appVersion = '0.11.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '0.11.0',
+    date: '19 Nov 2026',
+    notes: [
+      'WiZ lights: every WiZ scene your bulb plays, from Ocean to Night '
+          'light, with speed for the moving ones.',
+      'A colour wheel and swatches, warm and cool white channels, and '
+          'white presets from candle to cool daylight.',
+      'Automations and scenes can set a WiZ scene, colour or white, and a '
+          "captured scene brings the light back exactly as it was.",
+      "A light's row says what it is doing, such as On, Ocean, 60%.",
+    ],
+  ),
   (
     version: '0.10.0',
     date: '17 Nov 2026',

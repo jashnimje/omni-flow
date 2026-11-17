@@ -5,6 +5,8 @@ import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../storage/database.dart';
 import '../devices/device_service.dart' show stateKeyOf;
+import '../devices/wiz_pilot.dart' show isWizSceneCapability;
+import '../devices/wiz_scenes.dart';
 import 'house_things.dart';
 import 'phone_words.dart';
 import 'rules_core_words.dart';
@@ -260,6 +262,9 @@ class SentenceContext {
       if (phoneStepWords(who, key, params) case final words?) return words;
     }
     if (params == null || params.isEmpty) return '$who ${_key(thing, key)}';
+    if (_lightWords(capability, params) case final words?) {
+      return '$who $words';
+    }
     if (params.length == 1 && params.containsKey('value')) {
       final v = params['value'];
       if (capability?.type == CapabilityType.toggle && v is bool) {
@@ -271,6 +276,23 @@ class SentenceContext {
     }
     return '$who ${_key(thing, key)} '
         '${params.entries.map((e) => '${e.key} ${value(e.value)}').join(', ')}';
+  }
+
+  /// A light's scene, colour or white in words ([lightStepWords]).
+  static String? _lightWords(CapabilitySpec? capability, Map params) {
+    if (capability == null) return null;
+    final scene = isWizSceneCapability(capability)
+        ? wizSceneOf(params['scene'])
+        : null;
+    return lightStepWords(
+      type: capability.type.wireName,
+      params: params,
+      unit: capability.params['value']?.unit,
+      sceneName: isWizSceneCapability(capability)
+          ? scene?.name ?? value(params['scene'])
+          : null,
+      sceneMoves: scene?.dynamic ?? true,
+    );
   }
 
   String step(Map<String, Object?> s) {

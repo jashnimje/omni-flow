@@ -636,7 +636,7 @@ const builtInDriverSources = <String, String>{
   "icon": "lightbulb",
   "transport": { "type": "udp", "port": 38899, "listenPort": 38900, "payload": "json", "matchMethod": true, "pilot": "wiz" },
   "settings": [
-    { "key": "signingKey", "label": "WiZ home key", "secret": true, "pattern": "[0-9a-fA-F]{32}", "patternWords": "32 characters, the digits 0 to 9 and the letters a to f", "help": "Newer WiZ firmware only takes commands signed with your WiZ home's key, 32 characters of digits and the letters a to f. One key covers every bulb in the same WiZ home.\nOpen the WiZ app, go to the settings of your home, and look for the option to export the home for local integration (the exact menu name differs between app versions). It saves or shares a small file. Open it and copy the value of udp_signing_key, without the quotes, and paste it here.\nOlder bulbs do not need it. OmniFlow asks for it when a bulb refuses commands without it. The key stays on this phone." }
+    { "key": "signingKey", "label": "WiZ home key", "secret": true, "pattern": "[0-9a-fA-F]{32}", "patternWords": "32 characters, the digits 0 to 9 and the letters a to f", "help": "Newer WiZ firmware only takes commands signed with your WiZ home's key, 32 characters of digits and the letters a to f. One key covers every bulb in the same WiZ home.\nIt is not on the Security or local communication screen. In the WiZ app open your home's settings, then Integrations, then Local integrations, and export. The app gives a file or a link that works for about 15 minutes. Open it and copy the value of udp_signing_key, without the quotes, and paste it here.\nOlder bulbs do not need it. OmniFlow asks for it when a bulb refuses commands without it. The key stays on this phone." }
   ],
   "setup": ["secret:signingKey?"],
   "discovery": [
@@ -697,12 +697,32 @@ const builtInDriverSources = <String, String>{
         "r": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255 },
         "g": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255 },
         "b": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255 },
+        "c": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255, "optional": true },
+        "w": { "type": "number", "integer": true, "clamp": true, "min": 0, "max": 255, "optional": true },
         "brightness": { "type": "number", "integer": true, "clamp": true, "min": 10, "max": 100, "optional": true }
       },
       "command": {
         "id": 1,
         "method": "setPilot",
-        "params": { "state": true, "r": "{{r}}", "g": "{{g}}", "b": "{{b}}", "dimming": "{{brightness|state.dimming|100}}" }
+        "params": { "state": true, "r": "{{r}}", "g": "{{g}}", "b": "{{b}}", "c": "{{c|0}}", "w": "{{w|0}}", "dimming": "{{brightness|state.dimming|100}}" }
+      }
+    },
+    {
+      "id": "scene",
+      "type": "action",
+      "label": "Scene",
+      "params": {
+        "scene": {
+          "type": "enum",
+          "values": ["daylight", "focus", "relax", "tv_time", "night_light", "wake_up", "bedtime", "alarm", "true_colors", "plantgrowth", "warm_white", "cool_white", "white", "cozy", "candlelight", "dim_to_warm", "ocean", "romance", "sunset", "party", "fireplace", "forest", "pastel_colors", "spring", "summer", "fall", "deep_dive", "jungle", "mojito", "club", "christmas", "halloween", "golden_white", "pulse", "steampunk", "diwali", "snowy_sky"]
+        },
+        "speed": { "type": "number", "integer": true, "clamp": true, "min": 10, "max": 200, "optional": true },
+        "brightness": { "type": "number", "integer": true, "clamp": true, "min": 10, "max": 100, "optional": true }
+      },
+      "command": {
+        "id": 1,
+        "method": "setPilot",
+        "params": { "state": true, "sceneId": "{{scene}}", "speed": "{{speed|100}}", "dimming": "{{brightness|state.dimming|100}}" }
       }
     }
   ]

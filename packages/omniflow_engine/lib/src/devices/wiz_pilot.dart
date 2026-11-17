@@ -9,6 +9,7 @@ import '../manifest/param_spec.dart';
 import 'channels.dart';
 import 'device.dart';
 import 'http_channel.dart' show SecretRejectedException;
+import 'wiz_scenes.dart';
 
 /// The secret setting holding a WiZ home's `udp_signing_key`.
 const wizSigningKey = 'signingKey';
@@ -224,77 +225,99 @@ class WizBulb {
 }
 
 /// [base] narrowed to what [device] said it is: no colour on a white
-/// bulb, no white on a colour-only one, only power on a socket, and the
+/// bulb, no white on a colour-only one, only power on a socket, the scenes
+/// its kind plays, no white channels on a bulb without white, and the
 /// bulb's own white range and lowest dimming on the sliders.
 DriverManifest wizManifestFor(DriverManifest base, Device device) {
   final bulb = WizBulb.of(device);
   if (bulb == null) return base;
+  final scenes = [for (final s in wizScenesFor(bulb.kind)) s.slug];
   bool keep(CapabilitySpec c) => switch (c.type) {
     CapabilityType.colorRgb => bulb.hasColour != false,
     CapabilityType.colorTemp => bulb.hasWhite != false,
     CapabilityType.level => bulb.dims,
+    _ when isWizSceneCapability(c) => bulb.dims && scenes.isNotEmpty,
     _ => true,
   };
-  final narrowed = [
+  CapabilitySpec narrow(CapabilitySpec c) {
+    final params = {...c.params};
+    void fit(String key, num? min, num? max) {
+      final p = params[key];
+      if (p != null) params[key] = p.copyWith(min: min, max: max);
+    }
+
+    if (bulb.minDim != null) {
+      fit(
+        c.type == CapabilityType.level ? 'value' : 'brightness',
+        bulb.minDim,
+        null,
+      );
+    }
+    if (c.type == CapabilityType.colorTemp && bulb.hasWhiteRange) {
+      fit('value', bulb.minK, bulb.maxK);
+    }
+    if (c.type == CapabilityType.colorRgb && bulb.hasWhite == false) {
+      params
+        ..remove('c')
+        ..remove('w');
+    }
+    if (isWizSceneCapability(c)) {
+      params['scene'] = params['scene']!.copyWith(
+        values: [
+          for (final v in params['scene']!.values)
+            if (scenes.contains(v)) v,
+        ],
+      );
+    }
+    return c.withParams(params);
+  }
+
+  return base.withCapabilities([
     for (final c in base.capabilities)
-      if (keep(c))
-        switch (c.type) {
-          CapabilityType.colorTemp when bulb.hasWhiteRange => _withValueRange(
-            c,
-            bulb.minK!,
-            bulb.maxK!,
-          ),
-          CapabilityType.level when bulb.minDim != null => _withValueRange(
-            c,
-            bulb.minDim!,
-            c.params['value']?.max ?? 100,
-          ),
-          _ => c,
-        },
-  ];
-  return base.withCapabilities(narrowed, keep: (_) => false);
+      if (keep(c)) narrow(c),
+  ], keep: (_) => false);
 }
 
-CapabilitySpec _withValueRange(CapabilitySpec c, num min, num max) {
-  final v = c.params['value'];
-  if (v == null) return c;
-  return CapabilitySpec(
-    id: c.id,
-    type: c.type,
-    label: c.label,
-    params: {
-      ...c.params,
-      'value': ParamSpec(
-        type: v.type,
-        min: min,
-        max: max,
-        unit: v.unit,
-        optional: v.optional,
-        values: v.values,
-        pattern: v.pattern,
-        integer: v.integer,
-        clamp: v.clamp,
-      ),
-    },
-    command: c.command,
-    stateJsonPath: c.stateJsonPath,
-    onOff: c.onOff,
-    alsoOff: c.alsoOff,
-    values: c.values,
-    derive: c.derive,
-    highRisk: c.highRisk,
-    zeroTurnsOff: c.zeroTurnsOff,
-  );
-}
+/// Whether [c] sets a WiZ scene: its `scene` param is the scene list.
+bool isWizSceneCapability(CapabilitySpec c) =>
+    c.params['scene']?.type == ParamType.enumeration &&
+    c.params['scene']!.values.isNotEmpty;
 
-/// The WiZ scenes: 1 to 32, and 1000 for rhythm.
-bool _isScene(int id) => (id >= 1 && id <= 32) || id == 1000;
+/// The scene [value] names, fitted for [bulb]: its id, or a plain refusal.
+int _sceneId(Object? value, WizBulb? bulb, String name) {
+  final scene = wizSceneOf(value);
+  final id = value is num ? value.round() : scene?.id;
+  if (id == wizRhythmId) {
+    throw CommandFailedException(
+      'Rhythm follows the sound the WiZ app hears, so it only runs from '
+      'that app. $name refuses it over the network',
+    );
+  }
+  if (scene == null) {
+    // The custom modes a user made in the WiZ app, 256 to 265.
+    if (id != null && id >= 256 && id <= 265) return id;
+    throw CommandFailedException(
+      '$name has no scene $value. Pick one of '
+      '${wizScenesFor(bulb?.kind).map((s) => s.slug).join(', ')}',
+    );
+  }
+  if (!scene.playsOn(bulb?.kind)) {
+    final what = bulb?.kind == 'white'
+        ? 'a tunable white bulb'
+        : 'a white bulb';
+    throw CommandFailedException(
+      '$name is $what and does not play ${scene.name}',
+    );
+  }
+  return scene.id;
+}
 
 /// [payload] made into one a WiZ bulb takes: whole numbers only, dimming
 /// inside the bulb's range, white inside its own range, colour channels 0
-/// to 255, and a zero brightness or an all-zero colour sent as power off.
-/// Throws a [CommandFailedException] in plain words for what the bulb
-/// cannot do at all (a colour on a white bulb).
+/// to 255, a scene by its id with a speed only when it moves, and a zero
+/// brightness or an all-zero colour sent as power off. Throws a
+/// [CommandFailedException] in plain words for what the bulb cannot do at
+/// all (a colour on a white bulb, a scene its kind does not play).
 Map<String, Object?> fitWizPilot(
   Map<String, Object?> payload,
   WizBulb? bulb,
@@ -343,18 +366,62 @@ Map<String, Object?> fitWizPilot(
     }
     final lit = ['r', 'g', 'b', 'c', 'w'].any((k) => (p[k] as num? ?? 0) > 0);
     if (!lit) return off;
-  }
-  if (p['sceneId'] case final num v) {
-    final id = v.round();
-    if (!_isScene(id)) {
-      throw CommandFailedException(
-        '$name has no scene $v. WiZ scenes are 1 to 32, and 1000 for rhythm',
-      );
+    // A colour step that leaves the white channels at 0 is sent as before.
+    if (hasRgb && p['c'] == 0 && p['w'] == 0) {
+      p
+        ..remove('c')
+        ..remove('w');
     }
+  }
+  if (p.containsKey('sceneId')) {
+    final id = _sceneId(p['sceneId'], bulb, name);
     p['sceneId'] = id;
+    if (wizSceneById(id)?.dynamic == false) p.remove('speed');
   }
   if (p['speed'] case final num v) p['speed'] = fit(v, 10, 200);
   return {...payload, 'params': p};
+}
+
+/// [state] after [sent] (a fitted `setPilot` or `setState`) was taken: its
+/// values in, and the keys of the modes it left (white, colour, scene) out,
+/// as the bulb's next report would have it.
+Map<String, Object?> wizStateAfter(
+  Map<String, Object?> state,
+  Map<String, Object?> sent,
+) {
+  final p = sent['params'];
+  if (p is! Map) return state;
+  final params = Map<String, Object?>.from(p)..remove('sigTs');
+  final out = {...state};
+  const modes = [
+    ['temp'],
+    ['r', 'g', 'b', 'c', 'w'],
+    ['sceneId', 'speed'],
+  ];
+  if (sent['method'] == 'setPilot') {
+    final entered = modes
+        .where((m) => m.any((k) => k != 'speed' && params.containsKey(k)))
+        .firstOrNull;
+    if (entered != null) {
+      for (final m in modes) {
+        m.forEach(out.remove);
+      }
+      if (identical(entered, modes[1])) {
+        for (final k in entered) {
+          out[k] = 0;
+        }
+      }
+      // A bulb in a scene reports sceneId 0 once it leaves it.
+      if (!identical(entered, modes[2])) out['sceneId'] = 0;
+    }
+    out['state'] = params['state'] ?? true;
+  } else if (sent['method'] == 'setState' && params['state'] is bool) {
+    out['state'] = params['state'];
+  }
+  for (final e in params.entries) {
+    if (e.key != 'state') out[e.key] = e.value;
+  }
+  return out;
 }
 
 String _sentWords(Map<String, Object?> payload) {
@@ -365,7 +432,7 @@ String _sentWords(Map<String, Object?> payload) {
     if (p['dimming'] case final v?) 'brightness $v %',
     if (p['temp'] case final v?) 'white $v K',
     if (p['r'] is num) 'colour ${p['r']}, ${p['g']}, ${p['b']}',
-    if (p['sceneId'] case final v?) 'scene $v',
+    if (p['sceneId'] case final v?) 'scene ${wizSceneById(v)?.name ?? v}',
   ];
   return parts.isEmpty ? '${payload['method']}' : parts.join(', ');
 }

@@ -73,7 +73,9 @@ class AdbPhoneConnection implements EngineConnection {
     }
     final out = '${result.stdout}';
     final match = _result.firstMatch(out);
-    if (result.exitCode != 0 || match == null) {
+    // A reply in the output wins over the exit code: adb over wireless
+    // debugging can exit non-zero after printing the phone's whole answer.
+    if (match == null) {
       final said = '${result.stderr}'.trim().isNotEmpty
           ? '${result.stderr}'.trim()
           : out.trim();

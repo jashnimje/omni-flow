@@ -36,10 +36,14 @@ class ChannelRequest {
 
 /// The reply a channel got back, as JSON when it has one.
 class ChannelReply {
-  const ChannelReply(this.json, {this.raw});
+  const ChannelReply(this.json, {this.raw, this.sent});
 
   final Map<String, Object?>? json;
   final String? raw;
+
+  /// The command as it went out, when the channel changed it on the way (a
+  /// WiZ pilot fitted to the bulb), so the state written after it matches.
+  final Map<String, Object?>? sent;
 }
 
 class CommandFailedException implements Exception {
@@ -209,7 +213,11 @@ class UdpJsonChannel implements DriverChannel {
         '${request.device.id}: ${decoded['message'] ?? 'error'}',
       );
     }
-    return ChannelReply(decoded, raw: reply.text);
+    return ChannelReply(
+      decoded,
+      raw: reply.text,
+      sent: wiz ? Map<String, Object?>.from(sent as Map) : null,
+    );
   }
 }
 

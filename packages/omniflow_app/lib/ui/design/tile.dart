@@ -36,6 +36,7 @@ class OmniTile extends StatefulWidget {
     this.iconKey,
     this.onLongPress,
     this.tapHint,
+    this.chevron = true,
   });
 
   final IconData icon;
@@ -68,6 +69,10 @@ class OmniTile extends StatefulWidget {
 
   /// What a tap does, for screen readers ("Opens it").
   final String? tapHint;
+
+  /// Whether a tile with [onTap] shows the chevron that says a tap opens
+  /// something. Off for a tile a tap picks (a light's scene).
+  final bool chevron;
 
   static const minHeight = 112.0;
 
@@ -175,7 +180,7 @@ class _OmniTileState extends State<OmniTile> {
                               onTap: w.onIconTap,
                             ),
                             const Spacer(),
-                            if (w.onTap != null)
+                            if (w.onTap != null && w.chevron)
                               const Padding(
                                 padding: EdgeInsets.only(top: OmniSpace.md),
                                 child: ExcludeSemantics(

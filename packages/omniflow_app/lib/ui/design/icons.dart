@@ -114,6 +114,49 @@ abstract final class OmniIcons {
     _ => device,
   };
 
+  /// The icon the engine names for a light's scene (a WiZ scene's
+  /// `icon`, a Material Symbols name), [scene] for one it does not know.
+  static IconData forScene(String? name) => switch (name) {
+    'sunny' => Symbols.sunny_rounded,
+    'center_focus_strong' => Symbols.center_focus_strong_rounded,
+    'spa' => Symbols.spa_rounded,
+    'tv' => Symbols.tv_rounded,
+    'nightlight' => Symbols.nightlight_rounded,
+    'wb_sunny' => Symbols.wb_sunny_rounded,
+    'bedtime' => Symbols.bedtime_rounded,
+    'alarm' => Symbols.alarm_rounded,
+    'gradient' => Symbols.gradient_rounded,
+    'potted_plant' => Symbols.potted_plant_rounded,
+    'wb_incandescent' => Symbols.wb_incandescent_rounded,
+    'ac_unit' => Symbols.ac_unit_rounded,
+    'lightbulb' => Symbols.lightbulb_rounded,
+    'chair' => Symbols.chair_rounded,
+    'candle' => Symbols.candle_rounded,
+    'brightness_medium' => Symbols.brightness_medium_rounded,
+    'waves' => Symbols.waves_rounded,
+    'favorite' => Symbols.favorite_rounded,
+    'wb_twilight' => Symbols.wb_twilight_rounded,
+    'celebration' => Symbols.celebration_rounded,
+    'fireplace' => Symbols.fireplace_rounded,
+    'forest' => Symbols.forest_rounded,
+    'palette' => Symbols.palette_rounded,
+    'local_florist' => Symbols.local_florist_rounded,
+    'beach_access' => Symbols.beach_access_rounded,
+    'eco' => Symbols.eco_rounded,
+    'scuba_diving' => Symbols.scuba_diving_rounded,
+    'park' => Symbols.park_rounded,
+    'local_bar' => Symbols.local_bar_rounded,
+    'nightlife' => Symbols.nightlife_rounded,
+    'redeem' => Symbols.redeem_rounded,
+    'skull' => Symbols.skull_rounded,
+    'brightness_7' => Symbols.brightness_7_rounded,
+    'monitor_heart' => Symbols.monitor_heart_rounded,
+    'precision_manufacturing' => Symbols.precision_manufacturing_rounded,
+    'emoji_objects' => Symbols.emoji_objects_rounded,
+    'weather_snowy' => Symbols.weather_snowy_rounded,
+    _ => scene,
+  };
+
   /// The icon a driver manifest names (its `icon` field).
   static IconData? forManifestIcon(String? name) => switch (name) {
     'lightbulb' => light,

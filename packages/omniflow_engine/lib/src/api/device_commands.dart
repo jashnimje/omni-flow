@@ -17,6 +17,8 @@ import '../dag/web_request.dart';
 import '../devices/board.dart';
 import '../devices/device.dart';
 import '../devices/device_service.dart';
+import '../devices/wiz_pilot.dart';
+import '../devices/wiz_scenes.dart' show wizSceneChoices;
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../storage/database.dart';
@@ -616,6 +618,7 @@ class DeviceCommands {
   List<Map<String, Object?>> _capabilitiesJson(Device device) {
     final manifest = manifestFor(_registry, device);
     if (manifest == null) return const [];
+    final wiz = isWizPilot(manifest);
     return [
       for (final c in manifest.capabilities)
         {
@@ -639,6 +642,13 @@ class DeviceCommands {
                 if (p.value.unit != null) 'unit': p.value.unit,
                 if (p.value.values.isNotEmpty) 'values': p.value.values,
                 if (p.value.optional) 'optional': true,
+                if (p.value.integer) 'integer': true,
+                // Each WiZ scene with its name, group and icon.
+                if (wiz && p.key == 'scene' && isWizSceneCapability(c))
+                  'choices': [
+                    for (final choice in wizSceneChoices(WizBulb.of(device)))
+                      if (p.value.values.contains(choice['value'])) choice,
+                  ],
               },
           },
         },

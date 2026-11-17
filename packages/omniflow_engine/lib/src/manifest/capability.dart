@@ -84,8 +84,15 @@ class CapabilitySpec {
   bool asksForZero(Map<String, Object?> params) {
     if (!zeroTurnsOff) return false;
     if (type == CapabilityType.colorRgb) {
+      // A WiZ bulb lit by its white channels alone (c and w) is on.
       return ['r', 'g', 'b'].every((k) => params[k] is num) &&
-          ['r', 'g', 'b'].every((k) => (params[k] as num) <= 0);
+          [
+            'r',
+            'g',
+            'b',
+            'c',
+            'w',
+          ].every((k) => params[k] is! num || (params[k] as num) <= 0);
     }
     final value = params['value'];
     return value is num && value <= 0;
@@ -144,6 +151,23 @@ class CapabilitySpec {
     if (same(words.$2) || alsoOff.any(same)) return false;
     return value;
   }
+
+  /// This capability taking [params] instead of its own, for a device that
+  /// takes less than its driver declares.
+  CapabilitySpec withParams(Map<String, ParamSpec> params) => CapabilitySpec(
+    id: id,
+    type: type,
+    label: label,
+    params: params,
+    command: command,
+    stateJsonPath: stateJsonPath,
+    onOff: onOff,
+    alsoOff: alsoOff,
+    values: values,
+    derive: derive,
+    highRisk: highRisk,
+    zeroTurnsOff: zeroTurnsOff,
+  );
 
   static CapabilitySpec? parse(
     Object? json,

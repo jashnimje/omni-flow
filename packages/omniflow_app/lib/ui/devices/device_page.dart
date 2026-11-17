@@ -10,6 +10,7 @@ import 'capability_control.dart' show CapabilityControl, isHighRiskCapability;
 import 'device_controls.dart';
 import 'device_sections.dart';
 import 'device_text.dart';
+import 'light_panels.dart' show modeOf, sceneChoicesOf;
 import 'open_device.dart' show DeviceGone;
 import 'smart_home_sections.dart';
 
@@ -30,7 +31,7 @@ class DevicePage extends ConsumerWidget {
   static bool _shownAbove(DeviceView d, Json cap) => switch (cap['type']) {
     'toggle' => !_isPhone(d) && cap['id'] == d.capabilityOf('toggle')?['id'],
     'level' || 'color_temp' || 'color_rgb' => true,
-    _ => false,
+    _ => sceneChoicesOf(cap).isNotEmpty,
   };
 
   static int _rank(Json cap) => switch (cap['type']) {
@@ -94,6 +95,10 @@ class DevicePage extends ConsumerWidget {
 
   static String? _heroSubtitle(DeviceView d) {
     if (_isPhone(d)) return _phoneSubtitle(d);
+    // The scene, colour or white the engine says it is in.
+    if (modeOf(d)?['label'] case final String mode when powerOf(d) == true) {
+      return [mode, ?d.room].join(' · ');
+    }
     final temp = d.capabilityOf('color_temp');
     final v = temp == null ? null : d.state[temp['stateKey']];
     final k = v is num ? kelvinOf(v, rangeOf(temp!).unit) : null;
@@ -179,7 +184,7 @@ class DevicePage extends ConsumerWidget {
         if (!d.online)
           OfflineHelp(device: d)
         else ...[
-          LightControls(device: d),
+          LightControls(device: d, modes: true),
           // Grouped by what each does, so a device with many (the phone)
           // reads as sections rather than one long stack.
           for (final (title, group) in _groups(others))

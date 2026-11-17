@@ -9,7 +9,7 @@ import '../automations/form_parts.dart'
     show ChoiceSheet, ParamChoice, ParamControls;
 import '../automations/pickers.dart' show phoneAppChoices;
 import '../design/design.dart';
-import 'device_controls.dart' show ColourSwatches;
+import 'light_panels.dart' show ColourSwatches;
 
 /// The controls of the capabilities the device page has no special layout
 /// for (actions with params, text commands, remotes, sensors, events),

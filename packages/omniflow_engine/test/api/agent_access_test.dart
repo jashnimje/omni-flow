@@ -406,6 +406,20 @@ void main() {
       });
     });
 
+    test('a whole reply counts even when adb exits non-zero', () async {
+      final phone = AdbPhoneConnection(
+        adb: 'adb',
+        run: (_, _) async {
+          final reply = base64.encode(utf8.encode('{"ok":true,"scenes":[]}'));
+          return ProcessResult(1, 1, 'Result: Bundle[{result=$reply}]\n', '');
+        },
+      );
+      expect(await phone.handle('scene.list', const {}), {
+        'ok': true,
+        'scenes': [],
+      });
+    });
+
     test('a phone that does not answer is unreachable, not a crash', () async {
       final phone = AdbPhoneConnection(
         adb: 'adb',

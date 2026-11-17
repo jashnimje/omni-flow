@@ -10,7 +10,7 @@ import '../transports/udp_transport.dart';
 import 'board.dart';
 import 'channels.dart';
 import 'device.dart';
-import 'wiz_pilot.dart' show isWizPilot;
+import 'wiz_pilot.dart' show isWizPilot, wizStateAfter;
 
 /// A JSONPath naming one top-level key: `$.dimming` or `$['1']`.
 final _topLevelKey = RegExp(
@@ -188,7 +188,10 @@ class DeviceService {
       rethrow;
     }
     final (current, reply) = sent;
-    final state = _optimisticState(current.state, capability, validated);
+    var state = _optimisticState(current.state, capability, validated);
+    if (isWizPilot(manifest) && reply.sent != null) {
+      state = wizStateAfter(state, reply.sent!);
+    }
     final updated = current.copyWith(state: state, lastSeen: _clock());
     await _save(updated, by: by);
     return InvokeResult(updated, reply);

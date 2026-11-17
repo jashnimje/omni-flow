@@ -126,6 +126,23 @@ class FakeWizBulb {
           params.remove('sigTs');
         }
         if (!_valid(method, params)) return refuse(-32602, 'Invalid params');
+        // A bulb is in one of white, colour or a scene at a time, and
+        // reports only that one's keys.
+        const modes = [
+          ['temp'],
+          ['r', 'g', 'b', 'c', 'w'],
+          ['sceneId', 'speed'],
+        ];
+        if (modes.any(
+          (m) => m.any((k) => k != 'speed' && params.containsKey(k)),
+        )) {
+          for (final m in modes) {
+            m.forEach(pilot.remove);
+          }
+          if (params.containsKey('r')) {
+            pilot.addAll({'c': 0, 'w': 0});
+          }
+        }
         pilot.addAll(params);
         if (method == 'setPilot') pilot['state'] = params['state'] ?? true;
         return reply({
@@ -169,10 +186,17 @@ class FakeWizBulb {
       if (values.any((v) => v < 0 || v > 255)) return false;
       if (values.every((v) => v == 0)) return false;
     }
+    // What an ESP25_SHRGB_01 on firmware 1.38 takes: the scenes 1 to 36
+    // and 40, the custom modes 256 to 265, and no Rhythm (1000).
     final scene = p['sceneId'] as int?;
-    if (scene != null && !((scene >= 1 && scene <= 32) || scene == 1000)) {
+    if (scene != null &&
+        !((scene >= 1 && scene <= 36) ||
+            scene == 40 ||
+            (scene >= 256 && scene <= 265))) {
       return false;
     }
+    final speed = p['speed'] as int?;
+    if (speed != null && (speed < 10 || speed > 200)) return false;
     return true;
   }
 }

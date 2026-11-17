@@ -8,6 +8,8 @@ import 'versions.dart' show keepingVersionsOf;
 import '../devices/board.dart' show manifestFor;
 import '../devices/device.dart';
 import '../devices/device_service.dart' show stateKeyOf;
+import '../devices/wiz_pilot.dart' show isWizPilot, isWizSceneCapability;
+import '../devices/wiz_scenes.dart' show wizModeOf;
 import '../manifest/capability.dart';
 import '../manifest/driver_manifest.dart';
 import '../storage/database.dart';
@@ -52,6 +54,47 @@ List<Map<String, Object?>> capturedActions(
     if (c.type != CapabilityType.level || !settable(c)) continue;
     final value = read(c);
     if (value is num) out.add(step(c, {'value': _fit(c, value)}));
+  }
+  // A WiZ bulb in a scene comes back to that scene, at its speed, and one
+  // lit by its white channels comes back to them.
+  if (isWizPilot(manifest)) {
+    final mode = wizModeOf(state);
+    final scene = manifest.capabilities
+        .where((c) => isWizSceneCapability(c) && settable(c))
+        .firstOrNull;
+    if (mode?['kind'] == 'scene' &&
+        scene != null &&
+        scene.params['scene']!.values.contains(mode!['scene'])) {
+      out.add(
+        step(scene, {
+          'scene': mode['scene'],
+          if (mode['dynamic'] == true && mode['speed'] is int)
+            'speed': mode['speed'],
+        }),
+      );
+      return out;
+    }
+    final rgb = manifest.capabilities
+        .where((c) => c.type == CapabilityType.colorRgb && settable(c))
+        .firstOrNull;
+    if (mode?['kind'] == 'colour' && rgb != null) {
+      final channels = [
+        'r',
+        'g',
+        'b',
+        for (final k in ['c', 'w'])
+          if (rgb.params.containsKey(k)) k,
+      ];
+      final values = {for (final k in channels) k: mode![k] as int};
+      if (values.values.any((v) => v > 0)) {
+        out.add(
+          step(rgb, {
+            for (final e in values.entries) e.key: e.value.clamp(0, 255),
+          }),
+        );
+        return out;
+      }
+    }
   }
   final temp = manifest.capabilities
       .where((c) => c.type == CapabilityType.colorTemp && settable(c))

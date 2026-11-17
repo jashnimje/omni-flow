@@ -69,6 +69,8 @@ export 'src/devices/tv/tv_channel.dart';
 export 'src/devices/tv/tv_socket.dart'
     show TvPairingException, TvCertificateMismatchException, certificateSha256;
 export 'src/devices/wiz_push.dart';
+export 'src/devices/wiz_scenes.dart'
+    show colourWords, lightStepWords, whiteWords;
 export 'src/manifest/capability.dart';
 export 'src/mcp/omni_mcp.dart';
 export 'src/manifest/driver_manifest.dart';

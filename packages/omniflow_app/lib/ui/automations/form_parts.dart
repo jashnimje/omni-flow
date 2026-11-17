@@ -6,6 +6,7 @@ import '../../api/engine_calls.dart' show Json;
 import '../../rules/rule_spec.dart';
 import '../../state/clock.dart' show hour12Provider;
 import '../design/design.dart';
+import '../devices/light_panels.dart';
 import 'rule_words.dart';
 
 /// A short form in a sheet: [build] lays out its controls, [result] is what
@@ -396,10 +397,58 @@ class _ParamControlsState extends State<ParamControls> {
     ),
   );
 
+  /// The params a choice of another param takes (a moving scene's
+  /// `speed`), with whether the picked choice takes them now.
+  Map<String, bool> get _taken {
+    final out = <String, bool>{};
+    for (final e in widget.params.entries) {
+      final choices = sceneChoicesOf({
+        'params': {'scene': e.value},
+      });
+      if (choices.isEmpty) continue;
+      final picked = choices
+          .where((c) => c['value'] == widget.values[e.key])
+          .firstOrNull;
+      for (final c in choices) {
+        for (final k in (c['takes'] as List? ?? const [])) {
+          out['$k'] = (out['$k'] ?? false) || choiceTakes(picked, '$k');
+        }
+      }
+    }
+    return out;
+  }
+
+  /// Whether [params] are a colour: r, g and b, picked on a wheel.
+  bool get _colour =>
+      ['r', 'g', 'b'].every((k) => widget.params[k]?['type'] == 'number');
+
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [for (final e in widget.params.entries) _control(e.key, e.value)],
+  Widget build(BuildContext context) {
+    final taken = _taken;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_colour) _colourControl(),
+        for (final e in widget.params.entries)
+          if (taken[e.key] != false &&
+              !(_colour && const {'r', 'g', 'b'}.contains(e.key)))
+            _control(e.key, e.value),
+      ],
+    );
+  }
+
+  Widget _colourControl() => Padding(
+    key: const ValueKey('param-colour'),
+    padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+    child: ColourPicker(
+      value: {
+        for (final k in ['r', 'g', 'b']) k: widget.values[k],
+      },
+      onPick: (rgb) {
+        setState(() => widget.values.addAll(rgb));
+        widget.onChanged();
+      },
+    ),
   );
 
   Widget _control(String key, Json spec) {
@@ -416,6 +465,20 @@ class _ParamControlsState extends State<ParamControls> {
         key: ValueKey('param-$key'),
         title: label,
         trailing: Switch(value: widget.values[key] == true, onChanged: set),
+      );
+    }
+    final scenes = sceneChoicesOf({
+      'params': {'scene': spec},
+    });
+    if (scenes.isNotEmpty) {
+      return Padding(
+        key: ValueKey('param-$key'),
+        padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+        child: SceneGrid(
+          choices: scenes,
+          active: widget.values[key] as String?,
+          onPick: set,
+        ),
       );
     }
     if (spec['values'] case final List options) {
@@ -446,7 +509,7 @@ class _ParamControlsState extends State<ParamControls> {
     if (spec['type'] == 'number' && min is num && max is num) {
       final integer = spec['integer'] == true;
       final current = widget.values[key];
-      return Padding(
+      final slider = Padding(
         padding: const EdgeInsets.only(bottom: OmniSpace.sm),
         child: OmniLabelledSlider(
           key: ValueKey('param-$key'),
@@ -459,6 +522,23 @@ class _ParamControlsState extends State<ParamControls> {
           onChanged: (v) => set(integer ? v.round() : v),
           onChangeEnd: (v) => set(integer ? v.round() : v),
         ),
+      );
+      if (unit != 'K') return slider;
+      // A white, with the warm to cool whites the light takes.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          slider,
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+            child: WhitePresets(
+              min: min.toDouble(),
+              max: max.toDouble(),
+              value: current is num ? current : null,
+              onPick: set,
+            ),
+          ),
+        ],
       );
     }
     final c = _field(key);
@@ -518,6 +598,8 @@ const paramWords = <String, String>{
   'url': 'Link',
   'key': 'Button',
   'phoneMac': 'Phone MAC address',
+  'c': 'Cool white',
+  'w': 'Warm white',
 };
 
 /// A searchable list of choices, loaded when it opens, that pops the one

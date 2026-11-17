@@ -15,6 +15,8 @@ import '../devices/http_channel.dart';
 import '../devices/mqtt_channel.dart';
 import '../devices/serial_channel.dart';
 import '../devices/tv/tv_channel.dart';
+import '../devices/wiz_pilot.dart' show isWizPilot;
+import '../devices/wiz_scenes.dart' show wizModeOf;
 import '../manifest/driver_manifest.dart';
 import '../manifest/driver_registry.dart';
 import '../manifest/validation.dart';
@@ -212,6 +214,8 @@ class EngineCore {
       if (window != null) 'online': d.isOnline(DateTime.now(), window),
       'settings': d.settings,
       'state': d.state,
+      // What a WiZ bulb is doing: a scene by name, a colour or a white.
+      if (isWizPilot(manifest)) 'mode': ?wizModeOf(d.state),
       if (d.lastSeen != null) 'lastSeen': d.lastSeen!.toIso8601String(),
       'problem': ?_setupProblem(d, manifest),
     };

@@ -242,6 +242,32 @@ void _tools({required bool viaHub}) {
     expect((packets.single as Map)['text'], '{"method":"getPilot"}');
   });
 
+  test('an agent sees the WiZ scenes by name and a wrong one is refused '
+      'before anything is sent', () async {
+    final found = body(await call('discover_devices_and_capabilities', {}));
+    final lamp = (found['devices'] as List).cast<Map>().singleWhere(
+      (d) => d['id'] == 'desk_lamp',
+    );
+    final scene = (lamp['capabilities'] as List).cast<Map>().singleWhere(
+      (c) => c['id'] == 'scene',
+    );
+    final params = scene['params'] as Map;
+    expect((params['speed'] as Map)['max'], 200);
+    expect(
+      ((params['scene'] as Map)['choices'] as List).cast<Map>().first,
+      containsPair('label', 'Daylight'),
+    );
+    final refused = body(
+      await call('invoke_device_capability', {
+        'deviceId': 'desk_lamp',
+        'capabilityId': 'scene',
+        'params': {'scene': 'disco'},
+      }),
+    );
+    expect((refused['error'] as Map)['type'], 'invalid');
+    expect('${refused['error']}', contains('params.scene'));
+  });
+
   test('lists the thirty-six tools', () async {
     final tools = (await client.listTools()).tools.map((t) => t.name).toSet();
     expect(tools, {
@@ -357,6 +383,7 @@ void _tools({required bool viaHub}) {
         'min': 2200,
         'max': 6500,
         'unit': 'K',
+        'integer': true,
       });
     },
   );

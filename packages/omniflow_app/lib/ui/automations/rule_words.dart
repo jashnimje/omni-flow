@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:omniflow_engine/omniflow_engine.dart' show daysWords;
+import 'package:omniflow_engine/omniflow_engine.dart'
+    show daysWords, lightStepWords;
 
 import '../../api/engine_calls.dart' show Json;
 import '../../api/rule_calls.dart' show RuleWordPiece, RuleWordsReply;
@@ -9,6 +10,7 @@ import '../../rules/rule_spec.dart';
 import '../../rules/things.dart';
 import '../design/design.dart';
 import '../devices/device_text.dart' show appName;
+import '../devices/light_panels.dart' show choiceTakes, sceneChoicesOf;
 import 'phone_words.dart';
 import 'rules_core_words.dart';
 
@@ -879,6 +881,21 @@ class RuleWords {
     }
     final cap = th?.capability(capability);
     final label = '${cap?['label'] ?? capability}'.toLowerCase();
+    // "Ocean scene", "pink colour", "warm white 2700 K", in the engine's
+    // words, the scene by the name its choice carries.
+    final scene = sceneChoicesOf(cap)
+        .where((c) => c['value'] == params['scene'])
+        .firstOrNull;
+    final light = lightStepWords(
+      type: cap?['type'] as String?,
+      params: params,
+      unit: _paramUnit(cap, 'value'),
+      sceneName: sceneChoicesOf(cap).isEmpty
+          ? null
+          : '${scene?['label'] ?? params['scene']}',
+      sceneMoves: scene == null || choiceTakes(scene, 'speed'),
+    );
+    if (light != null) return light;
     // As the action picker says it: "Turn off", not "power off".
     if (label == 'power' &&
         cap?['type'] == 'toggle' &&

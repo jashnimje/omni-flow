@@ -11,6 +11,9 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 import '../tv/tv_page.dart' show Keycodes;
 import 'device_text.dart';
+import 'light_panels.dart';
+
+export 'light_panels.dart' show ColourSwatches;
 
 /// The controls a device's capability types need, shared by the quick
 /// sheet and the device page: sliders for levels and warmth, colour
@@ -97,11 +100,14 @@ const _cool = LinearGradient(
 );
 const _onWarmth = OmniColors.onWarmWhite;
 
-/// Sliders for every level and warmth, then the colour swatches.
+/// Sliders for every level and warmth, then the colour swatches. With
+/// [modes] (the device page) the levels, then the light's white, colour
+/// and scenes under one segmented control ([LightModePanel]).
 class LightControls extends ConsumerWidget {
-  const LightControls({super.key, required this.device});
+  const LightControls({super.key, required this.device, this.modes = false});
 
   final DeviceView device;
+  final bool modes;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -110,7 +116,7 @@ class LightControls extends ConsumerWidget {
     final children = <Widget>[];
     for (final cap in d.capabilities) {
       final type = cap['type'];
-      if (type != 'level' && type != 'color_temp') continue;
+      if (type != 'level' && (type != 'color_temp' || modes)) continue;
       final range = rangeOf(cap);
       final value = d.state[cap['stateKey']];
       final warmth = type == 'color_temp';
@@ -138,6 +144,13 @@ class LightControls extends ConsumerWidget {
         ),
       );
     }
+    if (modes) {
+      children.add(LightModePanel(device: d));
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      );
+    }
     final colour = d.capabilityOf('color_rgb');
     if (colour != null) {
       children.addAll([
@@ -154,57 +167,6 @@ class LightControls extends ConsumerWidget {
       children: children,
     );
   }
-}
-
-/// Five colours, sent as r, g and b.
-class ColourSwatches extends StatelessWidget {
-  const ColourSwatches({super.key, required this.onPick});
-
-  final void Function(Json rgb)? onPick;
-
-  static const colours = {
-    'Red': Color(0xFFFF6B6B),
-    'Yellow': Color(0xFFFFD93D),
-    'Green': Color(0xFF6BCB77),
-    'Blue': Color(0xFF4D96FF),
-    'Purple': Color(0xFFB18CFF),
-  };
-
-  static Json rgbOf(Color c) => {
-    'r': (c.r * 255).round(),
-    'g': (c.g * 255).round(),
-    'b': (c.b * 255).round(),
-  };
-
-  @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: OmniSpace.xs,
-    children: [
-      for (final e in colours.entries)
-        Semantics(
-          button: true,
-          enabled: onPick != null,
-          label: e.key,
-          excludeSemantics: true,
-          onTap: onPick == null ? null : () => onPick!(rgbOf(e.value)),
-          child: OmniTapTarget(
-            key: ValueKey('swatch-${e.key}'),
-            onTap: onPick == null ? null : () => onPick!(rgbOf(e.value)),
-            child: Opacity(
-              opacity: onPick == null ? 0.4 : 1,
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: e.value,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-          ),
-        ),
-    ],
-  );
 }
 
 /// A TV's volume, mute and the five keys of a mini remote.

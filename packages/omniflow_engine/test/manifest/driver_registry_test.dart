@@ -26,6 +26,7 @@ void main() {
         'brightness',
         'color_temp',
         'rgb',
+        'scene',
       ]);
       expect(wiz.isHighRisk, isFalse);
     });

@@ -37,7 +37,9 @@ class DeviceHistoryLog {
     // keys worth a history entry. The rest stay in state only.
     final only = _core.registry[e.device.driverId]?.statePush?['historyKeys'];
     final entries = [
-      for (final key in {...before.keys, ...after.keys})
+      // A key that left the state (a WiZ speed once the bulb is out of
+      // its scene) is not a change of its own.
+      for (final key in after.keys)
         if ((only is! List || only.contains(key)) &&
             canonicalJson(before[key]) != canonicalJson(after[key]))
           HistoryEntry(at, key, after[key], by: e.by),

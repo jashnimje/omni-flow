@@ -8,6 +8,7 @@ export 'brand.dart';
 export 'buttons.dart';
 export 'card.dart';
 export 'chips.dart';
+export 'colour_wheel.dart';
 export 'confirm.dart';
 export 'headers.dart';
 export 'icons.dart';

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:omniflow_engine/src/devices/wiz_pilot.dart';
+import 'package:omniflow_engine/src/devices/wiz_scenes.dart';
 import 'package:test/test.dart';
 
 import '../support/fake_wiz_bulb.dart';
@@ -192,7 +193,7 @@ void main() {
     },
   );
 
-  test('a captured scene skips a colour of all zeros', () async {
+  test('a captured scene keeps a light on its white channels alone', () async {
     await add('lamp');
     await engine.devices.applyPush('lamp', {
       'method': 'syncPilot',
@@ -213,8 +214,12 @@ void main() {
     expect(scene['ok'], isTrue, reason: '$scene');
     expect(
       [for (final a in scene['actions'] as List) (a as Map)['do']],
-      ['lamp.power', 'lamp.brightness'],
+      ['lamp.power', 'lamp.brightness', 'lamp.rgb'],
     );
+    expect((scene['actions'] as List).last, {
+      'do': 'lamp.rgb',
+      'params': {'r': 0, 'g': 0, 'b': 0, 'c': 0, 'w': 255},
+    });
   });
 
   test('a bulb that reports its state is asked once what it is', () async {
@@ -233,7 +238,164 @@ void main() {
     final caps = (listed['devices'] as List).cast<Map>().single;
     expect(
       [for (final c in caps['capabilities'] as List) (c as Map)['id']],
-      ['power', 'brightness'],
+      ['power', 'brightness', 'scene'],
     );
+  });
+
+  group('scenes, colours and whites', () {
+    Future<Map<String, Object?>> invoke(
+      String id,
+      String capability,
+      Map<String, Object?> params,
+    ) => engine.handle('device.invoke', {
+      'id': id,
+      'capability': capability,
+      'params': params,
+    });
+
+    Future<void> learned(String id) async {
+      await engine.devices.refreshState(id);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+
+    test('a scene goes by its id at its speed, and the device says which '
+        'scene it is in', () async {
+      final b = await add('lamp');
+      await learned('lamp');
+      final r = await invoke('lamp', 'scene', {'scene': 'ocean', 'speed': 150});
+      expect(r['ok'], isTrue, reason: '$r');
+      expect(b.requests.last['params'], {
+        'state': true,
+        'sceneId': 1,
+        'speed': 150,
+        'dimming': 100,
+      });
+      expect((await device('lamp'))['mode'], {
+        'kind': 'scene',
+        'label': 'Ocean',
+        'scene': 'ocean',
+        'sceneId': 1,
+        'dynamic': true,
+        'speed': 150,
+      });
+      await invoke('lamp', 'scene', {'scene': 'focus'});
+      expect(b.requests.last['params'], {
+        'state': true,
+        'sceneId': 15,
+        'dimming': 100,
+      });
+      await invoke('lamp', 'rgb', {'r': 0, 'g': 0, 'b': 0, 'w': 180});
+      expect(b.pilot, containsPair('w', 180));
+      expect(((await device('lamp'))['mode'] as Map)['kind'], 'colour');
+      await invoke('lamp', 'color_temp', {'value': 2700});
+      final d = await device('lamp');
+      expect(d['mode'], {
+        'kind': 'white',
+        'label': 'Warm white 2700 K',
+        'temp': 2700,
+      });
+      expect((d['state'] as Map).containsKey('speed'), isFalse);
+    });
+
+    test('the capability list gives each scene a name, a group and an icon, '
+        'only those the bulb plays', () async {
+      await add('lamp', module: 'ESP56_SHTW3_01', range: [2700, 6500]);
+      await learned('lamp');
+      final listed = await engine.handle('device.list', {
+        'withCapabilities': true,
+      });
+      final caps = ((listed['devices'] as List).single as Map)['capabilities'];
+      final scene = (caps as List).cast<Map>().singleWhere(
+        (c) => c['id'] == 'scene',
+      );
+      final choices = ((scene['params'] as Map)['scene'] as Map)['choices'];
+      expect(
+        [for (final c in choices as List) (c as Map)['value']],
+        [for (final s in wizScenesFor('white')) s.slug],
+      );
+      expect((choices.first as Map)['label'], 'Daylight');
+      expect(
+        (choices.cast<Map>().singleWhere(
+          (c) => c['value'] == 'golden_white',
+        ))['takes'],
+        ['speed'],
+      );
+      final refused = await invoke('lamp', 'scene', {'scene': 'ocean'});
+      expect((refused['error'] as Map)['type'], 'invalid');
+      expect('${(refused['error'] as Map)['message']}', contains('scene'));
+    });
+
+    test('Rhythm and a scene the bulb lacks are refused in words, and '
+        'nothing is sent', () async {
+      final b = await add('lamp');
+      final sent = b.requests.length;
+      final rhythm = await invoke('lamp', 'scene', {'scene': 'rhythm'});
+      expect((rhythm['error'] as Map)['type'], 'invalid');
+      final speed = await invoke('lamp', 'scene', {
+        'scene': 'ocean',
+        'speed': 'fast',
+      });
+      expect((speed['error'] as Map)['type'], 'invalid');
+      expect(b.requests.length, sent);
+    });
+
+    test('a captured scene puts the bulb back in its scene at its speed, '
+        'or on its colour and white channels', () async {
+      final b = await add('lamp');
+      await learned('lamp');
+      await invoke('lamp', 'scene', {'scene': 'party', 'speed': 60});
+      final party = await engine.handle('scene.capture', {
+        'name': 'Party time',
+        'devices': ['lamp'],
+      });
+      expect(party['ok'], isTrue, reason: '$party');
+      expect((party['actions'] as List).last, {
+        'do': 'lamp.scene',
+        'params': {'scene': 'party', 'speed': 60},
+      });
+      await invoke('lamp', 'rgb', {'r': 255, 'g': 40, 'b': 0, 'w': 30});
+      final glow = await engine.handle('scene.capture', {
+        'name': 'Glow',
+        'devices': ['lamp'],
+      });
+      expect((glow['actions'] as List).last, {
+        'do': 'lamp.rgb',
+        'params': {'r': 255, 'g': 40, 'b': 0, 'c': 0, 'w': 30},
+      });
+      await invoke('lamp', 'color_temp', {'value': 4000});
+      final run = await engine.handle('scene.run', {'id': party['id']});
+      expect(run['ok'], isTrue, reason: '$run');
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(b.pilot['sceneId'], 4);
+      expect(b.pilot['speed'], 60);
+      expect(b.pilot.containsKey('temp'), isFalse);
+    });
+
+    test('the sentence of a scene step names the scene', () async {
+      await add('bedroom');
+      final words = await engine.handle('rule.words', {
+        'rule': {
+          'when': [
+            {'at': '07:00'},
+          ],
+          'then': [
+            {
+              'do': 'bedroom.scene',
+              'params': {'scene': 'ocean'},
+            },
+            {
+              'do': 'bedroom.rgb',
+              'params': {'r': 0, 'g': 0, 'b': 255},
+            },
+          ],
+        },
+      });
+      expect(words['ok'], isTrue, reason: '$words');
+      final texts = [
+        for (final p in (words['parts'] as List).cast<Map>())
+          if (p['kind'] == 'step') p['text'],
+      ];
+      expect(texts, ['Bedroom Ocean scene', 'Bedroom blue colour']);
+    });
   });
 }

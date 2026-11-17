@@ -134,6 +134,7 @@ void main() {
         expect(ids(wizManifestFor(base, bulb({'kind': 'dimmable'}))), [
           'power',
           'brightness',
+          'scene',
         ]);
         expect(
           ids(
@@ -142,12 +143,13 @@ void main() {
               bulb({'kind': 'white', 'minK': 2700, 'maxK': 6500}),
             ),
           ),
-          ['power', 'brightness', 'color_temp'],
+          ['power', 'brightness', 'color_temp', 'scene'],
         );
         expect(ids(wizManifestFor(base, bulb({'kind': 'rgb'}))), [
           'power',
           'brightness',
           'rgb',
+          'scene',
         ]);
         expect(ids(wizManifestFor(base, bulb({'kind': 'socket'}))), ['power']);
         final white = wizManifestFor(
@@ -343,7 +345,10 @@ void main() {
           DriverRegistry.withBuiltIns(),
           (await s.device('lamp'))!,
         )!;
-        expect([for (final c in m.capabilities) c.id], ['power', 'brightness']);
+        expect(
+          [for (final c in m.capabilities) c.id],
+          ['power', 'brightness', 'scene'],
+        );
         await expectLater(
           s.invoke('lamp', 'rgb', {'r': 255, 'g': 0, 'b': 0}),
           throwsA(isA<DeviceNotFoundException>()),

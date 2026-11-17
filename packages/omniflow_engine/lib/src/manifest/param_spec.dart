@@ -46,6 +46,20 @@ class ParamSpec {
   /// light, where 5 % on a bulb whose lowest is 10 % should give 10 %.
   final bool clamp;
 
+  /// This spec with another range or set of values, for a device that
+  /// takes less than its driver declares.
+  ParamSpec copyWith({num? min, num? max, List<String>? values}) => ParamSpec(
+    type: type,
+    min: min ?? this.min,
+    max: max ?? this.max,
+    unit: unit,
+    optional: optional,
+    values: values ?? this.values,
+    pattern: pattern,
+    integer: integer,
+    clamp: clamp,
+  );
+
   /// [value] brought inside the range and rounded, when this param clamps.
   Object? fit(Object? value) {
     if (!clamp || value is! num || !value.isFinite) return value;

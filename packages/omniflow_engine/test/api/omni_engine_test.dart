@@ -263,7 +263,55 @@ void main() {
       final (_, listOut) = await omni(['device', 'list']);
       final device =
           ((jsonDecode(listOut) as Map)['devices'] as List).single as Map;
-      expect(device['state'], {'temp': 3000});
+      // The state says what was sent, and that the bulb left any scene.
+      expect(device['state'], {
+        'sceneId': 0,
+        'state': true,
+        'temp': 3000,
+        'dimming': 80,
+      });
+      expect(device['mode'], {
+        'kind': 'white',
+        'label': 'Warm white 3000 K',
+        'temp': 3000,
+      });
+    });
+
+    test('a WiZ scene is set by name from the CLI, and a wrong one is '
+        'refused with what it takes', () async {
+      final received = <Map>[];
+      final bulb = await fakeBulb(received);
+      addTearDown(bulb.close);
+      final (addCode, _) = await omni([
+        'device', 'add', 'desk_lamp', '--driver', 'philips_wiz_udp', //
+        '--host', '127.0.0.1', '--port', '${bulb.localPort}',
+      ]);
+      expect(addCode, 0);
+      final (code, out) = await omni([
+        'device',
+        'invoke',
+        'desk_lamp',
+        'scene',
+        'scene=ocean',
+        'speed=150',
+      ]);
+      expect(code, 0, reason: out);
+      expect(received.last['params'], {
+        'state': true,
+        'sceneId': 1,
+        'speed': 150,
+        'dimming': 100,
+      });
+      final (badCode, badOut) = await omni([
+        'device',
+        'invoke',
+        'desk_lamp',
+        'scene',
+        'scene=disco',
+      ]);
+      expect(badCode, isNot(0));
+      expect(badOut, contains('params.scene'));
+      expect(badOut, contains('ocean'));
     });
 
     test(
