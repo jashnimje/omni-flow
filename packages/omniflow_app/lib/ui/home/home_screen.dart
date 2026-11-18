@@ -8,7 +8,6 @@ import '../automations/test_run.dart' show RunPage;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
-import '../../api/tv_calls.dart';
 import '../../state/clock.dart';
 import '../../state/providers.dart';
 import '../../state/house.dart' show houseInViewProvider;
@@ -29,14 +28,18 @@ import 'first_run.dart';
 import 'home_data.dart';
 import 'home_helpers.dart';
 import 'quick_sheet.dart';
+import 'room_tile.dart' show RoomTileRow;
+import 'timer_strip.dart' show TimerStrip;
 import 'run_section.dart';
-import 'suggestion_card.dart';
+import 'home_activity.dart';
 import 'tile_look.dart';
 import 'home_hero.dart';
 import 'home_notices.dart';
 import 'mode_picker.dart' show ModeChip;
 import 'home_presence.dart';
-import 'energy_card.dart' show SmartHomeCards;
+import 'energy_card.dart' show HomeEnergySection;
+import '../add/add_page.dart' show openAddThing;
+import '../devices/weather_page.dart' show WeatherCard;
 import '../help/screen_help.dart';
 import '../onboarding/home_setup.dart' show openHomeSetup;
 
@@ -58,10 +61,11 @@ bool homeIsEmpty(WidgetRef ref) => switch (ref.watch(devicesProvider).value) {
 bool homeShowsFirstRun(WidgetRef ref) =>
     homeIsEmpty(ref) && ref.watch(firstRunDoneProvider).value == false;
 
-/// 1.1: the daily overview. A greeting, what is on, status chips, what to
-/// run (scenes and manual automations), favourites, one tile grid per room,
-/// and one row for every device that is offline. With nothing added it is
-/// the first run (8.1) or the empty home (8.2).
+/// 1.1: the daily overview. In front: the greeting, the mode and presence
+/// chips, at most one notice, favourites, scenes, one tile grid per room
+/// and one row for every device that is offline. Behind collapsed
+/// sections at the end: Activity, Energy and Ideas for you. With nothing
+/// added it is the first run (8.1) or the empty home (8.2).
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
@@ -96,8 +100,8 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-/// Home's header actions: search, what needs you, and help. They stay on
-/// the error state too.
+/// Home's header actions: search, what needs you, help and Add (the +,
+/// so nothing floats over the tiles). They stay on the error state too.
 List<Widget> _homeActions(BuildContext context, WidgetRef ref) => [
   OmniIconAction(
     key: const ValueKey('open-search'),
@@ -120,6 +124,12 @@ List<Widget> _homeActions(BuildContext context, WidgetRef ref) => [
     ),
   },
   const ScreenHelpButton(HelpScreen.home),
+  OmniIconAction(
+    key: const ValueKey('add-device'),
+    icon: OmniIcons.add,
+    label: 'Add a device',
+    onPressed: () => openAddThing(context),
+  ),
 ];
 
 class _Overview extends ConsumerStatefulWidget {
@@ -186,7 +196,6 @@ class _OverviewState extends ConsumerState<_Overview> {
             ] else ...[
               HomeNotices(devices: all),
               _StatusChips(
-                tiles: tiles,
                 presence: shown == PresenceShown.notSetUp ? null : presence,
                 person: person,
                 // Not set up at all has its own notice above. This is a
@@ -196,11 +205,11 @@ class _OverviewState extends ConsumerState<_Overview> {
                     shown != PresenceShown.notSetUp &&
                     presence?.home == null,
               ),
-              const HomeHelpers(),
-              const SuggestionCard(),
-              const SmartHomeCards(),
-              RunSection(items: runItems(scenes, summaries)),
+              const TimerStrip(),
+              const WeatherCard(),
               ..._favourites(context, ref, tiles, drivers),
+              RunSection(items: runItems(scenes, summaries)),
+              const RoomTileRow(),
               for (final g in _roomGroups(
                 tiles.where((d) => d.online).toList(),
                 rooms,
@@ -220,6 +229,10 @@ class _OverviewState extends ConsumerState<_Overview> {
                 TileGrid(devices: g.devices, drivers: drivers),
               ],
               if (offline.isNotEmpty) OfflineRow(devices: offline),
+              const SizedBox(height: OmniSpace.lg),
+              HomeActivitySection(devices: tiles),
+              const HomeEnergySection(),
+              const HomeIdeasSection(),
             ],
           ],
         ),
@@ -241,15 +254,9 @@ class _OverviewState extends ConsumerState<_Overview> {
         actionLabel: 'Edit',
         onAction: () => showFavourites(context, tiles),
       ),
-      if (favourites.isEmpty)
-        const Padding(
-          padding: EdgeInsets.only(bottom: OmniSpace.xs),
-          child: Text(
-            'Star a device on its page, or tap Edit, to keep it here.',
-            style: OmniText.caption,
-          ),
-        )
-      else
+      // With none starred the header and its Edit stay, so the way to add
+      // one is still there, and no hint sits in front.
+      if (favourites.isNotEmpty)
         TileGrid(devices: favourites, drivers: drivers),
     ];
   }
@@ -297,7 +304,7 @@ class _Row extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (var i = 0; i < columns; i++) ...[
-          if (i > 0) const SizedBox(width: OmniSpace.gap),
+          if (i > 0) const SizedBox(width: OmniSpace.md),
           Expanded(child: i < children.length ? children[i] : const SizedBox()),
         ],
       ],
@@ -344,14 +351,24 @@ class TileGrid extends ConsumerWidget {
     );
   }
 
+  /// From this text size Home's tiles stack in one column, so names and
+  /// readings are never cut.
+  static const oneColumnFrom = 1.3;
+
+  /// How many tiles a row holds here.
+  static int columnsOf(BuildContext context) =>
+      MediaQuery.textScalerOf(context).scale(16) / 16 > oneColumnFrom
+      ? 1
+      : OmniWidth.of(context).tileColumns;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final columns = OmniWidth.of(context).tileColumns;
+    final columns = columnsOf(context);
     return Column(
       children: [
         for (var i = 0; i < devices.length; i += columns)
           Padding(
-            padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+            padding: const EdgeInsets.only(bottom: OmniSpace.md),
             child: _Row([
               for (final d in devices.skip(i).take(columns))
                 _tile(context, ref, d),
@@ -403,17 +420,15 @@ class OfflineRow extends ConsumerWidget {
   }
 }
 
-/// Where you are and what the TV plays. Each chip opens what it names.
+/// The house mode and where you are. Each chip opens what it names.
 /// Offline devices have their own row at the bottom.
 class _StatusChips extends ConsumerWidget {
   const _StatusChips({
-    required this.tiles,
     required this.presence,
     required this.person,
     this.notSetUp = false,
   });
 
-  final List<DeviceView> tiles;
   final Presence? presence;
   final DeviceView? person;
 
@@ -422,13 +437,6 @@ class _StatusChips extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // An offline TV's state is the last one read, so it has no chip.
-    final playing = tiles.where(
-      (d) =>
-          d.online &&
-          kindOf(d) == DeviceKind.tv &&
-          TvState.ofDevice(d.json).isOn,
-    );
     final chips = <Widget>[
       if (ref.watch(houseModeProvider).value != null) const ModeChip(),
       if (presence?.home case final bool home)
@@ -448,18 +456,6 @@ class _StatusChips extends ConsumerWidget {
           onTap: () => Navigator.of(
             context,
           ).push(MaterialPageRoute<void>(builder: (_) => const PlacesPage())),
-        ),
-      for (final tv in playing)
-        OmniStatusChip(
-          key: ValueKey('chip-tv-${tv.id}'),
-          icon: OmniIcons.tv,
-          label: switch (TvState.ofDevice(tv.json)) {
-            TvState(app: final String app, playing: 'playing') =>
-              '${appName(app)} playing',
-            TvState(app: final String app) => '${appName(app)} on ${tv.name}',
-            _ => '${tv.name} is on',
-          },
-          onTap: () => openDevice(context, tv.id),
         ),
     ];
     if (chips.isEmpty) return const SizedBox(height: OmniSpace.xs);

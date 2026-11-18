@@ -34,7 +34,6 @@ class HomeHero extends ConsumerWidget {
             colors: [palette.heroTop, palette.heroBottom],
           ),
           border: Border.all(color: palette.accentLine),
-          boxShadow: OmniDepth.shadow,
         ),
         child: Material(
           type: MaterialType.transparency,
@@ -79,8 +78,6 @@ class HomeHero extends ConsumerWidget {
                       child: Text(
                         title,
                         key: const ValueKey('home-greeting'),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
                         style: OmniText.largeTitle,
                       ),
                     ),

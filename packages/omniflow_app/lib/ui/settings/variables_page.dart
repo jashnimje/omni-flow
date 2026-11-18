@@ -163,10 +163,10 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
         onRetry: _load,
       ),
       children: (context) => [
-        const Text(
+        Text(
           'Values automations set for each other to check. Change one '
           'that is stuck, or clear it.',
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
         const SizedBox(height: OmniSpace.md),
         if (own.isEmpty && system.isEmpty)

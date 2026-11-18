@@ -204,7 +204,7 @@ class _SunLightingPageState extends ConsumerState<SunLightingPage> {
               child: Text(
                 'Now: ${view.nowKelvin} K at ${view.nowBrightness}% '
                 'brightness. Lights that are on move every 5 minutes.',
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
             ),
         ],
@@ -394,7 +394,7 @@ class SunCurvePreview extends StatelessWidget {
                 points.length * 3 ~/ 4,
                 points.length - 1,
               })
-                Text(time(points[i].at), style: OmniText.caption),
+                Text(time(points[i].at), style: OmniText.captionOf(context)),
             ],
           ),
         ],

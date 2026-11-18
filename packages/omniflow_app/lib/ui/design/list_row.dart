@@ -16,20 +16,16 @@ class StatusDot extends StatelessWidget {
   /// Read out instead of the default word for [kind].
   final String? label;
 
-  /// The teal colour of [kind], for code with no [BuildContext]. Widgets
-  /// use [colorIn] so online follows the Appearance accent.
-  static Color colorOf(StatusKind kind) => switch (kind) {
-    StatusKind.online => OmniColors.accent,
-    StatusKind.offline => OmniColors.muted,
-    StatusKind.warning => OmniColors.warn,
-    StatusKind.problem => OmniColors.bad,
-  };
-
   /// The colour of [kind] in the current palette.
-  static Color colorIn(BuildContext context, StatusKind kind) =>
-      kind == StatusKind.online
-      ? OmniPalette.of(context).accent
-      : colorOf(kind);
+  static Color colorIn(BuildContext context, StatusKind kind) {
+    final p = OmniPalette.of(context);
+    return switch (kind) {
+      StatusKind.online => p.accent,
+      StatusKind.offline => p.muted,
+      StatusKind.warning => p.warn,
+      StatusKind.problem => p.bad,
+    };
+  }
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -52,9 +48,11 @@ class StatusDot extends StatelessWidget {
   );
 }
 
-/// A list row: an icon box (or any [leading]), a title with an optional
-/// one-line subtitle, and on the right a [value] in the accent, a status
-/// [dot], a [trailing] widget or a chevron. Rows are divided by a line.
+/// A list row: a 40 dp icon box (or any [leading]), a 16 title with an
+/// optional 14 subtitle, and on the right a [value] in the accent, a
+/// status [dot], a [trailing] widget or a chevron. A one-line row is at
+/// least 56 dp and a two-line row 72, and both grow with the text size.
+/// Rows are divided by a line.
 class OmniListRow extends StatelessWidget {
   const OmniListRow({
     super.key,
@@ -109,27 +107,31 @@ class OmniListRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
     final right = <Widget>[
       if (value != null)
         Text(
           value!,
-          style: OmniText.number.copyWith(
-            color: valueColor ?? OmniPalette.of(context).accent,
-          ),
+          style: OmniText.number.copyWith(color: valueColor ?? palette.accent),
         ),
       if (dot != null) StatusDot(dot!),
       ?trailing,
       if (chevron && value == null && trailing == null)
-        const Icon(OmniIcons.chevron, color: OmniColors.muted, size: 22),
+        Icon(OmniIcons.chevron, color: palette.muted, size: 24),
     ];
     final row = Container(
-      constraints: const BoxConstraints(minHeight: OmniSpace.target + 4),
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+      constraints: BoxConstraints(
+        minHeight: subtitle == null ? OmniSpace.row : OmniSpace.rowTwoLine,
+      ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 2,
+        vertical: OmniSpace.sm,
+      ),
       decoration: BoxDecoration(
-        color: selected ? OmniPalette.of(context).accentSoft : null,
+        color: selected ? palette.accentSoft : null,
         borderRadius: selected ? BorderRadius.circular(OmniRadii.field) : null,
         border: divider && !selected
-            ? Border(bottom: BorderSide(color: OmniPalette.of(context).line))
+            ? Border(bottom: BorderSide(color: palette.line))
             : null,
       ),
       child: Row(
@@ -139,11 +141,12 @@ class OmniListRow extends StatelessWidget {
           else if (icon != null)
             OmniIconBox(
               icon: icon!,
+              size: 40,
               background: iconBackground,
               foreground: iconForeground,
             ),
           if (leading != null || icon != null)
-            const SizedBox(width: OmniSpace.gap),
+            const SizedBox(width: OmniSpace.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -151,9 +154,9 @@ class OmniListRow extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: enabled
-                      ? OmniText.body
-                      : OmniText.body.copyWith(color: OmniColors.muted),
+                  style: OmniText.body.copyWith(
+                    color: enabled ? palette.text : palette.muted,
+                  ),
                 ),
                 if (subtitle != null)
                   Text(
@@ -163,7 +166,7 @@ class OmniListRow extends StatelessWidget {
                         ? subtitleLines * 3
                         : subtitleLines,
                     overflow: TextOverflow.ellipsis,
-                    style: OmniText.caption,
+                    style: OmniText.caption.copyWith(color: palette.muted),
                   ),
               ],
             ),

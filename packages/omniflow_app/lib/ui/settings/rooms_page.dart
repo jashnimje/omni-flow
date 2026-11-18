@@ -101,11 +101,11 @@ class RoomsPage extends ConsumerWidget {
               key: ValueKey('room-${list[i].id}'),
               leading: ReorderableDragStartListener(
                 index: i,
-                child: const Padding(
+                child: Padding(
                   padding: EdgeInsets.all(OmniSpace.md),
                   child: Icon(
                     OmniIcons.drag,
-                    color: OmniColors.muted,
+                    color: OmniPalette.of(context).muted,
                     semanticLabel: 'Drag to reorder',
                   ),
                 ),

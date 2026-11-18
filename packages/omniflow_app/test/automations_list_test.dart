@@ -24,6 +24,17 @@ class _WithNew extends StatelessWidget {
   );
 }
 
+/// Picks [label] in the All, Rules and Scenes switch.
+Future<void> _filter(WidgetTester tester, String label) async {
+  await tester.tap(
+    find.descendant(
+      of: find.byKey(const ValueKey('automation-filters')),
+      matching: find.text(label),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late FakeEngine engine;
 
@@ -42,27 +53,34 @@ void main() {
     expect(engine.callsOf('automation.list').length, before + 1);
   });
 
-  testWidgets('each automation shows its sentence, switch and last run, '
-      'scenes stay off the cards but count under All, and the review '
-      'waiting is flagged', (tester) async {
+  testWidgets('each automation is a card with its name, when it runs and '
+      'its state, a failed run says why, the scene is a card too, and the '
+      'review waiting is flagged', (tester) async {
     await pumpPage(tester, engine, const AutomationsScreen());
     expect(find.text('Arrive home'), findsOneWidget);
-    expect(find.text('When I get home'), findsOneWidget);
-    expect(find.text('after 6 pm'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('when-arrive_home'))).data,
+      'When I get home, after 6 pm',
+    );
     expect(find.byKey(const ValueKey('automation-movie')), findsNothing);
-    expect(find.text('All 6'), findsOneWidget);
-    expect(find.text('Quick links 1'), findsOneWidget);
-    expect(find.text('Needs you 1'), findsOneWidget);
+    expect(find.byKey(const ValueKey('scene-movie')), findsOneWidget);
+    // All, Rules and Scenes, with no counts and no other filters.
+    for (final f in ['All', 'Rules', 'Scenes']) {
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('automation-filters')),
+          matching: find.text(f),
+        ),
+        findsOneWidget,
+      );
+    }
+    expect(find.text('Quick links 1'), findsNothing);
     expect(
       find.text('An agent made "Movie night". Review before it can run.'),
       findsOneWidget,
     );
-    expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('last-run-arrive_home')))
-          .data,
-      startsWith('Ran today'),
-    );
+    // The last good run is history, so it is not on the card.
+    expect(find.byKey(const ValueKey('last-run-arrive_home')), findsNothing);
     expect(
       tester
           .widget<Text>(find.byKey(const ValueKey('last-failed-door_mute')))
@@ -71,9 +89,15 @@ void main() {
     );
     expect(
       tester
-          .widget<Switch>(find.byKey(const ValueKey('enable-door_mute')))
-          .value,
-      isFalse,
+          .widget<Text>(find.byKey(const ValueKey('enable-label-door_mute')))
+          .data,
+      'Off',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('enable-label-arrive_home')))
+          .data,
+      'On',
     );
   });
 
@@ -81,21 +105,16 @@ void main() {
     tester,
   ) async {
     await pumpPage(tester, engine, const AutomationsScreen());
-    // All is all: the scene follows the rules under its own header.
-    await tester.scrollUntilVisible(
-      find.byKey(const ValueKey('scene-movie')),
-      200,
-      scrollable: find.byType(Scrollable).last,
-    );
-    expect(find.byKey(const ValueKey('all-scenes')), findsOneWidget);
-    expect(
-      find.byType(AutomationCard).evaluate().map((e) {
-        return (e.widget as AutomationCard).automation.id;
-      }),
-      isNot(contains('movie')),
-      reason: 'not as a rule card',
-    );
-    await tapKey(tester, 'filter-scenes');
+    // All is all: the scene follows the rules.
+    final ids = [
+      for (final e in find.byType(AutomationCard).evaluate())
+        (e.widget as AutomationCard).automation.id,
+    ];
+    expect(ids.last, 'movie');
+    // A scene runs when asked, so its card has Run and no on or off.
+    expect(find.byKey(const ValueKey('enable-movie')), findsNothing);
+    await _filter(tester, 'Scenes');
+    expect(find.byType(AutomationCard), findsOneWidget);
     expect(find.byKey(const ValueKey('scene-movie')), findsOneWidget);
     // New, a scene among them, is the tab's button, not one in the list.
     expect(find.byKey(const ValueKey('scene-new')), findsNothing);
@@ -103,24 +122,41 @@ void main() {
     expect(engine.callsOf('scene.run').single.$2['id'], 'movie');
   });
 
-  testWidgets('the filter chips keep rules, links, the ones off and the ones '
-      'that need you', (tester) async {
+  testWidgets('All, Rules and Scenes split the list, and searching for '
+      'link, off or needs you finds what the old filters did', (tester) async {
     await pumpPage(tester, engine, const AutomationsScreen());
     Set<String> shown() => {
       for (final e in find.byType(AutomationCard).evaluate())
         (e.widget as AutomationCard).automation.id,
     };
-    await tapKey(tester, 'filter-links');
+    Future<void> search(String words) async {
+      await tester.enterText(
+        find.byKey(const ValueKey('automations-query')),
+        words,
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await _filter(tester, 'Rules');
+    expect(shown(), {
+      'arrive_home',
+      'bulb_away',
+      'door_mute',
+      'movie_night',
+      'desk_button',
+    });
+    await _filter(tester, 'Scenes');
+    expect(shown(), {'movie'});
+    await _filter(tester, 'All');
+    expect(shown().length, 6);
+    await tapKey(tester, 'automations-search');
+    await search('link');
     expect(shown(), {'desk_button'});
-    await tapKey(tester, 'filter-off');
+    await search('off');
     // One waiting for approval does not run yet, so it is off too.
     expect(shown(), {'door_mute', 'movie_night'});
-    await tapKey(tester, 'filter-needsYou');
+    await search('needs you');
     expect(shown(), {'movie_night'});
-    await tapKey(tester, 'filter-rules');
-    expect(shown(), {'arrive_home', 'bulb_away', 'door_mute', 'movie_night'});
-    await tapKey(tester, 'filter-all');
-    expect(shown().length, 5);
   });
 
   testWidgets('search keeps the automations whose name or sentence matches', (
@@ -155,17 +191,19 @@ void main() {
     await pumpPage(tester, engine, const AutomationsScreen());
     expect(
       tester
-          .widget<Switch>(find.byKey(const ValueKey('enable-movie_night')))
-          .onChanged,
+          .widget<InkWell>(find.byKey(const ValueKey('enable-movie_night')))
+          .onTap,
       isNull,
     );
     expect(
       tester
-          .widget<Switch>(find.byKey(const ValueKey('enable-movie_night')))
-          .value,
-      isFalse,
-      reason: 'it is not loaded until approved, so it shows off',
+          .widget<Text>(find.byKey(const ValueKey('enable-label-movie_night')))
+          .data,
+      'Review',
+      reason: 'it is not loaded until approved, so it is not on',
     );
+    await tapKey(tester, 'enable-movie_night');
+    expect(engine.callsOf('automation.enable'), isEmpty);
   });
 
   testWidgets('Retry runs a failed automation again and says how it went', (
@@ -228,7 +266,7 @@ void main() {
     expect(find.byKey(const ValueKey('automations-empty')), findsNothing);
     // All lists the scenes, so it is not empty.
     expect(find.byKey(const ValueKey('filter-empty')), findsNothing);
-    expect(find.byKey(const ValueKey('all-scenes')), findsOneWidget);
+    expect(find.byKey(const ValueKey('scene-movie')), findsOneWidget);
     expect(empty, isFalse);
   });
 
@@ -299,7 +337,8 @@ void main() {
     expect(find.textContaining('OmniFlow did not answer'), findsWidgets);
     engine.throwOn.clear();
     await tapText(tester, 'Try again');
-    expect(find.byType(AutomationCard), findsNWidgets(5));
+    // The five rules and links, and the scene.
+    expect(find.byType(AutomationCard), findsNWidgets(6));
   });
 
   testWidgets('the review banner opens the review', (tester) async {

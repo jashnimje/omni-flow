@@ -18,12 +18,12 @@ import 'run_words.dart';
 
 NodeCategory? _category(String type) => builtInNodeTypes[type]?.category;
 
-Color _color(NodeCategory? c) => switch (c) {
-  NodeCategory.trigger => OmniColors.trigger,
-  NodeCategory.condition => OmniColors.condition,
-  NodeCategory.gate || NodeCategory.flowControl => OmniColors.flowControl,
-  NodeCategory.action => OmniColors.action,
-  _ => OmniColors.muted,
+Color _color(OmniPalette palette, NodeCategory? c) => switch (c) {
+  NodeCategory.trigger => palette.trigger,
+  NodeCategory.condition => palette.condition,
+  NodeCategory.gate || NodeCategory.flowControl => palette.flowControl,
+  NodeCategory.action => palette.action,
+  _ => palette.muted,
 };
 
 /// The node ids of [flow] (an automation.get `flow`) with their labels,
@@ -136,7 +136,7 @@ class RunNodeRows extends StatelessWidget {
         for (final (i, n) in run.steps.indexed)
           OmniListRow(
             key: ValueKey('node-$i'),
-            leading: _Dot(_color(_category(n.type))),
+            leading: _Dot(_color(OmniPalette.of(context), _category(n.type))),
             title: stepWords(
               n.label ?? labels[n.node] ?? n.type.replaceAll('_', ' '),
               hour12: hour12,
@@ -168,9 +168,9 @@ class RunNodeRows extends StatelessWidget {
     final accent = OmniPalette.of(context).accent;
     final c = _category(n.type);
     if (n.error != null) {
-      return const Icon(
+      return Icon(
         AutomationIcons.fail,
-        color: OmniColors.bad,
+        color: OmniPalette.of(context).bad,
         semanticLabel: 'Fails',
       );
     }
@@ -186,7 +186,7 @@ class RunNodeRows extends StatelessWidget {
                 ? OmniIcons.branch
                 : AutomationIcons.stop,
             size: 18,
-            color: pass ? accent : OmniColors.warn,
+            color: pass ? accent : OmniPalette.of(context).warn,
           ),
           const SizedBox(width: OmniSpace.xs),
           Text(
@@ -196,7 +196,7 @@ class RunNodeRows extends StatelessWidget {
                 ? 'other way'
                 : 'stops',
             style: OmniText.number.copyWith(
-              color: pass ? accent : OmniColors.warn,
+              color: pass ? accent : OmniPalette.of(context).warn,
             ),
           ),
         ],
@@ -224,7 +224,7 @@ class _Dot extends StatelessWidget {
     width: 32,
     height: 32,
     decoration: BoxDecoration(
-      color: OmniColors.raised,
+      color: OmniPalette.of(context).raised,
       borderRadius: BorderRadius.circular(OmniRadii.iconBox),
     ),
     child: Icon(AutomationIcons.dot, size: 12, color: color, fill: 1),
@@ -259,7 +259,9 @@ class RunRow extends StatelessWidget {
           : failed ?? run.outcome,
       trailing: Icon(
         run.ok ? OmniIcons.check : AutomationIcons.fail,
-        color: run.ok ? OmniPalette.of(context).accent : OmniColors.bad,
+        color: run.ok
+            ? OmniPalette.of(context).accent
+            : OmniPalette.of(context).bad,
         semanticLabel: run.ok ? 'Worked' : 'Failed',
       ),
       onTap: onTap,
@@ -488,7 +490,7 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
                     ? 'Save it to run it for real.'
                     : 'Save your changes to run this version for real.',
                 key: const ValueKey('save-to-run'),
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
             ),
         ],

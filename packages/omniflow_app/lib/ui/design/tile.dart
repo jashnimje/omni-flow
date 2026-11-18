@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-import 'card.dart' show OmniSheen;
 import 'icons.dart';
 import 'skeleton.dart';
 import 'tokens.dart';
 
 /// A device tile on Home, showing the device's real state: its icon, its
-/// name (up to two lines), a big [reading] (a temperature, the app on a
-/// TV) and one line of [state].
+/// name (up to two lines, 16), a big [reading] (a temperature, the app on
+/// a TV) and one line of [state] (14). It sits on the container tone with
+/// a 24 corner and no shadow.
 ///
 /// A tile that is [on] takes a muted version of [tint] (a light's own
 /// colour, or the accent), and [level] fills it from the left like a
@@ -74,7 +74,7 @@ class OmniTile extends StatefulWidget {
   /// something. Off for a tile a tap picks (a light's scene).
   final bool chevron;
 
-  static const minHeight = 112.0;
+  static const minHeight = 120.0;
 
   @override
   State<OmniTile> createState() => _OmniTileState();
@@ -90,9 +90,11 @@ class _OmniTileState extends State<OmniTile> {
     final lit = w.on && !w.offline;
     final tint = w.tint ?? palette.accent;
     final base = lit
-        ? mutedTint(tint, palette.card, amount: 0.2)
+        ? mutedTint(tint, palette.card, amount: 0.2, text: palette.text)
         : palette.card;
-    final fill = lit ? mutedTint(tint, palette.card, amount: 0.38) : base;
+    final fill = lit
+        ? mutedTint(tint, palette.card, amount: 0.38, text: palette.text)
+        : base;
     final washed = !lit && w.wash != null;
     final border = lit ? Color.lerp(palette.card, tint, 0.55)! : null;
     final radius = BorderRadius.circular(OmniRadii.tile);
@@ -101,9 +103,10 @@ class _OmniTileState extends State<OmniTile> {
     final level = lit ? w.level?.clamp(0.0, 1.0) : null;
     final caption = OmniDepth.captionOn(
       washed ? OmniDepth.washTopOf(w.wash!, palette.card) : base,
+      palette: palette,
     );
-    final textColor = w.offline ? caption : OmniColors.text;
-    final stateColor = lit ? OmniColors.text : caption;
+    final textColor = w.offline ? caption : palette.text;
+    final stateColor = lit ? palette.text : caption;
     return Semantics(
       container: true,
       explicitChildNodes: true,
@@ -143,9 +146,6 @@ class _OmniTileState extends State<OmniTile> {
                     ),
                   ),
                 ),
-              const Positioned.fill(
-                child: IgnorePointer(child: OmniSheen(child: SizedBox())),
-              ),
               Material(
                 type: MaterialType.transparency,
                 child: InkWell(
@@ -157,10 +157,10 @@ class _OmniTileState extends State<OmniTile> {
                   onHighlightChanged: (v) => setState(() => _pressed = v),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(
-                      OmniSpace.xs,
-                      OmniSpace.xs,
+                      OmniSpace.sm,
                       OmniSpace.sm,
                       OmniSpace.md,
+                      OmniSpace.lg,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -181,13 +181,15 @@ class _OmniTileState extends State<OmniTile> {
                             ),
                             const Spacer(),
                             if (w.onTap != null && w.chevron)
-                              const Padding(
-                                padding: EdgeInsets.only(top: OmniSpace.md),
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  top: OmniSpace.md,
+                                ),
                                 child: ExcludeSemantics(
                                   child: Icon(
                                     OmniIcons.chevron,
-                                    size: 20,
-                                    color: OmniColors.muted,
+                                    size: 24,
+                                    color: palette.muted,
                                   ),
                                 ),
                               ),
@@ -215,7 +217,7 @@ class _OmniTileState extends State<OmniTile> {
                                   w.name,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: OmniText.label.copyWith(
+                                  style: OmniText.titleMedium.copyWith(
                                     color: textColor,
                                   ),
                                 ),
@@ -293,7 +295,7 @@ class _TileIcon extends StatelessWidget {
         icon,
         size: 22,
         fill: lit ? 1 : 0,
-        color: lit ? inkOn(tint) : OmniColors.text,
+        color: lit ? inkOn(tint) : palette.text,
       ),
     );
     final shown = Opacity(
@@ -362,7 +364,7 @@ class OmniIconBox extends StatelessWidget {
       child: Icon(
         icon,
         size: size * 0.56,
-        color: foreground ?? (on ? palette.onAccent : OmniColors.text),
+        color: foreground ?? (on ? palette.onAccent : palette.text),
       ),
     );
   }
@@ -390,10 +392,10 @@ class OmniTileSkeleton extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               OmniBone(width: 40, height: 40, radius: OmniShape.full),
-              SizedBox(height: OmniSpace.gap),
-              OmniBone(width: 90, height: 12),
-              SizedBox(height: 6),
-              OmniBone(width: 56, height: 10),
+              SizedBox(height: OmniSpace.md),
+              OmniBone(width: 90, height: 16),
+              SizedBox(height: OmniSpace.sm),
+              OmniBone(width: 56, height: 14),
             ],
           ),
         ),

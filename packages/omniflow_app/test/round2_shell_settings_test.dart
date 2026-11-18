@@ -38,32 +38,64 @@ void main() {
       'named', (tester) async {
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    await pumpApp(tester, FakeEngine());
-    final fab = find.byKey(const ValueKey('add-device'));
+    await pumpApp(
+      tester,
+      FakeEngine()
+        ..answers['automation.list'] = {
+          'ok': true,
+          'automations': [
+            {
+              'id': 'evening',
+              'name': 'Evening',
+              'source': 'rule',
+              'enabled': true,
+              'approved': true,
+              'sentence': <Object?>[],
+            },
+          ],
+        },
+    );
+    await openTab(tester, 'Automations');
+    final fab = find.byKey(const ValueKey('new-rule'));
     expect(fab, findsOneWidget);
-    expect(find.descendant(of: fab, matching: find.text('Add')), findsNothing);
+    expect(find.descendant(of: fab, matching: find.text('New')), findsNothing);
     expect(tester.getSize(fab).width, lessThanOrEqualTo(56));
-    expect(find.byTooltip('Add'), findsOneWidget);
+    expect(find.byTooltip('New'), findsOneWidget);
   });
 
   testWidgets('on a wide screen the button sits in the rail, over nothing', (
     tester,
   ) async {
-    await pumpApp(tester, FakeEngine());
+    await pumpApp(
+      tester,
+      FakeEngine()
+        ..answers['automation.list'] = {
+          'ok': true,
+          'automations': [
+            {
+              'id': 'evening',
+              'name': 'Evening',
+              'source': 'rule',
+              'enabled': true,
+              'approved': true,
+              'sentence': <Object?>[],
+            },
+          ],
+        },
+    );
     tester.view.physicalSize = const Size(3000, 1300);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Automations').last);
     await tester.pumpAndSettle();
     final rail = find.byKey(const ValueKey('shell-rail'));
     expect(
       find.descendant(
         of: rail,
-        matching: find.byKey(const ValueKey('add-device')),
+        matching: find.byKey(const ValueKey('new-rule')),
       ),
       findsOneWidget,
     );
     expect(find.byType(FloatingActionButton), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('add-device')));
-    await tester.pumpAndSettle();
-    expect(find.byType(AddPage), findsOneWidget);
   });
 
   testWidgets('Developer, Engine reads again after a change made elsewhere', (
@@ -235,6 +267,8 @@ void main() {
         FakeEngine()..answers['home.stats'] = statsReply(),
         const YourHomePage(),
       );
+      await tester.tap(find.text('Achievements'));
+      await tester.pumpAndSettle();
       final node = tester.getSemantics(
         find.byKey(const ValueKey('achievement-runs_100')),
       );
@@ -275,14 +309,15 @@ void main() {
           'manual': const [],
         };
       await pumpScreen(tester, engine, const AddPage(), settle: false);
-      String? keyOf(Widget w) => w is OmniListRow && w.key is ValueKey<String>
+      String? keyOf(Widget w) =>
+          (w is OmniListRow || w is AddKindTile) && w.key is ValueKey<String>
           ? (w.key! as ValueKey<String>).value
           : null;
       bool isKind(String? k) =>
           k != null &&
           (k.startsWith('manual-kind-') || k == 'add-another-phone');
       List<String> kinds() => [
-        for (final e in find.byType(OmniListRow).evaluate())
+        for (final e in find.byWidgetPredicate((_) => true).evaluate())
           if (keyOf(e.widget) case final k? when isKind(k)) k,
       ];
       expect(kinds(), isEmpty, reason: 'the kinds wait for the drivers');

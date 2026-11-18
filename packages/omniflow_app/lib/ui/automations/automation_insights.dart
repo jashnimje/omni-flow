@@ -49,20 +49,26 @@ class AutomationConflictChip extends StatelessWidget {
           key: ValueKey('conflict-$id'),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: OmniColors.warnSoft,
+            color: OmniPalette.of(context).warnSoft,
             borderRadius: BorderRadius.circular(OmniRadii.chip),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(OmniIcons.warning, size: 14, color: OmniColors.warn),
+              Icon(
+                OmniIcons.warning,
+                size: 14,
+                color: OmniPalette.of(context).warn,
+              ),
               const SizedBox(width: 4),
               Flexible(
                 child: Text(
                   conflicts.length == 1
                       ? 'Clashes with another automation'
                       : 'Clashes with ${conflicts.length} automations',
-                  style: OmniText.caption.copyWith(color: OmniColors.warn),
+                  style: OmniText.caption.copyWith(
+                    color: OmniPalette.of(context).warn,
+                  ),
                 ),
               ),
             ],
@@ -326,7 +332,7 @@ class _VersionRow extends StatelessWidget {
           if (version.sentence.isNotEmpty)
             AutomationSentence(version.sentence)
           else
-            Text(version.name, style: OmniText.caption),
+            Text(version.name, style: OmniText.captionOf(context)),
         ],
       ),
     ),

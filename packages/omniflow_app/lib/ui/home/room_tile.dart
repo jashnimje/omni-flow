@@ -31,7 +31,7 @@ class RoomTileRow extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 for (final (i, room) in rooms.indexed) ...[
-                  if (i > 0) const SizedBox(width: OmniSpace.gap),
+                  if (i > 0) const SizedBox(width: OmniSpace.md),
                   SizedBox(
                     width: tileWidth,
                     child: RoomTile(room: room),

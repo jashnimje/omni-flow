@@ -124,7 +124,8 @@ class DiagramCanvas extends StatelessWidget {
               painter: DiagramPainter(
                 diagram: diagram,
                 layout: layout,
-                lit: RunColors.ran,
+                palette: OmniPalette.of(context),
+                lit: RunColors.ran(OmniPalette.of(context)),
               ),
             ),
           ),
@@ -422,7 +423,7 @@ class DiagramList extends StatelessWidget {
             child: OmniListRow(
               key: ValueKey('diagram-row-${n.id}'),
               icon: h.iconOf?.call(n) ?? _kindIcon(n.kind),
-              iconForeground: RunColors.of(n),
+              iconForeground: RunColors.of(n, OmniPalette.of(context)),
               // Capitalised like the diagram's nodes and the sentence.
               title: stepWords(
                 n.words.isEmpty ? nodeKindWords(n.kind) : n.words,

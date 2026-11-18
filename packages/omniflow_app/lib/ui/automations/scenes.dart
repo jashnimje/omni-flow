@@ -11,6 +11,7 @@ import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automations_state.dart';
 import 'capture_scene.dart';
+import 'card_look.dart';
 import 'look_picker.dart';
 import 'pickers.dart';
 import 'review_page.dart';
@@ -428,44 +429,7 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
               onChanged: (_) => _changed(),
             ),
           ),
-          // The same row and sheet as a rule's look, with the film as the
-          // icon a scene wears with none of its own.
-          OmniListRow(
-            key: const ValueKey('scene-look'),
-            leading: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: automationColor(_color).withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(OmniRadii.iconBox),
-              ),
-              child: Icon(
-                sceneIconFor(_icon),
-                color: automationColor(_color),
-                size: 22,
-              ),
-            ),
-            title: 'Colour and icon',
-            subtitle: lookWords((
-              color: _color,
-              icon: sceneLookIcon(_icon),
-            ), fallbackIcon: 'movie'),
-            chevron: true,
-            onTap: () async {
-              final look = await pickLook(context, (
-                color: _color,
-                icon: sceneLookIcon(_icon),
-              ), fallbackIcon: 'movie');
-              if (look == null ||
-                  (look.color == _color && look.icon == sceneLookIcon(_icon))) {
-                return;
-              }
-              _color = look.color;
-              _icon = look.icon;
-              _changed();
-            },
-          ),
-          const OmniSectionHeader('What it does'),
+          const SizedBox(height: OmniSpace.md),
           OmniRuleBlock(
             kind: SentenceKind.then,
             heading: 'Then',
@@ -490,14 +454,62 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
             ],
           ),
           if (list.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: OmniSpace.xs),
               child: Text(
                 'Add what it should set, like the desk lamp at 20% and the '
                 'hall bulb off.',
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
             ),
+          const SizedBox(height: OmniSpace.md),
+          OmniDisclosure(
+            key: const ValueKey('scene-options'),
+            icon: OmniIcons.edit,
+            title: 'Options',
+            summary: 'Colour and icon',
+            storageId: 'scene-options',
+            children: [
+              // The same row and sheet as a rule's look, with the film as the
+              // icon a scene wears with none of its own.
+              OmniListRow(
+                key: const ValueKey('scene-look'),
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: automationCardColor(_color),
+                    borderRadius: BorderRadius.circular(OmniRadii.iconBox),
+                  ),
+                  child: Icon(
+                    sceneIconFor(_icon),
+                    color: OmniCardColors.onCard,
+                    size: 22,
+                  ),
+                ),
+                title: 'Colour and icon',
+                subtitle: lookWords((
+                  color: _color,
+                  icon: sceneLookIcon(_icon),
+                ), fallbackIcon: 'movie'),
+                chevron: true,
+                onTap: () async {
+                  final look = await pickLook(context, (
+                    color: _color,
+                    icon: sceneLookIcon(_icon),
+                  ), fallbackIcon: 'movie');
+                  if (look == null ||
+                      (look.color == _color &&
+                          look.icon == sceneLookIcon(_icon))) {
+                    return;
+                  }
+                  _color = look.color;
+                  _icon = look.icon;
+                  _changed();
+                },
+              ),
+            ],
+          ),
         ];
       },
     );
@@ -529,7 +541,7 @@ class _ActionRow extends StatelessWidget {
       OmniListRow(
         icon: icon,
         title: text,
-        iconForeground: error == null ? null : OmniColors.bad,
+        iconForeground: error == null ? null : OmniPalette.of(context).bad,
         onTap: onTap,
         trailing: OmniIconAction(
           icon: OmniIcons.close,
@@ -548,7 +560,9 @@ class _ActionRow extends StatelessWidget {
           ),
           child: Text(
             error!,
-            style: OmniText.caption.copyWith(color: OmniColors.bad),
+            style: OmniText.caption.copyWith(
+              color: OmniPalette.of(context).bad,
+            ),
           ),
         ),
     ],

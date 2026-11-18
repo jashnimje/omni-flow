@@ -115,7 +115,9 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
                   OmniListRow(
                     key: ValueKey('capture-${d.id}'),
                     icon: iconOf(d, drivers),
-                    iconForeground: d.online ? null : OmniColors.muted,
+                    iconForeground: d.online
+                        ? null
+                        : OmniPalette.of(context).muted,
                     title: d.name,
                     subtitle: switch (staleWords(d, hour12: hour12)) {
                       final stale? => 'Offline. $stale',

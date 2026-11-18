@@ -10,6 +10,7 @@ export 'card.dart';
 export 'chips.dart';
 export 'colour_wheel.dart';
 export 'confirm.dart';
+export 'disclosure.dart';
 export 'headers.dart';
 export 'icons.dart';
 export 'list_row.dart';

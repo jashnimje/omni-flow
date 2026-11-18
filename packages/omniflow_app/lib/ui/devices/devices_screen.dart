@@ -149,14 +149,6 @@ List<({String title, List<DeviceView> devices})> groupDevices(
   ];
 }
 
-/// Whether Devices shows its empty state, which has its own Add, so the
-/// shell hides its Add button then.
-bool devicesAreEmpty(WidgetRef ref) =>
-    switch (ref.watch(devicesProvider).value) {
-      final list? => listedDevices(list).isEmpty,
-      null => false,
-    };
-
 /// Below this height (logical pixels) Devices scrolls its filters.
 const shortScreen = 520.0;
 
@@ -239,7 +231,17 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
     // Home.
     return TabPage.custom(
       title: 'Devices',
-      actions: const [ScreenHelpButton(HelpScreen.devices)],
+      actions: [
+        const ScreenHelpButton(HelpScreen.devices),
+        // Add is the + here, as on Home, so nothing floats over the list.
+        if (listed?.isNotEmpty ?? false)
+          OmniIconAction(
+            key: const ValueKey('devices-add'),
+            icon: OmniIcons.add,
+            label: 'Add a device',
+            onPressed: () => openAddThing(context),
+          ),
+      ],
       house: const HouseSwitcher(),
       filters: inlineFilters ? null : filters,
       state: OmniLoad.of(
@@ -304,7 +306,10 @@ class _SearchField extends StatelessWidget {
       onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
       decoration: InputDecoration(
         hintText: 'Find a device',
-        prefixIcon: const Icon(OmniIcons.search, color: OmniColors.muted),
+        prefixIcon: Icon(
+          OmniIcons.search,
+          color: OmniPalette.of(context).muted,
+        ),
         isDense: true,
         suffixIcon: controller.text.isEmpty
             ? null
@@ -382,9 +387,44 @@ class _DeviceList extends ConsumerWidget {
   /// Shows a device beside the list. Null pushes its page.
   final void Function(String id)? onOpen;
 
+  Widget _row(BuildContext context, WidgetRef ref, DeviceView d) => OmniListRow(
+    key: ValueKey('device-row-${d.id}'),
+    icon: iconOf(d, drivers),
+    title: d.name,
+    subtitle: rowSubtitle(
+      d,
+      shortDriverName(drivers[d.driver], d.driver),
+      hour12: ref.watch(hour12Provider),
+    ),
+    dot: statusOf(d),
+    selected: selected == d.id,
+    onTap: () {
+      // Unfocused first, so coming back does not bring the
+      // keyboard up for the search field again.
+      FocusManager.instance.primaryFocus?.unfocus();
+      onOpen == null ? openDevice(context, d.id) : onOpen!(d.id);
+    },
+  );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final groups = groupDevices(devices, view, rooms, drivers);
+    // By room and By type list what answers. The ones that do not are
+    // grouped at the end, folded away when there is more than one.
+    final problems = view == DevicesView.problems;
+    final offline = problems
+        ? const <DeviceView>[]
+        : (devices.where((d) => !d.online).toList()..sort(byOrderThenName));
+    final groups = groupDevices(
+      problems
+          ? devices
+          : [
+              for (final d in devices)
+                if (d.online) d,
+            ],
+      view,
+      rooms,
+      drivers,
+    );
     return RefreshIndicator(
       onRefresh: () => ref.read(devicesProvider.notifier).refresh(),
       child: ListView(
@@ -392,7 +432,7 @@ class _DeviceList extends ConsumerWidget {
         padding: padding,
         children: [
           ?header,
-          if (groups.isEmpty)
+          if (groups.isEmpty && offline.isEmpty)
             query.trim().isNotEmpty
                 ? OmniEmptyState(
                     icon: AreaIcons.notFound,
@@ -408,25 +448,20 @@ class _DeviceList extends ConsumerWidget {
                   ),
           for (final g in groups) ...[
             OmniSectionHeader(g.title, trailingText: '${g.devices.length}'),
-            for (final d in g.devices)
-              OmniListRow(
-                key: ValueKey('device-row-${d.id}'),
-                icon: iconOf(d, drivers),
-                title: d.name,
-                subtitle: rowSubtitle(
-                  d,
-                  shortDriverName(drivers[d.driver], d.driver),
-                  hour12: ref.watch(hour12Provider),
-                ),
-                dot: statusOf(d),
-                selected: selected == d.id,
-                onTap: () {
-                  // Unfocused first, so coming back does not bring the
-                  // keyboard up for the search field again.
-                  FocusManager.instance.primaryFocus?.unfocus();
-                  onOpen == null ? openDevice(context, d.id) : onOpen!(d.id);
-                },
-              ),
+            for (final d in g.devices) _row(context, ref, d),
+          ],
+          if (offline.length == 1) ...[
+            const OmniSectionHeader('Not answering', trailingText: '1'),
+            _row(context, ref, offline.single),
+          ] else if (offline.length > 1) ...[
+            const SizedBox(height: OmniSpace.md),
+            OmniDisclosure(
+              key: const ValueKey('devices-not-answering'),
+              icon: AreaIcons.offline,
+              title: 'Not answering',
+              summary: '${offline.length} devices',
+              children: [for (final d in offline) _row(context, ref, d)],
+            ),
           ],
         ],
       ),

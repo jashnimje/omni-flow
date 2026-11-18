@@ -47,20 +47,22 @@ class OmniStepRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
     final borderColor = error != null
-        ? OmniColors.bad
+        ? palette.bad
         : switch (style) {
-            StepRowStyle.flow => OmniColors.flowLine,
-            _ => OmniColors.line,
+            StepRowStyle.flow => palette.flowLine,
+            _ => palette.line,
           };
     final radius = BorderRadius.circular(OmniRadii.step);
-    final ink = RuleBlockColor.maybeOf(context) ?? OmniColors.text;
+    final ink = RuleBlockColor.maybeOf(context) ?? palette.text;
+    final quiet = OmniText.caption.copyWith(color: palette.muted);
     Widget handle = Semantics(
       label: 'Drag to reorder',
-      child: const SizedBox(
+      child: SizedBox(
         width: 32,
         height: OmniSpace.target,
-        child: Icon(OmniIcons.drag, size: 20, color: OmniColors.muted),
+        child: Icon(OmniIcons.drag, size: 20, color: palette.muted),
       ),
     );
     if (reorderIndex != null) {
@@ -84,7 +86,7 @@ class OmniStepRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(text, style: OmniText.step.copyWith(color: ink)),
-                if (subtitle != null) Text(subtitle!, style: OmniText.caption),
+                if (subtitle != null) Text(subtitle!, style: quiet),
               ],
             ),
           ),
@@ -95,12 +97,8 @@ class OmniStepRow extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(trailingText!, style: OmniText.caption),
-                const Icon(
-                  OmniIcons.chevron,
-                  size: 18,
-                  color: OmniColors.muted,
-                ),
+                Text(trailingText!, style: quiet),
+                Icon(OmniIcons.chevron, size: 18, color: palette.muted),
               ],
             ),
           ),
@@ -113,9 +111,9 @@ class OmniStepRow extends StatelessWidget {
       ],
     );
     final card = Material(
-      color: OmniColors.card,
+      color: palette.card,
       shape: style == StepRowStyle.wait && error == null
-          ? const _DashedBorder(radius: OmniRadii.step)
+          ? _DashedBorder(radius: OmniRadii.step, color: palette.muted)
           : RoundedRectangleBorder(
               borderRadius: radius,
               side: BorderSide(color: borderColor),
@@ -135,7 +133,7 @@ class OmniStepRow extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
               child: Text(
                 error!,
-                style: OmniText.caption.copyWith(color: OmniColors.bad),
+                style: OmniText.caption.copyWith(color: palette.bad),
               ),
             ),
         ],
@@ -146,9 +144,10 @@ class OmniStepRow extends StatelessWidget {
 
 /// A rounded rectangle drawn with dashes, for a wait step.
 class _DashedBorder extends ShapeBorder {
-  const _DashedBorder({required this.radius});
+  const _DashedBorder({required this.radius, required this.color});
 
   final double radius;
+  final Color color;
 
   @override
   EdgeInsetsGeometry get dimensions => const EdgeInsets.all(1);
@@ -164,7 +163,7 @@ class _DashedBorder extends ShapeBorder {
   @override
   void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
     final paint = Paint()
-      ..color = OmniColors.muted
+      ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     final path = getOuterPath(rect.deflate(0.5));
@@ -176,5 +175,6 @@ class _DashedBorder extends ShapeBorder {
   }
 
   @override
-  ShapeBorder scale(double t) => _DashedBorder(radius: radius * t);
+  ShapeBorder scale(double t) =>
+      _DashedBorder(radius: radius * t, color: color);
 }

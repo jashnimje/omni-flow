@@ -118,7 +118,7 @@ class _WriteTagSheetState extends State<WriteTagSheet> {
             ? 'Waiting for a tag'
             : 'Try again with the tag held still, or cancel',
         key: const ValueKey('write-tag-status'),
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
         textAlign: TextAlign.center,
       ),
     ],

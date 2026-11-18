@@ -24,8 +24,8 @@ final sensorDayProvider =
     });
 
 /// 3.3: a thing that only reports. Its reading with the unit and age, a
-/// 24 hour chart with the low and high, a way to start an automation from
-/// it, and the automations that use it.
+/// 24 hour chart with the low and high and a way to start an automation
+/// from it in front, then the collapsed sections every device page has.
 class SensorPage extends ConsumerWidget {
   const SensorPage({super.key, required this.id});
 
@@ -67,6 +67,21 @@ class SensorPage extends ConsumerWidget {
         if (e.value is num) (e.value as num).toDouble(),
     ];
     final updated = d.lastSeen == null ? null : 'updated ${ago(d.lastSeen!)}';
+    // The day's chart is history, so it sits in Activity with the rest.
+    final sections = deviceSections(
+      ref,
+      d,
+      activityTop: Padding(
+        padding: const EdgeInsets.symmetric(vertical: OmniSpace.sm),
+        child: values.length < 2
+            ? Text(
+                'The chart fills in as readings arrive',
+                key: ValueKey('sensor-chart-empty-$id'),
+                style: OmniText.captionOf(context),
+              )
+            : DayChart(key: ValueKey('sensor-chart-$id'), values: values),
+      ),
+    );
     return DetailPage(
       key: ValueKey('sensor-page-$id'),
       title: d.name,
@@ -81,10 +96,9 @@ class SensorPage extends ConsumerWidget {
         subtitle: [driver, ?updated].join(' · '),
         tone: d.online ? HeroTone.accent : HeroTone.plain,
         footer: values.length < 2
-            ? 'The chart fills in as readings arrive'
+            ? null
             : 'Last 24 h · low ${_one(values.reduce(_min))} · '
                   'high ${_one(values.reduce(_max))}',
-        child: values.length < 2 ? null : DayChart(values: values),
       ),
       children: (context) => [
         OmniButton.ghost(
@@ -112,9 +126,8 @@ class SensorPage extends ConsumerWidget {
                   },
           ),
         ),
-        UsedInSection(device: d),
-        DeviceSection(device: d),
       ],
+      sections: (_) => sections,
     );
   }
 

@@ -439,10 +439,10 @@ Future<HttpStep?> httpForm(
       ],
       WebHeadersEditor(controller: headers, onChanged: () => setState(() {})),
       const SizedBox(height: OmniSpace.xs),
-      const Text(
+      Text(
         'A web request is high risk: when an agent makes an automation with '
         'one, it waits for your approval.',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
     ],
   );
@@ -676,7 +676,7 @@ Future<AskStep?> askForm(
         onChanged: (_) => setState(() {}),
       ),
       if (!text) ...[
-        const Text('Choices', style: OmniText.caption),
+        Text('Choices', style: OmniText.captionOf(context)),
         for (final (i, c) in choices.indexed)
           Row(
             key: ValueKey('ask-choice-row-$i'),
@@ -716,9 +716,9 @@ Future<AskStep?> askForm(
         ),
         if (filled().isNotEmpty) ...[
           const SizedBox(height: OmniSpace.sm),
-          const Text(
+          Text(
             'If nobody answers in time, take',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
           Wrap(
             key: const ValueKey('ask-defaults'),
@@ -1171,6 +1171,7 @@ Future<ForEachStep?> forEachForm(
             onTap: () => setState(() => room = r),
           ),
         ..._eachDeviceChoices(
+          context,
           words,
           room,
           each,
@@ -1223,6 +1224,7 @@ String _capLabel(Json c) => '${c['label'] ?? c['id']}'
 /// "Do this to each device" in a Repeat with each over [room]: a choice
 /// for each thing they all can do, then the number a level takes.
 List<Widget> _eachDeviceChoices(
+  BuildContext context,
   RuleWords words,
   String? room,
   String? each,
@@ -1245,13 +1247,13 @@ List<Widget> _eachDeviceChoices(
   return [
     const OmniSectionHeader('Do this to each device'),
     if (choices.isEmpty)
-      const Padding(
-        padding: EdgeInsets.only(bottom: OmniSpace.sm),
+      Padding(
+        padding: const EdgeInsets.only(bottom: OmniSpace.sm),
         child: Text(
           'These devices have nothing they all can do. Add steps inside '
           'the repeat instead.',
-          key: ValueKey('foreach-each-none'),
-          style: OmniText.caption,
+          key: const ValueKey('foreach-each-none'),
+          style: OmniText.captionOf(context),
         ),
       )
     else ...[

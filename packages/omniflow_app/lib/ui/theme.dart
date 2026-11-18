@@ -6,43 +6,27 @@ export 'design/tokens.dart';
 
 /// The app's Material theme, from the design tokens, so plain Material
 /// widgets (switches, app bars, dialogs, text fields) already match the
-/// mockups. [palette] is the Appearance setting: teal by default, the
-/// wallpaper's colours, or either on pure black.
-ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
-  final p = palette;
-  final scheme = ColorScheme.dark(
-    primary: p.accent,
-    onPrimary: p.onAccent,
-    primaryContainer: p.accentSoft,
-    onPrimaryContainer: p.onAccentSoft,
-    secondary: p.accent,
-    onSecondary: p.onAccent,
-    secondaryContainer: p.accentSoft,
-    onSecondaryContainer: p.onAccentSoft,
-    tertiary: OmniColors.condition,
-    error: OmniColors.bad,
-    onError: OmniColors.onBad,
-    errorContainer: OmniColors.badSoft,
-    onErrorContainer: OmniColors.bad,
-    surface: p.background,
-    onSurface: OmniColors.text,
-    onSurfaceVariant: OmniColors.muted,
-    surfaceContainerLowest: p.background,
-    surfaceContainerLow: p.bar,
-    surfaceContainer: p.card,
-    surfaceContainerHigh: p.raised,
-    surfaceContainerHighest: OmniSurface.highest,
-    outline: OmniColors.muted,
-    outlineVariant: p.line,
-    inverseSurface: OmniColors.text,
-    onInverseSurface: p.background,
-    scrim: Colors.black,
-  );
+/// mockups. [palette] is the Appearance setting, light or dark: teal by
+/// default, the wallpaper's colours, or dark teal on pure black. Asking for
+/// the light [brightness] with the default teal uses
+/// [OmniPalette.tealLight].
+ThemeData omniTheme({
+  OmniPalette palette = OmniPalette.teal,
+  Brightness brightness = Brightness.dark,
+}) {
+  final p =
+      brightness == Brightness.light && identical(palette, OmniPalette.teal)
+      ? OmniPalette.tealLight
+      : palette;
+  final scheme = omniColorScheme(p);
   final buttonShape = RoundedRectangleBorder(
     borderRadius: BorderRadius.circular(OmniRadii.button),
   );
   const minTarget = Size(OmniSpace.target, OmniSpace.target);
+  const largeTarget = Size(OmniSpace.targetLarge, OmniSpace.targetLarge);
+  final bars = p.isDark ? omniSystemBars : omniSystemBarsLight;
   return ThemeData(
+    brightness: p.brightness,
     colorScheme: scheme,
     extensions: [p],
     scaffoldBackgroundColor: p.background,
@@ -52,46 +36,30 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {TargetPlatform.android: _MotionAwareTransitions()},
     ),
-    textTheme: const TextTheme(
-      displaySmall: OmniText.displaySmall,
-      headlineLarge: OmniText.headlineLarge,
-      headlineMedium: OmniText.headlineMedium,
-      headlineSmall: OmniText.headlineSmall,
-      titleLarge: OmniText.titleLarge,
-      titleMedium: OmniText.titleMedium,
-      titleSmall: OmniText.titleSmall,
-      bodyLarge: OmniText.bodyLarge,
-      bodyMedium: OmniText.body,
-      bodySmall: OmniText.caption,
-      labelLarge: OmniText.label,
-      labelMedium: OmniText.labelMedium,
-      labelSmall: OmniText.navLabel,
-    ),
-    iconTheme: const IconThemeData(color: OmniColors.text, size: 22),
+    textTheme: omniTextTheme(p),
+    iconTheme: IconThemeData(color: p.text, size: 22),
     appBarTheme: AppBarTheme(
       backgroundColor: p.background,
-      foregroundColor: OmniColors.text,
+      foregroundColor: p.text,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
-      titleTextStyle: OmniText.pageTitle,
-      iconTheme: const IconThemeData(color: OmniColors.muted),
-      actionsIconTheme: const IconThemeData(color: OmniColors.muted),
-      systemOverlayStyle: omniSystemBars,
+      titleTextStyle: OmniText.pageTitle.copyWith(color: p.text),
+      iconTheme: IconThemeData(color: p.muted),
+      actionsIconTheme: IconThemeData(color: p.muted),
+      systemOverlayStyle: bars,
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: p.bar,
       surfaceTintColor: Colors.transparent,
       indicatorColor: p.accentSoft,
-      height: 64,
+      height: 80,
       elevation: 0,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => OmniText.navLabel.copyWith(
-          color: states.contains(WidgetState.selected)
-              ? OmniColors.text
-              : OmniColors.muted,
+          color: states.contains(WidgetState.selected) ? p.text : p.muted,
           fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w600
               : FontWeight.w400,
@@ -99,10 +67,8 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
       ),
       iconTheme: WidgetStateProperty.resolveWith(
         (states) => IconThemeData(
-          size: 22,
-          color: states.contains(WidgetState.selected)
-              ? OmniColors.text
-              : OmniColors.muted,
+          size: 24,
+          color: states.contains(WidgetState.selected) ? p.text : p.muted,
         ),
       ),
     ),
@@ -110,17 +76,15 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
       backgroundColor: p.bar,
       indicatorColor: p.accentSoft,
       labelType: NavigationRailLabelType.all,
-      selectedIconTheme: const IconThemeData(color: OmniColors.text, size: 22),
-      unselectedIconTheme: const IconThemeData(
-        color: OmniColors.muted,
-        size: 22,
-      ),
+      selectedIconTheme: IconThemeData(color: p.text, size: 24),
+      unselectedIconTheme: IconThemeData(color: p.muted, size: 24),
       selectedLabelTextStyle: OmniText.navLabel.copyWith(
-        color: OmniColors.text,
+        color: p.text,
         fontWeight: FontWeight.w600,
       ),
-      unselectedLabelTextStyle: OmniText.navLabel,
+      unselectedLabelTextStyle: OmniText.navLabel.copyWith(color: p.muted),
     ),
+    // The floating button keeps its shadow: it floats over the page.
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: p.accent,
       foregroundColor: p.onAccent,
@@ -129,34 +93,31 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(OmniRadii.fab),
       ),
-      extendedTextStyle: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w700,
-      ),
+      extendedTextStyle: OmniText.button,
     ),
     cardTheme: CardThemeData(
       color: p.card,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      margin: const EdgeInsets.only(bottom: OmniSpace.gap),
+      margin: const EdgeInsets.only(bottom: OmniSpace.md),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(OmniRadii.card),
-        side: BorderSide(color: p.line),
       ),
     ),
-    listTileTheme: const ListTileThemeData(
-      iconColor: OmniColors.muted,
-      textColor: OmniColors.text,
-      minVerticalPadding: 10,
+    listTileTheme: ListTileThemeData(
+      iconColor: p.muted,
+      textColor: p.text,
+      minVerticalPadding: OmniSpace.md,
+      minTileHeight: OmniSpace.row,
     ),
     dividerTheme: DividerThemeData(color: p.line, thickness: 1, space: 1),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith(
         (states) => states.contains(WidgetState.disabled)
-            ? OmniColors.muted.withValues(alpha: 0.5)
+            ? p.muted.withValues(alpha: 0.5)
             : states.contains(WidgetState.selected)
             ? p.onAccent
-            : OmniColors.muted,
+            : p.muted,
       ),
       trackColor: WidgetStateProperty.resolveWith(
         (states) => states.contains(WidgetState.disabled)
@@ -170,7 +131,7 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
             ? p.line.withValues(alpha: 0.5)
             : states.contains(WidgetState.selected)
             ? p.accent
-            : p.line,
+            : p.muted,
       ),
     ),
     sliderTheme: SliderThemeData(
@@ -186,23 +147,26 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
       style: FilledButton.styleFrom(
         backgroundColor: p.accent,
         foregroundColor: p.onAccent,
-        minimumSize: minTarget,
+        minimumSize: largeTarget,
         shape: buttonShape,
-        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        textStyle: OmniText.button,
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: OmniColors.text,
+        foregroundColor: p.text,
         side: BorderSide(color: p.line),
         minimumSize: minTarget,
         shape: buttonShape,
+        textStyle: OmniText.button,
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: p.accent,
         minimumSize: minTarget,
+        shape: buttonShape,
+        textStyle: OmniText.label,
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -211,8 +175,8 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: p.card,
-      labelStyle: const TextStyle(color: OmniColors.muted),
-      hintStyle: const TextStyle(color: OmniColors.muted),
+      labelStyle: TextStyle(color: p.muted),
+      hintStyle: TextStyle(color: p.muted),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(OmniRadii.field),
         borderSide: BorderSide(color: p.line),
@@ -233,12 +197,13 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(OmniRadii.chip),
       ),
-      labelStyle: const TextStyle(fontSize: 12, color: OmniColors.text),
+      labelStyle: TextStyle(fontSize: 14, color: p.text),
     ),
+    // Sheets keep the Material shadow: they float over the page.
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: p.sheet,
       surfaceTintColor: Colors.transparent,
-      modalBarrierColor: OmniColors.scrim,
+      modalBarrierColor: p.scrim,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(OmniRadii.sheet),
@@ -254,7 +219,7 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: p.raised,
-      contentTextStyle: const TextStyle(color: OmniColors.text, fontSize: 14),
+      contentTextStyle: TextStyle(color: p.text, fontSize: 14),
       actionTextColor: p.accent,
       behavior: SnackBarBehavior.floating,
     ),
@@ -265,8 +230,70 @@ ThemeData omniTheme({OmniPalette palette = OmniPalette.teal}) {
           Radius.circular(OmniRadii.tooltip),
         ),
       ),
-      textStyle: const TextStyle(color: OmniColors.text, fontSize: 12),
+      textStyle: TextStyle(color: p.text, fontSize: 14),
     ),
+  );
+}
+
+/// The Material colour scheme of [p], dark or light by its brightness.
+ColorScheme omniColorScheme(OmniPalette p) => ColorScheme(
+  brightness: p.brightness,
+  primary: p.accent,
+  onPrimary: p.onAccent,
+  primaryContainer: p.accentSoft,
+  onPrimaryContainer: p.onAccentSoft,
+  secondary: p.accent,
+  onSecondary: p.onAccent,
+  secondaryContainer: p.accentSoft,
+  onSecondaryContainer: p.onAccentSoft,
+  tertiary: p.condition,
+  onTertiary: p.isDark ? p.background : Colors.white,
+  tertiaryContainer: p.conditionSoft,
+  onTertiaryContainer: p.condition,
+  error: p.bad,
+  onError: p.onBad,
+  errorContainer: p.badSoft,
+  onErrorContainer: p.bad,
+  surface: p.background,
+  onSurface: p.text,
+  onSurfaceVariant: p.muted,
+  surfaceDim: p.background,
+  surfaceBright: p.raised,
+  surfaceContainerLowest: p.background,
+  surfaceContainerLow: p.bar,
+  surfaceContainer: p.card,
+  surfaceContainerHigh: p.raised,
+  surfaceContainerHighest: p.highest,
+  outline: p.muted,
+  outlineVariant: p.line,
+  inverseSurface: p.text,
+  onInverseSurface: p.background,
+  inversePrimary: p.accentSoft,
+  shadow: Colors.black,
+  scrim: Colors.black,
+  surfaceTint: Colors.transparent,
+);
+
+/// The [OmniText] scale in [p]'s text colours: body text in
+/// [OmniPalette.text], the small grey styles in [OmniPalette.muted]. Text
+/// with no colour of its own takes these through [DefaultTextStyle].
+TextTheme omniTextTheme(OmniPalette p) {
+  TextStyle on(TextStyle s) => s.copyWith(color: p.text);
+  TextStyle quiet(TextStyle s) => s.copyWith(color: p.muted);
+  return TextTheme(
+    displaySmall: on(OmniText.displaySmall),
+    headlineLarge: on(OmniText.headlineLarge),
+    headlineMedium: on(OmniText.headlineMedium),
+    headlineSmall: on(OmniText.headlineSmall),
+    titleLarge: on(OmniText.titleLarge),
+    titleMedium: on(OmniText.titleMedium),
+    titleSmall: on(OmniText.titleSmall),
+    bodyLarge: on(OmniText.body),
+    bodyMedium: on(OmniText.body),
+    bodySmall: quiet(OmniText.caption),
+    labelLarge: on(OmniText.label),
+    labelMedium: on(OmniText.labelMedium),
+    labelSmall: quiet(OmniText.navLabel),
   );
 }
 

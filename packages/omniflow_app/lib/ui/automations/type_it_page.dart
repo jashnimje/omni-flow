@@ -124,7 +124,7 @@ class _TypeItSheetState extends ConsumerState<TypeItSheet> {
         ),
         const SizedBox(height: OmniSpace.md),
         if (_text.text.trim().isEmpty) ...[
-          const Text('Try one of these', style: OmniText.caption),
+          Text('Try one of these', style: OmniText.captionOf(context)),
           const SizedBox(height: OmniSpace.xs),
           Wrap(
             spacing: OmniSpace.sm,
@@ -143,7 +143,7 @@ class _TypeItSheetState extends ConsumerState<TypeItSheet> {
           )
         else if (parsed != null) ...[
           if (spec != null) ...[
-            const Text('It reads as', style: OmniText.caption),
+            Text('It reads as', style: OmniText.captionOf(context)),
             const SizedBox(height: OmniSpace.xs),
             KeyedSubtree(
               key: const ValueKey('type-it-sentence'),
@@ -153,7 +153,9 @@ class _TypeItSheetState extends ConsumerState<TypeItSheet> {
             Text(
               parsed.problem ?? 'That does not make a rule yet.',
               key: const ValueKey('type-it-problem'),
-              style: OmniText.body.copyWith(color: OmniColors.warn),
+              style: OmniText.body.copyWith(
+                color: OmniPalette.of(context).warn,
+              ),
             ),
           if (parsed.unknown.isNotEmpty) ...[
             const SizedBox(height: OmniSpace.sm),
@@ -165,22 +167,22 @@ class _TypeItSheetState extends ConsumerState<TypeItSheet> {
               child: Text(
                 '"${c.text}" is ${c.chosen}. It could also be '
                 '${c.others.join(' or ')}: change it in the editor.',
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
             ),
           for (final n in parsed.notes)
             Padding(
               padding: const EdgeInsets.only(top: OmniSpace.sm),
-              child: Text(n, style: OmniText.caption),
+              child: Text(n, style: OmniText.captionOf(context)),
             ),
         ],
         if (_reading)
-          const Padding(
-            padding: EdgeInsets.only(top: OmniSpace.sm),
+          Padding(
+            padding: const EdgeInsets.only(top: OmniSpace.sm),
             child: Text(
               'Reading…',
-              key: ValueKey('type-it-reading'),
-              style: OmniText.caption,
+              key: const ValueKey('type-it-reading'),
+              style: OmniText.captionOf(context),
             ),
           ),
       ],
@@ -211,16 +213,19 @@ class UnknownWords extends StatelessWidget {
         TextSpan(
           style: OmniText.body,
           children: [
-            const TextSpan(text: 'Not understood: ', style: OmniText.caption),
+            TextSpan(
+              text: 'Not understood: ',
+              style: OmniText.captionOf(context),
+            ),
             for (var i = 0; i < words.length; i++) ...[
               if (i > 0) const TextSpan(text: ' '),
               marked.contains(_bare(words[i]))
                   ? TextSpan(
                       text: words[i],
                       style: OmniText.bodyStrong.copyWith(
-                        color: OmniColors.warn,
+                        color: OmniPalette.of(context).warn,
                         decoration: TextDecoration.underline,
-                        decorationColor: OmniColors.warn,
+                        decorationColor: OmniPalette.of(context).warn,
                       ),
                     )
                   : TextSpan(text: words[i]),

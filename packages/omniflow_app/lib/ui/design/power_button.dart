@@ -3,15 +3,16 @@ import 'package:flutter/material.dart';
 import 'icons.dart';
 import 'tokens.dart';
 
-/// The round power button of a device hero: accent when [on], raised when
-/// off. Screen readers hear it as a switch named [label].
+/// The round 72 dp power button of a device's state card: accent when
+/// [on], raised when off. Screen readers hear it as a switch named
+/// [label].
 class OmniPowerButton extends StatelessWidget {
   const OmniPowerButton({
     super.key,
     required this.on,
     required this.onPressed,
     this.label = 'Power',
-    this.size = 64,
+    this.size = 72,
   });
 
   final bool on;
@@ -53,10 +54,10 @@ class OmniPowerButton extends StatelessWidget {
               size: size * 0.42,
               weight: 600,
               color: onPressed == null
-                  ? OmniColors.muted
+                  ? palette.muted
                   : on
                   ? palette.onAccent
-                  : OmniColors.text,
+                  : palette.text,
             ),
           ),
         ),

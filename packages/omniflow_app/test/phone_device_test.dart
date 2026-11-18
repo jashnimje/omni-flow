@@ -67,16 +67,22 @@ Future<void> openMore(WidgetTester tester) async {
   await tapKey(tester, 'tv-tab-more');
 }
 
+/// The segment named [label] in the page's view switch.
+Finder tab(String label) => find.descendant(
+  of: find.byKey(const ValueKey('tv-tabs')),
+  matching: find.text(label),
+);
+
 void main() {
   testWidgets('a phone opens the Android device page on Screen, with Apps '
       'and Files as tabs', (tester) async {
     final engine = phoneEngine();
     await pumpPhone(tester, engine);
     expect(find.byType(TvPage), findsOneWidget);
-    for (final t in ['screen', 'apps', 'files']) {
-      expect(find.byKey(ValueKey('tv-tab-$t')), findsOneWidget, reason: t);
+    for (final t in ['Screen', 'Apps', 'Files']) {
+      expect(tab(t), findsOneWidget, reason: t);
     }
-    expect(find.byKey(const ValueKey('tv-tab-remote')), findsNothing);
+    expect(tab('Remote'), findsNothing);
     expect(find.byKey(const ValueKey('tv-screen')), findsOneWidget);
     expect(find.text('Screen on'), findsNothing, reason: 'an app is in front');
     expect(find.bySemanticsLabel('Lock the phone'), findsOneWidget);
@@ -86,7 +92,7 @@ void main() {
   testWidgets('Files on a phone says Phone, not TV', (tester) async {
     final engine = phoneEngine();
     await pumpPhone(tester, engine);
-    await tapKey(tester, 'tv-tab-files');
+    await openTvTab(tester, 'Files');
     expect(argsOf(engine, 'tv.files.list'), isNotEmpty);
     expect(find.text('Phone'), findsWidgets);
     expect(find.text('TV'), findsNothing);
@@ -101,7 +107,7 @@ void main() {
       expect(find.byKey(ValueKey('tv-more-$t')), findsOneWidget, reason: t);
     }
     expect(find.byKey(const ValueKey('tv-more-files')), findsNothing);
-    expect(find.text('change settings on the phone'), findsOneWidget);
+    expect(find.text('Change settings on the phone'), findsOneWidget);
   });
 
   testWidgets('the phone remote sends Back, Home, Recents, lock and the '
@@ -173,8 +179,11 @@ void main() {
         tvPollProvider.overrideWithValue(const Duration(hours: 1)),
       ],
     );
-    expect(find.byKey(const ValueKey('tv-tab-remote')), findsOneWidget);
-    expect(find.byKey(const ValueKey('tv-tab-files')), findsNothing);
+    expect(tab('Remote'), findsOneWidget);
+    expect(tab('Files'), findsNothing);
+    // Its tools are a section under the remote, not a header action.
+    expect(find.byKey(const ValueKey('tv-tools')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tv-tab-more')), findsNothing);
     expect(find.byKey(const ValueKey('phone-remote')), findsNothing);
     expect(find.bySemanticsLabel('Put the TV to sleep'), findsOneWidget);
   });

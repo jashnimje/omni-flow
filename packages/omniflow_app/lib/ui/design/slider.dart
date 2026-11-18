@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 
 import 'tokens.dart';
 
-/// The pill slider of the mockups: the fill grows from the left with the
-/// [label] on it and the value on the right. It moves as the finger moves
+/// The 56 dp slider of the mockups: the fill grows from the left with the
+/// 16 [label] on it and the value on the right. It moves as the finger moves
 /// but reports [onChangeEnd] only on release, so a device gets one command
 /// per gesture. Screen readers can step it up and down.
 class OmniLabelledSlider extends StatefulWidget {
@@ -20,7 +20,7 @@ class OmniLabelledSlider extends StatefulWidget {
     this.onChanged,
     this.fill,
     this.labelOnFill,
-    this.height = 36,
+    this.height = OmniSpace.targetLarge,
   });
 
   final String label;
@@ -103,6 +103,7 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
     final enabled = widget.onChangeEnd != null;
     final step = widget.step ?? (widget.max - widget.min) / 20;
     return Semantics(
@@ -116,12 +117,15 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
       onDecrease: enabled ? () => _nudge(-1) : null,
       excludeSemantics: true,
       child: SizedBox(
-        height: OmniSpace.target,
+        height: widget.height > OmniSpace.target
+            ? widget.height
+            : OmniSpace.target,
         child: LayoutBuilder(
           builder: (context, box) {
             final width = box.maxWidth;
             final filled = width * _fraction;
-            final labelLit = filled > 96;
+            final labelLit = filled > 112;
+            final onFill = widget.labelOnFill ?? palette.onSliderFill;
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapUp: enabled
@@ -151,15 +155,17 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
                 child: Opacity(
                   opacity: enabled ? 1 : 0.5,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(widget.height / 2),
+                    borderRadius: BorderRadius.circular(
+                      widget.height / 2 < OmniShape.lg
+                          ? widget.height / 2
+                          : OmniShape.lg,
+                    ),
                     child: SizedBox(
                       height: widget.height,
                       child: Stack(
                         children: [
                           Positioned.fill(
-                            child: ColoredBox(
-                              color: OmniPalette.of(context).raised,
-                            ),
+                            child: ColoredBox(color: palette.raised),
                           ),
                           Positioned(
                             left: 0,
@@ -169,7 +175,7 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
                             child: DecoratedBox(
                               decoration: BoxDecoration(
                                 color: widget.fill == null
-                                    ? OmniColors.sliderFill
+                                    ? palette.sliderFill
                                     : null,
                                 gradient: widget.fill,
                               ),
@@ -187,24 +193,22 @@ class _OmniLabelledSliderState extends State<OmniLabelledSlider> {
                                       widget.label,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: labelLit
-                                            ? widget.labelOnFill ??
-                                                  OmniColors.text
-                                            : OmniColors.text,
+                                      style: OmniText.body.copyWith(
+                                        fontWeight: FontWeight.w500,
+                                        color: labelLit ? onFill : palette.text,
                                       ),
                                     ),
                                   ),
                                   Text(
                                     _text(_value),
                                     style: OmniText.number.copyWith(
+                                      fontSize: OmniText.body.fontSize,
+                                      fontWeight: FontWeight.w500,
                                       // Over the fill the muted grey would
                                       // drop below AA.
                                       color: _fraction > 0.8
-                                          ? widget.labelOnFill ??
-                                                OmniColors.text
-                                          : OmniColors.muted,
+                                          ? onFill
+                                          : palette.muted,
                                     ),
                                   ),
                                 ],

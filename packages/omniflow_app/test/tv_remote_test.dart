@@ -157,6 +157,8 @@ void main() {
         await openTvTab(tester, tab);
         expect(find.byKey(const ValueKey('tv-volume')), findsOneWidget);
         expect(find.byKey(const ValueKey('tv-header-power')), findsOneWidget);
+        // A tool is its own page: back to the remote for the next one.
+        if (tab != 'Apps') await closeTvTool(tester);
       }
     });
   });
@@ -168,6 +170,7 @@ void main() {
       await pumpTv(tester, engine);
       await tester.tap(find.byKey(const ValueKey('key-23')));
       await tester.pumpAndSettle();
+      await openSectionKey(tester, 'tv-more-buttons');
       for (final code in [244, 245]) {
         await tester.scrollUntilVisible(
           find.byKey(ValueKey('key-$code')),
@@ -184,41 +187,45 @@ void main() {
       ]);
     });
 
-    testWidgets('the top row, the D-pad, then back, menu, info, volume and '
-        'media come first', (tester) async {
+    testWidgets('the D-pad, then Back, Home, Mute, Vol -, Play and Vol + '
+        'come first, and the rest is under More buttons', (tester) async {
       await pumpTv(tester, engine);
       double top(int code) =>
           tester.getTopLeft(find.byKey(ValueKey('key-$code'))).dy;
       double left(int code) =>
           tester.getTopLeft(find.byKey(ValueKey('key-$code'))).dx;
-      final topRow = [26, 178, 3, 219];
-      for (final code in topRow.skip(1)) {
-        expect(top(code), top(26));
-      }
-      expect([
-        for (final c in topRow) left(c),
-      ], orderedEquals([for (final c in topRow) left(c)]..sort()));
-      expect(top(19), greaterThan(top(26)));
       expect(top(23), greaterThan(top(19)));
       expect(top(20), greaterThan(top(23)));
       for (final (row, codes) in [
-        (0, [4, 82, 165]),
-        (1, [25, 164, 24]),
-        (2, [88, 85, 87]),
+        (0, [4, 3, 164]),
+        (1, [25, 85, 24]),
       ]) {
         for (final code in codes) {
           expect(top(code), top(codes.first), reason: 'row $row');
         }
         expect(top(codes.first), greaterThan(top(20)));
+        expect([
+          for (final c in codes) left(c),
+        ], orderedEquals([for (final c in codes) left(c)]..sort()));
       }
       expect(top(25), greaterThan(top(4)));
-      expect(top(88), greaterThan(top(25)));
+      // The D-pad is the mockup's 232 dp ring with a 100 dp OK.
+      expect(tester.getSize(find.byKey(const ValueKey('key-23'))).width, 100);
+      // Power is the header's, and nothing else is in front.
+      expect(find.byKey(const ValueKey('tv-header-power')), findsOneWidget);
+      for (final code in [178, 219, 82, 165, 8, 183]) {
+        expect(find.byKey(ValueKey('key-$code')), findsNothing);
+      }
+      expect(find.byKey(const ValueKey('tv-remote-mode')), findsNothing);
+      expect(find.textContaining('Swipe up'), findsNothing);
+      await openSectionKey(tester, 'tv-more-buttons');
+      expect(find.byKey(const ValueKey('key-178')), findsOneWidget);
     });
 
     testWidgets('every part of the layout is there', (tester) async {
       await pumpTv(tester, engine);
+      await openSectionKey(tester, 'tv-more-buttons');
       for (final code in [
-        26,
         178,
         3,
         219,
@@ -284,9 +291,12 @@ void main() {
 
     testWidgets('the text box types on the TV and clears', (tester) async {
       await pumpTv(tester, engine);
+      await openSectionKey(tester, 'tv-more-buttons');
       final box = find.byKey(const ValueKey('tv-text'));
       await tester.scrollUntilVisible(box, 200, scrollable: remoteScroll());
       await tester.enterText(box, 'stranger things');
+      await tester.ensureVisible(find.byKey(const ValueKey('tv-text-send')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tv-text-send')));
       await tester.pumpAndSettle();
       expect(argsOf(engine, 'tv.text').single, {
@@ -300,10 +310,13 @@ void main() {
       tester,
     ) async {
       await pumpTv(tester, engine);
+      await openSectionKey(tester, 'tv-more-buttons');
       final zoom = find.byKey(const ValueKey('catalog-zoom'));
       await tester.scrollUntilVisible(zoom, 200, scrollable: remoteScroll());
       expect(find.text('More system keys'), findsOneWidget);
       expect(find.byKey(const ValueKey('catalog-ok')), findsNothing);
+      await tester.ensureVisible(zoom);
+      await tester.pumpAndSettle();
       await tester.tap(zoom);
       await tester.pumpAndSettle();
       expect(argsOf(engine, 'tv.key').single, {'id': tvId, 'key': 'zoom'});

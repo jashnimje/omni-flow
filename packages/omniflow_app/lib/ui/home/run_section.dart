@@ -8,7 +8,6 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../api/engine_calls.dart';
 import '../../state/house.dart' show houseInViewProvider;
 import '../../state/providers.dart';
-import '../automations/capture_scene.dart' show showCaptureScene;
 import '../automations/scenes.dart'
     show automationIconFor, openScenes, openSceneEditor, sceneIconFor;
 import '../design/automation_look.dart';
@@ -76,11 +75,11 @@ List<RunItem>? surpriseScenes(List<RunItem> items) {
   return scenes.length >= 2 ? scenes : null;
 }
 
-/// The Run header and a grid of coloured tiles, then Surprise me with two
-/// scenes or more, and last "Save how things are now", which makes a
-/// scene of the devices as they are. Each tile is keyed by the house and
-/// what it runs, so the last result of one house's tile never shows on
-/// another's in the same place.
+/// Home's Scenes: a 56 dp run button for every scene and manual
+/// automation, then Surprise me with two scenes or more. "All" opens the
+/// Scenes page. Each button is keyed by the house and what it runs, so the
+/// last result of one house's button never shows on another's in the
+/// same place.
 class RunSection extends ConsumerWidget {
   const RunSection({super.key, required this.items});
 
@@ -95,15 +94,15 @@ class RunSection extends ConsumerWidget {
         RunTile(key: ValueKey('run-tile-$house-${item.id}'), item: item),
       if (surprise != null)
         SurpriseTile(key: ValueKey('run-surprise-$house'), scenes: surprise),
-      const CaptureTile(),
     ];
+    if (tiles.isEmpty) return const SizedBox.shrink();
     return Column(
       key: const ValueKey('home-run'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         OmniSectionHeader(
-          'Run',
-          actionLabel: 'Scenes',
+          'Scenes',
+          actionLabel: 'All',
           onAction: () => openScenes(context),
         ),
         LayoutBuilder(
@@ -111,22 +110,24 @@ class RunSection extends ConsumerWidget {
             // Columns by the width the text needs, so large text gets
             // wider tiles rather than cut-off names.
             final width = box.maxWidth / runTextScale(context);
-            final columns = width >= 340
+            final columns = runTextScale(context) > 1.3
+                ? 1
+                : width >= 520
                 ? 3
-                : width >= 150
+                : width >= 260
                 ? 2
                 : 1;
             return Column(
               children: [
                 for (var i = 0; i < tiles.length; i += columns)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+                    padding: const EdgeInsets.only(bottom: OmniSpace.md),
                     child: IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           for (var c = 0; c < columns; c++) ...[
-                            if (c > 0) const SizedBox(width: OmniSpace.gap),
+                            if (c > 0) const SizedBox(width: OmniSpace.md),
                             Expanded(
                               child: i + c < tiles.length
                                   ? tiles[i + c]
@@ -255,12 +256,14 @@ class _RunTileState extends ConsumerState<RunTile> {
   @override
   Widget build(BuildContext context) {
     final item = _item;
-    final radius = BorderRadius.circular(OmniRadii.tile);
+    final palette = OmniPalette.of(context);
+    final radius = BorderRadius.circular(OmniRadii.button);
     final failed = _state == _RunState.failed;
-    final card = OmniPalette.of(context).card;
+    final card = palette.card;
     final own = AutomationLook.colorOf(item.color);
     final caption = OmniDepth.captionOn(
       own == null ? card : OmniDepth.washTopOf(own, card),
+      palette: palette,
     );
     return Semantics(
       container: true,
@@ -282,58 +285,62 @@ class _RunTileState extends ConsumerState<RunTile> {
             color: card,
             gradient: own == null ? null : OmniDepth.wash(own, card),
             radius: radius,
-            border: failed ? OmniColors.badLine : null,
+            border: failed ? palette.badLine : null,
           ),
           child: Material(
             key: ValueKey(item.isScene ? 'scene-${item.id}' : 'run-${item.id}'),
             type: MaterialType.transparency,
             shape: RoundedRectangleBorder(borderRadius: radius),
             clipBehavior: Clip.antiAlias,
-            child: OmniSheen(
-              child: InkWell(
-                onTap: _tap,
-                onLongPress: widget.pick == null ? _open : null,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 92),
-                  child: Padding(
-                    padding: const EdgeInsets.all(OmniSpace.md),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
+            child: InkWell(
+              onTap: _tap,
+              onLongPress: widget.pick == null ? _open : null,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minHeight: OmniSpace.targetLarge,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: OmniSpace.md,
+                    vertical: OmniSpace.sm,
+                  ),
+                  child: Row(
+                    children: [
+                      AutomationBadge(
+                        icon: item.icon,
+                        color: item.color,
+                        size: 32,
+                      ),
+                      const SizedBox(width: OmniSpace.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            AutomationBadge(
-                              icon: item.icon,
-                              color: item.color,
-                              size: 32,
+                            Text(
+                              item.name,
+                              maxLines: runLines(context, 2),
+                              overflow: TextOverflow.ellipsis,
+                              style: OmniText.bodyStrong,
                             ),
-                            const Spacer(),
-                            _Indicator(state: _state, id: item.id),
+                            Text(
+                              _stateText,
+                              key: ValueKey('run-state-${item.id}'),
+                              maxLines: runLines(context, failed ? 3 : 1),
+                              overflow: TextOverflow.ellipsis,
+                              style: OmniText.labelMedium.copyWith(
+                                color: failed
+                                    ? palette.bad
+                                    : item.waiting
+                                    ? palette.warn
+                                    : caption,
+                              ),
+                            ),
                           ],
                         ),
-                        const SizedBox(height: OmniSpace.gap),
-                        Text(
-                          item.name,
-                          maxLines: runLines(context, 2),
-                          overflow: TextOverflow.ellipsis,
-                          style: OmniText.label,
-                        ),
-                        Text(
-                          _stateText,
-                          key: ValueKey('run-state-${item.id}'),
-                          maxLines: runLines(context, failed ? 3 : 1),
-                          overflow: TextOverflow.ellipsis,
-                          style: OmniText.caption.copyWith(
-                            color: failed
-                                ? OmniColors.bad
-                                : item.waiting
-                                ? OmniColors.warn
-                                : caption,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                      _Indicator(state: _state, id: item.id),
+                    ],
                   ),
                 ),
               ),
@@ -368,9 +375,9 @@ class _Indicator extends StatelessWidget {
       OmniIcons.error,
       key: ValueKey('run-failed-$id'),
       size: 20,
-      color: OmniColors.bad,
+      color: OmniPalette.of(context).bad,
     ),
-    _RunState.idle => const SizedBox(height: 20),
+    _RunState.idle => const SizedBox.shrink(),
   };
 }
 
@@ -414,70 +421,4 @@ class _SurpriseTileState extends State<SurpriseTile> {
       pick: _pick,
     ),
   );
-}
-
-/// "Save how things are now": picks devices and saves how they are as a
-/// new scene.
-class CaptureTile extends ConsumerWidget {
-  const CaptureTile({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final radius = BorderRadius.circular(OmniRadii.tile);
-    final card = OmniPalette.of(context).card;
-    void open() => showCaptureScene(context, ref);
-    return Semantics(
-      container: true,
-      button: true,
-      label: 'Save how things are now',
-      hint: 'Makes a scene of how your devices are',
-      excludeSemantics: true,
-      onTap: open,
-      child: DecoratedBox(
-        decoration: OmniDepth.surface(color: card, radius: radius),
-        child: Material(
-          key: const ValueKey('run-capture'),
-          type: MaterialType.transparency,
-          shape: RoundedRectangleBorder(borderRadius: radius),
-          clipBehavior: Clip.antiAlias,
-          child: OmniSheen(
-            child: InkWell(
-              onTap: open,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 92),
-                child: Padding(
-                  padding: const EdgeInsets.all(OmniSpace.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const AutomationBadge(
-                        icon: Symbols.photo_camera_rounded,
-                        size: 32,
-                      ),
-                      const SizedBox(height: OmniSpace.gap),
-                      Text(
-                        'Save how things are now',
-                        maxLines: runLines(context, 2),
-                        overflow: TextOverflow.ellipsis,
-                        style: OmniText.label,
-                      ),
-                      Text(
-                        'As a new scene',
-                        maxLines: runLines(context, 1),
-                        overflow: TextOverflow.ellipsis,
-                        style: OmniText.caption.copyWith(
-                          color: OmniDepth.captionOn(card),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

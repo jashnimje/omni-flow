@@ -117,7 +117,7 @@ void main() {
       tester,
     ) async {
       await pumpPushed(tester, engine, const RuleEditorPage());
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'pick-thing-desk_lamp');
       await tapKey(tester, 'opt-on-state');
       expect(find.text('Right away'), findsOneWidget);
@@ -130,17 +130,17 @@ void main() {
     testWidgets('the people triggers, engine start and an aligned interval '
         'come from the library', (tester) async {
       await pumpPushed(tester, engine, const RuleEditorPage());
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'pick-people');
       await tapKey(tester, 'people-last_leaves');
       await tapKey(tester, 'form-done');
       expect(find.text('The last person leaves'), findsOneWidget);
 
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'pick-engine-start');
       expect(find.text('When OmniFlow starts'), findsOneWidget);
 
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'pick-interval');
       await tester.enterText(
         find.descendant(
@@ -160,7 +160,7 @@ void main() {
         findsOneWidget,
       );
 
-      await tapText(tester, 'Add condition');
+      await tapAdd(tester, 'Add condition');
       await tapKey(tester, 'pick-people');
       await tapKey(tester, 'form-done');
       expect(find.text('Everyone is away'), findsOneWidget);
@@ -201,6 +201,8 @@ void main() {
         engine,
         const RuleEditorPage(id: 'lamp_left_on'),
       );
+      // Why it did not run and the versions wait in Activity.
+      await tapKey(tester, 'rule-activity');
       expect(find.text('Desk lamp has been on for 5 min'), findsOneWidget);
       await tapKey(tester, 'try-as-if-0');
       final call = engine.callsOf('automation.dry_run').single.$2;
@@ -250,6 +252,8 @@ void main() {
         engine,
         const RuleEditorPage(id: 'lamp_left_on'),
       );
+      // Why it did not run and the versions wait in Activity.
+      await tapKey(tester, 'rule-activity');
       await tester.scrollUntilVisible(
         find.text('Why didn\'t it run?'),
         200,
@@ -288,6 +292,8 @@ void main() {
         engine,
         const RuleEditorPage(id: 'lamp_left_on'),
       );
+      // Why it did not run and the versions wait in Activity.
+      await tapKey(tester, 'rule-activity');
       expect(find.byKey(const ValueKey('skips-none')), findsOneWidget);
       expect(find.byKey(const ValueKey('versions-none')), findsOneWidget);
     });
@@ -302,6 +308,8 @@ void main() {
         engine,
         const RuleEditorPage(id: 'lamp_left_on'),
       );
+      // Why it did not run and the versions wait in Activity.
+      await tapKey(tester, 'rule-activity');
       expect(find.byKey(const ValueKey('skips-never-ran')), findsOneWidget);
       expect(find.text('It has not been set off yet'), findsOneWidget);
       expect(find.byKey(const ValueKey('skips-none')), findsNothing);
@@ -335,6 +343,8 @@ void main() {
         engine,
         const RuleEditorPage(id: 'lamp_left_on'),
       );
+      // Why it did not run and the versions wait in Activity.
+      await tapKey(tester, 'rule-activity');
       expect(find.textContaining('made by an agent'), findsOneWidget);
       await tapKey(tester, 'restore-3');
       expect(find.text('Go back to this version?'), findsOneWidget);

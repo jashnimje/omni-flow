@@ -144,7 +144,7 @@ class TokenField extends StatelessWidget {
                 runSpacing: 4,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  const Text('Uses', style: OmniText.caption),
+                  Text('Uses', style: OmniText.captionOf(context)),
                   for (final t in used.toSet())
                     TokenChip(
                       key: ValueKey('$id-has-$t'),
@@ -173,7 +173,7 @@ class TokenField extends StatelessWidget {
                     runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      const Text('Add a value', style: OmniText.caption),
+                      Text('Add a value', style: OmniText.captionOf(context)),
                       for (final t in tokens)
                         TokenChip(
                           key: ValueKey('$id-token-${t.token}'),

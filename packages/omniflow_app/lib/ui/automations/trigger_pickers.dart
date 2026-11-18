@@ -487,10 +487,10 @@ Future<OnTrigger?> presenceTriggerForm(
         selected: arriving,
         onChanged: (v) => setState(() => arriving = v),
       ),
-      const Text(
+      Text(
         'Home is decided by your home Wi-Fi, a Bluetooth beacon, or a hub '
         'that sees your phone.',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
       HoldField(ms: holdMs, onChanged: (v) => setState(() => holdMs = v)),
     ],
@@ -687,7 +687,7 @@ Future<TimeTrigger?> timeTriggerForm(
       const SizedBox(height: OmniSpace.md),
       Text(
         'On ${daysText(days.toList()).replaceFirst('on ', '')}',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
       const SizedBox(height: OmniSpace.xs),
       DayChips(days: days, onChanged: () => setState(() {})),
@@ -810,7 +810,7 @@ Future<SunTrigger?> sunTriggerForm(
         Text(
           'Today at home: sunrise ${today!.sunrise}, sunset ${today!.sunset}',
           key: const ValueKey('sun-today'),
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
       const SizedBox(height: OmniSpace.sm),
       OmniSegmented<String>(
@@ -846,7 +846,7 @@ Future<SunTrigger?> sunTriggerForm(
       const SizedBox(height: OmniSpace.md),
       Text(
         'On ${daysText(days.toList()).replaceFirst('on ', '')}',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
       const SizedBox(height: OmniSpace.xs),
       DayChips(days: days, onChanged: () => setState(() {})),

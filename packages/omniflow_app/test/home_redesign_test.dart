@@ -234,17 +234,21 @@ void main() {
         'exactAlarms': false,
       });
       await pumpHome(tester, engine, switches: switches);
+      const alarms =
+          'Alarms and reminders is off, so timed automations may run late.';
       expect(
         find.text('Location is off, so arriving by Wi-Fi cannot be seen.'),
         findsOneWidget,
       );
-      expect(
-        find.text(
-          'Alarms and reminders is off, so timed automations may run late.',
-        ),
-        findsOneWidget,
-      );
+      // One notice at a time: the next waits until this one is fixed.
+      expect(find.text(alarms), findsNothing);
       await tester.tap(find.text('Turn on location'));
+      // Location turned on in Android's settings, then back to the app.
+      switches.state = {'locationOn': true, 'exactAlarms': false};
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text(alarms), findsOneWidget);
       await tester.tap(find.text('Allow it'));
       expect(switches.opened, ['location', 'alarms']);
     });

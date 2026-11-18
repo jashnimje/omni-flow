@@ -47,12 +47,17 @@ class YourHomePage extends ConsumerWidget {
           )
         else
           _Week(stats: s),
-        OmniSectionHeader(
-          'Achievements',
-          trailingText: '${s.earnedCount} of ${s.achievements.length}',
-        ),
-        _AchievementGrid(achievements: s.achievements),
         const SizedBox(height: OmniSpace.md),
+        OmniDisclosure(
+          key: const ValueKey('your-home-achievements'),
+          icon: Symbols.emoji_events_rounded,
+          title: 'Achievements',
+          summary: '${s.earnedCount} of ${s.achievements.length} earned',
+          children: [
+            const SizedBox(height: OmniSpace.sm),
+            _AchievementGrid(achievements: s.achievements),
+          ],
+        ),
         OmniCard(
           child: OmniListRow(
             key: const ValueKey('celebrations-switch'),
@@ -89,7 +94,7 @@ class _Week extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
+              _Numbers(
                 children: [
                   _Number(
                     '${week.automationsRun}',
@@ -168,6 +173,36 @@ String streakLine(int streak, int best) {
   return best > streak ? '$now Your best is $best days.' : now;
 }
 
+/// The week's four numbers: one row on a phone, two rows of two from
+/// 130% text so each number keeps its width.
+class _Numbers extends StatelessWidget {
+  const _Numbers({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.textScalerOf(context).scale(10) < 13) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      );
+    }
+    return Column(
+      children: [
+        for (var i = 0; i < children.length; i += 2)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: children.sublist(i, (i + 2).clamp(0, children.length)),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _Number extends StatelessWidget {
   const _Number(this.value, this.label);
 
@@ -181,10 +216,15 @@ class _Number extends StatelessWidget {
       excludeSemantics: true,
       child: Column(
         children: [
-          Text(value, style: OmniText.number),
+          Text(
+            value,
+            style: OmniText.reading.copyWith(
+              color: OmniPalette.of(context).text,
+            ),
+          ),
           Text(
             label,
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
             textAlign: TextAlign.center,
             maxLines: 2,
           ),
@@ -218,7 +258,10 @@ class _AchievementGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
-      final columns = box.maxWidth >= 520 ? 4 : (box.maxWidth >= 340 ? 3 : 2);
+      final large = MediaQuery.textScalerOf(context).scale(10) >= 13;
+      final columns = large
+          ? (box.maxWidth >= 520 ? 2 : 1)
+          : (box.maxWidth >= 520 ? 4 : (box.maxWidth >= 340 ? 3 : 2));
       // Row by row, each as tall as its tallest tile, so a longer name
       // does not leave its neighbours short.
       return Column(
@@ -226,14 +269,14 @@ class _AchievementGrid extends StatelessWidget {
           for (var i = 0; i < achievements.length; i += columns)
             Padding(
               padding: EdgeInsets.only(
-                bottom: i + columns < achievements.length ? OmniSpace.gap : 0,
+                bottom: i + columns < achievements.length ? OmniSpace.md : 0,
               ),
               child: IntrinsicHeight(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (var c = 0; c < columns; c++) ...[
-                      if (c > 0) const SizedBox(width: OmniSpace.gap),
+                      if (c > 0) const SizedBox(width: OmniSpace.md),
                       Expanded(
                         child: i + c < achievements.length
                             ? _AchievementTile(achievements[i + c])
@@ -285,20 +328,20 @@ class _AchievementTile extends StatelessWidget {
               achievementIcon(a.id),
               size: 26,
               fill: a.earned ? 1 : 0,
-              color: a.earned ? palette.accent : OmniColors.muted,
+              color: a.earned ? palette.accent : palette.muted,
             ),
             const SizedBox(height: OmniSpace.sm),
             Text(
               a.title,
               style: OmniText.label.copyWith(
-                color: a.earned ? OmniColors.text : OmniColors.muted,
+                color: a.earned ? palette.text : palette.muted,
               ),
             ),
             const SizedBox(height: OmniSpace.xs),
             Text(
               detail,
               style: OmniText.caption.copyWith(
-                color: a.earned ? palette.onAccentSoft : OmniColors.muted,
+                color: a.earned ? palette.onAccentSoft : palette.muted,
               ),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,

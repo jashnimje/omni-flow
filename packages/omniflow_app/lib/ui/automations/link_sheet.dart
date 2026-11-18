@@ -259,7 +259,7 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
             selected: _mode!,
             onChanged: (m) => setState(() => _mode = m),
           ),
-          Text(modeHelp[_mode] ?? '', style: OmniText.caption),
+          Text(modeHelp[_mode] ?? '', style: OmniText.captionOf(context)),
         ],
         if (_mode == 'threshold') ...[
           const SizedBox(height: OmniSpace.sm),
@@ -282,7 +282,7 @@ class _LinkSheetState extends ConsumerState<LinkSheet> {
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: OmniSpace.sm),
-          const Text('Then', style: OmniText.caption),
+          Text('Then', style: OmniText.captionOf(context)),
           OmniSegmented<String>(
             key: const ValueKey('link-set-to'),
             segments: const [

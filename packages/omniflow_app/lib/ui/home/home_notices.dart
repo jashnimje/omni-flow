@@ -102,8 +102,9 @@ List<HomeNotice> homeNotices({
     ),
 ];
 
-/// Home's notices: presence that nothing detects, and the Android
-/// switches that stop arrivals or timed automations from working.
+/// Home's notice: presence that nothing detects, or an Android switch
+/// that stops arrivals or timed automations from working. At most one
+/// shows, in that order.
 class HomeNotices extends ConsumerStatefulWidget {
   const HomeNotices({super.key, required this.devices});
 
@@ -144,10 +145,12 @@ class _HomeNoticesState extends ConsumerState<HomeNotices> {
       allowAlarms: switches.openExactAlarms,
     );
     if (notices.isEmpty) return const SizedBox.shrink();
+    // One notice at a time, the one that matters most, so Home stays calm.
+    // The next shows once it is fixed.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final n in notices)
+        for (final n in notices.take(1))
           n.warning
               ? OmniBanner.warning(
                   n.message,

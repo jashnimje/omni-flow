@@ -164,7 +164,9 @@ class _PickerSheetState<T> extends State<PickerSheet<T>> {
               title: item.title,
               subtitle: item.subtitle,
               icon: item.icon,
-              iconForeground: item.destructive ? OmniColors.bad : null,
+              iconForeground: item.destructive
+                  ? OmniPalette.of(context).bad
+                  : null,
               selected: item.value == widget.selected,
               trailing: item.value == widget.selected
                   ? Icon(

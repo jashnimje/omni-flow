@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -175,12 +176,12 @@ class _OmniShellState extends ConsumerState<OmniShell> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = _themeFor(ref.watch(paletteProvider));
+    final palette = shownPalette(ref, context);
     return AnimatedTheme(
-      data: theme,
+      data: _themeFor(palette),
       duration: OmniMotion.of(context),
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: omniSystemBars,
+        value: palette.isDark ? omniSystemBars : omniSystemBarsLight,
         child: ListenableBuilder(listenable: _shell, builder: _frame),
       ),
     );
@@ -296,7 +297,8 @@ class _OmniShellState extends ConsumerState<OmniShell> {
       maxScaleFactor: _maxLabelScale,
       child: NavigationBar(
         key: const ValueKey('shell-tabs'),
-        height: OmniSpace.target + label,
+        height: math.max(_barHeight, OmniSpace.target + label),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         selectedIndex: tab.index,
         animationDuration: OmniMotion.of(context, OmniMotion.slow),
         onDestinationSelected: _select,
@@ -314,6 +316,9 @@ class _OmniShellState extends ConsumerState<OmniShell> {
   }
 
   static const _maxLabelScale = 1.5;
+
+  /// The Material 3 navigation bar height.
+  static const _barHeight = 80.0;
 
   /// The tab root's Add or New. Extended on a phone at normal text sizes;
   /// just the icon at large text sizes and in the rail, so it never sits

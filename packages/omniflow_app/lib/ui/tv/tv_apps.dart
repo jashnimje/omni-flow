@@ -196,7 +196,9 @@ class _TvAppsTabState extends ConsumerState<TvAppsTab> {
           : !a.enabled
           ? 'disabled'
           : null,
-      valueColor: running ? OmniPalette.of(context).accent : OmniColors.muted,
+      valueColor: running
+          ? OmniPalette.of(context).accent
+          : OmniPalette.of(context).muted,
       chevron: true,
       onTap: () => _openApp(a),
     );
@@ -298,7 +300,9 @@ class _AppSheetState extends State<AppSheet> {
       key: ValueKey('app-$key'),
       label: label,
       icon: icon,
-      foreground: danger ? OmniColors.bad : OmniColors.text,
+      foreground: danger
+          ? OmniPalette.of(context).bad
+          : OmniPalette.of(context).text,
       onTap: _busy ? null : onTap,
     );
 

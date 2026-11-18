@@ -324,7 +324,7 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
                                 child: Text(
                                   _error!,
                                   textAlign: TextAlign.center,
-                                  style: OmniText.caption,
+                                  style: OmniText.captionOf(context),
                                 ),
                               ),
                       )
@@ -432,7 +432,7 @@ class _TvScreenTabState extends ConsumerState<TvScreenTab> {
                       'video apps show black, which is Android protecting them.'
                 : 'The TV records at most 3 minutes at a time, and some TVs have no '
                       'video encoder for it.',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ],
         if (_recording == false && _recordFile != null) ...[

@@ -147,6 +147,11 @@ void main() {
       expect(find.text('Your activity'), findsOneWidget);
       expect(find.byKey(const ValueKey('your-home-busiest')), findsOneWidget);
       expect(find.textContaining('ran 14 times'), findsOneWidget);
+      // The achievements sit in a closed section with their count.
+      expect(find.text('Earned 10 Nov 2026'), findsNothing);
+      expect(find.textContaining(' earned'), findsOneWidget);
+      await tester.tap(find.text('Achievements'));
+      await tester.pumpAndSettle();
       expect(find.text('Earned 10 Nov 2026'), findsOneWidget);
       expect(find.text('Let automations run 100 times'), findsOneWidget);
       expect(
@@ -176,6 +181,8 @@ void main() {
           ],
         );
       await pumpScreen(tester, engine, const YourHomePage());
+      await tester.tap(find.text('Achievements'));
+      await tester.pumpAndSettle();
       Rect tile(String id) =>
           tester.getRect(find.byKey(ValueKey('achievement-$id')));
       expect(tile('first_device').top, tile('first_automation').top);

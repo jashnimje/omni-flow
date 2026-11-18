@@ -174,11 +174,17 @@ void main() {
       expect(engine.callsOf('thing.add').single.$2, isEmpty);
       expect(find.text('Android TV'), findsOneWidget);
       expect(find.text('192.168.1.60 · needs pairing'), findsOneWidget);
+      // What is already added sits in a closed section.
       expect(find.text('Already added'), findsOneWidget);
+      expect(find.text('added'), findsNothing);
+      await tester.tap(find.text('Already added'));
+      await tester.pumpAndSettle();
       expect(find.text('added'), findsOneWidget);
       expect(find.text('Desk lamp'), findsOneWidget);
       expect(find.byKey(const ValueKey('manual-tag')), findsOneWidget);
       expect(find.byKey(const ValueKey('manual-place')), findsOneWidget);
+      expect(find.text('Mac, LG webOS TV…'), findsNothing);
+      await openAddMoreWays(tester);
       expect(find.text('Mac, LG webOS TV…'), findsOneWidget);
     });
 

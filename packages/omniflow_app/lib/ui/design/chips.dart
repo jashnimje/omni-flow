@@ -4,9 +4,10 @@ import 'buttons.dart';
 import 'list_row.dart';
 import 'tokens.dart';
 
-/// A fully rounded chip. Selected is accent filled. [count] follows the
-/// label ("All 6"), [dot] leads it (the amber dot of "Needs you"), and the
-/// hit area is 48 dp high whatever the chip's size.
+/// A fully rounded chip, 40 dp high with a 14 label. Selected is accent
+/// filled. [count] follows the label ("All 6"), [dot] leads it (the amber
+/// dot of "Needs you"), and the hit area is 48 dp high whatever the
+/// chip's size.
 class OmniFilterChip extends StatelessWidget {
   const OmniFilterChip({
     super.key,
@@ -25,10 +26,13 @@ class OmniFilterChip extends StatelessWidget {
   final StatusKind? dot;
   final IconData? icon;
 
+  /// The chip's visual height. The hit area stays 48.
+  static const _height = 40.0;
+
   @override
   Widget build(BuildContext context) {
     final palette = OmniPalette.of(context);
-    final fg = selected ? palette.onAccent : OmniColors.text;
+    final fg = selected ? palette.onAccent : palette.text;
     final text = count == null ? label : '$label $count';
     final radius = BorderRadius.circular(OmniRadii.chip);
     return Semantics(
@@ -41,6 +45,7 @@ class OmniFilterChip extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: OmniMotion.of(context, OmniMotion.fast),
+          constraints: const BoxConstraints(minHeight: _height),
           decoration: BoxDecoration(
             color: selected ? palette.accent : palette.card,
             borderRadius: radius,
@@ -53,8 +58,8 @@ class OmniFilterChip extends StatelessWidget {
               onTap: onTap,
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: OmniSpace.md,
-                  vertical: 7,
+                  horizontal: OmniSpace.lg,
+                  vertical: OmniSpace.sm,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -64,8 +69,8 @@ class OmniFilterChip extends StatelessWidget {
                       const SizedBox(width: 6),
                     ],
                     if (icon != null) ...[
-                      Icon(icon, size: 16, color: fg),
-                      const SizedBox(width: 6),
+                      Icon(icon, size: 18, color: fg),
+                      const SizedBox(width: OmniSpace.sm),
                     ],
                     Flexible(
                       child: Text(
@@ -73,11 +78,11 @@ class OmniFilterChip extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 14,
                           color: fg,
                           fontWeight: selected
                               ? FontWeight.w600
-                              : FontWeight.w400,
+                              : FontWeight.w500,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
@@ -116,17 +121,22 @@ class OmniStatusChip extends StatelessWidget {
 
 /// One choice of an [OmniSegmented].
 class OmniSegment<T> {
-  const OmniSegment(this.value, this.label, {this.count});
+  const OmniSegment(this.value, this.label, {this.count, this.key});
 
   final T value;
   final String label;
+
+  /// The key of the segment's widget, so a test can tap it.
+  final Key? key;
 
   /// Shown after the label ("Problems 1").
   final int? count;
 }
 
 /// The segmented control of Devices, the TV page and Developer: equal
-/// segments in a card, the selected one raised.
+/// pill segments in a pill track, the selected one in the soft accent.
+/// Each segment is 48 dp high and wraps its label to two lines at large
+/// text sizes.
 class OmniSegmented<T> extends StatelessWidget {
   const OmniSegmented({
     super.key,
@@ -142,7 +152,7 @@ class OmniSegmented<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: OmniSpace.md),
-    padding: const EdgeInsets.all(OmniRadii.segmented - OmniRadii.segment),
+    padding: const EdgeInsets.all(OmniSpace.xs),
     decoration: BoxDecoration(
       color: OmniPalette.of(context).card,
       borderRadius: BorderRadius.circular(OmniRadii.segmented),
@@ -160,6 +170,7 @@ class OmniSegmented<T> extends StatelessWidget {
     final text = s.count == null ? s.label : '${s.label} ${s.count}';
     final radius = BorderRadius.circular(OmniRadii.segment);
     return Semantics(
+      key: s.key,
       button: true,
       selected: on,
       inMutuallyExclusiveGroup: true,
@@ -170,7 +181,7 @@ class OmniSegmented<T> extends StatelessWidget {
         duration: OmniMotion.of(context, OmniMotion.fast),
         constraints: const BoxConstraints(minHeight: OmniSpace.target),
         decoration: BoxDecoration(
-          color: on ? OmniPalette.of(context).raised : Colors.transparent,
+          color: on ? OmniPalette.of(context).accentSoft : Colors.transparent,
           borderRadius: radius,
         ),
         child: Material(
@@ -180,7 +191,10 @@ class OmniSegmented<T> extends StatelessWidget {
             onTap: () => onChanged(s.value),
             child: Center(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: OmniSpace.sm,
+                  vertical: OmniSpace.xs,
+                ),
                 // Two lines at large text sizes rather than a cut count.
                 child: Text(
                   text,
@@ -188,9 +202,11 @@ class OmniSegmented<T> extends StatelessWidget {
                   textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 12,
-                    color: on ? OmniColors.text : OmniColors.muted,
-                    fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                    fontSize: 14,
+                    color: on
+                        ? OmniPalette.of(context).onAccentSoft
+                        : OmniPalette.of(context).muted,
+                    fontWeight: on ? FontWeight.w600 : FontWeight.w500,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),

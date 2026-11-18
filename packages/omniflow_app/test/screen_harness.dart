@@ -8,8 +8,9 @@ import 'package:omniflow_app/ui/theme.dart';
 import 'fake_engine.dart';
 
 /// Shows [page] on its own, as a page pushed over a root, with the app's
-/// theme and snackbars, so a screen test does not depend on how the tabs
-/// reach it. Back pops to a plain root page.
+/// theme ([brightness], dark by default) and snackbars, so a screen test
+/// does not depend on how the tabs reach it. Back pops to a plain root
+/// page.
 Future<void> pumpScreen(
   WidgetTester tester,
   FakeEngine engine,
@@ -17,6 +18,7 @@ Future<void> pumpScreen(
   List<Override> overrides = const [],
   Size size = const Size(1236, 5400),
   bool settle = true,
+  Brightness brightness = Brightness.dark,
 }) async {
   tester.view.physicalSize = size;
   addTearDown(tester.view.reset);
@@ -27,7 +29,7 @@ Future<void> pumpScreen(
         ...overrides,
       ],
       child: MaterialApp(
-        theme: omniTheme(),
+        theme: omniTheme(brightness: brightness),
         scaffoldMessengerKey: messengerKey,
         home: _Root(page: page),
       ),

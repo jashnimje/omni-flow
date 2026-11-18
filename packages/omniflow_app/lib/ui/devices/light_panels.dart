@@ -93,12 +93,12 @@ class _SceneGridState extends State<SceneGrid> {
           ),
         for (var i = 0; i < shown.length; i += columns)
           Padding(
-            padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+            padding: const EdgeInsets.only(bottom: OmniSpace.md),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (var j = 0; j < columns; j++) ...[
-                  if (j > 0) const SizedBox(width: OmniSpace.gap),
+                  if (j > 0) const SizedBox(width: OmniSpace.md),
                   Expanded(
                     child: i + j < shown.length
                         ? _tile(shown[i + j])
@@ -221,7 +221,8 @@ class ColourPicker extends StatelessWidget {
   );
 }
 
-/// Whites from warm to cool, those inside [min] to [max] kelvin.
+/// Four named whites from warm to cool, those inside [min] to [max]
+/// kelvin. The kelvin shows only on the slider, so the chips stay words.
 class WhitePresets extends StatelessWidget {
   const WhitePresets({
     super.key,
@@ -239,21 +240,20 @@ class WhitePresets extends StatelessWidget {
   static const presets = [
     ('Candle', 2200),
     ('Warm', 2700),
-    ('Soft', 3000),
     ('Neutral', 4000),
     ('Daylight', 5000),
-    ('Cool', 6500),
   ];
 
   @override
   Widget build(BuildContext context) => Wrap(
-    spacing: OmniSpace.xs,
+    spacing: OmniSpace.sm,
+    runSpacing: OmniSpace.xs,
     children: [
       for (final (label, k) in presets)
         if (k >= min && k <= max)
           OmniFilterChip(
             key: ValueKey('white-$k'),
-            label: '$label $k K',
+            label: label,
             selected: value?.round() == k,
             onTap: onPick == null ? null : () => onPick!(k),
           ),
@@ -261,25 +261,21 @@ class WhitePresets extends StatelessWidget {
   );
 }
 
-const _warmth = LinearGradient(
-  colors: [OmniColors.warmWhite, OmniColors.coolWhite],
-);
-const _cool = LinearGradient(
-  colors: [OmniColors.coolWhite, OmniColors.warmWhite],
-);
+const _warmth = LightWhite.kelvin;
+const _cool = LightWhite.mired;
 
 enum LightMode {
   white('White'),
   colour('Colour'),
-  scene('Scenes');
+  scene('Effects');
 
   const LightMode(this.label);
 
   final String label;
 }
 
-/// A light's white, colour and scenes, one at a time under a segmented
-/// control, starting on what the light is doing. The scene speed shows
+/// A light's White, Colour and Effects (its scenes), one at a time under
+/// one segmented control, starting on what the light is doing. The scene speed shows
 /// only while the light is in a scene that moves.
 class LightModePanel extends ConsumerStatefulWidget {
   const LightModePanel({super.key, required this.device});
@@ -360,7 +356,7 @@ class _LightModePanelState extends ConsumerState<LightModePanel> {
             ? formatValue(kelvinOf(v, 'mired') ?? v, 'K')
             : formatValue(v.round(), range.unit),
         fill: mired ? _cool : _warmth,
-        labelOnFill: OmniColors.onWarmWhite,
+        labelOnFill: LightWhite.onWarm,
         onChangeEnd: d.online
             ? (v) => _send(d, cap, {'value': v.round()})
             : null,
@@ -396,7 +392,7 @@ class _LightModePanelState extends ConsumerState<LightModePanel> {
         step: 1,
         format: (v) => formatValue((v / 255 * 100).round(), '%'),
         fill: key == 'w' ? _warmth : _cool,
-        labelOnFill: OmniColors.onWarmWhite,
+        labelOnFill: LightWhite.onWarm,
         onChangeEnd: d.online
             ? (v) => _send(d, cap, {
                 ...rgb(),

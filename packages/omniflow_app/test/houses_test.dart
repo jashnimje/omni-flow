@@ -276,9 +276,9 @@ void main() {
       expect(find.text('Desk button'), findsNothing);
       expectAllIn(engine, 'automation.list', 'bangalore');
 
-      // Settings, This house.
+      // Settings, Your home.
       await openTab(tester, 'Settings');
-      expect(find.text('This house · Bangalore'), findsOneWidget);
+      expect(find.text('Your home · Bangalore'), findsOneWidget);
       expect(find.text('Your home'), findsNothing);
       expectAllIn(engine, 'zone.list', 'bangalore');
       expectAllIn(engine, 'home.location', 'bangalore');
@@ -322,7 +322,8 @@ void main() {
       final engine = twoHouses();
       await pumpHouses(tester, engine);
       await switchTo(tester, 'bangalore');
-      await tester.tap(find.byKey(const ValueKey('add-device')));
+      await openTab(tester, 'Devices');
+      await tester.tap(find.byKey(const ValueKey('devices-add')));
       await tester.pumpAndSettle();
       expectAllIn(engine, 'thing.add', 'bangalore');
     });

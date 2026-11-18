@@ -6,7 +6,7 @@ import '../../api/engine_calls.dart';
 import '../../state/providers.dart';
 import '../add/guided_steps_page.dart' show openSetup;
 import '../design/design.dart';
-import 'capability_control.dart' show CapabilityControl, isHighRiskCapability;
+import 'capability_control.dart' show CapabilityControl;
 import 'device_controls.dart';
 import 'device_sections.dart';
 import 'device_text.dart';
@@ -15,9 +15,10 @@ import 'open_device.dart' show DeviceGone;
 import 'smart_home_sections.dart';
 
 /// 3.2: one layout for every simple device. A hero with its main state and
-/// the power button, the controls its capabilities need, the automations
-/// that use it, its recent history, and its room, settings and Remove.
-/// A device that stopped answering shows 8.3's help instead of controls.
+/// the power button and the controls its capabilities need in front. Under
+/// them, collapsed, the automations that use it, what happened to it, and
+/// its room, settings and Remove. A device that stopped answering shows
+/// 8.3's help instead of controls.
 class DevicePage extends ConsumerWidget {
   const DevicePage({super.key, required this.id});
 
@@ -140,6 +141,7 @@ class DevicePage extends ConsumerWidget {
           if (c['type'] == 'sensor') c,
     ];
     final lit = phone ? d.state['screen_on'] == true : shownOn(ref, d);
+    final sections = deviceSections(ref, d);
     return DetailPage(
       key: ValueKey('device-page-$id'),
       title: d.name,
@@ -157,12 +159,8 @@ class DevicePage extends ConsumerWidget {
             actionLabel: 'Add it',
             onAction: () => openSetup(context, d.json),
           ),
-        if (d.online && !phone && d.capabilities.any(isHighRiskCapability))
-          OmniBanner.warning(
-            'Some controls run commands on ${d.host ?? d.name}. OmniFlow '
-            'asks before each one.',
-            key: ValueKey('high-risk-$id'),
-          ),
+        // A control that runs a command on the device asks before each
+        // run (CapabilityControl), so it needs no banner here.
       ],
       hero: d.online
           ? OmniHeroCard(
@@ -191,11 +189,11 @@ class DevicePage extends ConsumerWidget {
             if (group.isNotEmpty) ...[
               OmniSectionHeader(title),
               if (title == 'Events')
-                const Padding(
-                  padding: EdgeInsets.only(bottom: OmniSpace.xs),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: OmniSpace.xs),
                   child: Text(
                     'Things it does. Each can start an automation.',
-                    style: OmniText.caption,
+                    style: OmniText.captionOf(context),
                   ),
                 ),
               for (final c in group)
@@ -208,10 +206,8 @@ class DevicePage extends ConsumerWidget {
           ],
         ],
         if (d.online) DeviceSmartSections(device: d),
-        UsedInSection(device: d),
-        if (d.online) RecentSection(device: d),
-        DeviceSection(device: d),
       ],
+      sections: (_) => sections,
     );
   }
 }

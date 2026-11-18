@@ -1,37 +1,38 @@
 import 'dart:async';
 
-import 'type_it_page.dart' show openTypeIt;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../api/rule_calls.dart';
-import '../../state/clock.dart' show hour12Provider;
 import '../../state/hub_mode.dart' show hubLinkProvider;
 import '../../state/providers.dart';
-import '../settings/settings_screen.dart' show engineStatusProvider;
-import '../design/automation_look.dart';
 import '../design/design.dart';
+import '../help/screen_help.dart';
+import '../home/suggestion_card.dart' show suggestionsProvider;
+import '../settings/settings_screen.dart' show engineStatusProvider;
 import 'automation_insights.dart' show AutomationConflictChip;
 import 'automation_page.dart';
 import 'automations_state.dart';
-import 'dialogs.dart';
-import '../help/screen_help.dart';
+import 'card_look.dart';
 import 'new_automation.dart';
 import 'next_run_line.dart';
 import 'removed_page.dart' show openRecentlyRemoved;
 import 'review_page.dart';
-import 'scenes.dart' show SceneRow, automationIconFor;
+import 'scenes.dart' show automationIconFor, openSceneEditor, runScene;
 import 'suggestions_page.dart';
 import 'test_run.dart';
+import 'type_it_page.dart' show openTypeIt;
 
-enum AutomationFilter { all, rules, links, scenes, off, needsYou }
+/// The three views of the list. The ones off, the quick links and the
+/// ones that need you are found by searching for those words.
+enum AutomationFilter { all, rules, scenes }
 
-/// 2.1: every rule and link, written as its sentence, with its switch and
-/// how its last run went. Agent-made ones waiting for review are flagged
-/// at the top.
+/// 2.1: every rule, link and scene as a bold colour card in a two-column
+/// grid. Agent-made ones waiting for review
+/// are flagged at the top. Ideas and Recently removed wait in collapsed
+/// sections at the end.
 class AutomationsScreen extends ConsumerStatefulWidget {
   const AutomationsScreen({super.key});
 
@@ -42,7 +43,7 @@ class AutomationsScreen extends ConsumerStatefulWidget {
 class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
   var _filter = AutomationFilter.all;
   var _searching = false;
-  var _query = '';
+  final _query = TextEditingController();
 
   /// Rows swiped away to be removed, hidden until Undo brings them back.
   final _removing = <String>{};
@@ -50,6 +51,12 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
   /// Of [_removing], the ones the list no longer has. One that comes back
   /// (Restore on Recently removed) shows again.
   final _gone = <String>{};
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
 
   /// Keeps [_removing] in step with the list: a swiped id leaves it once
   /// the list has dropped it and then has it again.
@@ -69,20 +76,38 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
   /// Whether [a] belongs under the filter [f], before any search.
   static bool _inFilter(AutomationSummary a, AutomationFilter f) => switch (f) {
     AutomationFilter.all => true,
-    AutomationFilter.rules => a.source == 'rule' || a.source == 'graph',
-    AutomationFilter.links => a.isLink,
-    AutomationFilter.scenes => false,
-    AutomationFilter.off => !a.enabled || a.needsApproval,
-    AutomationFilter.needsYou => a.needsYou,
+    AutomationFilter.rules => !a.isScene,
+    AutomationFilter.scenes => a.isScene,
   };
 
-  bool _shows(AutomationSummary a) {
-    final q = _query.trim().toLowerCase();
-    return _inFilter(a, _filter) &&
-        (q.isEmpty ||
-            a.name.toLowerCase().contains(q) ||
+  /// Whether [a] matches the search [q]: its name, its sentence, or one of
+  /// the words that used to be filters ("off", "link", "needs you").
+  static bool _matches(AutomationSummary a, String q) {
+    if (q.isEmpty) return true;
+    // A word that used to be a filter keeps meaning that filter.
+    final off = !a.enabled || a.needsApproval;
+    final word = switch (q) {
+      'off' || 'turned off' => off,
+      'link' || 'links' || 'quick link' || 'quick links' => a.isLink,
+      'needs you' || 'review' => a.needsYou,
+      _ => null,
+    };
+    return word ??
+        (a.name.toLowerCase().contains(q) ||
             a.sentence.any((p) => p.text.toLowerCase().contains(q)));
   }
+
+  String get _q => _query.text.trim().toLowerCase();
+
+  bool _shows(AutomationSummary a) =>
+      !_removing.contains(a.id) && _inFilter(a, _filter) && _matches(a, _q);
+
+  /// Opens the search with [words] in it.
+  void _search(String words) => setState(() {
+    _searching = true;
+    _filter = AutomationFilter.all;
+    _query.text = words;
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -91,20 +116,12 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
     });
     final async = ref.watch(automationsProvider);
     final all = async.value ?? const <AutomationSummary>[];
-    final list = [
-      for (final a in all)
-        if (!a.isScene) a,
-    ];
-    final scenes = [
-      for (final a in all)
-        if (a.isScene) a,
-    ];
     final error = async.error;
     return TabPage.custom(
       title: 'Automations',
       subtitle: automationsStopped(ref)
           ? 'Stopped. Start them from the banner above.'
-          : 'Each runs on the phone, even with the screen off.',
+          : null,
       actions: [
         OmniIconAction(
           key: const ValueKey('automations-search'),
@@ -112,12 +129,12 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
           label: _searching ? 'Close search' : 'Search automations',
           onPressed: () => setState(() {
             _searching = !_searching;
-            if (!_searching) _query = '';
+            if (!_searching) _query.clear();
           }),
         ),
         const ScreenHelpButton(HelpScreen.automations),
       ],
-      filters: all.isEmpty ? null : _filters(list, scenes),
+      filters: all.isEmpty ? null : _filters(),
       state: OmniLoad.of(
         async,
         isEmpty: (v) => v.isEmpty,
@@ -156,98 +173,63 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
           ],
         ),
       ),
-      body: (context, padding) => _list(list, scenes, padding),
+      body: (context, padding) => _list(all, padding),
     );
   }
 
-  /// The search field (while searching) and the filter chips, pinned
+  /// The search field (while searching) and All, Rules and Scenes, pinned
   /// above the list.
-  Widget _filters(
-    List<AutomationSummary> list,
-    List<AutomationSummary> scenes,
-  ) {
-    final needsYou = list.where((a) => a.needsYou).length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_searching)
-          Padding(
-            padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-            child: TextField(
-              key: const ValueKey('automations-query'),
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'Search names and what they do',
-                prefixIcon: Icon(OmniIcons.search),
-              ),
-              onChanged: (v) => setState(() => _query = v),
+  Widget _filters() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (_searching)
+        Padding(
+          padding: const EdgeInsets.only(bottom: OmniSpace.sm),
+          child: TextField(
+            key: const ValueKey('automations-query'),
+            controller: _query,
+            autofocus: _query.text.isEmpty,
+            decoration: const InputDecoration(
+              hintText: 'Search, or type off, link or needs you',
+              prefixIcon: Icon(OmniIcons.search),
             ),
-          ),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final f in AutomationFilter.values) ...[
-                OmniFilterChip(
-                  key: ValueKey('filter-${f.name}'),
-                  label: switch (f) {
-                    AutomationFilter.all => 'All',
-                    AutomationFilter.rules => 'Rules',
-                    AutomationFilter.links => 'Quick links',
-                    AutomationFilter.scenes => 'Scenes',
-                    AutomationFilter.off => 'Off',
-                    AutomationFilter.needsYou => 'Needs you',
-                  },
-                  // Each chip counts what it shows, a zero too, and All
-                  // counts the scenes it lists.
-                  count: switch (f) {
-                    AutomationFilter.all => list.length + scenes.length,
-                    AutomationFilter.scenes => scenes.length,
-                    _ => list.where((a) => _inFilter(a, f)).length,
-                  },
-                  dot: f == AutomationFilter.needsYou && needsYou > 0
-                      ? StatusKind.warning
-                      : null,
-                  selected: _filter == f,
-                  onTap: () => setState(() => _filter = f),
-                ),
-                if (f != AutomationFilter.values.last)
-                  const SizedBox(width: OmniSpace.sm),
-              ],
-            ],
+            onChanged: (_) => setState(() {}),
           ),
         ),
-      ],
-    );
-  }
+      OmniSegmented<AutomationFilter>(
+        key: const ValueKey('automation-filters'),
+        segments: const [
+          OmniSegment(AutomationFilter.all, 'All'),
+          OmniSegment(AutomationFilter.rules, 'Rules'),
+          OmniSegment(AutomationFilter.scenes, 'Scenes'),
+        ],
+        selected: _filter,
+        onChanged: (f) => setState(() => _filter = f),
+      ),
+    ],
+  );
 
-  Widget _list(
-    List<AutomationSummary> list,
-    List<AutomationSummary> scenes,
-    EdgeInsets padding,
-  ) {
+  Widget _list(List<AutomationSummary> all, EdgeInsets padding) {
     final waiting = [
-      for (final a in list)
-        if (a.needsApproval) a,
+      for (final a in all)
+        if (a.needsApproval && !a.isScene) a,
     ];
+    // Rules and links first, then the scenes, as All has always read.
     final shown = [
-      for (final a in list)
-        if (!_removing.contains(a.id) && _shows(a)) a,
+      for (final a in all)
+        if (!a.isScene && _shows(a)) a,
+      for (final a in all)
+        if (a.isScene && _shows(a)) a,
     ];
-    final query = _query.trim().toLowerCase();
-    final shownScenes = [
-      for (final s in scenes)
-        if (query.isEmpty || s.name.toLowerCase().contains(query)) s,
-    ];
+    final scenes = all.where((a) => a.isScene).length;
+    final plain = _filter == AutomationFilter.all && !_searching;
     return RefreshIndicator(
       onRefresh: () => ref.read(automationsProvider.notifier).refresh(),
       child: ListView(
         key: const ValueKey('automations-list'),
         padding: padding,
         children: [
-          if (_filter == AutomationFilter.all && !_searching)
-            const AutomationHelpers(),
           if (waiting.length == 1)
             OmniBanner.warning(
               'An agent made "${waiting.single.name}". Review before it can run.',
@@ -261,11 +243,10 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
               'they can run.',
               key: const ValueKey('needs-review'),
               actionLabel: 'Show them',
-              onAction: () =>
-                  setState(() => _filter = AutomationFilter.needsYou),
+              onAction: () => _search('needs you'),
             ),
-          if (_filter == AutomationFilter.scenes) ...[
-            if (scenes.isEmpty)
+          if (shown.isEmpty)
+            if (_filter == AutomationFilter.scenes && scenes == 0)
               const OmniEmptyState(
                 key: ValueKey('scenes-empty'),
                 icon: OmniIcons.scene,
@@ -275,61 +256,69 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
                     '20%, TV on.',
                 compact: true,
               )
-            else if (shownScenes.isEmpty)
+            else
               OmniEmptyState(
                 key: const ValueKey('filter-empty'),
                 icon: OmniIcons.search,
-                title: 'Nothing matches "$_query"',
+                title: _q.isNotEmpty
+                    ? switch (_q) {
+                        'off' => 'Every automation is on.',
+                        'needs you' =>
+                          'Nothing needs you. Every automation is approved '
+                              'and its last run worked.',
+                        'link' || 'quick links' => 'No quick links yet.',
+                        _ => 'Nothing matches "${_query.text.trim()}".',
+                      }
+                    : 'No rules yet.',
                 compact: true,
               ),
-            // New, a scene among them, is the tab's button.
-            for (final s in shownScenes) SceneRow(scene: s),
-          ] else if (shown.isEmpty &&
-              (_filter != AutomationFilter.all || shownScenes.isEmpty))
-            OmniEmptyState(
-              key: const ValueKey('filter-empty'),
-              icon: OmniIcons.search,
-              title: _query.isNotEmpty
-                  ? 'Nothing matches "$_query".'
-                  : switch (_filter) {
-                      AutomationFilter.off => 'Every automation is on.',
-                      AutomationFilter.needsYou =>
-                        'Nothing needs you. Every automation is approved '
-                            'and its last run worked.',
-                      AutomationFilter.links => 'No quick links yet.',
-                      _ => 'No rules yet.',
-                    },
-              compact: true,
-            ),
-          for (final a in shown)
-            _swipeable(
-              a,
-              AutomationCard(
-                automation: a,
-                onOpen: () => _push(AutomationPage(id: a.id, summary: a)),
-              ),
-            ),
-          // All is all: the scenes follow the rules and links.
-          if (_filter == AutomationFilter.all && shownScenes.isNotEmpty) ...[
-            OmniSectionHeader(
-              'Scenes',
-              key: const ValueKey('all-scenes'),
-              trailingText: '${shownScenes.length}',
-            ),
-            for (final s in shownScenes) SceneRow(scene: s),
+          _grid(context, shown),
+          if (plain) ...[
+            const SizedBox(height: OmniSpace.md),
+            const _IdeasSection(),
+            const _RemovedSection(),
           ],
-          if (_filter == AutomationFilter.all && !_searching)
-            OmniListRow(
-              key: const ValueKey('automations-removed'),
-              icon: OmniIcons.delete,
-              title: 'Recently removed',
-              subtitle: 'Put back an automation you removed',
-              chevron: true,
-              onTap: () => openRecentlyRemoved(context),
-            ),
         ],
       ),
     );
+  }
+
+  /// [shown] as two columns of cards, or one from 130% text, where a
+  /// card's name would not fit half the width.
+  Widget _grid(BuildContext context, List<AutomationSummary> shown) {
+    final columns = MediaQuery.textScalerOf(context).scale(10) > 13 ? 1 : 2;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < shown.length; i += columns)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.md),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var c = 0; c < columns; c++) ...[
+                    if (c > 0) const SizedBox(width: OmniSpace.md),
+                    Expanded(
+                      child: i + c < shown.length
+                          ? _card(shown[i + c])
+                          : const SizedBox(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _card(AutomationSummary a) {
+    final open = a.isScene && !a.needsApproval
+        ? () => openSceneEditor(context, id: a.id)
+        : () => _push(AutomationPage(id: a.id, summary: a));
+    final card = AutomationCard(automation: a, onOpen: open);
+    return a.isScene ? card : _swipeable(a, card);
   }
 
   Future<void> _push(Widget page) =>
@@ -358,10 +347,10 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
           color: OmniPalette.of(context).accent,
           start: true,
         ),
-        secondaryBackground: const _SwipeBackground(
+        secondaryBackground: _SwipeBackground(
           icon: OmniIcons.delete,
           label: 'Remove',
-          color: OmniColors.bad,
+          color: OmniPalette.of(context).bad,
           start: false,
         ),
         confirmDismiss: (direction) async {
@@ -463,14 +452,18 @@ class _SwipeBackground extends StatelessWidget {
       children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(width: OmniSpace.sm),
-        Text(label, style: OmniText.bodyStrong.copyWith(color: color)),
+        Flexible(
+          child: Text(label, style: OmniText.bodyStrong.copyWith(color: color)),
+        ),
       ],
     ),
   );
 }
 
-/// One automation: name and switch, its sentence, and its last run (or
-/// why it failed, with Retry).
+/// One automation as a bold card in its colour: the icon and its state
+/// (On, Off, Asks, Review), the name, when it runs in one line, and, when
+/// it needs you, why. A tap opens it. A scene's card has Run instead of a
+/// state, since a scene runs when you ask.
 class AutomationCard extends ConsumerStatefulWidget {
   const AutomationCard({super.key, required this.automation, this.onOpen});
 
@@ -518,127 +511,269 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
     await ref.read(automationsProvider.notifier).refresh();
   }
 
+  /// When it runs, in one line: the WHEN and ONLY IF parts of its
+  /// sentence, or what a scene sets.
+  static String whenLine(AutomationSummary a) {
+    if (a.isScene) {
+      final sets = a.sentence
+          .where((p) => p.kind != SentenceKind.text)
+          .map((p) => p.text)
+          .join(', ');
+      return sets.isEmpty ? 'Scene' : sets;
+    }
+    final when = [
+      for (final p in a.sentence)
+        if (p.kind == SentenceKind.when || p.kind == SentenceKind.onlyIf)
+          p.text,
+    ];
+    if (when.isNotEmpty) return when.join(', ');
+    return a.isLink ? 'Quick link' : sentenceText(a.sentence);
+  }
+
   @override
   Widget build(BuildContext context) {
     final a = _a;
-    final enabled = _enabled ?? a.enabled;
+    final on = (_enabled ?? a.enabled) && !a.needsApproval;
     final last = a.lastRun;
-    final failedLast = last != null && !last.ok;
-    return OmniCard(
-      key: ValueKey('automation-${a.id}'),
-      onTap: widget.onOpen,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final failedLast = last != null && !last.ok && !a.needsApproval;
+    final color = automationCardColor(a.color);
+    const ink = OmniCardColors.onCard;
+    final small = OmniText.caption.copyWith(color: ink);
+    return Material(
+      key: ValueKey(a.isScene ? 'scene-${a.id}' : 'automation-${a.id}'),
+      color: color,
+      borderRadius: BorderRadius.circular(OmniRadii.card),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: widget.onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(OmniSpace.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AutomationBadge(
-                key: ValueKey('badge-${a.id}'),
-                icon: automationIconFor(a),
-                color: a.color,
-              ),
-              const SizedBox(width: OmniSpace.gap),
-              Expanded(child: Text(a.name, style: OmniText.bodyStrong)),
-              ExcludeSemantics(
-                child: Text(
-                  enabled && !a.needsApproval ? 'On' : 'Off',
-                  key: ValueKey('enable-label-${a.id}'),
-                  style: OmniText.caption,
-                ),
-              ),
-              const SizedBox(width: OmniSpace.sm),
-              Semantics(
-                label: enabled && !a.needsApproval
-                    ? 'Turn ${a.name} off'
-                    : 'Turn ${a.name} on',
-                child: Switch(
-                  key: ValueKey('enable-${a.id}'),
-                  // Not loaded until approved, so it shows off whatever it
-                  // says.
-                  value: enabled && !a.needsApproval,
-                  onChanged: a.needsApproval ? null : _enable,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: OmniSpace.xs),
-          if (a.sentence.isNotEmpty) AutomationSentence(a.sentence),
-          if (a.askFirst || a.notifyOnRun)
-            Padding(
-              padding: const EdgeInsets.only(top: OmniSpace.xs),
-              child: Wrap(
-                spacing: OmniSpace.sm,
-                runSpacing: OmniSpace.xs,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (a.askFirst)
-                    BehaviourBadge(
-                      key: ValueKey('asks-first-${a.id}'),
-                      icon: AutomationLook.askIcon,
-                      label: 'Asks first',
-                    ),
-                  if (a.notifyOnRun)
-                    BehaviourBadge(
-                      key: ValueKey('tells-you-${a.id}'),
-                      icon: OmniIcons.notifications,
-                      label: 'Tells you when it runs',
+                  CardIcon(
+                    key: ValueKey('badge-${a.id}'),
+                    icon: automationIconFor(a),
+                  ),
+                  const Spacer(),
+                  if (a.isScene && !a.needsApproval)
+                    _RunButton(scene: a)
+                  else if (!a.isScene)
+                    _StateBadge(
+                      automation: a,
+                      on: on,
+                      onChanged: a.needsApproval ? null : _enable,
                     ),
                 ],
               ),
-            ),
-          // Sets a device the other way from another automation.
-          AutomationConflictChip(id: a.id, conflicts: a.conflicts),
-          if (a.needsApproval)
-            Padding(
-              padding: const EdgeInsets.only(top: OmniSpace.xs),
-              child: Text(
-                'Waiting for your review',
-                style: OmniText.caption.copyWith(color: OmniColors.warn),
-              ),
-            )
-          else if (failedLast)
-            Row(
-              children: [
-                Expanded(
+              const SizedBox(height: OmniSpace.md),
+              Text(a.name, style: OmniText.cardTitle.copyWith(color: ink)),
+              const SizedBox(height: OmniSpace.xs),
+              Text(whenLine(a), key: ValueKey('when-${a.id}'), style: small),
+              if (a.askFirst)
+                Text(
+                  'Asks first',
+                  key: ValueKey('asks-first-${a.id}'),
+                  style: small,
+                ),
+              if (a.notifyOnRun)
+                Text(
+                  'Tells you when it runs',
+                  key: ValueKey('tells-you-${a.id}'),
+                  style: small,
+                ),
+              // Sets a device the other way from another automation.
+              AutomationConflictChip(id: a.id, conflicts: a.conflicts),
+              if (a.needsApproval)
+                Padding(
+                  padding: const EdgeInsets.only(top: OmniSpace.xs),
+                  child: Text('Waiting for your review', style: small),
+                )
+              else if (failedLast) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: OmniSpace.xs),
                   child: Text(
                     'Last run failed${last.error == null ? '' : ': ${last.error}'}',
                     key: ValueKey('last-failed-${a.id}'),
-                    style: OmniText.caption.copyWith(color: OmniColors.bad),
+                    style: small.copyWith(fontWeight: FontWeight.w600),
                   ),
                 ),
-                TextButton(
+                TextButton.icon(
                   key: ValueKey('retry-${a.id}'),
                   onPressed: _retrying ? null : _retry,
+                  icon: const Icon(OmniIcons.retry, size: 18),
+                  label: const Text('Retry'),
                   style: TextButton.styleFrom(
-                    foregroundColor: OmniColors.bad,
+                    foregroundColor: ink,
                     minimumSize: const Size(OmniSpace.target, OmniSpace.target),
-                    textStyle: OmniText.labelMedium,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: OmniSpace.xs,
+                    ),
+                    textStyle: OmniText.label,
                   ),
-                  child: const Text('Retry'),
                 ),
               ],
-            )
-          else if (last != null)
-            Padding(
-              padding: const EdgeInsets.only(top: OmniSpace.xs),
-              child: Text(
-                [
-                  if (a.isLink) 'Link',
-                  'Ran ${whenInline(last.at, hour12: ref.watch(hour12Provider))}',
-                  '${last.steps} ${last.steps == 1 ? 'step' : 'steps'}',
-                ].join(' · '),
-                key: ValueKey('last-run-${a.id}'),
-                style: OmniText.caption,
+              // No next run while this phone's automations are stopped.
+              NextRunLine(
+                a,
+                enabled: on && !automationsStopped(ref),
+                color: ink,
               ),
-            )
-          else if (a.isLink)
-            const Padding(
-              padding: EdgeInsets.only(top: OmniSpace.xs),
-              child: Text('Link', style: OmniText.caption),
-            ),
-          // No next run while this phone's automations are stopped.
-          NextRunLine(a, enabled: enabled && !automationsStopped(ref)),
-        ],
+            ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+/// The state pill on a rule's card: On, Off, Asks (on, and asks before it
+/// runs) or Review. A tap turns it on or off, with a 48 dp target; one
+/// waiting for review cannot be turned on.
+class _StateBadge extends StatelessWidget {
+  const _StateBadge({
+    required this.automation,
+    required this.on,
+    required this.onChanged,
+  });
+
+  final AutomationSummary automation;
+  final bool on;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = automation;
+    final label = a.needsApproval
+        ? 'Review'
+        : !on
+        ? 'Off'
+        : a.askFirst
+        ? 'Asks'
+        : 'On';
+    return Semantics(
+      container: true,
+      button: true,
+      toggled: on,
+      enabled: onChanged != null,
+      label: a.needsApproval
+          ? '${a.name} waits for your review'
+          : on
+          ? 'Turn ${a.name} off'
+          : 'Turn ${a.name} on',
+      excludeSemantics: true,
+      child: InkWell(
+        key: ValueKey('enable-${a.id}'),
+        borderRadius: BorderRadius.circular(OmniRadii.chip),
+        onTap: onChanged == null ? null : () => onChanged!(!on),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minWidth: OmniSpace.target,
+            minHeight: OmniSpace.target,
+          ),
+          child: Center(
+            widthFactor: 1,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: OmniSpace.sm + 2,
+                vertical: OmniSpace.xs,
+              ),
+              decoration: BoxDecoration(
+                color: on
+                    ? OmniCardColors.onCard
+                    : OmniCardColors.onCard.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(OmniRadii.chip),
+              ),
+              child: Text(
+                label,
+                key: ValueKey('enable-label-${a.id}'),
+                style: OmniText.labelMedium.copyWith(
+                  color: on
+                      ? automationCardColor(a.color)
+                      : OmniCardColors.onCard,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Run on a scene's card.
+class _RunButton extends ConsumerWidget {
+  const _RunButton({required this.scene});
+
+  final AutomationSummary scene;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Material(
+    color: OmniCardColors.onCard,
+    shape: const CircleBorder(),
+    child: OmniIconAction(
+      key: ValueKey('scene-run-${scene.id}'),
+      icon: OmniIcons.play,
+      label: 'Run ${scene.name}',
+      color: automationCardColor(scene.color),
+      onPressed: () => runScene(ref, scene.id, scene.name),
+    ),
+  );
+}
+
+/// Ideas for you, collapsed: the suggestions from habits and the
+/// templates.
+class _IdeasSection extends ConsumerWidget {
+  const _IdeasSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Home loads the suggestions when the app opens, so this list only
+    // shows what is loaded and starts no read of its own.
+    final suggestions = ref.watch(suggestionsProvider.exists)
+        ? ref.watch(suggestionsProvider).value ?? const []
+        : const [];
+    final n = suggestions.length;
+    return OmniDisclosure(
+      key: const ValueKey('automations-ideas'),
+      icon: OmniIcons.star,
+      title: 'Ideas for you',
+      summary: n == 0
+          ? 'Templates to start from'
+          : '$n ${n == 1 ? 'automation' : 'automations'} you could add',
+      storageId: 'automations-ideas',
+      children: const [AutomationHelpers()],
+    );
+  }
+}
+
+/// Recently removed, collapsed: a way to put one back.
+class _RemovedSection extends StatelessWidget {
+  const _RemovedSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return OmniDisclosure(
+      key: const ValueKey('automations-removed'),
+      icon: OmniIcons.delete,
+      title: 'Recently removed',
+      summary: 'Put back one you removed',
+      storageId: 'automations-removed',
+      children: [
+        OmniListRow(
+          key: const ValueKey('automations-removed-open'),
+          icon: OmniIcons.retry,
+          title: 'See what was removed',
+          subtitle: 'Put one back as it was',
+          chevron: true,
+          divider: false,
+          onTap: () => openRecentlyRemoved(context),
+        ),
+      ],
     );
   }
 }

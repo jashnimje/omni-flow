@@ -478,7 +478,7 @@ const _actionIcons = <(List<String>, IconData)>[
   (['sound', 'ring'], Symbols.notifications_active_rounded),
   (['volume'], Symbols.volume_up_rounded),
   (['media'], Symbols.play_pause_rounded),
-  (['open_app', 'launch'], Symbols.apps_rounded),
+  (['open_app', 'launch'], OmniIcons.apps),
   (['link', 'url'], Symbols.link_rounded),
   (['alarm'], Symbols.alarm_rounded),
   (['timer'], Symbols.timer_rounded),

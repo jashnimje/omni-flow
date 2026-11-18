@@ -63,6 +63,14 @@ Future<void> _openEditor(
   );
 }
 
+/// From the blocks to the diagram: See it as a diagram, in Options.
+Future<void> _toDiagram(WidgetTester tester) async {
+  final row = find.byKey(const ValueKey('rule-diagram-view'));
+  // Options stays open once opened, so open it only the first time.
+  if (row.evaluate().isEmpty) await tapKey(tester, 'rule-options');
+  await tapKey(tester, 'rule-diagram-view');
+}
+
 /// Lets the debounced re-fetch after an edit go out and come back.
 Future<void> _refetch(WidgetTester tester) async {
   await tester.pump(diagramRefetchDelay + const Duration(milliseconds: 50));
@@ -241,8 +249,7 @@ void main() {
       expect(find.byKey(const ValueKey('rule-editor')), findsOneWidget);
       expect(find.byKey(const ValueKey('row-then[0]')), findsOneWidget);
 
-      await tester.tap(find.text('Diagram'));
-      await tester.pumpAndSettle();
+      await _toDiagram(tester);
       expect(store.view, RuleView.diagram);
       expect(find.byKey(const ValueKey('diagram-editor')), findsOneWidget);
       expect(_drawnSpec(engine), {'name': 'Every part', ...everyPartSpec()});
@@ -369,7 +376,7 @@ void main() {
             .text,
         'Desk lamp · turn on',
       );
-      await tester.tap(find.text('Diagram'));
+      await _toDiagram(tester);
       await _refetch(tester);
       then = _drawnSpec(engine)['then'] as List;
       expect(then, hasLength(8));

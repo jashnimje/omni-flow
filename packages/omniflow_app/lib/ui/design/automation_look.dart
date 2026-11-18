@@ -61,24 +61,24 @@ abstract final class AutomationLook {
   static IconData iconOf(String? name, {IconData? fallback}) =>
       icons[name] ?? fallback ?? OmniIcons.automations;
 
-  /// The background of a badge in [hex]: the colour, or the plain raised
-  /// grey when it has none.
-  static Color badgeOf(String? hex) => colorOf(hex) ?? OmniColors.raised;
+  /// The background of a badge in [hex]: the colour, or [p]'s plain
+  /// raised grey when it has none.
+  static Color badgeOf(String? hex, OmniPalette p) => colorOf(hex) ?? p.raised;
 
   /// The icon colour on [badgeOf].
-  static Color badgeInkOf(String? hex) =>
-      colorOf(hex) == null ? OmniColors.text : ink;
+  static Color badgeInkOf(String? hex, OmniPalette p) =>
+      colorOf(hex) == null ? p.text : ink;
 
-  /// A tile's soft fill in [hex], or the plain card.
-  static Color tintOf(String? hex) => switch (colorOf(hex)) {
-    final c? => Color.alphaBlend(c.withAlpha(0x2E), OmniColors.card),
-    null => OmniColors.card,
+  /// A tile's soft fill in [hex] over [p]'s card, or the plain card.
+  static Color tintOf(String? hex, OmniPalette p) => switch (colorOf(hex)) {
+    final c? => Color.alphaBlend(c.withAlpha(0x2E), p.card),
+    null => p.card,
   };
 
-  /// A tile's border in [hex], or the plain line.
-  static Color lineOf(String? hex) => switch (colorOf(hex)) {
-    final c? => Color.alphaBlend(c.withAlpha(0x73), OmniColors.card),
-    null => OmniColors.line,
+  /// A tile's border in [hex], or [p]'s plain line.
+  static Color lineOf(String? hex, OmniPalette p) => switch (colorOf(hex)) {
+    final c? => Color.alphaBlend(c.withAlpha(0x73), p.card),
+    null => p.line,
   };
 }
 
@@ -97,23 +97,26 @@ class AutomationBadge extends StatelessWidget {
   final double size;
 
   @override
-  Widget build(BuildContext context) => ExcludeSemantics(
-    child: Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: AutomationLook.badgeOf(color),
-        borderRadius: BorderRadius.circular(OmniRadii.iconBox),
+  Widget build(BuildContext context) {
+    final p = OmniPalette.of(context);
+    return ExcludeSemantics(
+      child: Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AutomationLook.badgeOf(color, p),
+          borderRadius: BorderRadius.circular(OmniRadii.iconBox),
+        ),
+        child: Icon(
+          icon,
+          size: size * 0.56,
+          fill: 1,
+          color: AutomationLook.badgeInkOf(color, p),
+        ),
       ),
-      child: Icon(
-        icon,
-        size: size * 0.56,
-        fill: 1,
-        color: AutomationLook.badgeInkOf(color),
-      ),
-    ),
-  );
+    );
+  }
 }
 
 /// A small muted pill saying how an automation behaves ("Asks first",
@@ -125,25 +128,28 @@ class BehaviourBadge extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: label,
-    excludeSemantics: true,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: OmniColors.raised,
-        borderRadius: BorderRadius.circular(OmniRadii.chip),
+  Widget build(BuildContext context) {
+    final p = OmniPalette.of(context);
+    return Semantics(
+      label: label,
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: p.raised,
+          borderRadius: BorderRadius.circular(OmniRadii.chip),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: p.muted),
+            const SizedBox(width: 4),
+            Text(label, style: OmniText.caption.copyWith(color: p.muted)),
+          ],
+        ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: OmniColors.muted),
-          const SizedBox(width: 4),
-          Text(label, style: OmniText.caption),
-        ],
-      ),
-    ),
-  );
+    );
+  }
 }
 
 /// One colour to pick: a 48 dp target with a round swatch, ringed and
@@ -181,7 +187,9 @@ class ColorSwatchButton extends StatelessWidget {
               color: color,
               shape: BoxShape.circle,
               border: Border.all(
-                color: selected ? OmniColors.text : Colors.transparent,
+                color: selected
+                    ? OmniPalette.of(context).text
+                    : Colors.transparent,
                 width: 2,
               ),
             ),

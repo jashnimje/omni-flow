@@ -210,12 +210,18 @@ void main() {
       );
       expect(find.byKey(const ValueKey('white-2200')), findsNothing);
       expect(find.byKey(const ValueKey('scene-ocean')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('white-6500')));
+      // Four named whites, the kelvin only on the slider.
+      for (final k in [2700, 4000, 5000]) {
+        expect(find.byKey(ValueKey('white-$k')), findsOneWidget);
+      }
+      expect(find.text('Daylight'), findsOneWidget);
+      expect(find.textContaining('5000 K'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('white-5000')));
       await tester.pump();
       expect(lastInvoke(), {
         'id': 'bedroom',
         'capability': 'color_temp',
-        'params': {'value': 6500},
+        'params': {'value': 5000},
       });
     });
 
@@ -257,7 +263,7 @@ void main() {
       engine.devices = [_bulb(colour: false, mode: null)];
       await pumpApp(tester, engine);
       await openDevicePage(tester, 'bedroom');
-      expect(find.text('Scenes'), findsOneWidget);
+      expect(find.text('Effects'), findsOneWidget);
       expect(find.byKey(const ValueKey('swatch-Red')), findsNothing);
       expect(find.byKey(const ValueKey('colour-wheel')), findsNothing);
     });

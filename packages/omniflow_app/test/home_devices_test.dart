@@ -13,6 +13,7 @@ import 'package:omniflow_app/ui/settings/rooms_page.dart';
 import 'package:omniflow_app/ui/tv/tv_page.dart';
 
 import 'fake_engine.dart';
+import 'section_helpers.dart';
 
 /// Home, Devices, the device and sensor pages, search and Settings, with
 /// a household of a lamp, a TV, an offline bulb, a sensor, a phone and a
@@ -286,7 +287,9 @@ void main() {
       expect(find.textContaining(', Jade'), findsOneWidget);
       expect(find.byKey(const ValueKey('home-status')), findsNothing);
       expect(find.text('You are home'), findsOneWidget);
-      expect(find.text('Netflix playing'), findsOneWidget);
+      // What the TV plays is on its tile, not a chip in front.
+      expect(find.byKey(const ValueKey('chip-tv-lounge_tv')), findsNothing);
+      expect(find.text('Netflix · Playing · vol 35'), findsOneWidget);
       expect(find.text('Hall bulb offline'), findsOneWidget);
     });
 
@@ -313,11 +316,12 @@ void main() {
       expect(find.byKey(const ValueKey('tile-this_phone')), findsNothing);
     });
 
-    testWidgets('an offline TV drops its app chip until it is heard again', (
+    testWidgets('an offline TV drops its tile until it is heard again', (
       tester,
     ) async {
+      const playing = 'Netflix · Playing · vol 35';
       await pump(tester, engine);
-      expect(find.text('Netflix playing'), findsOneWidget);
+      expect(find.text(playing), findsOneWidget);
       engine.eventsOut.add({
         'event': 'device.pollFailed',
         'device': 'lounge_tv',
@@ -325,12 +329,12 @@ void main() {
         'error': 'connection refused',
       });
       await tester.pumpAndSettle();
-      expect(find.text('Netflix playing'), findsNothing);
+      expect(find.text(playing), findsNothing);
       expect(find.text('2 offline'), findsOneWidget);
       // A read it answers saves it and the engine sends its state again.
       engine.eventsOut.add({'event': 'device.stateChanged', 'device': tv()});
       await tester.pumpAndSettle();
-      expect(find.text('Netflix playing'), findsOneWidget);
+      expect(find.text(playing), findsOneWidget);
       expect(find.text('Hall bulb offline'), findsOneWidget);
     });
 
@@ -739,18 +743,22 @@ void main() {
   });
 
   group('3.2 Device page', () {
-    testWidgets('a hero with the state and power, Used in and Recent', (
-      tester,
-    ) async {
+    testWidgets('a hero with the state and power, then Automations and '
+        'Activity collapsed under it', (tester) async {
       await pump(tester, engine);
       await openDevicePage(tester, 'desk_lamp');
       expect(find.text('On · 80%'), findsOneWidget);
       expect(find.text('Study'), findsWidgets);
-      expect(find.text('Automations that use it'), findsOneWidget);
+      // Both start closed, each saying what is inside.
+      expect(find.byKey(const ValueKey('used-in-desk_button')), findsNothing);
+      expect(find.textContaining(RegExp(r'^Used in \d')), findsOneWidget);
+      expect(find.text('Turned on by Desk button'), findsNothing);
+      await openSectionKey(tester, 'device-automations-desk_lamp');
       expect(find.byKey(const ValueKey('used-in-desk_button')), findsOneWidget);
       expect(find.text('Has a step on it'), findsWidgets);
-      expect(find.textContaining('turned on by Desk button'), findsOneWidget);
-      expect(find.textContaining('turned off by you'), findsOneWidget);
+      await openSectionKey(tester, 'device-activity-desk_lamp');
+      expect(find.text('Turned on by Desk button'), findsOneWidget);
+      expect(find.text('Turned off by you'), findsOneWidget);
       expect(engine.callsOf('automation.list').last.$2, {
         'device': 'desk_lamp',
       });
@@ -769,6 +777,7 @@ void main() {
       };
       await pump(tester, engine);
       await openDevicePage(tester, 'desk_lamp');
+      await openSectionKey(tester, 'device-automations-desk_lamp');
       final row = find.byKey(const ValueKey('used-in-desk_button'));
       await tester.ensureVisible(row);
       final badge = tester.widget<AutomationBadge>(
@@ -803,6 +812,7 @@ void main() {
     testWidgets('Room moves it to another room by id', (tester) async {
       await pump(tester, engine);
       await openDevicePage(tester, 'desk_lamp');
+      await openSectionKey(tester, 'device-more-desk_lamp');
       await tapKey(tester, 'device-room-desk_lamp');
       await tapKey(tester, 'room-pick-hall');
       expect(engine.callsOf('device.organize').single.$2, {
@@ -814,6 +824,7 @@ void main() {
     testWidgets('Not in a room takes it out of its room', (tester) async {
       await pump(tester, engine);
       await openDevicePage(tester, 'desk_lamp');
+      await openSectionKey(tester, 'device-more-desk_lamp');
       await tapKey(tester, 'device-room-desk_lamp');
       await tapKey(tester, 'room-none');
       expect(engine.callsOf('device.organize').single.$2, {
@@ -825,6 +836,7 @@ void main() {
     testWidgets('a new name is saved through device.organize', (tester) async {
       await pump(tester, engine);
       await openDevicePage(tester, 'desk_lamp');
+      await openSectionKey(tester, 'device-more-desk_lamp');
       await tapKey(tester, 'device-details-desk_lamp');
       await tester.enterText(
         find.byKey(const ValueKey('device-name-field')),
@@ -842,6 +854,7 @@ void main() {
     ) async {
       await pump(tester, engine);
       await openDevicePage(tester, 'desk_lamp');
+      await openSectionKey(tester, 'device-more-desk_lamp');
       await tapKey(tester, 'device-remove-desk_lamp');
       expect(find.text('Remove Desk lamp?'), findsOneWidget);
       await tester.tap(find.text('Cancel'));
@@ -897,7 +910,7 @@ void main() {
       await pump(tester, engine);
       await openDevicePage(tester, 'hall_bulb');
       expect(find.textContaining('Not answering since'), findsOneWidget);
-      expect(find.text('Automations that use it'), findsOneWidget);
+      await openSectionKey(tester, 'device-automations-hall_bulb');
       expect(find.text('Steps on it fail while it is offline'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('device-power-hall_bulb')),
@@ -905,7 +918,8 @@ void main() {
       );
       await tapKey(tester, 'device-retry');
       expect(engine.callsOf('device.refresh').single.$2, {'id': 'hall_bulb'});
-      await tapKey(tester, 'device-advanced');
+      await openSectionKey(tester, 'device-more-hall_bulb');
+      await openSectionKey(tester, 'device-advanced');
       await tapKey(tester, 'device-packets');
       expect(find.byType(DeveloperScreen), findsOneWidget);
       expect(
@@ -941,8 +955,15 @@ void main() {
       expect(find.byType(SensorPage), findsOneWidget);
       expect(find.text('24.5 °C'), findsOneWidget);
       expect(find.text('Last 24 h · low 21.0 · high 29.5'), findsOneWidget);
+      // The day's chart is history, so it is inside Activity.
+      expect(find.byType(DayChart), findsNothing);
+      await openSectionKey(tester, 'device-activity-room_temp');
       expect(find.byType(DayChart), findsOneWidget);
-      final call = engine.callsOf('device.history').last.$2;
+      // The chart's read, not Activity's, which reads every key.
+      final call = engine
+          .callsOf('device.history')
+          .map((c) => c.$2)
+          .lastWhere((a) => a['key'] != null);
       expect(call['key'], 'value');
       expect(call['since'], isA<String>());
       expect(
@@ -958,7 +979,7 @@ void main() {
     ) async {
       await pump(tester, engine);
       await openTab(tester, 'Settings');
-      expect(find.text('Home · you are here'), findsOneWidget);
+      expect(find.text('You are home'), findsOneWidget);
       expect(find.text('3 rooms'), findsOneWidget);
       // Scenes are under Automations now, beside what they belong with.
       expect(find.text('1 scene'), findsNothing);
@@ -1318,7 +1339,7 @@ void main() {
       expect(find.byKey(const ValueKey('add-device-empty')), findsOneWidget);
       expect(find.byKey(const ValueKey('add-device')), findsNothing);
       await openTab(tester, 'Devices');
-      expect(find.byKey(const ValueKey('add-device')), findsOneWidget);
+      expect(find.byKey(const ValueKey('devices-add')), findsOneWidget);
     });
   });
 

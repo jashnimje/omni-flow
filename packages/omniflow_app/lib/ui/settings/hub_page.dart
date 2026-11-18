@@ -126,10 +126,10 @@ class _PhoneHub extends ConsumerWidget {
         tone: running ? HeroTone.accent : HeroTone.plain,
       ),
       children: (context) => [
-        const Text(
+        Text(
           'The hub listens for your devices, keeps time and runs each '
           'automation when its trigger happens, with the screen off too.',
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
         const SizedBox(height: OmniSpace.lg),
         if (status != null && !running)
@@ -631,9 +631,9 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
         style: OmniText.body,
       )
     else ...[
-      const Text(
+      Text(
         'Run this on the Mac mini, in Terminal:',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
       const SizedBox(height: OmniSpace.sm),
       SelectableText(
@@ -664,7 +664,7 @@ class _HubSetupState extends ConsumerState<_HubSetup> {
         style: OmniText.body,
       )
     else ...[
-      const Text('The Mac mini says its key is:', style: OmniText.caption),
+      Text('The Mac mini says its key is:', style: OmniText.captionOf(context)),
       const SizedBox(height: OmniSpace.sm),
       SelectableText(
         fingerprint ?? offered,

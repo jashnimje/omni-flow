@@ -21,7 +21,7 @@ export 'rules_core_words.dart';
 abstract final class AutomationIcons {
   static const rule = Symbols.rule_rounded;
   static const link = Symbols.link_rounded;
-  static const template = Symbols.auto_awesome_rounded;
+  static const template = OmniIcons.autoAwesome;
   static const variable = Symbols.data_object_rounded;
   static const web = Symbols.public_rounded;
   static const together = Symbols.alt_route_rounded;
@@ -42,7 +42,7 @@ abstract final class AutomationIcons {
   static const date = Symbols.event_rounded;
   static const forEach = Symbols.data_array_rounded;
   static const phone = Symbols.smartphone_rounded;
-  static const app = Symbols.apps_rounded;
+  static const app = OmniIcons.apps;
   static const bluetooth = Symbols.bluetooth_rounded;
   static const screen = Symbols.screen_lock_portrait_rounded;
   static const dnd = Symbols.do_not_disturb_on_rounded;

@@ -3,10 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../design/design.dart';
 import '../home/suggestion_card.dart';
-import 'type_it_page.dart';
+import 'new_automation.dart' show openNewAutomation;
 
-/// The top of the Automations list: Type what you want, and the
-/// suggestions from habits when there are any.
+/// Inside Ideas for you on the Automations list: the suggestions from
+/// habits, or what to do while there are none.
 class AutomationHelpers extends ConsumerWidget {
   const AutomationHelpers({super.key});
 
@@ -17,37 +17,43 @@ class AutomationHelpers extends ConsumerWidget {
     final suggestions = ref.watch(suggestionsProvider.exists)
         ? ref.watch(suggestionsProvider).value ?? const []
         : const [];
-    return Padding(
-      padding: const EdgeInsets.only(bottom: OmniSpace.sm),
-      child: Column(
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (suggestions.isNotEmpty)
           OmniListRow(
-            key: const ValueKey('type-it'),
-            icon: OmniIcons.edit,
-            title: 'Type what you want',
-            subtitle: 'Say it in a sentence, then check it in the editor',
+            key: const ValueKey('suggestions-row'),
+            icon: OmniIcons.star,
+            title: 'Suggestions',
+            subtitle: suggestions.first.words,
+            value: '${suggestions.length}',
             chevron: true,
-            divider: suggestions.isNotEmpty,
-            onTap: () => openTypeIt(context),
-          ),
-          if (suggestions.isNotEmpty)
-            OmniListRow(
-              key: const ValueKey('suggestions-row'),
-              icon: OmniIcons.star,
-              title: 'Suggestions',
-              subtitle: suggestions.first.words,
-              value: '${suggestions.length}',
-              chevron: true,
-              divider: false,
-              semanticLabel:
-                  '${suggestions.length} suggestion'
-                  '${suggestions.length == 1 ? '' : 's'} from your habits',
-              onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute(builder: (_) => const SuggestionsPage()),
-              ),
+            semanticLabel:
+                '${suggestions.length} suggestion'
+                '${suggestions.length == 1 ? '' : 's'} from your habits',
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const SuggestionsPage()),
             ),
-        ],
-      ),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: OmniSpace.sm),
+            child: Text(
+              'Ideas show up once you do the same thing at about the same '
+              'time for a couple of weeks.',
+              style: OmniText.captionOf(context),
+            ),
+          ),
+        OmniListRow(
+          key: const ValueKey('ideas-templates'),
+          icon: OmniIcons.add,
+          title: 'Start from a template',
+          subtitle: 'Arrive home, bedtime and more',
+          chevron: true,
+          divider: false,
+          onTap: () => openNewAutomation(context),
+        ),
+      ],
     );
   }
 }
@@ -67,14 +73,14 @@ class SuggestionsPage extends ConsumerWidget {
         onRetry: () => ref.invalidate(suggestionsProvider),
         error: 'The suggestions did not load.',
       ),
-      banners: const [
+      banners: [
         Padding(
-          padding: EdgeInsets.only(bottom: OmniSpace.md),
+          padding: const EdgeInsets.only(bottom: OmniSpace.md),
           child: Text(
             'From the last four weeks of what you turned on and off '
             'yourself. Make it opens the automation to check before it is '
             'saved.',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ),
       ],

@@ -148,8 +148,10 @@ Future<void> pumpApp(
 
 /// Opens the Add page, then the sheet that adds a device by its driver.
 Future<void> openDriverSheet(WidgetTester tester) async {
+  await openTab(tester, 'Devices');
   await tester.tap(find.byKey(const ValueKey('add-device')));
   await tester.pumpAndSettle();
+  await openAddMoreWays(tester);
   await tester.tap(find.byKey(const ValueKey('add-by-driver')));
   await tester.pumpAndSettle();
 }
@@ -194,9 +196,49 @@ Future<void> openSearch(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-/// Opens Settings, Developer.
+/// Opens Settings' collapsed More settings, and For developers inside it
+/// when [developers].
+Future<void> openMoreSettings(
+  WidgetTester tester, {
+  bool developers = false,
+}) async {
+  for (final key in [
+    'settings-more',
+    if (developers) 'settings-for-developers',
+  ]) {
+    final section = find.byKey(ValueKey(key));
+    await tester.ensureVisible(section);
+    await tester.pumpAndSettle();
+    final header = find
+        .descendant(of: section, matching: find.byType(InkWell))
+        .first;
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+  }
+}
+
+/// Opens Settings, More settings, For developers, Developer.
 Future<void> openDeveloper(WidgetTester tester) async {
   await openTab(tester, 'Settings');
+  await openMoreSettings(tester, developers: true);
+  // The rows are 56 to 72 dp, so Developer can sit under the tab bar.
+  await tester.ensureVisible(find.byKey(const ValueKey('settings-developer')));
+  await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey('settings-developer')));
+  await tester.pumpAndSettle();
+}
+
+/// Opens the Add page's collapsed More ways to add.
+Future<void> openAddMoreWays(WidgetTester tester) async {
+  final section = find.byKey(const ValueKey('add-more-ways'));
+  await tester.scrollUntilVisible(
+    section,
+    200,
+    scrollable: find.byType(Scrollable).last,
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(
+    find.descendant(of: section, matching: find.byType(InkWell)).first,
+  );
   await tester.pumpAndSettle();
 }

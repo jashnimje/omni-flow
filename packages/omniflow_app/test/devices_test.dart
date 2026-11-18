@@ -228,7 +228,9 @@ void main() {
       ];
       await pumpApp(tester, engine);
       await openDevicePage(tester, 'mac');
-      expect(find.byKey(const ValueKey('high-risk-mac')), findsOneWidget);
+      // No warning banner in front: the ask before each command is the
+      // warning.
+      expect(find.byKey(const ValueKey('high-risk-mac')), findsNothing);
       await tester.tap(find.text('Sleep display'));
       await tester.pumpAndSettle();
       expect(

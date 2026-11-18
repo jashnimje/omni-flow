@@ -298,7 +298,7 @@ void main() {
         'shows it by its label', (tester) async {
       engine.answers['rule.tokens'] = _answerToken;
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-notify');
       expect(engine.callsOf('rule.tokens').last.$2['path'], 'then[0]');
       expect(
@@ -345,7 +345,7 @@ void main() {
           },
         ),
       );
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       expect(
         find.byKey(const ValueKey('suggest-device-desk_lamp')),
         findsOneWidget,
@@ -375,7 +375,7 @@ void main() {
     testWidgets('an ask step chooses from a menu with a default and a time '
         'limit', (tester) async {
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-ask-choose');
       expect(buttonEnabled(tester, 'form-done'), isFalse);
       await tester.enterText(
@@ -420,7 +420,7 @@ void main() {
 
     testWidgets('the data steps save what their forms say', (tester) async {
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-get');
       await tester.enterText(
         find.byKey(const ValueKey('get-from')),
@@ -430,7 +430,7 @@ void main() {
       await tester.pump();
       await tapKey(tester, 'form-done');
 
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-math');
       await tester.enterText(
         find.byKey(const ValueKey('math-expr')),
@@ -440,14 +440,14 @@ void main() {
       await tester.pump();
       await tapKey(tester, 'form-done');
 
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-text');
       await tester.enterText(find.byKey(const ValueKey('text-value')), 'hi');
       await tester.pump();
       await tapText(tester, 'CAPITALS');
       await tapKey(tester, 'form-done');
 
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-date');
       await tapText(tester, 'From now');
       await tester.enterText(find.byKey(const ValueKey('date-minutes')), '15');
@@ -475,7 +475,7 @@ void main() {
       tester,
     ) async {
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-foreach');
       await tapText(tester, 'A room');
       await tapKey(tester, 'foreach-room-Living room');
@@ -511,7 +511,7 @@ void main() {
       ]);
     });
 
-    testWidgets('the header sets ask first, notify on run, colour and icon', (
+    testWidgets('Options sets ask first, notify on run, colour and icon', (
       tester,
     ) async {
       await pumpPushed(
@@ -526,6 +526,9 @@ void main() {
           },
         ),
       );
+      // They wait in Options, collapsed.
+      expect(find.byKey(const ValueKey('rule-ask-first')), findsNothing);
+      await tapKey(tester, 'rule-options');
       await tester.tap(
         find.descendant(
           of: find.byKey(const ValueKey('rule-ask-first')),
@@ -567,7 +570,7 @@ void main() {
           },
         ),
       );
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'category-This phone');
       expect(find.byKey(const ValueKey('pick-time')), findsNothing);
       for (final key in [
@@ -589,7 +592,7 @@ void main() {
       await tapKey(tester, 'form-done');
       expect(find.text('Netflix opens'), findsOneWidget);
 
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'pick-phone-charging');
       await tapText(tester, 'Starts');
       await tapKey(tester, 'form-done');
@@ -639,7 +642,7 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       await expectLater(tester, meetsGuideline(textContrastGuideline));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       handle.dispose();
@@ -668,6 +671,8 @@ void main() {
           },
         ),
       );
+      // Options opens on its own only for an error, so open it.
+      await tapKey(tester, 'rule-options');
       final ask = tester.widget<Switch>(
         find.descendant(
           of: find.byKey(const ValueKey('rule-ask-first')),
@@ -680,7 +685,7 @@ void main() {
 
     testWidgets('an ask takes at most ten choices', (tester) async {
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-ask-choose');
       for (var i = 0; i < 8; i++) {
         await tapKey(tester, 'ask-add-choice');

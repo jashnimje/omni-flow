@@ -36,6 +36,10 @@ void main() {
         'in one row of chips', (tester) async {
       final engine = household()..answers['home.mode'] = modes;
       await pumpApp(tester, engine);
+      // Chip labels are 14 now, and the test font draws every letter a
+      // full em wide, so the two chips need a 480 dp screen to share a row.
+      tester.view.physicalSize = const Size(1440, 5400);
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-status')), findsNothing);
       expect(find.text('Home · Home mode'), findsNothing);
       final mode = tester.getCenter(find.byKey(const ValueKey('mode-chip')));
@@ -132,7 +136,7 @@ void main() {
       });
     });
 
-    testWidgets('Run tiles at large text are wider and keep their names', (
+    testWidgets('Scenes at large text are one a row and keep their names', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -165,11 +169,12 @@ void main() {
         ),
       );
       await tester.pump();
-      final name = tester.widget<Text>(find.text('Save how things are now'));
+      final name = tester.widget<Text>(find.text('Movie time'));
       expect(name.maxLines, 4);
       final movie = tester.getSize(find.byKey(const ValueKey('scene-movie')));
-      // Two a row, not three.
-      expect(movie.width, greaterThan(170));
+      // One a row, the whole width.
+      expect(movie.width, 384);
+      expect(movie.height, greaterThanOrEqualTo(56));
     });
   });
 
@@ -203,6 +208,7 @@ void main() {
         'same online and offline', (tester) async {
       await pumpApp(tester, household());
       await openDevicePage(tester, 'desk_lamp');
+      await openSectionKey(tester, 'device-more-desk_lamp');
       for (final key in ['device-room-desk_lamp', 'device-details-desk_lamp']) {
         await tester.ensureVisible(find.byKey(ValueKey(key)));
         expect(
@@ -213,11 +219,13 @@ void main() {
       }
       expect(
         tester
-            .widget<OmniListRow>(find.byKey(const ValueKey('device-advanced')))
+            .widget<OmniDisclosure>(
+              find.byKey(const ValueKey('device-advanced')),
+            )
             .icon,
         isNotNull,
       );
-      expect(find.text('Automations that use it'), findsOneWidget);
+      await openSectionKey(tester, 'device-automations-desk_lamp');
       expect(find.text('Used in'), findsNothing);
       expect(find.text('Has a step on it'), findsWidgets);
     });
@@ -349,9 +357,8 @@ void main() {
       );
     });
 
-    testWidgets('the remote has one row of tabs: how it works is a choice', (
-      tester,
-    ) async {
+    testWidgets('the remote has one row of tabs: how it works is a choice '
+        'under More buttons', (tester) async {
       final engine = tvEngine();
       await pumpTv(tester, engine);
       expect(
@@ -361,9 +368,14 @@ void main() {
         ),
         findsNothing,
       );
-      expect(find.text('Keys: Buttons'), findsOneWidget);
-      await tapKey(tester, 'tv-remote-mode');
+      // No keys chip in front: the choice is inside More buttons.
+      expect(find.text('Keys: Buttons'), findsNothing);
+      expect(find.byKey(const ValueKey('tv-remote-mode')), findsNothing);
+      await openSectionKey(tester, 'tv-more-buttons');
+      expect(find.text('Now: Buttons'), findsOneWidget);
+      await openRemoteMode(tester);
       await tapKey(tester, 'tv-remote-mode-gamepad');
+      // The gamepad is in front, with the way back to the buttons.
       expect(find.text('Keys: Gamepad'), findsOneWidget);
     });
   });

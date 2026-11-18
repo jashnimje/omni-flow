@@ -95,10 +95,10 @@ class HoldField extends StatelessWidget {
           ms: ms!,
           onChanged: onChanged,
         ),
-        const Text(
+        Text(
           'It runs only if it stays that way the whole time, and not when '
           'it changes back first.',
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
       ],
     ],

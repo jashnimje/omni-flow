@@ -20,7 +20,7 @@ import '../home/mode_picker.dart' show showModePicker;
 import '../shell/shell.dart';
 import '../tags/tags_page.dart' show TagsPage;
 import '../help/screen_help.dart';
-import '../onboarding/home_setup.dart' show HomeSetupRow;
+import '../onboarding/home_setup.dart' show HomeSetupRow, setupProgressProvider;
 import 'agent_access.dart';
 import 'alerts_page.dart';
 import 'appearance_page.dart';
@@ -88,10 +88,13 @@ final engineStatusProvider = FutureProvider<Json>((ref) async {
 /// The events after which the engine's status may read differently.
 const engineStatusEvents = {'automation.changed', deviceChangedEvent};
 
-/// 7.1: this house (places, location, mode, rooms, tags, alerts and the
-/// smart home settings, all for the house in view), this phone
-/// (background running, permissions, hubs), what agents made that waits
-/// for approval, your data and activity, and the developer tools.
+/// Settings (docs/ui/design-v2.md, Settings): three groups in front,
+/// Your home (places and people, rooms, house mode), This phone
+/// (appearance, alerts, phone setup) and Your data (backup, your
+/// activity), then the rarely used rows inside a collapsed More settings
+/// with For developers nested in it, and About at the end. "Set up your
+/// home" shows in front only until it is done. An automation waiting for
+/// approval shows in front only while one waits.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -119,163 +122,220 @@ class SettingsScreen extends ConsumerWidget {
     final shell = ref.read(shellControllerProvider);
     final house = ref.watch(houseShownProvider);
     final mode = ref.watch(houseModeProvider).value;
+    final setupDone = ref.watch(setupProgressProvider)?.complete == true;
+    final waitingInFront = waiting != null && waiting.isNotEmpty;
+    final waitingRow = OmniListRow(
+      key: const ValueKey('settings-waiting'),
+      icon: OmniIcons.agent,
+      title: 'Waiting for approval',
+      subtitle: waiting == null
+          ? ''
+          : waiting.isEmpty
+          ? 'Nothing waiting'
+          : _count(waiting.length, 'automation', 'automations'),
+      value: waitingInFront ? '${waiting.length}' : null,
+      chevron: true,
+      onTap: () => waiting != null && waiting.length == 1
+          ? shell.open(ReviewLink(waiting.single.id))
+          : openWaitingForApproval(context),
+    );
     return TabPage(
       title: 'Settings',
       actions: const [ScreenHelpButton(HelpScreen.settings)],
       fab: false,
       children: (context) => [
+        if (!setupDone) SettingsGroup(children: const [HomeSetupRow()]),
+        if (waitingInFront) SettingsGroup(children: [waitingRow]),
         OmniSectionHeader(
-          house == null ? 'This house' : 'This house · ${house.name}',
+          house == null ? 'Your home' : 'Your home · ${house.name}',
         ),
-        const HomeSetupRow(),
-        OmniListRow(
-          key: const ValueKey('settings-places'),
-          icon: OmniIcons.place,
-          title: 'Places and people',
-          subtitle: switch (presenceShown(presence, zones)) {
-            PresenceShown.home => 'Home · you are here',
-            PresenceShown.away => 'Home · you are away',
-            PresenceShown.notSetUp => '$presenceNotSetUp. Tap to set it up',
-            _ => 'Where you are, and how OmniFlow knows',
-          },
-          chevron: true,
-          onTap: () => _push(context, const PlacesPage()),
+        SettingsGroup(
+          children: [
+            OmniListRow(
+              key: const ValueKey('settings-rooms'),
+              icon: OmniIcons.room,
+              title: 'Rooms',
+              subtitle: _count(rooms?.length, 'room', 'rooms'),
+              chevron: true,
+              onTap: () => _push(context, const RoomsPage()),
+            ),
+            OmniListRow(
+              key: const ValueKey('settings-places'),
+              icon: OmniIcons.place,
+              title: 'Places and people',
+              subtitle: switch (presenceShown(presence, zones)) {
+                PresenceShown.home => 'You are home',
+                PresenceShown.away => 'You are away',
+                PresenceShown.notSetUp => '$presenceNotSetUp. Tap to set it up',
+                _ => 'Where you are, and how OmniFlow knows',
+              },
+              chevron: true,
+              divider: mode != null,
+              onTap: () => _push(context, const PlacesPage()),
+            ),
+            if (mode != null)
+              OmniListRow(
+                key: const ValueKey('settings-mode'),
+                icon: OmniIcons.home,
+                title: 'House mode',
+                subtitle: mode.followPresence
+                    ? '${mode.name} · follows who is home'
+                    : mode.name,
+                chevron: true,
+                divider: false,
+                onTap: () => showModePicker(context, ref),
+              ),
+          ],
         ),
-        const HomeLocationRow(),
-        if (mode != null)
-          OmniListRow(
-            key: const ValueKey('settings-mode'),
-            icon: OmniIcons.home,
-            title: 'House mode',
-            subtitle: mode.followPresence
-                ? '${mode.name} · follows who is home'
-                : mode.name,
-            chevron: true,
-            onTap: () => showModePicker(context, ref),
-          ),
-        OmniListRow(
-          key: const ValueKey('settings-rooms'),
-          icon: OmniIcons.room,
-          title: 'Rooms',
-          subtitle: _count(rooms?.length, 'room', 'rooms'),
-          chevron: true,
-          onTap: () => _push(context, const RoomsPage()),
-        ),
-        OmniListRow(
-          key: const ValueKey('settings-tags'),
-          icon: OmniIcons.tag,
-          title: 'NFC tags',
-          subtitle: _count(tags, 'tag', 'tags'),
-          chevron: true,
-          onTap: () => _push(context, const TagsPage()),
-        ),
-        OmniListRow(
-          key: const ValueKey('settings-variables'),
-          icon: OmniIcons.level,
-          title: 'Variables',
-          subtitle: 'Values automations set, to see or clear',
-          chevron: true,
-          onTap: () => _push(context, const VariablesPage()),
-        ),
-        const AlertsSettingsRow(),
-        const SmartHomeSettingsRows(),
         const OmniSectionHeader('This phone'),
-        const HomeRunsOnRow(),
-        const ShakeSceneRow(),
-        OmniListRow(
-          key: const ValueKey('settings-background'),
-          icon: OmniIcons.settings,
-          title: 'Phone setup',
-          subtitle: switch (access) {
-            null => 'Checking',
-            PhoneAccessState(running: false) => 'Off · automations wait',
-            PhoneAccessState(batteryUnrestricted: false) =>
-              'On · battery saver can stop it',
-            PhoneAccessState(batteryUnrestricted: true) =>
-              'On · battery saver off for OmniFlow',
-            _ => 'On',
-          },
-          dot: access == null
-              ? null
-              : access.backgroundOk
-              ? StatusKind.online
-              : StatusKind.warning,
-          chevron: true,
-          onTap: () => _push(context, const PhoneAccessPage()),
-        ),
-        OmniListRow(
-          key: const ValueKey('settings-appearance'),
-          icon: OmniIcons.color,
-          title: 'Appearance',
-          subtitle: appearance == null
-              ? 'Colours and background'
-              : AppearancePage.summary(appearance),
-          chevron: true,
-          onTap: () => _push(context, const AppearancePage()),
-        ),
-        OmniListRow(
-          key: const ValueKey('settings-usb'),
-          icon: OmniIcons.board,
-          title: 'Boards on USB',
-          subtitle: 'Set up a board, or install firmware on it',
-          chevron: true,
-          onTap: () => showUsbBoardSheet(context),
-        ),
-        const OmniSectionHeader('Agents'),
-        const AgentAccessRow(),
-        OmniListRow(
-          key: const ValueKey('settings-waiting'),
-          icon: OmniIcons.agent,
-          title: 'Waiting for approval',
-          subtitle: waiting == null
-              ? ''
-              : waiting.isEmpty
-              ? 'Nothing waiting'
-              : _count(waiting.length, 'automation', 'automations'),
-          value: waiting == null || waiting.isEmpty
-              ? null
-              : '${waiting.length}',
-          chevron: true,
-          onTap: () => waiting != null && waiting.length == 1
-              ? shell.open(ReviewLink(waiting.single.id))
-              : openWaitingForApproval(context),
+        SettingsGroup(
+          children: [
+            OmniListRow(
+              key: const ValueKey('settings-appearance'),
+              icon: OmniIcons.color,
+              title: 'Appearance',
+              subtitle: appearance == null
+                  ? 'Colours and background'
+                  : AppearancePage.summary(appearance),
+              chevron: true,
+              onTap: () => _push(context, const AppearancePage()),
+            ),
+            const AlertsSettingsRow(),
+            OmniListRow(
+              key: const ValueKey('settings-background'),
+              icon: OmniIcons.settings,
+              title: 'Phone setup',
+              subtitle: switch (access) {
+                null => 'Checking',
+                PhoneAccessState(running: false) => 'Off · automations wait',
+                PhoneAccessState(batteryUnrestricted: false) =>
+                  'On · battery saver can stop it',
+                PhoneAccessState(batteryUnrestricted: true) =>
+                  'On · battery saver off for OmniFlow',
+                _ => 'On',
+              },
+              dot: access == null
+                  ? null
+                  : access.backgroundOk
+                  ? StatusKind.online
+                  : StatusKind.warning,
+              chevron: true,
+              divider: false,
+              onTap: () => _push(context, const PhoneAccessPage()),
+            ),
+          ],
         ),
         const OmniSectionHeader('Your data'),
-        OmniListRow(
-          key: const ValueKey('settings-backup'),
-          icon: OmniIcons.backup,
-          title: 'Backup and restore',
-          subtitle: 'Keep a copy of the whole home in a file',
-          chevron: true,
-          onTap: () => _push(context, const BackupPage()),
+        SettingsGroup(
+          children: [
+            OmniListRow(
+              key: const ValueKey('settings-backup'),
+              icon: OmniIcons.backup,
+              title: 'Backup and restore',
+              subtitle: 'Keep a copy of the whole home in a file',
+              chevron: true,
+              onTap: () => _push(context, const BackupPage()),
+            ),
+            OmniListRow(
+              key: const ValueKey('settings-activity'),
+              icon: OmniIcons.automations,
+              title: 'Your activity',
+              subtitle: 'What ran this week, and your achievements',
+              chevron: true,
+              divider: false,
+              onTap: () => _push(context, const YourHomePage()),
+            ),
+          ],
         ),
-        OmniListRow(
-          key: const ValueKey('settings-activity'),
-          icon: OmniIcons.automations,
-          title: 'Your activity',
-          subtitle: 'What ran this week, your streak and achievements',
-          chevron: true,
-          onTap: () => _push(context, const YourHomePage()),
+        const SizedBox(height: OmniSpace.sm),
+        OmniDisclosure(
+          key: const ValueKey('settings-more'),
+          icon: OmniIcons.level,
+          title: 'More settings',
+          summary: 'Tags, variables, energy, away lighting',
+          children: [
+            OmniListRow(
+              key: const ValueKey('settings-tags'),
+              icon: OmniIcons.tag,
+              title: 'NFC tags',
+              subtitle: _count(tags, 'tag', 'tags'),
+              chevron: true,
+              onTap: () => _push(context, const TagsPage()),
+            ),
+            OmniListRow(
+              key: const ValueKey('settings-variables'),
+              icon: OmniIcons.level,
+              title: 'Variables',
+              subtitle: 'Values automations set, to see or clear',
+              chevron: true,
+              onTap: () => _push(context, const VariablesPage()),
+            ),
+            const SmartHomeSettingsRows(),
+            const HomeLocationRow(),
+            const HomeRunsOnRow(),
+            const ShakeSceneRow(),
+            OmniListRow(
+              key: const ValueKey('settings-usb'),
+              icon: OmniIcons.board,
+              title: 'Boards on USB',
+              subtitle: 'Set up a board, or install firmware on it',
+              chevron: true,
+              onTap: () => showUsbBoardSheet(context),
+            ),
+            if (setupDone) const HomeSetupRow(),
+            OmniDisclosure(
+              key: const ValueKey('settings-for-developers'),
+              icon: OmniIcons.developer,
+              title: 'For developers',
+              summary: 'Packets, run log, agents',
+              children: [
+                OmniListRow(
+                  key: const ValueKey('settings-developer'),
+                  icon: OmniIcons.developer,
+                  title: 'Developer',
+                  subtitle: 'Packets, run log, drivers, engine',
+                  chevron: true,
+                  onTap: () => shell.open(const DeveloperLink()),
+                ),
+                const AgentAccessRow(),
+                if (!waitingInFront) waitingRow,
+              ],
+            ),
+          ],
         ),
-        const OmniSectionHeader('Advanced'),
-        OmniListRow(
-          key: const ValueKey('settings-developer'),
-          icon: OmniIcons.developer,
-          title: 'Developer',
-          subtitle: 'Packets, run log, drivers, engine',
-          chevron: true,
-          onTap: () => shell.open(const DeveloperLink()),
-        ),
-        OmniListRow(
-          key: const ValueKey('settings-about'),
-          icon: OmniIcons.about,
-          title: 'About',
-          subtitle: 'OmniFlow $appVersion · what is new, licences',
-          chevron: true,
-          divider: false,
-          onTap: () => _push(context, const AboutPage()),
+        SettingsGroup(
+          children: [
+            OmniListRow(
+              key: const ValueKey('settings-about'),
+              icon: OmniIcons.about,
+              title: 'About',
+              subtitle: 'OmniFlow $appVersion · what is new, licences',
+              chevron: true,
+              divider: false,
+              onTap: () => _push(context, const AboutPage()),
+            ),
+          ],
         ),
       ],
     );
   }
+}
+
+/// A group of Settings rows on one rounded card.
+class SettingsGroup extends StatelessWidget {
+  const SettingsGroup({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => OmniCard(
+    padding: const EdgeInsets.symmetric(
+      horizontal: OmniSpace.md,
+      vertical: OmniSpace.xs,
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    ),
+  );
 }

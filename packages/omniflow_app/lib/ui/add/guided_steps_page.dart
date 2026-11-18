@@ -394,9 +394,9 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
           Text(
             'Step $_current of $_total · ${_stepName(step)}',
             key: const ValueKey('setup-step'),
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
-          const SizedBox(height: OmniSpace.gap),
+          const SizedBox(height: OmniSpace.md),
           ..._stepBody(step),
         ],
         if (_note != null && step?.kind != NextKind.pair)
@@ -405,7 +405,7 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
             child: Text(
               _note!,
               key: const ValueKey('setup-note'),
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
         if (_busy && step?.kind != NextKind.pair)
@@ -562,9 +562,9 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
             ),
           ),
       const SizedBox(height: OmniSpace.xs),
-      const Text(
+      Text(
         'Kept in the phone\'s secret store, never in settings or logs.',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
     ],
     NextKind.configure when step.isPins => [
@@ -624,9 +624,9 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
       ..._nameAndRoom(),
       if (step.optional.isNotEmpty) ...[
         const OmniSectionHeader('Optional'),
-        const Text(
+        Text(
           'Fill in any it needs. These can wait. Finish saves what you type.',
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
         const SizedBox(height: OmniSpace.sm),
         for (final k in step.optional) _keyField(k, secret: k.step == 'secret'),
@@ -668,7 +668,7 @@ class _GuidedStepsPageState extends ConsumerState<GuidedStepsPage> {
                     ? 'Waiting for $waitingFor · ${left.inSeconds} s'
                     : 'Waiting for $waitingFor',
                 textAlign: TextAlign.center,
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
               const SizedBox(height: OmniSpace.xs),
               OmniProgressBar(

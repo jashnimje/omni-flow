@@ -7,7 +7,7 @@ import 'tv_fixtures.dart';
 
 void main() {
   Future<void> openMouse(WidgetTester tester) async {
-    await tester.tap(find.byKey(const ValueKey('tv-remote-mode')));
+    await openRemoteMode(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Mouse'));
     await tester.pumpAndSettle();

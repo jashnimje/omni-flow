@@ -243,29 +243,25 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
   (String, String) _words(SetupStep? step, SetupProgress? p) => switch (step) {
     SetupStep.you => (
       'Who are you?',
-      'Your name, so automations like "when I get home" know who is meant, '
-          'and Home can greet you.',
+      'So automations like "when I get home" know who you are.',
     ),
     SetupStep.home => (
       'Where is home?',
-      'Sunrise and sunset, the weather and Follow the sun all need to know '
-          'roughly where home is. It stays on this phone.',
+      'For sunrise, sunset and the weather. It stays on this phone.',
     ),
     SetupStep.presence => (
       'How does the phone know you are home?',
-      'When the phone joins your home Wi-Fi, you are home. When it leaves '
-          'for a few minutes, you are away. Android shows the Wi-Fi name '
-          'only to apps allowed to use location.',
+      'When the phone joins your home Wi-Fi, you are home. When it '
+          'leaves, you are away.',
     ),
     SetupStep.device => (
       'Add your first device',
-      'A light, plug, TV or speaker on your Wi-Fi. OmniFlow looks for them '
-          'first, and you can add one by hand.',
+      'A light, plug, TV or speaker on your Wi-Fi.',
     ),
     SetupStep.automation => (
       'Make your first automation',
-      'Something that happens by itself, like turn on the lamp when I get '
-          'home, or switch everything off at bedtime.',
+      'Something that happens by itself, like the lamp coming on when you '
+          'get home.',
     ),
     null when p?.complete ?? false => (
       'Your home is set up',
@@ -376,7 +372,7 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
       _PermissionRow(
         id: 'location',
         title: '1. Allow location',
-        why: 'So OmniFlow can read the Wi-Fi name',
+        why: 'Android shows the Wi-Fi name only with location on',
         granted: access?.location,
         onAllow: _busy ? null : () => _ask((a) => a.askLocation()),
       ),
@@ -396,11 +392,11 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
           key: const ValueKey('setup-presence-done'),
         )
       else if (_wifi == null)
-        const Text(
+        Text(
           '3. Connect this phone to your home Wi-Fi, then come back here. '
           'The network shows here once Android lets OmniFlow see it.',
           key: ValueKey('setup-no-wifi'),
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
     ];
   }

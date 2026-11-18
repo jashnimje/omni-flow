@@ -29,20 +29,27 @@ class _ConfettiBurstState extends State<ConfettiBurst>
     vsync: this,
     duration: ConfettiBurst.duration,
   );
-  late final List<_Piece> _pieces;
 
-  static const _colors = [
-    OmniColors.accent,
-    OmniColors.trigger,
-    OmniColors.condition,
-    OmniColors.transformer,
-    OmniColors.flowControl,
-    OmniColors.warn,
+  /// The palette's step colours, read when the burst first builds so it
+  /// follows the theme.
+  static List<Color> _colorsOf(OmniPalette p) => [
+    p.accent,
+    p.trigger,
+    p.condition,
+    p.transformer,
+    p.flowControl,
+    p.warn,
   ];
 
+  var _pieces = const <_Piece>[];
+  var _started = false;
+
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    final colors = _colorsOf(OmniPalette.of(context));
     final random = Random(widget.seed);
     _pieces = [
       for (var i = 0; i < 48; i++)
@@ -52,7 +59,7 @@ class _ConfettiBurstState extends State<ConfettiBurst>
           speed: 0.55 + random.nextDouble() * 0.6,
           spin: (random.nextDouble() - 0.5) * 14,
           size: 5 + random.nextDouble() * 5,
-          color: _colors[i % _colors.length],
+          color: colors[i % colors.length],
           round: random.nextBool(),
         ),
     ];

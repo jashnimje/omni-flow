@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../api/engine_calls.dart';
 import '../../api/tv_calls.dart';
-import '../design/tokens.dart';
+import '../design/tokens.dart' show LightWhite;
 import '../devices/device_text.dart';
 
 /// How a Home tile shows a device's live state: the colour a light glows,
@@ -29,14 +29,14 @@ Color? tileTint(DeviceView d) {
     final k = v is num ? kelvinOf(v, rangeOf(temp).unit) : null;
     if (k != null) return whiteOf(k);
   }
-  if (d.capabilityOf('level') != null) return OmniColors.warmWhite;
+  if (d.capabilityOf('level') != null) return LightWhite.warm;
   return null;
 }
 
 /// A light's white at [kelvin]: amber at 2200 K, pale at 6500 K.
 Color whiteOf(double kelvin) => Color.lerp(
-  OmniColors.warmWhite,
-  OmniColors.coolWhite,
+  LightWhite.warm,
+  LightWhite.cool,
   ((kelvin - 2200) / (6500 - 2200)).clamp(0.0, 1.0),
 )!;
 

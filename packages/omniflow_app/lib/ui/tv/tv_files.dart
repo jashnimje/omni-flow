@@ -406,7 +406,9 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
               key: ValueKey('file-$value'),
               icon: icon,
               title: label,
-              iconForeground: value == 'delete' ? OmniColors.bad : null,
+              iconForeground: value == 'delete'
+                  ? OmniPalette.of(context).bad
+                  : null,
               onTap: () => Navigator.of(context).pop(value),
             ),
         ],
@@ -609,7 +611,7 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
                   selected ? TvIcons.checked : TvIcons.unchecked,
                   color: selected
                       ? OmniPalette.of(context).accent
-                      : OmniColors.muted,
+                      : OmniPalette.of(context).muted,
                   fill: selected ? 1 : 0,
                   semanticLabel: selected ? 'Selected' : 'Not selected',
                 ),
@@ -670,10 +672,10 @@ class _TvFilesTabState extends ConsumerState<TvFilesTab> {
       bool danger = false,
     }) {
       final color = onTap == null
-          ? OmniColors.muted
+          ? OmniPalette.of(context).muted
           : danger
-          ? OmniColors.bad
-          : OmniColors.text;
+          ? OmniPalette.of(context).bad
+          : OmniPalette.of(context).text;
       return Expanded(
         child: Semantics(
           button: true,
@@ -809,10 +811,10 @@ class _Breadcrumbs extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (i > 0)
-                    const Icon(
+                    Icon(
                       OmniIcons.chevron,
                       size: 16,
-                      color: OmniColors.muted,
+                      color: OmniPalette.of(context).muted,
                     ),
                   TextButton(
                     key: ValueKey('crumb-$target'),
@@ -825,11 +827,11 @@ class _Breadcrumbs extends StatelessWidget {
                         horizontal: OmniSpace.sm,
                       ),
                       foregroundColor: i == crumbs.length - 1
-                          ? OmniColors.text
-                          : OmniColors.muted,
+                          ? OmniPalette.of(context).text
+                          : OmniPalette.of(context).muted,
                       disabledForegroundColor: i == crumbs.length - 1
-                          ? OmniColors.text
-                          : OmniColors.muted,
+                          ? OmniPalette.of(context).text
+                          : OmniPalette.of(context).muted,
                       textStyle: OmniText.caption.copyWith(
                         fontWeight: i == crumbs.length - 1
                             ? FontWeight.w700

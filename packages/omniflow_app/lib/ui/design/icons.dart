@@ -84,6 +84,16 @@ abstract final class OmniIcons {
   static const developer = Symbols.swap_vert_rounded;
   static const about = Symbols.info_rounded;
   static const packets = Symbols.swap_vert_rounded;
+  static const history = Symbols.history_rounded;
+  static const tune = Symbols.tune_rounded;
+  static const handyman = Symbols.handyman_rounded;
+  static const apps = Symbols.apps_rounded;
+  static const autoAwesome = Symbols.auto_awesome_rounded;
+
+  /// The Appearance theme choices: follow the phone, light, dark.
+  static const themeSystem = Symbols.brightness_auto_rounded;
+  static const themeLight = Symbols.light_mode_rounded;
+  static const themeDark = Symbols.dark_mode_rounded;
 
   /// The icon of a capability type (`toggle`, `level`, ...).
   static IconData forCapability(String? type) => switch (type) {

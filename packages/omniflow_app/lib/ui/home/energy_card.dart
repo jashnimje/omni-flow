@@ -39,15 +39,16 @@ final energySummaryProvider = FutureProvider.autoDispose<EnergySummary?>((
   }
 });
 
-/// Home's weather and energy cards, each shown only when there is
-/// something to show.
+/// Home's weather card and its Energy section, each shown only when there
+/// is something to show. On Home the weather sits in front and Energy at
+/// the end with the other sections.
 class SmartHomeCards extends StatelessWidget {
   const SmartHomeCards({super.key});
 
   @override
   Widget build(BuildContext context) => const Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [WeatherCard(), EnergyCard()],
+    children: [WeatherCard(), HomeEnergySection()],
   );
 }
 
@@ -56,50 +57,51 @@ bool showsEnergy(EnergySummary? summary) =>
     summary != null &&
     summary.devices.any((d) => d.watts != null || d.weekKwh > 0);
 
-/// Today's kWh across the plugs that report power, the top user, and the
-/// week as bars. A tap opens the energy page.
-class EnergyCard extends ConsumerWidget {
-  const EnergyCard({super.key});
+/// Home's Energy section: today's kWh across the plugs that report power
+/// as its summary, each plug's today inside with the week as bars, and a
+/// row to the energy page.
+class HomeEnergySection extends ConsumerWidget {
+  const HomeEnergySection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final summary = ref.watch(energySummaryProvider).value;
     if (!showsEnergy(summary)) return const SizedBox.shrink();
     final s = summary!;
-    final top = s.devices.first;
-    final week = _weekTotals(s);
-    return OmniCard(
+    final muted = OmniPalette.of(context).muted;
+    return OmniDisclosure(
       key: const ValueKey('home-energy'),
-      onTap: () => Navigator.of(context)
-          .push(MaterialPageRoute<void>(builder: (_) => const EnergyPage())),
-      child: Semantics(
-        button: true,
-        label:
-            'Energy: ${s.todayLine()}. Most used by ${top.name}, '
-            '${EnergySummary.kwh(top.todayKwh)}',
-        hint: 'Opens Energy',
-        excludeSemantics: true,
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Energy', style: OmniText.caption),
-                  const SizedBox(height: 2),
-                  Text(s.todayLine(), style: OmniText.bodyStrong),
-                  Text(
-                    'Most: ${top.name}, ${EnergySummary.kwh(top.todayKwh)}',
-                    style: OmniText.caption,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: OmniSpace.md),
-            WeekBars(runs: week),
-          ],
+      storageId: 'home-energy',
+      icon: OmniIcons.plug,
+      title: 'Energy',
+      summary: s.todayLine(),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: OmniSpace.sm),
+          child: Semantics(
+            label: 'The last 7 days of energy',
+            child: WeekBars(runs: _weekTotals(s)),
+          ),
         ),
-      ),
+        for (final d in s.devices)
+          OmniListRow(
+            key: ValueKey('home-energy-${d.id}'),
+            title: d.name,
+            value: EnergySummary.kwh(d.todayKwh),
+            valueColor: muted,
+          ),
+        OmniListRow(
+          key: const ValueKey('home-energy-open'),
+          icon: OmniIcons.gauge,
+          title: 'See all energy',
+          subtitle: 'Each plug, the week and the price',
+          chevron: true,
+          divider: false,
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const EnergyPage())),
+        ),
+      ],
     );
   }
 }
@@ -170,7 +172,7 @@ class EnergySection extends ConsumerWidget {
                           '${EnergySummary.kwh(row.weekKwh)} this week',
                           if (row.watts != null) '${row.watts!.round()} W now',
                         ].join(' · '),
-                        style: OmniText.caption,
+                        style: OmniText.captionOf(context),
                       ),
                     ],
                   ),

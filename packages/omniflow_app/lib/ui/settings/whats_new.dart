@@ -266,7 +266,7 @@ class _Note extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(
             top: OmniSpace.sm,
-            right: OmniSpace.gap,
+            right: OmniSpace.md,
           ),
           child: Icon(
             Icons.circle,

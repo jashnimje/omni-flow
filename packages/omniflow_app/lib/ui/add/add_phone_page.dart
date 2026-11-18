@@ -355,10 +355,10 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
         child: Text('${i + 1}. $step', style: OmniText.body),
       ),
     const SizedBox(height: OmniSpace.sm),
-    const Text(
+    Text(
       'Wireless debugging turns off when that phone restarts, so its owner '
       'turns it on again, and can turn it off there at any time.',
-      style: OmniText.caption,
+      style: OmniText.captionOf(context),
     ),
   ];
 

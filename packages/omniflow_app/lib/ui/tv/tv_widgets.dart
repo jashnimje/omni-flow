@@ -146,7 +146,7 @@ class TvKeyButton extends StatelessWidget {
     this.showLabel = true,
     this.text,
     this.background,
-    this.foreground = OmniColors.text,
+    this.foreground,
     this.height = OmniSpace.target,
   });
 
@@ -164,7 +164,9 @@ class TvKeyButton extends StatelessWidget {
 
   /// Defaults to the Appearance card colour.
   final Color? background;
-  final Color foreground;
+
+  /// Defaults to the Appearance text colour.
+  final Color? foreground;
   final double height;
 
   @override
@@ -172,7 +174,7 @@ class TvKeyButton extends StatelessWidget {
     final palette = OmniPalette.of(context);
     final radius = BorderRadius.circular(OmniRadii.button);
     final enabled = onTap != null;
-    final fg = enabled ? foreground : OmniColors.muted;
+    final fg = enabled ? (foreground ?? palette.text) : palette.muted;
     return Semantics(
       button: true,
       enabled: enabled,
@@ -282,7 +284,10 @@ class TransferProgress extends StatelessWidget {
         title: what,
         trailing: fraction == null
             ? null
-            : Text('${(fraction * 100).round()}%', style: OmniText.caption),
+            : Text(
+                '${(fraction * 100).round()}%',
+                style: OmniText.captionOf(context),
+              ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -298,7 +303,7 @@ class TransferProgress extends StatelessWidget {
                         ? formatBytes(p.done)
                         : '${formatBytes(p.done)} of ${formatBytes(total)}',
                     key: const ValueKey('tv-progress-text'),
-                    style: OmniText.caption,
+                    style: OmniText.captionOf(context),
                   ),
                 ),
                 if (onCancel != null)
@@ -463,7 +468,7 @@ abstract final class TvIcons {
   static const captions = Symbols.closed_caption_rounded;
   static const sleep = Symbols.bedtime_rounded;
   static const wake = Symbols.wb_sunny_rounded;
-  static const lastChannel = Symbols.history_rounded;
+  static const lastChannel = OmniIcons.history;
   static const recents = Symbols.view_carousel_rounded;
   static const send = Symbols.send_rounded;
   static const folder = Symbols.folder_rounded;
@@ -490,7 +495,7 @@ abstract final class TvIcons {
   static const data = Symbols.delete_sweep_rounded;
   static const disable = Symbols.block_rounded;
   static const enable = Symbols.check_circle_rounded;
-  static const history = Symbols.history_rounded;
+  static const history = OmniIcons.history;
   static const run = Symbols.play_arrow_rounded;
   static const clear = Symbols.clear_all_rounded;
 }

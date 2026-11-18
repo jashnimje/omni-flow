@@ -175,11 +175,11 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     return FormPage.instant(
       title: 'Backup and restore',
       children: (context) => [
-        const Text(
+        Text(
           'A backup holds your things, rooms, places, tags, automations and '
           'variables. Keys and passwords stay on this phone, so after a '
           'restore each device that had one asks for it again.',
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
         const SizedBox(height: OmniSpace.md),
         OmniListRow(

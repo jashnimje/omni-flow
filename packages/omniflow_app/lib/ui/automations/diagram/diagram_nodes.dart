@@ -9,19 +9,21 @@ import 'diagram_painter.dart';
 
 /// The colours a run lights nodes with.
 abstract final class RunColors {
-  static const ran = Color(0xFF34D399);
-  static const failed = OmniColors.bad;
-  static const skipped = OmniColors.muted;
-  static const waiting = OmniColors.info;
-  static const saidNo = OmniColors.warn;
+  /// Green, at 3 to 1 or better on the cards of either theme.
+  static Color ran(OmniPalette p) =>
+      p.isDark ? const Color(0xFF34D399) : OmniCardColors.green;
+  static Color failed(OmniPalette p) => p.bad;
+  static Color skipped(OmniPalette p) => p.muted;
+  static Color waiting(OmniPalette p) => p.info;
+  static Color saidNo(OmniPalette p) => p.warn;
 
-  static Color? of(DiagramNode n) {
-    if (n.saidNo) return saidNo;
+  static Color? of(DiagramNode n, OmniPalette p) {
+    if (n.saidNo) return saidNo(p);
     return switch (n.status) {
-      NodeStatus.ran => ran,
-      NodeStatus.failed => failed,
-      NodeStatus.skipped => skipped,
-      NodeStatus.waiting => waiting,
+      NodeStatus.ran => ran(p),
+      NodeStatus.failed => failed(p),
+      NodeStatus.skipped => skipped(p),
+      NodeStatus.waiting => waiting(p),
       _ => null,
     };
   }
@@ -109,9 +111,9 @@ class DiagramNodeCard extends StatelessWidget {
     final body = switch (node.kind) {
       NodeKind.trigger => _pill(context),
       NodeKind.check || NodeKind.decision => _diamond(context),
-      NodeKind.merge => _merge(),
-      NodeKind.end => _end(),
-      NodeKind.group => _header(),
+      NodeKind.merge => _merge(context),
+      NodeKind.end => _end(context),
+      NodeKind.group => _header(context),
       _ => _card(context),
     };
     final faded = node.status == NodeStatus.skipped;
@@ -142,16 +144,24 @@ class DiagramNodeCard extends StatelessWidget {
     );
   }
 
-  Color get _ring =>
-      error != null ? OmniColors.bad : RunColors.of(node) ?? Colors.transparent;
+  Color _ring(BuildContext context) {
+    final palette = OmniPalette.of(context);
+    return error != null
+        ? palette.bad
+        : RunColors.of(node, palette) ?? Colors.transparent;
+  }
 
-  Widget? _badge() {
+  Widget? _badge(BuildContext context) {
+    final palette = OmniPalette.of(context);
     final (IconData icon, Color color)? mark = node.saidNo
-        ? (AutomationIcons.stop, RunColors.saidNo)
+        ? (AutomationIcons.stop, RunColors.saidNo(palette))
         : switch (node.status) {
-            NodeStatus.ran => (OmniIcons.check, RunColors.ran),
-            NodeStatus.failed => (AutomationIcons.fail, RunColors.failed),
-            NodeStatus.waiting => (OmniIcons.wait, RunColors.waiting),
+            NodeStatus.ran => (OmniIcons.check, RunColors.ran(palette)),
+            NodeStatus.failed => (
+              AutomationIcons.fail,
+              RunColors.failed(palette),
+            ),
+            NodeStatus.waiting => (OmniIcons.wait, RunColors.waiting(palette)),
             _ => null,
           };
     if (mark == null) return null;
@@ -159,15 +169,19 @@ class DiagramNodeCard extends StatelessWidget {
       width: _badgeSize,
       height: _badgeSize,
       decoration: BoxDecoration(color: mark.$2, shape: BoxShape.circle),
-      child: Icon(mark.$1, size: 13, color: OmniColors.background),
+      child: Icon(mark.$1, size: 13, color: palette.background),
     );
   }
 
   /// [child] with its run mark at its top right corner, or for a diamond
   /// at the middle of its upper right side, so the mark sits on the shape
   /// rather than in the empty corner of its box.
-  Widget _withBadge(Widget child, {bool diamond = false}) {
-    final badge = _badge();
+  Widget _withBadge(
+    BuildContext context,
+    Widget child, {
+    bool diamond = false,
+  }) {
+    final badge = _badge(context);
     if (badge == null) return child;
     const half = _badgeSize / 2;
     return Stack(
@@ -216,23 +230,30 @@ class DiagramNodeCard extends StatelessWidget {
   }
 
   Widget _pill(BuildContext context) => _withBadge(
+    context,
     Container(
       padding: const EdgeInsets.symmetric(
         horizontal: OmniSpace.md,
         vertical: OmniSpace.xs,
       ),
       decoration: ShapeDecoration(
-        color: OmniColors.triggerSoft,
+        color: OmniPalette.of(context).triggerSoft,
         shape: StadiumBorder(
           side: BorderSide(
-            color: _ring == Colors.transparent ? OmniColors.trigger : _ring,
-            width: _ring == Colors.transparent ? 1.2 : 2,
+            color: _ring(context) == Colors.transparent
+                ? OmniPalette.of(context).trigger
+                : _ring(context),
+            width: _ring(context) == Colors.transparent ? 1.2 : 2,
           ),
         ),
       ),
       child: Row(
         children: [
-          Icon(icon ?? OmniIcons.event, size: 18, color: OmniColors.trigger),
+          Icon(
+            icon ?? OmniIcons.event,
+            size: 18,
+            color: OmniPalette.of(context).trigger,
+          ),
           const SizedBox(width: OmniSpace.sm),
           Expanded(child: _text(nodeText(node), lines: 2, size: 12)),
         ],
@@ -241,13 +262,15 @@ class DiagramNodeCard extends StatelessWidget {
   );
 
   Widget _diamond(BuildContext context) {
-    final ring = _ring;
+    final ring = _ring(context);
     final diamond = SizedBox(
       height: DiagramMetrics.diamondHeight,
       child: CustomPaint(
         painter: DiamondPainter(
-          fill: OmniColors.conditionSoft,
-          border: ring == Colors.transparent ? OmniColors.condition : ring,
+          fill: OmniPalette.of(context).conditionSoft,
+          border: ring == Colors.transparent
+              ? OmniPalette.of(context).condition
+              : ring,
           width: ring == Colors.transparent ? 1.4 : 2.4,
         ),
         child: Center(
@@ -266,7 +289,7 @@ class DiagramNodeCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _withBadge(diamond, diamond: true),
+        _withBadge(context, diamond, diamond: true),
         if (node.seen case final seen?)
           SizedBox(
             height: DiagramMetrics.seenHeight,
@@ -283,7 +306,9 @@ class DiagramNodeCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.left,
                   style: OmniText.caption.copyWith(
-                    color: node.saidNo ? RunColors.saidNo : OmniColors.text,
+                    color: node.saidNo
+                        ? RunColors.saidNo(OmniPalette.of(context))
+                        : OmniPalette.of(context).text,
                   ),
                 ),
               ),
@@ -294,18 +319,21 @@ class DiagramNodeCard extends StatelessWidget {
   }
 
   Widget _card(BuildContext context) {
-    final ring = _ring;
-    final tint = color ?? OmniColors.action;
+    final ring = _ring(context);
+    final tint = color ?? OmniPalette.of(context).action;
     final isWait = node.kind == NodeKind.wait;
     return _withBadge(
+      context,
       Container(
         padding: const EdgeInsets.all(OmniSpace.sm),
         decoration: BoxDecoration(
-          color: OmniColors.card,
+          color: OmniPalette.of(context).card,
           borderRadius: BorderRadius.circular(OmniRadii.step),
           border: Border.all(
             color: ring == Colors.transparent
-                ? (isWait ? OmniColors.flowLine : OmniColors.line)
+                ? (isWait
+                      ? OmniPalette.of(context).flowLine
+                      : OmniPalette.of(context).line)
                 : ring,
             width: ring == Colors.transparent ? 1 : 2,
           ),
@@ -338,19 +366,19 @@ class DiagramNodeCard extends StatelessWidget {
                       'Saw $seen',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: OmniText.caption,
+                      style: OmniText.captionOf(context),
                     ),
                 ],
               ),
             ),
             if (node.risk != null)
-              const Padding(
-                padding: EdgeInsets.only(left: OmniSpace.xs),
+              Padding(
+                padding: const EdgeInsets.only(left: OmniSpace.xs),
                 child: Icon(
                   OmniIcons.warning,
-                  key: ValueKey('diagram-risk'),
+                  key: const ValueKey('diagram-risk'),
                   size: 16,
-                  color: OmniColors.warn,
+                  color: OmniPalette.of(context).warn,
                 ),
               ),
           ],
@@ -359,44 +387,55 @@ class DiagramNodeCard extends StatelessWidget {
     );
   }
 
-  Widget _merge() => Center(
+  Widget _merge(BuildContext context) => Center(
     child: Container(
       width: DiagramMetrics.mergeSize,
       height: DiagramMetrics.mergeSize,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: OmniColors.raised,
-        border: Border.all(color: RunColors.of(node) ?? OmniColors.muted),
+        color: OmniPalette.of(context).raised,
+        border: Border.all(
+          color:
+              RunColors.of(node, OmniPalette.of(context)) ??
+              OmniPalette.of(context).muted,
+        ),
       ),
     ),
   );
 
-  Widget _end() => _withBadge(
+  Widget _end(BuildContext context) => _withBadge(
+    context,
     Container(
       alignment: Alignment.center,
       decoration: ShapeDecoration(
-        color: OmniColors.raised,
+        color: OmniPalette.of(context).raised,
         shape: StadiumBorder(
-          side: BorderSide(color: RunColors.of(node) ?? OmniColors.line),
+          side: BorderSide(
+            color:
+                RunColors.of(node, OmniPalette.of(context)) ??
+                OmniPalette.of(context).line,
+          ),
         ),
       ),
       child: Text(
         nodeText(node),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: OmniText.caption.copyWith(color: OmniColors.text),
+        style: OmniText.caption.copyWith(color: OmniPalette.of(context).text),
       ),
     ),
   );
 
-  Widget _header() => Container(
+  Widget _header(BuildContext context) => Container(
     alignment: Alignment.center,
-    padding: const EdgeInsets.symmetric(horizontal: OmniSpace.gap),
+    padding: const EdgeInsets.symmetric(horizontal: OmniSpace.md),
     decoration: BoxDecoration(
-      color: OmniColors.flowSoft,
+      color: OmniPalette.of(context).flowSoft,
       borderRadius: BorderRadius.circular(OmniRadii.chip),
       border: Border.all(
-        color: error != null ? OmniColors.bad : OmniColors.flowLine,
+        color: error != null
+            ? OmniPalette.of(context).bad
+            : OmniPalette.of(context).flowLine,
       ),
     ),
     child: Row(
@@ -405,7 +444,7 @@ class DiagramNodeCard extends StatelessWidget {
         Icon(
           icon ?? AutomationIcons.together,
           size: 14,
-          color: OmniColors.flowControl,
+          color: OmniPalette.of(context).flowControl,
         ),
         const SizedBox(width: OmniSpace.xs),
         Flexible(
@@ -464,7 +503,8 @@ class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
         borderRadius: BorderRadius.circular(OmniRadii.step),
         boxShadow: [
           BoxShadow(
-            color: RunColors.waiting.withValues(alpha: 0.15 + 0.35 * _c.value),
+            color: RunColors.waiting(OmniPalette.of(context))
+                .withValues(alpha: 0.15 + 0.35 * _c.value),
             blurRadius: 4 + 8 * _c.value,
           ),
         ],

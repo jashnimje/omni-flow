@@ -55,7 +55,7 @@ class WeekBars extends StatelessWidget {
                   ),
                   if (labels case final l? when i < l.length) ...[
                     const SizedBox(height: OmniSpace.xs),
-                    Text(l[i], style: OmniText.caption),
+                    Text(l[i], style: OmniText.captionOf(context)),
                   ],
                 ],
               ),
@@ -85,13 +85,17 @@ class StreakFlame extends StatelessWidget {
           Symbols.local_fire_department_rounded,
           fill: days > 0 ? 1 : 0,
           size: size,
-          color: days > 0 ? OmniColors.trigger : OmniColors.muted,
+          color: days > 0
+              ? OmniPalette.of(context).trigger
+              : OmniPalette.of(context).muted,
         ),
         const SizedBox(width: 2),
         Text(
           '$days',
           style: OmniText.label.copyWith(
-            color: days > 0 ? OmniColors.trigger : OmniColors.muted,
+            color: days > 0
+                ? OmniPalette.of(context).trigger
+                : OmniPalette.of(context).muted,
           ),
         ),
       ],

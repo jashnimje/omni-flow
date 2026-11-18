@@ -440,7 +440,7 @@ class _TvMouseState extends State<TvMouse> {
                         e,
                         key: const ValueKey('tv-mouse-error'),
                         textAlign: TextAlign.center,
-                        style: OmniText.caption,
+                        style: OmniText.captionOf(context),
                       ),
                     ),
                   )
@@ -474,13 +474,13 @@ class _TvMouseState extends State<TvMouse> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_live)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: OmniSpace.xs),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: OmniSpace.xs),
             child: Text(
               'The pointer moves on the TV as you drag.',
-              key: ValueKey('tv-mouse-live'),
+              key: const ValueKey('tv-mouse-live'),
               textAlign: TextAlign.center,
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           )
         else ...[
@@ -519,10 +519,10 @@ class _TvMouseState extends State<TvMouse> {
                   border: Border.all(color: OmniPalette.of(context).line),
                 ),
                 alignment: Alignment.center,
-                child: const Text(
+                child: Text(
                   'Drag to move · tap to click\nTwo fingers to scroll · hold to long-press',
                   textAlign: TextAlign.center,
-                  style: OmniText.caption,
+                  style: OmniText.captionOf(context),
                 ),
               ),
             );

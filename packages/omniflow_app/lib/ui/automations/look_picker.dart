@@ -150,14 +150,16 @@ class _IconChoice extends StatelessWidget {
               color: selected ? color.withValues(alpha: 0.18) : null,
               shape: BoxShape.circle,
               border: Border.all(
-                color: selected ? OmniColors.text : Colors.transparent,
+                color: selected
+                    ? OmniPalette.of(context).text
+                    : Colors.transparent,
                 width: 2,
               ),
             ),
             child: Icon(
               icon,
               size: 24,
-              color: selected ? color : OmniColors.muted,
+              color: selected ? color : OmniPalette.of(context).muted,
             ),
           ),
         ),

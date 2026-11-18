@@ -4,14 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../state/appearance.dart';
 import '../design/design.dart';
 
-/// Settings, Appearance: OmniFlow's teal or the wallpaper's colours, and
-/// pure black. The app recolours as soon as a choice is made, and the
-/// choice stays on this phone.
+/// Settings, Appearance: light, dark or as the phone is set, OmniFlow's
+/// teal or the wallpaper's colours, and pure black. The app recolours as
+/// soon as a choice is made, and the choice stays on this phone.
 class AppearancePage extends ConsumerWidget {
   const AppearancePage({super.key});
 
   /// How Settings sums the setting up.
   static String summary(Appearance a) => [
+    ?switch (a.theme) {
+      ThemeChoice.system => null,
+      ThemeChoice.light => 'Light',
+      ThemeChoice.dark => 'Dark',
+    },
     switch (a.colours) {
       ColourSource.teal => 'Teal',
       ColourSource.wallpaper => 'Wallpaper colours',
@@ -29,15 +34,43 @@ class AppearancePage extends ConsumerWidget {
     final notifier = ref.read(appearanceProvider.notifier);
     void pick(ColourSource source) =>
         notifier.change(appearance.copyWith(colours: source));
+    Widget theme(ThemeChoice choice, IconData icon, String title, String sub) =>
+        _Choice(
+          key: ValueKey('appearance-theme-${choice.name}'),
+          title: title,
+          subtitle: sub,
+          icon: icon,
+          selected: appearance.theme == choice,
+          onTap: () => notifier.change(appearance.copyWith(theme: choice)),
+        );
     return FormPage.instant(
       title: 'Appearance',
       children: (context) => [
+        const OmniSectionHeader('Theme'),
+        theme(
+          ThemeChoice.system,
+          OmniIcons.themeSystem,
+          'System',
+          'Light or dark, as your phone is set',
+        ),
+        theme(
+          ThemeChoice.light,
+          OmniIcons.themeLight,
+          'Light',
+          'Light screens all the time',
+        ),
+        theme(
+          ThemeChoice.dark,
+          OmniIcons.themeDark,
+          'Dark',
+          'Dark screens all the time',
+        ),
         const OmniSectionHeader('Colours'),
         _Choice(
           key: const ValueKey('appearance-teal'),
           title: 'Teal',
           subtitle: 'The OmniFlow colours',
-          swatch: OmniColors.accent,
+          swatch: OmniPalette.of(context).accent,
           selected: appearance.colours == ColourSource.teal,
           onTap: () => pick(ColourSource.teal),
         ),
@@ -59,11 +92,12 @@ class AppearancePage extends ConsumerWidget {
           key: const ValueKey('appearance-pure-black'),
           icon: OmniIcons.screen,
           title: 'Pure black',
-          subtitle: 'Black screens, which use less power on OLED phones',
+          subtitle: _pureBlackWords,
+          subtitleLines: 3,
           divider: false,
           semanticLabel:
               'Pure black, ${appearance.pureBlack ? 'on' : 'off'}. '
-              'Black screens, which use less power on OLED phones',
+              '$_pureBlackWords',
           onTap: () => notifier.change(
             appearance.copyWith(pureBlack: !appearance.pureBlack),
           ),
@@ -81,7 +115,11 @@ class AppearancePage extends ConsumerWidget {
   }
 }
 
-/// One colour choice: a round swatch, the words, and a tick when chosen.
+const _pureBlackWords =
+    'Black screens in the dark theme, which use less power on OLED phones';
+
+/// One choice: an [icon], or a round swatch of a colour, the words, and a
+/// tick when chosen.
 class _Choice extends StatelessWidget {
   const _Choice({
     super.key,
@@ -90,6 +128,7 @@ class _Choice extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.swatch,
+    this.icon,
   });
 
   final String title;
@@ -97,6 +136,7 @@ class _Choice extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final Color? swatch;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -109,18 +149,25 @@ class _Choice extends StatelessWidget {
         subtitle: subtitle,
         subtitleLines: 3,
         semanticLabel: '$title. $subtitle',
-        leading: Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: swatch ?? palette.raised,
-            border: Border.all(color: palette.line),
-          ),
-          child: swatch == null
-              ? const Icon(OmniIcons.color, size: 18, color: OmniColors.text)
-              : null,
-        ),
+        icon: icon,
+        leading: icon != null
+            ? null
+            : Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: swatch ?? palette.raised,
+                  border: Border.all(color: palette.line),
+                ),
+                child: swatch == null
+                    ? Icon(
+                        OmniIcons.color,
+                        size: 18,
+                        color: OmniPalette.of(context).text,
+                      )
+                    : null,
+              ),
         trailing: selected
             ? Icon(OmniIcons.check, color: palette.accent)
             : const SizedBox(width: 24),

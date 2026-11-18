@@ -292,10 +292,7 @@ class _TagPageState extends ConsumerState<TagPage> {
           title: last == null ? 'Not scanned yet' : 'Scanned ${agoText(last)}',
           subtitle: [
             if (by.isNotEmpty) 'by $by',
-            if (uid != null)
-              'card ${uidText(uid)}'
-            else
-              'no card yet: write one or scan it',
+            if (uid == null) 'no card yet: write one or scan it',
           ].join(' · '),
         ),
         children: (context) => [
@@ -314,8 +311,61 @@ class _TagPageState extends ConsumerState<TagPage> {
             icon: OmniIcons.add,
             onPressed: () => _newAutomation(device),
           ),
-          const OmniSectionHeader('Recent scans'),
-          ..._scansList(),
+        ],
+        sections: (context) => [
+          OmniDisclosure(
+            key: const ValueKey('tag-activity'),
+            icon: OmniIcons.time,
+            title: 'Activity',
+            summary: _scansSummary(),
+            children: _scansList(),
+          ),
+          OmniDisclosure(
+            key: const ValueKey('tag-settings'),
+            icon: OmniIcons.level,
+            title: 'More settings',
+            summary: 'Name, card, remove',
+            children: [
+              OmniListRow(
+                key: const ValueKey('tag-settings-rename'),
+                icon: OmniIcons.edit,
+                title: 'Name',
+                subtitle: view.name,
+                chevron: true,
+                onTap: () => _rename(device),
+              ),
+              OmniListRow(
+                key: const ValueKey('tag-settings-forget'),
+                icon: OmniIcons.retry,
+                title: 'Use a different card',
+                subtitle: 'The next card scanned with its link becomes it',
+                subtitleLines: 2,
+                chevron: true,
+                onTap: () => _forgetCard(device),
+              ),
+              OmniDisclosure(
+                key: const ValueKey('tag-developer'),
+                icon: OmniIcons.developer,
+                title: 'Developer details',
+                summary: 'The card id',
+                children: [
+                  OmniListRow(
+                    key: const ValueKey('tag-uid'),
+                    title: 'Card id',
+                    value: uid == null ? 'None yet' : uidText(uid),
+                    divider: false,
+                  ),
+                ],
+              ),
+              const SizedBox(height: OmniSpace.sm),
+              OmniButton.danger(
+                key: const ValueKey('tag-settings-remove'),
+                label: 'Remove ${view.name}',
+                icon: OmniIcons.delete,
+                onPressed: () => _remove(device),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -368,6 +418,19 @@ class _TagPageState extends ConsumerState<TagPage> {
     ];
     if (then.isNotEmpty) return then.join(', then ');
     return a.sentence.map((p) => p.text).join(' ');
+  }
+
+  /// The Activity line: how many recent scans, so most never open it.
+  String _scansSummary() {
+    final scans = _scans;
+    if (scans == null) return 'Reading';
+    if (!scans.ok) return 'Could not read the scans';
+    final n = scans.value?.length ?? 0;
+    return switch (n) {
+      0 => 'No scans yet',
+      1 => '1 recent scan',
+      _ => '$n recent scans',
+    };
   }
 
   List<Widget> _scansList() {

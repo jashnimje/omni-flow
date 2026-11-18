@@ -3,14 +3,17 @@ import 'package:flutter/material.dart';
 import '../headers.dart';
 import '../icons.dart';
 import '../banner.dart';
+import '../disclosure.dart';
 import '../tokens.dart';
 import 'load_state.dart';
 
 /// T3, one thing (a device, sensor, tag, board, place, hub or run): the
 /// large title is its name, header [actions] (star, more), [banners]
 /// (offline, needs pairing), the [hero] card with its main control,
-/// optional [tabs] chips, then the sections. While it loads it shows the
-/// page skeleton, and when the thing is gone the [notFound] state.
+/// optional [tabs] chips, then the [children], then the collapsed
+/// [sections] (Automations, Activity, More settings). While it loads it
+/// shows the page skeleton, and when the thing is gone the [notFound]
+/// state.
 class DetailPage extends StatelessWidget {
   const DetailPage({
     super.key,
@@ -24,6 +27,7 @@ class DetailPage extends StatelessWidget {
     this.notFound,
     this.bottom,
     this.controller,
+    this.sections,
   }) : body = null;
 
   /// A detail page whose body under the hero is not a list (the TV tabs):
@@ -40,7 +44,8 @@ class DetailPage extends StatelessWidget {
     this.notFound,
     this.bottom,
   }) : children = null,
-       controller = null;
+       controller = null,
+       sections = null;
 
   final String title;
   final List<Widget> actions;
@@ -61,6 +66,12 @@ class DetailPage extends StatelessWidget {
   final ScrollController? controller;
 
   final List<Widget> Function(BuildContext context)? children;
+
+  /// The secondary information, after [children]: each an
+  /// [OmniDisclosure], closed until tapped, in the standard order
+  /// (docs/ui/design-v2.md, The collapsed section). A [DetailPage.custom]
+  /// body places its own.
+  final List<OmniDisclosure> Function(BuildContext context)? sections;
   final Widget Function(BuildContext context)? body;
 
   /// The not-found state every detail page shares.
@@ -76,6 +87,11 @@ class DetailPage extends StatelessWidget {
     ?tabs,
     if (tabs != null) const SizedBox(height: OmniSpace.sm),
   ];
+
+  List<Widget> _sections(BuildContext context) {
+    final list = sections?.call(context) ?? const <OmniDisclosure>[];
+    return [if (list.isNotEmpty) const SizedBox(height: OmniSpace.md), ...list];
+  }
 
   @override
   Widget build(BuildContext context) => OmniPage(
@@ -116,7 +132,11 @@ class DetailPage extends StatelessWidget {
             empty: notFound ?? gone,
             banners: banners,
             fullPageError: true,
-            data: (context) => [..._top(), ...children!(context)],
+            data: (context) => [
+              ..._top(),
+              ...children!(context),
+              ..._sections(context),
+            ],
           ),
         );
       },

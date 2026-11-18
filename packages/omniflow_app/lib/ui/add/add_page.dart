@@ -220,98 +220,210 @@ class _AddPageState extends ConsumerState<AddPage> {
                           dimension: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : TextButton(
+                      : FilledButton.tonal(
                           key: ValueKey('candidate-add-$i'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(72, OmniSpace.target),
+                          ),
                           onPressed: _adding == null ? () => _add(f) : null,
                           child: const Text('Add'),
                         ),
                   onTap: _adding == null ? () => _add(f) : null,
                 ),
-            if (known.isNotEmpty) ...[
-              const OmniSectionHeader('Already added'),
-              for (final (i, f) in known.indexed)
-                Opacity(
-                  opacity: 0.6,
-                  child: OmniListRow(
-                    key: ValueKey('known-$i'),
-                    icon: _icon(f),
-                    title: _knownName('${f.candidate['knownAs']}'),
-                    subtitle: '${f.candidate['host'] ?? ''}',
-                    value: 'added',
-                    valueColor: OmniColors.muted,
-                  ),
-                ),
-            ],
-            const OmniSectionHeader('Or add by hand'),
-            // The common kinds first, in plain words. Another phone has its
-            // own steps. Until the drivers are read the kinds wait as one
-            // skeleton, so none is inserted above another later.
+            const OmniSectionHeader('Add by hand'),
+            // The common kinds as big tiles, in plain words. Another phone
+            // has its own steps. Until the drivers are read the kinds wait
+            // as one skeleton, so none is inserted above another later.
             if (!kindsReady)
               const OmniListSkeleton(
                 key: ValueKey('add-kinds-loading'),
                 rows: 3,
                 label: 'Loading the kinds',
-              ),
-            for (final k in addKinds)
-              if (kindsReady)
-                if (k.id == 'phones' || _drivers.values.any(k.has))
-                  OmniListRow(
-                    key: ValueKey(
-                      k.id == 'phones'
-                          ? 'add-another-phone'
-                          : 'manual-kind-${k.id}',
-                    ),
-                    icon: k.icon,
-                    title: k.title,
-                    subtitle: k.subtitle,
-                    chevron: true,
-                    onTap: () => k.id == 'phones'
-                        ? openAddPhone(context)
-                        : _byHand(kind: k.id),
+              )
+            else
+              AddKindGrid(
+                tiles: [
+                  for (final k in addKinds)
+                    if (k.id == 'phones' || _drivers.values.any(k.has))
+                      AddKindTile(
+                        key: ValueKey(
+                          k.id == 'phones'
+                              ? 'add-another-phone'
+                              : 'manual-kind-${k.id}',
+                        ),
+                        icon: k.icon,
+                        title: k.title,
+                        onTap: () => k.id == 'phones'
+                            ? openAddPhone(context)
+                            : _byHand(kind: k.id),
+                      ),
+                  AddKindTile(
+                    key: const ValueKey('manual-tag'),
+                    icon: OmniIcons.tag,
+                    title: 'NFC tag',
+                    onTap: () => showAddTagSheet(context),
                   ),
-            OmniListRow(
-              key: const ValueKey('manual-tag'),
-              icon: OmniIcons.tag,
-              title: 'NFC tag',
-              chevron: true,
-              onTap: () => showAddTagSheet(context),
-            ),
-            const AddWeatherRow(),
-            OmniListRow(
-              key: const ValueKey('manual-place'),
-              icon: OmniIcons.place,
-              title: 'A place (home, office)',
-              chevron: true,
-              onTap: () => _byHand(driver: '${place?['driver'] ?? 'place'}'),
-            ),
-            OmniListRow(
-              key: const ValueKey('manual-usb-board'),
-              icon: OmniIcons.board,
-              title: 'A board on USB',
-              subtitle:
-                  'ESP32, ESP8266, Pico W or Uno, plugged into this phone',
-              chevron: true,
-              onTap: () => showUsbBoardSheet(context),
-            ),
-            OmniListRow(
-              key: const ValueKey('manual-firmware'),
-              icon: OmniIcons.developer,
-              title: 'Install firmware on a board',
-              subtitle: 'OmniFlow, or your own .bin or .hex, over USB',
-              chevron: true,
-              onTap: () => showFirmwareSheet(context),
-            ),
-            OmniListRow(
-              key: const ValueKey('add-by-driver'),
+                  AddKindTile(
+                    key: const ValueKey('manual-place'),
+                    icon: OmniIcons.place,
+                    title: 'A place',
+                    onTap: () =>
+                        _byHand(driver: '${place?['driver'] ?? 'place'}'),
+                  ),
+                ],
+              ),
+            const SizedBox(height: OmniSpace.md),
+            if (known.isNotEmpty)
+              OmniDisclosure(
+                key: const ValueKey('add-known'),
+                icon: OmniIcons.check,
+                title: 'Already added',
+                summary: known.length == 1
+                    ? '1 found that you have'
+                    : '${known.length} found that you have',
+                children: [
+                  for (final (i, f) in known.indexed)
+                    Opacity(
+                      opacity: 0.6,
+                      child: OmniListRow(
+                        key: ValueKey('known-$i'),
+                        icon: _icon(f),
+                        title: _knownName('${f.candidate['knownAs']}'),
+                        subtitle: '${f.candidate['host'] ?? ''}',
+                        value: 'added',
+                        valueColor: OmniPalette.of(context).muted,
+                        divider: i < known.length - 1,
+                      ),
+                    ),
+                ],
+              ),
+            OmniDisclosure(
+              key: const ValueKey('add-more-ways'),
               icon: OmniIcons.more,
-              title: 'More kinds',
-              subtitle: others.isEmpty
-                  ? 'Every driver, by its full name'
-                  : '${others.take(4).join(', ')}…',
-              chevron: true,
-              onTap: _byHand,
+              title: 'More ways to add',
+              summary: 'Weather, boards on USB, firmware, every kind',
+              children: [
+                const AddWeatherRow(),
+                OmniListRow(
+                  key: const ValueKey('manual-usb-board'),
+                  icon: OmniIcons.board,
+                  title: 'A board on USB',
+                  subtitle:
+                      'ESP32, ESP8266, Pico W or Uno, plugged into this phone',
+                  chevron: true,
+                  onTap: () => showUsbBoardSheet(context),
+                ),
+                OmniListRow(
+                  key: const ValueKey('manual-firmware'),
+                  icon: OmniIcons.developer,
+                  title: 'Install firmware on a board',
+                  subtitle: 'OmniFlow, or your own .bin or .hex, over USB',
+                  chevron: true,
+                  onTap: () => showFirmwareSheet(context),
+                ),
+                OmniListRow(
+                  key: const ValueKey('add-by-driver'),
+                  icon: OmniIcons.more,
+                  title: 'More kinds',
+                  subtitle: others.isEmpty
+                      ? 'Every kind, by its full name'
+                      : '${others.take(4).join(', ')}…',
+                  chevron: true,
+                  divider: false,
+                  onTap: _byHand,
+                ),
+              ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The kinds to add by hand as big tiles, two across, one across from
+/// 130% text so a name never wraps into a sliver.
+class AddKindGrid extends StatelessWidget {
+  const AddKindGrid({super.key, required this.tiles});
+
+  final List<Widget> tiles;
+
+  @override
+  Widget build(BuildContext context) {
+    final large = MediaQuery.textScalerOf(context).scale(10) >= 13;
+    final columns = large ? 1 : 2;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < tiles.length; i += columns)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmniSpace.md),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var c = 0; c < columns; c++) ...[
+                    if (c > 0) const SizedBox(width: OmniSpace.md),
+                    Expanded(
+                      child: i + c < tiles.length
+                          ? tiles[i + c]
+                          : const SizedBox(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One big kind tile: an icon and a plain name, and a tap opens its steps.
+class AddKindTile extends StatelessWidget {
+  const AddKindTile({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
+    final radius = BorderRadius.circular(OmniRadii.tile);
+    return Semantics(
+      button: true,
+      label: title,
+      excludeSemantics: true,
+      child: Material(
+        color: palette.card,
+        shape: RoundedRectangleBorder(borderRadius: radius),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 104),
+            child: Padding(
+              padding: const EdgeInsets.all(OmniSpace.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  OmniIconBox(icon: icon, size: 40),
+                  const SizedBox(height: OmniSpace.md),
+                  Text(
+                    title,
+                    style: OmniText.bodyStrong.copyWith(color: palette.text),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

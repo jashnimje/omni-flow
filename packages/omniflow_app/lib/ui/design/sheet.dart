@@ -17,7 +17,7 @@ Future<T?> showOmniSheet<T>(
   enableDrag: dismissible,
   useSafeArea: true,
   backgroundColor: OmniPalette.of(context).sheet,
-  barrierColor: OmniColors.scrim,
+  barrierColor: OmniPalette.of(context).scrim,
   showDragHandle: false,
   sheetAnimationStyle: OmniMotion.reduced(context)
       ? AnimationStyle.noAnimation
@@ -99,18 +99,23 @@ class OmniSheet extends StatelessWidget {
                                 header: true,
                                 child: Text(
                                   title!,
-                                  style: OmniText.titleMedium,
+                                  style: OmniText.titleLarge.copyWith(
+                                    color: OmniPalette.of(context).text,
+                                  ),
                                 ),
                               ),
                             if (subtitle != null)
-                              Text(subtitle!, style: OmniText.caption),
+                              Text(
+                                subtitle!,
+                                style: OmniText.captionOf(context),
+                              ),
                           ],
                         ),
                       ),
                       ?trailing,
                     ],
                   ),
-                if (hasHeader) const SizedBox(height: OmniSpace.sm),
+                if (hasHeader) const SizedBox(height: OmniSpace.md),
                 if (pinned != null) ...[
                   pinned!,
                   const SizedBox(height: OmniSpace.sm),

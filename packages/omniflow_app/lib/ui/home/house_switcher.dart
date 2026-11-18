@@ -89,7 +89,10 @@ Future<void> showHouses(BuildContext context) => showOmniSheet<void>(
               trailing: PopupMenuButton<String>(
                 key: ValueKey('house-menu-${h.id}'),
                 tooltip: 'More for ${h.name}',
-                icon: const Icon(OmniIcons.more, color: OmniColors.muted),
+                icon: Icon(
+                  OmniIcons.more,
+                  color: OmniPalette.of(context).muted,
+                ),
                 onSelected: (action) => action == 'rename'
                     ? _rename(sheet, ref, h)
                     : _remove(sheet, ref, h),

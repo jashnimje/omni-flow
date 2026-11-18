@@ -92,13 +92,9 @@ class PowerSwitch extends ConsumerWidget {
   }
 }
 
-const _warmth = LinearGradient(
-  colors: [OmniColors.warmWhite, OmniColors.coolWhite],
-);
-const _cool = LinearGradient(
-  colors: [OmniColors.coolWhite, OmniColors.warmWhite],
-);
-const _onWarmth = OmniColors.onWarmWhite;
+const _warmth = LightWhite.kelvin;
+const _cool = LightWhite.mired;
+const _onWarmth = LightWhite.onWarm;
 
 /// Sliders for every level and warmth, then the colour swatches. With
 /// [modes] (the device page) the levels, then the light's white, colour
@@ -186,13 +182,14 @@ class TvQuickControls extends ConsumerWidget {
     final id = device.id;
     final s = TvState.ofDevice(device.json);
     final max = s.volumeMax <= 0 ? 100 : s.volumeMax;
+    final palette = OmniPalette.of(context);
     Future<void> key(int code) =>
         callEngine(ref, TvCalls.key, TvCalls.keyArgs(id, keycode: code));
     Widget remoteKey(int code, IconData icon, String label) => OmniIconAction(
       key: ValueKey('tv-mini-$code'),
       icon: icon,
       label: label,
-      color: OmniColors.text,
+      color: palette.text,
       onPressed: () => key(code),
     );
     return Column(
@@ -218,7 +215,7 @@ class TvQuickControls extends ConsumerWidget {
               key: ValueKey('tv-mute-$id'),
               icon: s.muted == true ? AreaIcons.mute : AreaIcons.volume,
               label: s.muted == true ? 'Unmute' : 'Mute',
-              color: OmniColors.text,
+              color: palette.text,
               onPressed: () => key(Keycodes.mute),
             ),
           ],
@@ -228,9 +225,9 @@ class TvQuickControls extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.all(OmniSpace.xs),
             decoration: BoxDecoration(
-              color: OmniColors.card,
+              color: palette.card,
               borderRadius: BorderRadius.circular(OmniRadii.card),
-              border: Border.all(color: OmniColors.line),
+              border: Border.all(color: palette.line),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -252,8 +249,8 @@ class TvQuickControls extends ConsumerWidget {
                           width: 44,
                           height: 44,
                           alignment: Alignment.center,
-                          decoration: const BoxDecoration(
-                            color: OmniColors.raised,
+                          decoration: BoxDecoration(
+                            color: palette.raised,
                             shape: BoxShape.circle,
                           ),
                           child: const Text('OK', style: OmniText.label),

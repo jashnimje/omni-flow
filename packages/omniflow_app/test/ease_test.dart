@@ -67,7 +67,7 @@ void main() {
         'categories in one row that scrolls sideways', (tester) async {
       final engine = automationsEngine();
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       final search = tester.widget<TextField>(
         find.byKey(const ValueKey('picker-search')),
       );
@@ -81,12 +81,11 @@ void main() {
   });
 
   group('automation rows', () {
-    testWidgets('the switch says On or Off, and the filter says Quick links', (
+    testWidgets('the state says On or Off, and says what a tap does', (
       tester,
     ) async {
       final engine = automationsEngine();
       await pumpPage(tester, engine, const AutomationsScreen());
-      expect(find.textContaining('Quick links'), findsOneWidget);
       expect(
         tester
             .widget<Text>(
@@ -203,7 +202,7 @@ void main() {
           },
         ),
       );
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'category-This phone');
       await tapKey(tester, 'pick-phone-app');
       expect(find.byKey(const ValueKey('phone-app')), findsOneWidget);
@@ -240,7 +239,7 @@ void main() {
           livingTv,
         ];
       await pumpPushed(tester, engine, const RuleEditorPage(initial: _blank));
-      await tapText(tester, 'Add step');
+      await tapAdd(tester, 'Add step');
       await tapKey(tester, 'pick-foreach');
       await tapText(tester, 'A room');
       await tapKey(tester, 'foreach-room-Study');

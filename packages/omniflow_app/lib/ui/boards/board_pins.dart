@@ -3,6 +3,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:omniflow_engine/omniflow_engine.dart' show pinIdFor;
 
 import '../../api/engine_calls.dart';
+import '../design/icons.dart';
 
 /// What is wired to a pin, in the words of 5.2. Each role is one or two of
 /// the firmware's pin modes; the engine checks the mode against the board.
@@ -11,7 +12,7 @@ enum PinRole {
   relay('Relay or LED', Symbols.electric_bolt_rounded),
   dimmer('Dimmer', Symbols.brightness_medium_rounded),
   servo('Servo', Symbols.rotate_right_rounded),
-  analog('Analog sensor', Symbols.tune_rounded);
+  analog('Analog sensor', OmniIcons.tune);
 
   const PinRole(this.label, this.icon);
 

@@ -62,13 +62,8 @@ final Map<ShellTab, ShellTabSpec> shellTabs = {
   ShellTab.home: ShellTabSpec(
     label: 'Home',
     icon: OmniIcons.home,
+    // Add is the + in Home's top bar, so nothing floats over the tiles.
     root: (_) => const HomeScreen(),
-    fab: const ShellFab(
-      key: ValueKey('add-device'),
-      label: 'Add',
-      onPressed: openAddThing,
-      hiddenWhen: homeIsEmpty,
-    ),
     fullScreenWhen: homeShowsFirstRun,
   ),
   ShellTab.automations: ShellTabSpec(
@@ -86,12 +81,6 @@ final Map<ShellTab, ShellTabSpec> shellTabs = {
     label: 'Devices',
     icon: OmniIcons.devices,
     root: (_) => const DevicesScreen(),
-    fab: const ShellFab(
-      key: ValueKey('add-device'),
-      label: 'Add',
-      onPressed: openAddThing,
-      hiddenWhen: devicesAreEmpty,
-    ),
   ),
   ShellTab.settings: ShellTabSpec(
     label: 'Settings',

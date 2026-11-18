@@ -8,6 +8,7 @@ import '../../state/clock.dart' show hour12Provider;
 import '../../state/providers.dart';
 import '../add/guided_steps_page.dart';
 import '../add/pair_sheet.dart';
+import '../automations/sun_lighting_page.dart' show FollowSunSwitch;
 import '../automations/automations.dart';
 import '../boards/pin_sheet.dart';
 import '../design/automation_look.dart' show AutomationBadge;
@@ -17,6 +18,7 @@ import '../../state/reload_home.dart';
 import '../home/home_data.dart';
 import '../settings/developer_page.dart';
 import '../shell/shell.dart';
+import '../../api/smart_home_calls.dart' show isSmartLight;
 import '../tags/write_tag_sheet.dart';
 import 'device_text.dart';
 import '../../api/screen_calls.dart';
@@ -89,7 +91,7 @@ class DeviceMenu extends ConsumerWidget {
     return PopupMenuButton<String>(
       key: ValueKey('device-menu-${d.id}'),
       tooltip: 'More for ${d.name}',
-      icon: const Icon(OmniIcons.more, color: OmniColors.muted),
+      icon: Icon(OmniIcons.more, color: OmniPalette.of(context).muted),
       onSelected: (choice) => switch (choice) {
         'pair' => showPairDevice(context, d.json),
         'setup' => openSetup(context, d.json),
@@ -183,7 +185,7 @@ class OfflineHelp extends ConsumerWidget {
           key: const ValueKey('device-find'),
           icon: OmniIcons.search,
           title: 'Find it on the network',
-          subtitle: 'if its address changed',
+          subtitle: 'If its address changed',
           chevron: true,
           onTap: () => showOmniSheet<void>(
             context,
@@ -229,66 +231,245 @@ class _RetryButtonState extends ConsumerState<_RetryButton> {
   );
 }
 
-/// What only someone debugging a device needs, folded away: its raw ids
-/// and the messages sent to it.
-class _Advanced extends StatefulWidget {
-  const _Advanced({required this.device});
+/// What only someone debugging a device needs, folded away inside More
+/// settings: its ids, every change as the engine stored it (the ones
+/// Activity leaves out too) and the messages sent to it.
+class DeveloperDetails extends ConsumerWidget {
+  const DeveloperDetails({super.key, required this.device});
 
   final DeviceView device;
 
   @override
-  State<_Advanced> createState() => _AdvancedState();
-}
-
-class _AdvancedState extends State<_Advanced> {
-  var _open = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final d = widget.device;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final d = device;
+    final palette = OmniPalette.of(context);
+    final entries = ref.watch(deviceHistoryProvider(d.id)).value ?? const [];
+    final names = automationNames(ref);
+    final hour12 = ref.watch(hour12Provider);
+    return OmniDisclosure(
+      key: const ValueKey('device-advanced'),
+      storageId: 'device-advanced-${d.id}',
+      icon: OmniIcons.developer,
+      title: 'Developer details',
+      summary: 'Ids and the messages sent to it',
       children: [
-        Semantics(
-          expanded: _open,
-          child: OmniListRow(
-            key: const ValueKey('device-advanced'),
-            icon: OmniIcons.developer,
-            title: 'Advanced',
-            subtitle: 'ids and the messages sent to it',
-            trailing: Icon(
-              _open ? Icons.expand_less : Icons.expand_more,
-              color: OmniColors.muted,
+        OmniListRow(
+          icon: OmniIcons.info,
+          title: 'Id',
+          value: d.id,
+          valueColor: palette.muted,
+        ),
+        if (d.json['stableId'] case final String stable)
+          OmniListRow(
+            icon: OmniIcons.device,
+            title: 'Hardware id',
+            value: stable,
+            valueColor: palette.muted,
+          ),
+        if (entries.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              OmniSpace.md,
+              OmniSpace.md,
+              OmniSpace.md,
+              OmniSpace.xs,
             ),
-            onTap: () => setState(() => _open = !_open),
+            child: Text('Raw changes', style: OmniText.captionOf(context)),
+          ),
+          for (final (i, e) in entries.take(20).indexed)
+            OmniListRow(
+              key: ValueKey('device-raw-$i'),
+              title: RecentSection.describe(e, d, names, hour12: hour12),
+            ),
+        ],
+        OmniListRow(
+          key: const ValueKey('device-packets'),
+          icon: OmniIcons.packets,
+          title: 'See what was sent',
+          chevron: true,
+          divider: false,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => DeveloperScreen(filter: d.host ?? d.id),
+            ),
           ),
         ),
-        if (_open) ...[
+      ],
+    );
+  }
+}
+
+/// The names of the automations by id, so a change says "by Good night"
+/// rather than an id.
+Map<String, String> automationNames(WidgetRef ref) => {
+  for (final a
+      in ref.watch(summariesProvider).value ?? const <AutomationSummary>[])
+    a.id: a.name,
+};
+
+/// The one line under a device's Automations section.
+String? usedInSummary(List<AutomationSummary>? used) => switch (used) {
+  null => null,
+  [] => 'Not used yet',
+  [_] => 'Used in 1',
+  final all => 'Used in ${all.length}',
+};
+
+/// A device page's collapsed sections, in the standard order and always
+/// below its controls: the automations that use it, what happened to it
+/// in plain words, and its room, name, settings and Remove.
+/// [activityTop] goes first inside Activity (a sensor's day chart).
+List<OmniDisclosure> deviceSections(
+  WidgetRef ref,
+  DeviceView d, {
+  Widget? activityTop,
+}) {
+  final entries = ref.watch(deviceHistoryProvider(d.id)).value;
+  final plain = entries == null
+      ? null
+      : DeviceActivitySection.plainEntries(entries, d, automationNames(ref));
+  return [
+    OmniDisclosure(
+      key: ValueKey('device-automations-${d.id}'),
+      storageId: 'device-automations-${d.id}',
+      icon: OmniIcons.automations,
+      title: 'Automations',
+      summary: usedInSummary(ref.watch(usedInProvider(d.id)).value),
+      children: [UsedInSection(device: d, header: false)],
+    ),
+    OmniDisclosure(
+      key: ValueKey('device-activity-${d.id}'),
+      storageId: 'device-activity-${d.id}',
+      icon: OmniIcons.history,
+      title: 'Activity',
+      summary: plain == null
+          ? null
+          : DeviceActivitySection.summaryOf([for (final p in plain) p.$2]),
+      children: [
+        ?activityTop,
+        DeviceActivitySection(device: d),
+      ],
+    ),
+    OmniDisclosure(
+      key: ValueKey('device-more-${d.id}'),
+      storageId: 'device-more-${d.id}',
+      icon: OmniIcons.tune,
+      title: 'More settings',
+      summary: isSmartLight(d)
+          ? 'Room, name, follow the sun'
+          : 'Room, name and Remove',
+      children: [DeviceSection(device: d)],
+    ),
+  ];
+}
+
+/// What happened to a device, newest first, in plain words ("Turned on
+/// by you", "Brightness 60% by Good night"). A change with no plain
+/// description (a key no capability names, an empty value) is left out
+/// here and shown only under Developer details, Raw changes.
+class DeviceActivitySection extends ConsumerWidget {
+  const DeviceActivitySection({super.key, required this.device});
+
+  final DeviceView device;
+
+  /// How many changes Activity lists.
+  static const shown = 8;
+
+  /// [e] as a sentence, or null when it has no plain description.
+  static String? plain(
+    HistoryEntry e,
+    DeviceView d,
+    Map<String, String> names,
+  ) {
+    final cap = d.capabilities.where((c) => c['stateKey'] == e.key).firstOrNull;
+    if (cap == null) return null;
+    final label = switch (cap['label']) {
+      final String l when l.trim().isNotEmpty => l.trim(),
+      _ => null,
+    };
+    final type = cap['type'];
+    final unit = rangeOf(cap).unit;
+    final what = switch ((type, e.value)) {
+      ('toggle', true) => 'Turned on',
+      ('toggle', false) => 'Turned off',
+      (_, null) => null,
+      _ when label == null => null,
+      ('color_temp', final num n) => 'Warmth ${_kelvin(n, unit)}',
+      (_, final num n) => '$label ${formatValue(n, unit)}',
+      (_, final bool b) => '$label ${b ? 'on' : 'off'}',
+      (_, final String t) when t.trim().isNotEmpty => '$label ${t.trim()}',
+      _ => null,
+    };
+    if (what == null) return null;
+    final by = switch (e.by) {
+      'user' => ' by you',
+      final String id when names[id] != null => ' by ${names[id]}',
+      _ => '',
+    };
+    return '$what$by';
+  }
+
+  static String _kelvin(num n, String unit) =>
+      formatValue((kelvinOf(n, unit) ?? n).round(), 'K');
+
+  /// The entries of [entries] with a plain description, each with it.
+  static List<(String, HistoryEntry)> plainEntries(
+    List<HistoryEntry> entries,
+    DeviceView d,
+    Map<String, String> names,
+  ) => [
+    for (final e in entries)
+      if (plain(e, d, names) case final words?) (words, e),
+  ];
+
+  /// Activity's one line: "5 changes today", "Nothing today" or "Nothing
+  /// yet", counting only the changes it lists.
+  static String summaryOf(List<HistoryEntry> plain, {DateTime? now}) {
+    if (plain.isEmpty) return 'Nothing yet';
+    final today = (now ?? DateTime.now()).toLocal();
+    final count = plain.where((e) {
+      final at = e.at.toLocal();
+      return at.year == today.year &&
+          at.month == today.month &&
+          at.day == today.day;
+    }).length;
+    return switch (count) {
+      0 => 'Nothing today',
+      1 => '1 change today',
+      final n => '$n changes today',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final entries = ref.watch(deviceHistoryProvider(device.id)).value;
+    if (entries == null) {
+      return const OmniListSkeleton(rows: 2, label: 'Loading what happened');
+    }
+    final plain = plainEntries(entries, device, automationNames(ref));
+    final hour12 = ref.watch(hour12Provider);
+    if (plain.isEmpty) {
+      return Padding(
+        key: ValueKey('activity-none-${device.id}'),
+        padding: const EdgeInsets.symmetric(vertical: OmniSpace.md),
+        child: Text(
+          'Nothing has changed yet. Changes show here as they happen.',
+          style: OmniText.captionOf(context),
+        ),
+      );
+    }
+    return Column(
+      key: ValueKey('activity-${device.id}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (i, (words, e)) in plain.take(shown).indexed)
           OmniListRow(
-            icon: OmniIcons.info,
-            title: 'Id',
-            value: d.id,
-            valueColor: OmniColors.muted,
+            key: ValueKey('activity-${device.id}-$i'),
+            title: words,
+            value: when(e.at, hour12: hour12),
+            valueColor: OmniPalette.of(context).muted,
+            divider: i < plain.take(shown).length - 1,
           ),
-          if (d.json['stableId'] case final String stable)
-            OmniListRow(
-              icon: OmniIcons.device,
-              title: 'Hardware id',
-              value: stable,
-              valueColor: OmniColors.muted,
-            ),
-          OmniListRow(
-            key: const ValueKey('device-packets'),
-            icon: OmniIcons.packets,
-            title: 'See what was sent',
-            chevron: true,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => DeveloperScreen(filter: d.host ?? d.id),
-              ),
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -298,9 +479,13 @@ class _AdvancedState extends State<_Advanced> {
 /// page and in the TV's more sheet. Each row says what the automation does
 /// with it, and while it is offline, what that means.
 class UsedInSection extends ConsumerWidget {
-  const UsedInSection({super.key, required this.device});
+  const UsedInSection({super.key, required this.device, this.header = true});
 
   final DeviceView device;
+
+  /// Whether it carries its own "Automations that use it" heading. Off
+  /// inside a page's Automations section, which already names it.
+  final bool header;
 
   /// What [a] does with [d]: a step on it, or it starts or checks on it.
   static String roleOf(AutomationSummary a, DeviceView d) {
@@ -339,7 +524,7 @@ class UsedInSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const OmniSectionHeader('Automations that use it'),
+        if (header) const OmniSectionHeader('Automations that use it'),
         if (used.isEmpty)
           OmniListRow(
             key: ValueKey('used-in-new-${device.id}'),
@@ -427,7 +612,9 @@ class RecentSection extends ConsumerWidget {
   }
 }
 
-/// The device's room, its name, address and settings, and Remove.
+/// The inside of a device page's More settings: its room, its name,
+/// address and settings, Follow the sun for a light, Developer details,
+/// and Remove.
 class DeviceSection extends ConsumerWidget {
   const DeviceSection({super.key, required this.device});
 
@@ -440,7 +627,6 @@ class DeviceSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const OmniSectionHeader('Device'),
         OmniListRow(
           key: ValueKey('device-room-${d.id}'),
           icon: OmniIcons.room,
@@ -452,7 +638,7 @@ class DeviceSection extends ConsumerWidget {
         OmniListRow(
           key: ValueKey('device-details-${d.id}'),
           icon: OmniIcons.edit,
-          title: 'Name, address and settings',
+          title: 'Name and address',
           subtitle: address.isEmpty ? d.name : address,
           chevron: true,
           onTap: () => _details(context, ref, d),
@@ -462,12 +648,13 @@ class DeviceSection extends ConsumerWidget {
             key: ValueKey('device-hostkey-${d.id}'),
             icon: OmniIcons.permissions,
             title: 'SSH host key',
-            subtitle: 'check it, or trust a new one after a reinstall',
+            subtitle: 'Check it, or trust a new one after a reinstall',
             chevron: true,
             onTap: () => showHostKeySheet(context, d),
           ),
-        _Advanced(device: d),
-        const SizedBox(height: OmniSpace.lg),
+        if (d.online && isSmartLight(d)) FollowSunSwitch(device: d),
+        DeveloperDetails(device: d),
+        const SizedBox(height: OmniSpace.md),
         OmniButton.danger(
           key: ValueKey('device-remove-${d.id}'),
           label: 'Remove ${d.name}',
@@ -516,7 +703,7 @@ class DeviceSection extends ConsumerWidget {
                 icon: OmniIcons.network,
                 title: 'Address',
                 value: d.host,
-                valueColor: OmniColors.muted,
+                valueColor: OmniPalette.of(context).muted,
               ),
             OmniListRow(
               key: const ValueKey('device-settings'),

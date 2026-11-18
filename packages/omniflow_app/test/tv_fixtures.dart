@@ -5,6 +5,9 @@ import 'package:omniflow_app/ui/tv/tv_page.dart';
 
 import 'fake_engine.dart';
 import 'screen_harness.dart';
+import 'section_helpers.dart';
+
+export 'section_helpers.dart';
 
 const tvId = 'lounge_tv';
 
@@ -234,30 +237,66 @@ FakeEngine tvEngine() {
   return engine;
 }
 
-/// Shows [tab] of the open TV control centre.
+/// Opens the remote's "Use it as a gamepad or a mouse" choice, which sits
+/// under More buttons.
+Future<void> openRemoteMode(WidgetTester tester) async {
+  await openSectionKey(tester, 'tv-more-buttons');
+  final row = find.byKey(const ValueKey('tv-remote-mode'));
+  await tester.ensureVisible(row);
+  await tester.pumpAndSettle();
+  await tester.tap(row);
+  await tester.pumpAndSettle();
+}
+
+/// Leaves the TV tool page on top, back to the TV page.
+Future<void> closeTvTool(WidgetTester tester) async {
+  tester.state<NavigatorState>(find.byType(Navigator).last).pop();
+  await tester.pumpAndSettle();
+}
+
+/// Shows [tab] of the open TV control centre. A TV tool opens from the TV
+/// tools section under the remote, a phone's from the header's Phone
+/// tools, each as its own page.
 Future<void> openTvTab(WidgetTester tester, String tab) async {
   if (tab == 'Remote') return;
-  final more = TvTab.values.where((t) => t.label == tab && !t.isMain);
-  if (more.firstOrNull case final t?) {
-    final chip = find.byKey(const ValueKey('tv-tab-more'));
-    await tester.ensureVisible(chip);
-    await tester.pumpAndSettle();
-    await tester.tap(chip);
-    await tester.pumpAndSettle();
+  final inSwitch = find.descendant(
+    of: find.byKey(const ValueKey('tv-tabs')),
+    matching: find.text(tab),
+  );
+  final more = TvTab.values.where((t) => t.label == tab);
+  if (inSwitch.evaluate().isEmpty && more.firstOrNull != null) {
+    final t = more.first;
+    // The TV tools sit under the remote, so another view goes back to it.
+    final remote = find.descendant(
+      of: find.byKey(const ValueKey('tv-tabs')),
+      matching: find.text('Remote'),
+    );
+    if (find.byKey(const ValueKey('tv-tools')).evaluate().isEmpty &&
+        remote.evaluate().isNotEmpty) {
+      await tester.tap(remote);
+      await tester.pumpAndSettle();
+    }
+    final tools = find.byKey(const ValueKey('tv-tools'));
+    if (tools.evaluate().isNotEmpty) {
+      await openSectionKey(tester, 'tv-tools');
+    } else {
+      await tester.tap(find.byKey(const ValueKey('tv-tab-more')));
+      await tester.pumpAndSettle();
+    }
     final row = find.byKey(ValueKey('tv-more-${t.name}'));
     await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
     await tester.tap(row);
     await tester.pumpAndSettle();
     return;
   }
-  final chip = find.descendant(
+  final segment = find.descendant(
     of: find.byKey(const ValueKey('tv-tabs')),
     matching: find.text(tab),
   );
-  // The tabs scroll sideways, so the later ones may be out of view.
-  await tester.ensureVisible(chip);
+  await tester.ensureVisible(segment);
   await tester.pumpAndSettle();
-  await tester.tap(chip);
+  await tester.tap(segment);
   await tester.pumpAndSettle();
 }
 

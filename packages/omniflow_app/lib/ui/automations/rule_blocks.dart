@@ -201,11 +201,34 @@ void _move<T>(List<T> list, int from, int to) {
   list.insert(to, list.removeAt(from));
 }
 
+/// Adds a trigger the person picks to [draft]'s WHEN.
+Future<void> addTrigger(BuildContext context, RuleDraft draft) async {
+  final t = await pickTrigger(context, draft.words);
+  if (t == null) return;
+  draft.spec.when.add(t);
+  draft.changed();
+}
+
+/// Adds a condition the person picks to [conditions].
+Future<void> addCondition(
+  BuildContext context,
+  RuleDraft draft,
+  List<RuleCondition> conditions,
+) async {
+  final c = await pickCondition(context, draft.words);
+  if (c == null) return;
+  conditions.add(c);
+  draft.changed();
+}
+
 /// WHEN: any of these.
 class TriggerBlock extends StatelessWidget {
-  const TriggerBlock({super.key, required this.draft});
+  const TriggerBlock({super.key, required this.draft, this.addable = true});
 
   final RuleDraft draft;
+
+  /// False for the editor's own block, whose one "Add a step" adds here.
+  final bool addable;
 
   @override
   Widget build(BuildContext context) {
@@ -216,14 +239,13 @@ class TriggerBlock extends StatelessWidget {
       heading: 'When',
       caption: draft.spec.onlyKeeps && when.isEmpty
           ? 'not needed: each keep watches its own while'
-          : 'any of these',
-      addLabel: 'Add trigger',
-      onAdd: () async {
-        final t = await pickTrigger(context, draft.words);
-        if (t == null) return;
-        when.add(t);
-        draft.changed();
-      },
+          : addable || when.length > 1
+          ? 'any of these'
+          : '',
+      addLabel: addable ? 'Add trigger' : null,
+      onAdd: () => addTrigger(context, draft),
+      isEmpty: when.isEmpty && !draft.spec.onlyKeeps,
+      emptyLabel: 'Choose what starts it',
       children: [
         _reorderable(
           count: when.length,
@@ -289,7 +311,11 @@ class ConditionBlock extends StatelessWidget {
     required this.path,
     this.heading = 'Only if',
     this.caption = 'all of these',
+    this.addable = true,
   });
+
+  /// False for the editor's own block, whose one "Add a step" adds here.
+  final bool addable;
 
   final RuleDraft draft;
   final List<RuleCondition> conditions;
@@ -304,14 +330,9 @@ class ConditionBlock extends StatelessWidget {
     key: ValueKey('block-$path'),
     kind: SentenceKind.onlyIf,
     heading: heading,
-    caption: caption,
-    addLabel: 'Add condition',
-    onAdd: () async {
-      final c = await pickCondition(context, draft.words);
-      if (c == null) return;
-      conditions.add(c);
-      draft.changed();
-    },
+    caption: addable || conditions.length > 1 ? caption : '',
+    addLabel: addable ? 'Add condition' : null,
+    onAdd: () => addCondition(context, draft, conditions),
     children: [
       _reorderable(
         count: conditions.length,
@@ -364,7 +385,11 @@ class StepBlock extends StatelessWidget {
     this.kind = SentenceKind.then,
     this.allowKeep = false,
     this.onRemoveBlock,
+    this.addable = true,
   });
+
+  /// False for the editor's own block, whose one "Add a step" adds here.
+  final bool addable;
 
   final RuleDraft draft;
   final List<RuleStep> steps;
@@ -386,9 +411,11 @@ class StepBlock extends StatelessWidget {
     key: ValueKey('block-$path'),
     kind: kind,
     heading: heading,
-    caption: caption,
-    addLabel: 'Add step',
-    onAdd: () => _add(context),
+    caption: addable || steps.length > 1 ? caption : '',
+    addLabel: addable ? 'Add step' : null,
+    onAdd: () => add(context),
+    isEmpty: steps.isEmpty,
+    emptyLabel: 'Choose what it does',
     children: [
       _reorderable(
         count: steps.length,
@@ -405,7 +432,7 @@ class StepBlock extends StatelessWidget {
           child: TextButton(
             onPressed: onRemoveBlock,
             style: TextButton.styleFrom(
-              foregroundColor: OmniColors.bad,
+              foregroundColor: OmniPalette.of(context).bad,
               minimumSize: const Size(OmniSpace.target, OmniSpace.target),
               textStyle: OmniText.labelMedium,
             ),
@@ -417,7 +444,8 @@ class StepBlock extends StatelessWidget {
 
   void _keepsLast() => keepsLast(steps);
 
-  Future<void> _add(BuildContext context) async {
+  /// Adds a step the person picks, and opens a group's page to fill it.
+  Future<void> add(BuildContext context) async {
     var step = await pickStep(
       context,
       draft.words,
@@ -926,7 +954,7 @@ class _KeepPageState extends State<KeepPage> {
                         'Anything that changes it in between is put back.'
                   : 'Anything that changes it while they hold is put back. '
                         'When they stop, it is left as it is.',
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
         ],

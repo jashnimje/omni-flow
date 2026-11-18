@@ -130,7 +130,9 @@ void main() {
         'and the recent scans', (tester) async {
       await pumpTag(tester);
       expect(find.text('Scanned $scannedAgo'), findsOneWidget);
-      expect(find.text('by this phone · card 04:A1:B2:C3'), findsOneWidget);
+      expect(find.text('by this phone'), findsOneWidget);
+      // The card id is a developer detail, inside More settings.
+      expect(find.textContaining('04:A1:B2:C3'), findsNothing);
       expect(engine.callsOf('automation.list').single.$2, {
         'tag': 'front_door',
       });
@@ -141,8 +143,30 @@ void main() {
         'key': 'last_scanned',
         'limit': 10,
       });
+      // Recent scans sit in the closed Activity section.
+      expect(find.textContaining('· this phone'), findsNothing);
+      expect(find.text('1 recent scan'), findsOneWidget);
+      await tester.tap(find.text('Activity'));
+      await tester.pumpAndSettle();
       expect(find.textContaining('Today'), findsOneWidget);
       expect(find.textContaining('· this phone'), findsOneWidget);
+    });
+
+    testWidgets('More settings holds the name, the card and its id', (
+      tester,
+    ) async {
+      await pumpTag(tester);
+      expect(find.byKey(const ValueKey('tag-settings-rename')), findsNothing);
+      await tester.ensureVisible(find.text('More settings'));
+      await tester.tap(find.text('More settings'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tag-settings-rename')), findsOneWidget);
+      expect(find.byKey(const ValueKey('tag-settings-remove')), findsOneWidget);
+      expect(find.byKey(const ValueKey('tag-uid')), findsNothing);
+      await tester.ensureVisible(find.text('Developer details'));
+      await tester.tap(find.text('Developer details'));
+      await tester.pumpAndSettle();
+      expect(find.text('04:A1:B2:C3'), findsOneWidget);
     });
 
     testWidgets('a tag never scanned and used by nothing says so', (
@@ -160,6 +184,9 @@ void main() {
       await pumpTag(tester);
       expect(find.text('Not scanned yet'), findsOneWidget);
       expect(find.byKey(const ValueKey('tag-no-automations')), findsOneWidget);
+      expect(find.text('No scans yet'), findsOneWidget);
+      await tester.tap(find.text('Activity'));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('tag-no-scans')), findsOneWidget);
     });
 

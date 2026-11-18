@@ -173,8 +173,8 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
                 : null,
           ),
         if (!diagram.editable)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
               OmniSpace.screen,
               OmniSpace.sm,
               OmniSpace.screen,
@@ -183,7 +183,7 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
             child: Text(
               'This automation came as a graph, so it is shown but not '
               'changed here.',
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
         Expanded(

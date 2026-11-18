@@ -195,11 +195,11 @@ class _HomeLocationPageState extends ConsumerState<HomeLocationPage> {
           icon: OmniIcons.place,
           onPressed: _busy ? null : _useThisPhone,
         ),
-        const Padding(
+        Padding(
           padding: EdgeInsets.only(top: OmniSpace.xs),
           child: Text(
             'Do this while you are at home.',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ),
         const OmniSectionHeader('Or type it'),
@@ -231,13 +231,13 @@ class _HomeLocationPageState extends ConsumerState<HomeLocationPage> {
           chevron: true,
           onTap: () => openSunLighting(context),
         ),
-        const Padding(
+        Padding(
           padding: EdgeInsets.only(top: OmniSpace.sm),
           child: Text(
             'Sunrise and sunset are worked out on your own devices. If you '
             'add the weather, this place, rounded, is sent to Open-Meteo to '
             'read the forecast.',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ),
       ],

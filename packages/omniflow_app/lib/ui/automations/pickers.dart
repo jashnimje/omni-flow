@@ -221,11 +221,11 @@ Future<T?> _optionsForm<T>(
       final option = options.where((o) => o.id == picked).firstOrNull;
       return [
         if (options.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: OmniSpace.md),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: OmniSpace.md),
             child: Text(
               'It reports nothing an automation can use yet.',
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
         for (final o in options)

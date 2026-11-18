@@ -160,9 +160,8 @@ void main() {
       expect(engine.callsOf('automation.save'), isEmpty);
     });
 
-    testWidgets('Automations lists Type what you want and the suggestions', (
-      tester,
-    ) async {
+    testWidgets('Automations keeps the suggestions in Ideas for you, and '
+        'Type what you want in New', (tester) async {
       final engine = automationsEngine();
       offer(engine, [
         suggestion(
@@ -175,7 +174,10 @@ void main() {
         ),
       ]);
       await pumpPage(tester, engine, const _HomeThenAutomations());
-      expect(find.byKey(const ValueKey('type-it')), findsOneWidget);
+      expect(find.byKey(const ValueKey('type-it')), findsNothing);
+      expect(find.text('2 automations you could add'), findsOneWidget);
+      expect(find.byKey(const ValueKey('suggestions-row')), findsNothing);
+      await tapKey(tester, 'automations-ideas');
       expect(find.byKey(const ValueKey('suggestions-row')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('suggestions-row')));
       await tester.pumpAndSettle();
@@ -183,11 +185,12 @@ void main() {
       expect(find.text('Make it'), findsNWidgets(2));
     });
 
-    testWidgets('with no suggestions only Type what you want shows', (
+    testWidgets('with no suggestions Ideas for you offers the templates', (
       tester,
     ) async {
       await pumpPage(tester, automationsEngine(), const AutomationsScreen());
-      expect(find.byKey(const ValueKey('type-it')), findsOneWidget);
+      await tapKey(tester, 'automations-ideas');
+      expect(find.byKey(const ValueKey('ideas-templates')), findsOneWidget);
       expect(find.byKey(const ValueKey('suggestions-row')), findsNothing);
       expect(find.byType(AutomationHelpers), findsOneWidget);
     });

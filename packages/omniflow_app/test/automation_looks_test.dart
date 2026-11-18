@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/api/engine_calls.dart';
 import 'package:omniflow_app/ui/automations/automations.dart';
+import 'package:omniflow_app/ui/automations/card_look.dart';
 import 'package:omniflow_app/ui/automations/new_automation.dart'
     show TemplateGallery;
 import 'package:omniflow_app/ui/design/automation_look.dart';
@@ -109,10 +110,12 @@ void main() {
     test('falls back to the plain look for anything unknown', () {
       expect(AutomationLook.colorOf('#123456'), isNull);
       expect(AutomationLook.colorOf(null), isNull);
-      expect(AutomationLook.badgeOf(null), OmniColors.raised);
-      expect(AutomationLook.badgeInkOf('#nope'), OmniColors.text);
-      expect(AutomationLook.tintOf(null), OmniColors.card);
-      expect(AutomationLook.lineOf(null), OmniColors.line);
+      for (final p in [OmniPalette.teal, OmniPalette.tealLight]) {
+        expect(AutomationLook.badgeOf(null, p), p.raised);
+        expect(AutomationLook.badgeInkOf('#nope', p), p.text);
+        expect(AutomationLook.tintOf(null, p), p.card);
+        expect(AutomationLook.lineOf(null, p), p.line);
+      }
       expect(AutomationLook.iconOf('nope'), OmniIcons.automations);
       expect(
         AutomationLook.iconOf(null, fallback: OmniIcons.scene),
@@ -135,21 +138,24 @@ void main() {
         ],
       );
       await fx.pumpPage(tester, engine, const AutomationsScreen());
-      final badge = tester.widget<AutomationBadge>(
-        find.byKey(const ValueKey('badge-lights_out')),
+      Color cardColor(String key) =>
+          tester.widget<Material>(find.byKey(ValueKey(key))).color!;
+      // The stored purple wears the bold violet, which white reads on.
+      expect(cardColor('automation-lights_out'), OmniCardColors.violet);
+      expect(
+        tester
+            .widget<CardIcon>(find.byKey(const ValueKey('badge-lights_out')))
+            .icon,
+        AutomationLook.icons['moon'],
       );
-      expect(badge.color, '#A78BFA');
-      expect(badge.icon, AutomationLook.icons['moon']);
       expect(find.byKey(const ValueKey('asks-first-lights_out')), findsOne);
       expect(find.byKey(const ValueKey('tells-you-lights_out')), findsOne);
       expect(find.text('Asks first'), findsOneWidget);
       expect(find.text('Tells you when it runs'), findsOneWidget);
       expect(find.byKey(const ValueKey('asks-first-plain')), findsNothing);
       expect(find.byKey(const ValueKey('tells-you-plain')), findsNothing);
-      final plain = tester.widget<AutomationBadge>(
-        find.byKey(const ValueKey('badge-plain')),
-      );
-      expect(plain.color, isNull);
+      // One with no colour wears teal, the colour its look is named.
+      expect(cardColor('automation-plain'), OmniCardColors.teal);
     });
 
     testWidgets('a scene row wears its colour', (tester) async {
@@ -159,35 +165,55 @@ void main() {
         ],
       );
       await fx.pumpPage(tester, engine, const AutomationsScreen());
-      await fx.tapKey(tester, 'filter-scenes');
-      final badge = tester.widget<AutomationBadge>(
-        find.byKey(const ValueKey('badge-movie')),
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('automation-filters')),
+          matching: find.text('Scenes'),
+        ),
       );
-      expect(badge.color, '#F472B6');
-      expect(badge.icon, sceneIconFor('movie'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Material>(find.byKey(const ValueKey('scene-movie')))
+            .color,
+        OmniCardColors.pink,
+      );
+      expect(
+        tester.widget<CardIcon>(find.byKey(const ValueKey('badge-movie'))).icon,
+        sceneIconFor('movie'),
+      );
     });
   });
 
   group('Home Run', () {
-    testWidgets('one Run section of scenes and manual automations, above '
-        'favourites', (tester) async {
+    testWidgets('one Scenes section of scenes and manual automations, '
+        'under favourites, with All', (tester) async {
       await pump(tester, homeWithRun());
       expect(find.byKey(const ValueKey('home-run')), findsOneWidget);
-      expect(find.text('Run'), findsOneWidget);
+      final header = find.descendant(
+        of: find.byKey(const ValueKey('home-run')),
+        matching: find.text('Scenes'),
+      );
+      expect(header, findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('home-run')),
+          matching: find.text('All'),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('scene-movie')), findsOneWidget);
       expect(find.byKey(const ValueKey('run-lights_out')), findsOneWidget);
       expect(find.byKey(const ValueKey('run-on_its_own')), findsNothing);
       expect(find.byKey(const ValueKey('run-desk_button')), findsNothing);
-      final run = tester.getTopLeft(find.text('Run')).dy;
+      final scenes = tester.getTopLeft(header).dy;
       final favourites = tester.getTopLeft(find.text('Favourites')).dy;
-      expect(run < favourites, isTrue);
-      final scene = tester.getTopLeft(
-        find.byKey(const ValueKey('scene-movie')),
-      );
-      final rule = tester.getTopLeft(
-        find.byKey(const ValueKey('run-lights_out')),
-      );
-      expect(scene.dy, rule.dy, reason: 'three columns at phone width');
+      expect(favourites < scenes, isTrue);
+      final scene = tester.getRect(find.byKey(const ValueKey('scene-movie')));
+      final rule = tester.getRect(find.byKey(const ValueKey('run-lights_out')));
+      expect(scene.top, rule.top, reason: 'two a row at phone width');
+      // Run buttons are at least 56 dp, the size of a primary control.
+      expect(scene.height, greaterThanOrEqualTo(56));
     });
 
     testWidgets('tiles are labelled for screen readers', (tester) async {
@@ -311,17 +337,15 @@ void main() {
       expect(find.byType(ReviewPage), findsOneWidget);
     });
 
-    testWidgets('with nothing to run the section offers to save a scene', (
-      tester,
-    ) async {
+    testWidgets('with nothing to run there is no Scenes section, and saving '
+        'how things are is on the Scenes page, not Home', (tester) async {
       final engine = household();
       engine.answers['scene.list'] = {'ok': true, 'scenes': []};
       await pump(tester, engine);
-      expect(find.byKey(const ValueKey('home-run')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-run')), findsNothing);
       expect(find.byType(RunTile), findsNothing);
-      await tapKey(tester, 'run-capture');
-      expect(find.text('Save how things are now'), findsWidgets);
-      expect(find.byKey(const ValueKey('capture-name')), findsOneWidget);
+      expect(find.byKey(const ValueKey('run-capture')), findsNothing);
+      expect(find.text('Save how things are now'), findsNothing);
     });
   });
 

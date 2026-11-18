@@ -438,6 +438,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('settings-hubs')), findsNothing);
     expect(find.text('Hubs'), findsNothing);
+    await openMoreSettings(tester);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('settings-home-runs-on')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-home-runs-on')));
     await tester.pumpAndSettle();
     expect(find.text('This phone runs the hub'), findsOneWidget);

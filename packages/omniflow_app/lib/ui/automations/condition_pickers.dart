@@ -183,9 +183,12 @@ Future<BetweenCondition?> betweenForm(
         onChanged: (v) => setState(() => end = v),
       ),
       if (start.compareTo(end) > 0)
-        const Padding(
-          padding: EdgeInsets.only(top: OmniSpace.sm),
-          child: Text('This runs across midnight.', style: OmniText.caption),
+        Padding(
+          padding: const EdgeInsets.only(top: OmniSpace.sm),
+          child: Text(
+            'This runs across midnight.',
+            style: OmniText.captionOf(context),
+          ),
         ),
     ],
   );

@@ -6,6 +6,7 @@ import '../../api/home_location_calls.dart';
 import '../../api/smart_home_calls.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
+import 'device_sections.dart' show deviceSections;
 import '../settings/home_location_page.dart'
     show homeLocationProvider, openHomeLocation;
 
@@ -51,7 +52,7 @@ class WeatherCard extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(thing.name, style: OmniText.caption),
+                  Text(thing.name, style: OmniText.captionOf(context)),
                   Text(w.line, style: OmniText.bodyStrong),
                 ],
               ),
@@ -59,7 +60,7 @@ class WeatherCard extends ConsumerWidget {
             if (w.high != null && w.low != null)
               Text(
                 '${WeatherView.degrees(w.high)} / ${WeatherView.degrees(w.low)}',
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
           ],
         ),
@@ -81,6 +82,7 @@ class WeatherPage extends ConsumerWidget {
     String number(double? v, String unit) =>
         v == null ? '-' : '${v.round()}$unit';
     final list = ref.watch(devicesProvider);
+    final sections = thing == null ? null : deviceSections(ref, thing);
     return DetailPage(
       key: const ValueKey('weather-page'),
       title: thing?.name ?? 'Weather',
@@ -145,10 +147,11 @@ class WeatherPage extends ConsumerWidget {
             child: Text(
               'Updated ${TimeOfDay.fromDateTime(at.toLocal()).format(context)}. '
               'From Open-Meteo, read every hour near your home.',
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
       ],
+      sections: sections == null ? null : (_) => sections,
     );
   }
 }

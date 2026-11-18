@@ -88,10 +88,10 @@ class PhoneRemoteTab extends StatelessWidget {
         children: [for (final k in PhoneKeys.screen) _key(k)],
       ),
       const SizedBox(height: OmniSpace.sm),
-      const Text(
+      Text(
         'Power held down opens the power menu on most phones. Lock turns the '
         'screen off, and Wake turns it on again.',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
     ],
   );

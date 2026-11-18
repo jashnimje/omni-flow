@@ -13,10 +13,19 @@ String nextRunWords(DateTime at, {DateTime? now, bool hour12 = false}) =>
 /// "Next: today 18:30" on an automation's card, while it is on and a time,
 /// sun or interval trigger has a next run.
 class NextRunLine extends ConsumerWidget {
-  const NextRunLine(this.automation, {super.key, required this.enabled});
+  const NextRunLine(
+    this.automation, {
+    super.key,
+    required this.enabled,
+    this.color,
+  });
 
   final AutomationSummary automation;
   final bool enabled;
+
+  /// The words' colour, the muted caption by default. A colour card
+  /// passes its white.
+  final Color? color;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -30,7 +39,9 @@ class NextRunLine extends ConsumerWidget {
       child: Text(
         'Next: ${nextRunWords(next, hour12: ref.watch(hour12Provider))}',
         key: ValueKey('next-run-${a.id}'),
-        style: OmniText.caption,
+        style: color == null
+            ? OmniText.captionOf(context)
+            : OmniText.caption.copyWith(color: color),
       ),
     );
   }

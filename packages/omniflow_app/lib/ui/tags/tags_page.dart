@@ -138,10 +138,10 @@ class _AddTagSheetState extends ConsumerState<_AddTagSheet> {
         onChanged: (_) => setState(() {}),
       ),
       const SizedBox(height: OmniSpace.sm),
-      const Text(
+      Text(
         'A tag OmniFlow has not seen, held to the phone, is offered for '
         'naming too.',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
     ],
   );

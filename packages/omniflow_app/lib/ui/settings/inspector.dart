@@ -57,12 +57,15 @@ class _InspectorState extends ConsumerState<Inspector> {
           key: const ValueKey('packets-filter'),
           controller: _filter,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
-            prefixIcon: Icon(OmniIcons.search, color: OmniColors.muted),
+          decoration: InputDecoration(
+            prefixIcon: Icon(
+              OmniIcons.search,
+              color: OmniPalette.of(context).muted,
+            ),
             hintText: 'Filter by udp, mqtt, adb or a device',
           ),
         ),
-        const SizedBox(height: OmniSpace.gap),
+        const SizedBox(height: OmniSpace.md),
         Expanded(
           child: packets.isEmpty
               ? ListView(
@@ -93,7 +96,7 @@ class _InspectorState extends ConsumerState<Inspector> {
                     final out = p['direction'] == 'outgoing';
                     final colour = out
                         ? OmniPalette.of(context).accent
-                        : OmniColors.trigger;
+                        : OmniPalette.of(context).trigger;
                     return OmniCard(
                       padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                       margin: const EdgeInsets.only(bottom: OmniSpace.sm),
@@ -122,7 +125,7 @@ class _InspectorState extends ConsumerState<Inspector> {
                               Text(
                                 _time(p['at']),
                                 style: OmniText.mono.copyWith(
-                                  color: OmniColors.muted,
+                                  color: OmniPalette.of(context).muted,
                                 ),
                               ),
                             ],

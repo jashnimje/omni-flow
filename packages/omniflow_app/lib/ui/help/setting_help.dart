@@ -56,7 +56,7 @@ class SettingHelpLine extends StatelessWidget {
         child: Text(
           helpSummary(help),
           key: ValueKey('setting-help-$settingKey'),
-          style: OmniText.caption,
+          style: OmniText.captionOf(context),
         ),
       ),
       OmniIconAction(

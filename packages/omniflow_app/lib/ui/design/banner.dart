@@ -62,26 +62,24 @@ class OmniBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = OmniPalette.of(context);
     final (bg, fg, glyph) = switch (kind) {
-      BannerKind.info => (OmniColors.infoSoft, OmniColors.info, OmniIcons.info),
-      BannerKind.warning => (
-        OmniColors.warnSoft,
-        OmniColors.warn,
-        OmniIcons.warning,
-      ),
-      BannerKind.error => (OmniColors.badSoft, OmniColors.bad, OmniIcons.error),
+      BannerKind.info => (p.infoSoft, p.info, OmniIcons.info),
+      BannerKind.warning => (p.warnSoft, p.warn, OmniIcons.warning),
+      BannerKind.error => (p.badSoft, p.bad, OmniIcons.error),
     };
     return Semantics(
       liveRegion: kind != BannerKind.info,
       container: true,
       child: Container(
         width: double.infinity,
-        margin: const EdgeInsets.only(bottom: OmniSpace.gap),
+        margin: const EdgeInsets.only(bottom: OmniSpace.md),
+        constraints: const BoxConstraints(minHeight: OmniSpace.row),
         padding: EdgeInsets.fromLTRB(
-          12,
-          onClose == null ? 10 : 0,
-          onClose == null ? 12 : 0,
-          actionLabel == null ? 10 : 0,
+          OmniSpace.lg,
+          onClose == null ? OmniSpace.md : 0,
+          onClose == null ? OmniSpace.lg : 0,
+          actionLabel == null ? OmniSpace.md : 0,
         ),
         decoration: BoxDecoration(
           color: bg,
@@ -97,12 +95,12 @@ class OmniBanner extends StatelessWidget {
                 Expanded(
                   child: Padding(
                     // Centres the first line on the 48 dp close button.
-                    padding: EdgeInsets.only(top: onClose == null ? 0 : 15),
+                    padding: EdgeInsets.only(top: onClose == null ? 0 : 14),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (showIcon) ...[
-                          Icon(icon ?? glyph, size: 16, color: fg),
+                          Icon(icon ?? glyph, size: 20, color: fg),
                           const SizedBox(width: OmniSpace.sm),
                         ],
                         Expanded(
@@ -129,14 +127,14 @@ class OmniBanner extends StatelessWidget {
             ),
             if (actionLabel != null)
               Padding(
-                padding: EdgeInsets.only(left: showIcon ? 16 : 0),
+                padding: EdgeInsets.only(left: showIcon ? 20 : 0),
                 child: TextButton(
                   onPressed: onAction,
                   style: TextButton.styleFrom(
                     foregroundColor: fg,
                     minimumSize: const Size(OmniSpace.target, OmniSpace.target),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    textStyle: OmniText.labelMedium.copyWith(
+                    textStyle: OmniText.label.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -161,7 +159,7 @@ class OmniEmptyState extends StatelessWidget {
     this.message,
     this.action,
     this.padding,
-    this.iconColor = OmniColors.muted,
+    this.iconColor,
     this.large = false,
     this.compact = false,
   });
@@ -173,7 +171,9 @@ class OmniEmptyState extends StatelessWidget {
 
   /// Defaults to 40 above and below, or 16 when [compact].
   final EdgeInsetsGeometry? padding;
-  final Color iconColor;
+
+  /// The palette's muted grey by default.
+  final Color? iconColor;
 
   /// A welcome screen's title at screen-title size (22) instead of 16.
   final bool large;
@@ -193,7 +193,11 @@ class OmniEmptyState extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (!compact) ...[
-          Icon(icon, size: 40, color: iconColor),
+          Icon(
+            icon,
+            size: 48,
+            color: iconColor ?? OmniPalette.of(context).muted,
+          ),
           const SizedBox(height: OmniSpace.sm),
         ],
         Semantics(
@@ -203,7 +207,7 @@ class OmniEmptyState extends StatelessWidget {
             textAlign: TextAlign.center,
             style: large
                 ? OmniText.screenTitle.copyWith(fontWeight: FontWeight.w700)
-                : OmniText.titleMedium,
+                : OmniText.section,
           ),
         ),
         if (message != null) ...[
@@ -211,7 +215,7 @@ class OmniEmptyState extends StatelessWidget {
           Text(
             message!,
             textAlign: TextAlign.center,
-            style: OmniText.body.copyWith(color: OmniColors.muted),
+            style: OmniText.body.copyWith(color: OmniPalette.of(context).muted),
           ),
         ],
         if (action != null) ...[const SizedBox(height: OmniSpace.lg), action!],
@@ -243,7 +247,7 @@ class OmniErrorState extends StatelessWidget {
     container: true,
     child: OmniEmptyState(
       icon: OmniIcons.error,
-      iconColor: OmniColors.bad,
+      iconColor: OmniPalette.of(context).bad,
       title: title,
       message: message,
       action: onRetry == null

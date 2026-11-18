@@ -168,10 +168,10 @@ class _WebHeadersEditorState extends ConsumerState<WebHeadersEditor> {
         header: true,
         child: const Text('Headers', style: OmniText.bodyStrong),
       ),
-      const Text(
+      Text(
         'Keys, tokens and passwords go in a secret, which stays on this '
         'phone. A key typed into a header such as Authorization is refused.',
-        style: OmniText.caption,
+        style: OmniText.captionOf(context),
       ),
       for (final (i, r) in _c.rows.indexed) _row(i, r),
       Align(
@@ -304,7 +304,9 @@ class _WebHeadersEditorState extends ConsumerState<WebHeadersEditor> {
                         : 'Not saved yet',
                     key: ValueKey('http-header-secret-state-$i'),
                     style: OmniText.caption.copyWith(
-                      color: r.saved ? OmniColors.muted : OmniColors.warn,
+                      color: r.saved
+                          ? OmniPalette.of(context).muted
+                          : OmniPalette.of(context).warn,
                     ),
                   ),
                 ),

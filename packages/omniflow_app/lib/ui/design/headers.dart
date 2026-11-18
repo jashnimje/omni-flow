@@ -5,8 +5,9 @@ import 'buttons.dart';
 import 'icons.dart';
 import 'tokens.dart';
 
-/// A section heading: the title on the left, and on the right an accent
-/// action ("Edit", "All", "＋ Add pin") or an accent [trailingText] (a count).
+/// A section heading in 18: the title on the left, and on the right an
+/// accent action ("Edit", "All", "＋ Add pin") or a muted [trailingText]
+/// (a count).
 class OmniSectionHeader extends StatelessWidget {
   const OmniSectionHeader(
     this.title, {
@@ -41,7 +42,12 @@ class OmniSectionHeader extends StatelessWidget {
           Expanded(
             child: Semantics(
               header: true,
-              child: Text(title, style: OmniText.section),
+              child: Text(
+                title,
+                style: OmniText.section.copyWith(
+                  color: OmniPalette.of(context).text,
+                ),
+              ),
             ),
           ),
           if (trailingText != null)
@@ -50,7 +56,7 @@ class OmniSectionHeader extends StatelessWidget {
               // A count, not a link: muted, so only real actions use the
               // accent.
               style: OmniText.caption.copyWith(
-                color: OmniColors.muted,
+                color: OmniPalette.of(context).muted,
                 fontWeight: FontWeight.w500,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
@@ -62,9 +68,7 @@ class OmniSectionHeader extends StatelessWidget {
                 foregroundColor: OmniPalette.of(context).accent,
                 minimumSize: const Size(OmniSpace.target, OmniSpace.target),
                 padding: const EdgeInsets.symmetric(horizontal: OmniSpace.sm),
-                textStyle: OmniText.labelMedium.copyWith(
-                  fontWeight: FontWeight.w500,
-                ),
+                textStyle: OmniText.label.copyWith(fontWeight: FontWeight.w500),
               ),
               child: Text(actionLabel!),
             ),
@@ -74,7 +78,7 @@ class OmniSectionHeader extends StatelessWidget {
   }
 }
 
-/// The title of a tab's root screen: 28 type that shrinks to 22 as
+/// The title of a tab's root screen: 32 type that shrinks to 22 as
 /// [collapse] goes from 0 to 1 (the page scrolling), with icon [actions]
 /// on the right (search, notifications) and an optional [subtitle] line.
 class OmniScreenTitle extends StatelessWidget {
@@ -160,8 +164,8 @@ class OmniScreenTitle extends StatelessWidget {
           ),
           if (subtitle != null)
             Padding(
-              padding: const EdgeInsets.only(bottom: OmniSpace.gap),
-              child: Text(subtitle!, style: OmniText.caption),
+              padding: const EdgeInsets.only(bottom: OmniSpace.md),
+              child: Text(subtitle!, style: OmniText.captionOf(context)),
             ),
         ],
       ),
@@ -231,7 +235,8 @@ class _CollapseOnScrollState extends State<_CollapseOnScroll> {
 }
 
 /// A pushed page: the back chevron and icon [actions] in a bar, the
-/// title large under it that slides into the bar as [body] scrolls, then
+/// title large (32) under it that shrinks to 22 and slides into the bar
+/// as [body] scrolls, then
 /// [body] with the screen padding. [close] shows a cross instead of the
 /// chevron (the Add flow). It draws edge to edge, clear of the system
 /// bars.
@@ -272,7 +277,7 @@ class OmniPage extends StatelessWidget {
           )
         : null;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: omniSystemBars,
+      value: omniSystemBarsOf(context),
       child: Scaffold(
         floatingActionButton: floatingActionButton,
         body: SafeArea(
@@ -446,7 +451,7 @@ class OmniTabPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
-    value: omniSystemBars,
+    value: omniSystemBarsOf(context),
     child: Scaffold(
       body: SafeArea(
         bottom: false,

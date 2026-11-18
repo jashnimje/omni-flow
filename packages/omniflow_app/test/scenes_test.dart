@@ -75,6 +75,7 @@ void main() {
     expect(buttonEnabled(tester, 'scene-save'), isFalse);
     await tester.enterText(find.byKey(const ValueKey('scene-name')), 'Sleep');
     await tester.pump();
+    await tapKey(tester, 'scene-options');
     await tapKey(tester, 'scene-look');
     await tapKey(tester, 'look-icon-moon');
     await tapKey(tester, 'look-done');

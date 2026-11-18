@@ -87,7 +87,7 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
   /// bar, so it is never below the fold.
   @override
   Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
-    value: omniSystemBars,
+    value: omniSystemBarsOf(context),
     child: Scaffold(
       body: SafeArea(
         child: Column(
@@ -144,11 +144,11 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
                     onChanged: (v) => setState(() => _background = v),
                   ),
                   const SizedBox(height: OmniSpace.sm),
-                  const Text(
+                  Text(
                     'You can change any of these later in Settings, This '
                     'phone.',
                     textAlign: TextAlign.center,
-                    style: OmniText.caption,
+                    style: OmniText.captionOf(context),
                   ),
                 ],
               ),

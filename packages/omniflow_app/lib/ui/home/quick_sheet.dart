@@ -75,7 +75,7 @@ class QuickSheet extends ConsumerWidget {
                   if (playing.playing case final String p) p,
                 ].join(' · '),
                 key: ValueKey('tv-card-now-$id'),
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
             ),
           TvQuickControls(device: d),

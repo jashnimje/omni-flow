@@ -21,12 +21,17 @@ class DiagramPainter extends CustomPainter {
   DiagramPainter({
     required this.diagram,
     required this.layout,
-    this.line = OmniColors.line,
-    this.lit = OmniColors.accent,
-  });
+    this.palette = OmniPalette.teal,
+    Color? line,
+    Color? lit,
+  }) : line = line ?? palette.line,
+       lit = lit ?? palette.accent;
 
   final Diagram diagram;
   final DiagramLayout layout;
+
+  /// The theme's colours, which a painter cannot read from a context.
+  final OmniPalette palette;
   final Color line;
   final Color lit;
 
@@ -61,7 +66,7 @@ class DiagramPainter extends CustomPainter {
       canvas
         ..drawRRect(
           rrect,
-          Paint()..color = OmniColors.flowSoft.withValues(alpha: 0.35),
+          Paint()..color = palette.flowSoft.withValues(alpha: 0.35),
         )
         ..drawRRect(
           rrect,
@@ -69,8 +74,8 @@ class DiagramPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.2
             ..color = run && status == NodeStatus.skipped
-                ? OmniColors.line
-                : OmniColors.flowLine,
+                ? palette.line
+                : palette.flowLine,
         );
     }
   }
@@ -80,7 +85,7 @@ class DiagramPainter extends CustomPainter {
     final run = diagram.hasRun;
     final color = run
         ? (solid ? lit : line.withValues(alpha: 0.5))
-        : OmniColors.muted.withValues(alpha: 0.7);
+        : palette.muted.withValues(alpha: 0.7);
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -102,7 +107,7 @@ class DiagramPainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: OmniText.caption.copyWith(
-          color: run && !solid ? OmniColors.muted : OmniColors.text,
+          color: run && !solid ? palette.muted : palette.text,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -144,7 +149,7 @@ class DiagramPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(DiagramPainter old) =>
-      old.diagram != diagram || old.layout != layout;
+      old.diagram != diagram || old.layout != layout || old.palette != palette;
 }
 
 /// A diamond filling its box: the shape of a check.

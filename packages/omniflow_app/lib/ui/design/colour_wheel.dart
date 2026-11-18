@@ -103,7 +103,7 @@ class _OmniColourWheelState extends State<OmniColourWheel> {
             size: Size.square(widget.size),
             painter: _WheelPainter(
               shown,
-              ring: OmniColors.text,
+              ring: OmniPalette.of(context).text,
               edge: OmniPalette.of(context).line,
             ),
           ),

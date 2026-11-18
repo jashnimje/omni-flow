@@ -365,7 +365,7 @@ void main() {
           },
         ),
       );
-      await tapText(tester, 'Add trigger');
+      await tapAdd(tester, 'Add trigger');
       await tapKey(tester, 'category-Calls, media and more');
       for (final key in [
         'pick-phone-alarm',

@@ -65,7 +65,7 @@ class OmniActionBar extends StatelessWidget {
                 missing!,
                 key: const ValueKey('action-bar-missing'),
                 textAlign: TextAlign.center,
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
             ),
           ),

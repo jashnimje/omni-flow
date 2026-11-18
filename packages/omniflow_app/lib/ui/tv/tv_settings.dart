@@ -300,7 +300,7 @@ class _SettingCardState extends State<SettingCard> {
       d,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: OmniText.caption,
+      style: OmniText.captionOf(context),
     ),
     _ => null,
   };
@@ -368,7 +368,7 @@ class _SettingCardState extends State<SettingCard> {
             borderRadius: BorderRadius.circular(OmniRadii.field),
             hint: Text(
               s.textValue.isEmpty ? 'Not set' : s.textValue,
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
             items: [
               for (final o in s.options)

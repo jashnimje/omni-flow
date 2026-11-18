@@ -13,6 +13,7 @@ import 'link_sheet.dart';
 import 'rule_editor.dart';
 import 'rule_words.dart';
 import 'scenes.dart' show openSceneEditor;
+import 'type_it_page.dart' show openTypeIt;
 
 /// The New button of Automations: a rule, a quick link, or a template.
 /// [tabContext] is inside the Automations tab, so what it opens keeps the
@@ -24,6 +25,8 @@ Future<void> openNewAutomation(BuildContext tabContext) async {
   );
   if (choice == null || !tabContext.mounted) return;
   switch (choice) {
+    case _NewTypeIt():
+      await openTypeIt(tabContext);
     case _NewRule():
       await openRuleEditor(tabContext);
     case _NewLink():
@@ -39,6 +42,10 @@ Future<void> openNewAutomation(BuildContext tabContext) async {
 
 sealed class _NewChoice {
   const _NewChoice();
+}
+
+class _NewTypeIt extends _NewChoice {
+  const _NewTypeIt();
 }
 
 class _NewRule extends _NewChoice {
@@ -75,6 +82,16 @@ class _NewSheet extends ConsumerWidget {
       title: 'New automation',
       subtitle: 'Each runs on the phone, even with the screen off.',
       children: (context) => [
+        // Saying it is the easiest start, so it comes first.
+        OmniListRow(
+          key: const ValueKey('type-it'),
+          icon: OmniIcons.edit,
+          title: 'Type what you want',
+          subtitle: 'Say it in a sentence, then check it in the editor',
+          subtitleLines: 2,
+          chevron: true,
+          onTap: () => pick(const _NewTypeIt()),
+        ),
         OmniListRow(
           key: const ValueKey('new-blank-rule'),
           icon: AutomationIcons.rule,
@@ -101,9 +118,12 @@ class _NewSheet extends ConsumerWidget {
           onTap: () => pick(const _NewScene()),
         ),
         // A caption, so it does not stack on the first group's heading.
-        const Padding(
-          padding: EdgeInsets.only(top: OmniSpace.md),
-          child: Text('Or start from a template', style: OmniText.caption),
+        Padding(
+          padding: const EdgeInsets.only(top: OmniSpace.md),
+          child: Text(
+            'Or start from a template',
+            style: OmniText.captionOf(context),
+          ),
         ),
         switch (templates) {
           AsyncData(:final value) when value.ok => TemplateGallery(
@@ -167,13 +187,13 @@ class TemplateGallery extends StatelessWidget {
                 OmniSectionHeader(category),
               for (var i = 0; i < group.length; i += columns)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+                  padding: const EdgeInsets.only(bottom: OmniSpace.md),
                   child: IntrinsicHeight(
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         for (var c = 0; c < columns; c++) ...[
-                          if (c > 0) const SizedBox(width: OmniSpace.gap),
+                          if (c > 0) const SizedBox(width: OmniSpace.md),
                           Expanded(
                             child: i + c < group.length
                                 ? _TemplateCard(
@@ -206,6 +226,7 @@ class _TemplateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = template;
     final radius = BorderRadius.circular(OmniRadii.card);
+    final palette = OmniPalette.of(context);
     return Semantics(
       container: true,
       button: true,
@@ -215,10 +236,10 @@ class _TemplateCard extends StatelessWidget {
       onTap: onTap,
       child: Material(
         key: ValueKey('template-${t.id}'),
-        color: AutomationLook.tintOf(t.color),
+        color: AutomationLook.tintOf(t.color, palette),
         shape: RoundedRectangleBorder(
           borderRadius: radius,
-          side: BorderSide(color: AutomationLook.lineOf(t.color)),
+          side: BorderSide(color: AutomationLook.lineOf(t.color, palette)),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -236,16 +257,11 @@ class _TemplateCard extends StatelessWidget {
                   color: t.color,
                   size: 44,
                 ),
-                const SizedBox(height: OmniSpace.gap),
+                const SizedBox(height: OmniSpace.md),
                 Text(t.name, style: OmniText.bodyStrong),
                 if (t.description.isNotEmpty) ...[
                   const SizedBox(height: OmniSpace.xs),
-                  Text(
-                    t.description,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: OmniText.caption,
-                  ),
+                  Text(t.description, style: OmniText.captionOf(context)),
                 ],
               ],
             ),
@@ -333,11 +349,11 @@ class _TemplatePageState extends ConsumerState<TemplatePage> {
                 ),
                 color: widget.template.color,
               ),
-              const SizedBox(width: OmniSpace.gap),
+              const SizedBox(width: OmniSpace.md),
               Expanded(
                 child: Text(
                   widget.template.description,
-                  style: OmniText.caption,
+                  style: OmniText.captionOf(context),
                 ),
               ),
             ],

@@ -131,7 +131,8 @@ const screenHelp = <HelpScreen, ({String title, List<HelpSection> sections})>{
         body:
             'Places and people say where home is and who lives there. A '
             'place knows you are there from its Wi-Fi or a Bluetooth beacon. '
-            'Rooms group your devices.',
+            'Rooms group your devices. Things you change less often sit '
+            'in More settings at the end.',
       ),
       (
         heading: 'Setting up',
@@ -145,7 +146,7 @@ const screenHelp = <HelpScreen, ({String title, List<HelpSection> sections})>{
         body:
             'A hub is a computer at home, such as a Raspberry Pi, that runs '
             'your home all the time. With one, automations keep running when '
-            'your phone is away.',
+            'your phone is away. Find it in More settings, Home runs on.',
       ),
       (
         heading: 'Backup',
@@ -159,7 +160,8 @@ const screenHelp = <HelpScreen, ({String title, List<HelpSection> sections})>{
         body:
             'An agent such as an AI assistant can read your home, and with '
             'your say-so set things up. It can never store a key, pair or '
-            'remove a device.',
+            'remove a device. Choose what it can do in More settings, For '
+            'developers.',
       ),
     ],
   ),

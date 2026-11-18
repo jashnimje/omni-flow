@@ -100,7 +100,7 @@ class _RunLog extends ConsumerWidget {
             key: ValueKey('run-${r.id}'),
             leading: Icon(
               r.ok ? AreaIcons.ok : AreaIcons.failed,
-              color: r.ok ? accent : OmniColors.bad,
+              color: r.ok ? accent : OmniPalette.of(context).bad,
               semanticLabel: r.ok ? 'Worked' : 'Failed',
             ),
             title: names[r.automationId] ?? r.automationId,
@@ -216,7 +216,9 @@ class _Engine extends ConsumerWidget {
           OmniListRow(
             title: 'Hub',
             value: s['hubRunning'] == true ? 'running' : 'stopped',
-            valueColor: s['hubRunning'] == true ? accent : OmniColors.warn,
+            valueColor: s['hubRunning'] == true
+                ? accent
+                : OmniPalette.of(context).warn,
           ),
           if (hubError != null)
             OmniListRow(
@@ -228,7 +230,7 @@ class _Engine extends ConsumerWidget {
           OmniListRow(
             title: 'Load issues',
             value: '${issues.length}',
-            valueColor: issues.isEmpty ? accent : OmniColors.warn,
+            valueColor: issues.isEmpty ? accent : OmniPalette.of(context).warn,
           ),
           for (final i in issues)
             OmniListRow(

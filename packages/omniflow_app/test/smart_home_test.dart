@@ -9,6 +9,7 @@ import 'package:omniflow_app/ui/settings/away_lighting_page.dart';
 
 import 'fake_engine.dart';
 import 'screen_harness.dart';
+import 'section_helpers.dart';
 
 Map<String, Object?> _weather() => {
   'id': 'weather_at_home',
@@ -155,7 +156,12 @@ void main() {
       ..answers['sunlight.get'] = {'ok': true, 'targets': <Object?>[]};
     await pumpScreen(tester, engine, const DevicePage(id: 'desk_lamp'));
     final row = find.byKey(const ValueKey('follow-sun-desk_lamp'));
+    // A rarely changed option, so it is under More settings.
+    expect(row, findsNothing);
+    await openSectionKey(tester, 'device-more-desk_lamp');
     expect(row, findsOneWidget);
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
     await tester.tap(find.descendant(of: row, matching: find.byType(Switch)));
     await tester.pumpAndSettle();
     expect(engine.callsOf('sunlight.set').single.$2, {

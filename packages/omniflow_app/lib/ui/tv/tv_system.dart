@@ -275,7 +275,7 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
               Row(
                 children: [
                   Expanded(child: Text(label)),
-                  Text(value, style: OmniText.caption),
+                  Text(value, style: OmniText.captionOf(context)),
                 ],
               ),
               const SizedBox(height: OmniSpace.xs),
@@ -392,7 +392,7 @@ class _TvSystemTabState extends ConsumerState<TvSystemTab> {
                       key: ValueKey('tv-process-stop-${p.package}'),
                       onPressed: () => _stopApp(p),
                       style: TextButton.styleFrom(
-                        foregroundColor: OmniColors.bad,
+                        foregroundColor: OmniPalette.of(context).bad,
                       ),
                       child: const Text('Stop'),
                     ),

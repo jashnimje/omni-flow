@@ -13,6 +13,7 @@ import '../design/automation_look.dart';
 import '../design/design.dart';
 import 'automation_insights.dart';
 import 'automations_state.dart';
+import 'card_look.dart';
 import 'diagram/diagram.dart';
 import 'dialogs.dart';
 import 'review_page.dart';
@@ -71,7 +72,7 @@ class RuleEditorPage extends ConsumerStatefulWidget {
   ConsumerState<RuleEditorPage> createState() => _RuleEditorPageState();
 }
 
-enum _Menu { rename, stopOnError, duplicate, history, remove }
+enum _Menu { rename, duplicate, history, remove }
 
 class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
   RuleDraft? _draft;
@@ -325,14 +326,59 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  /// The one "Add a step": asks which kind, then opens that kind's picker.
+  Future<void> _addAStep(RuleDraft draft) async {
+    final kind = await showPickerSheet<SentenceKind>(
+      context,
+      title: 'Add a step',
+      sections: [
+        PickerSection([
+          PickerItem(
+            key: const ValueKey('add-part-when'),
+            value: SentenceKind.when,
+            title: 'When',
+            subtitle: 'Something that starts it',
+            icon: SentenceColors.iconOf(SentenceKind.when),
+          ),
+          PickerItem(
+            key: const ValueKey('add-part-onlyIf'),
+            value: SentenceKind.onlyIf,
+            title: 'Only if',
+            subtitle: 'A check that has to be true',
+            icon: SentenceColors.iconOf(SentenceKind.onlyIf),
+          ),
+          PickerItem(
+            key: const ValueKey('add-part-then'),
+            value: SentenceKind.then,
+            title: 'Then',
+            subtitle: 'Something it does',
+            icon: SentenceColors.iconOf(SentenceKind.then),
+          ),
+        ]),
+      ],
+    );
+    if (kind == null || !mounted) return;
+    final spec = draft.spec;
+    switch (kind) {
+      case SentenceKind.when:
+        await addTrigger(context, draft);
+      case SentenceKind.onlyIf:
+        await addCondition(context, draft, spec.onlyIf);
+      default:
+        await StepBlock(
+          draft: draft,
+          steps: spec.then,
+          path: 'then',
+          allowKeep: true,
+        ).add(context);
+    }
+  }
+
   Future<void> _onMenu(_Menu choice) async {
     final draft = _draft!;
     switch (choice) {
       case _Menu.rename:
         await _rename();
-      case _Menu.stopOnError:
-        draft.spec.stopOnError = !draft.spec.stopOnError;
-        draft.changed();
       case _Menu.duplicate:
         // A copy of what is on screen, as a new rule that is not saved yet.
         // It takes this page's place unless this page has unsaved edits,
@@ -420,15 +466,10 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
             PopupMenuButton<_Menu>(
               key: const ValueKey('rule-menu'),
               tooltip: 'More',
-              icon: const Icon(OmniIcons.more, color: OmniColors.muted),
+              icon: Icon(OmniIcons.more, color: OmniPalette.of(context).muted),
               onSelected: _onMenu,
               itemBuilder: (_) => [
                 const PopupMenuItem(value: _Menu.rename, child: Text('Rename')),
-                CheckedPopupMenuItem(
-                  value: _Menu.stopOnError,
-                  checked: spec.stopOnError,
-                  child: const Text('Stop at the first failed step'),
-                ),
                 if (widget.id != null) ...[
                   const PopupMenuItem(
                     key: ValueKey('rule-duplicate'),
@@ -443,7 +484,9 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                     value: _Menu.remove,
                     child: Text(
                       'Remove',
-                      style: OmniText.body.copyWith(color: OmniColors.bad),
+                      style: OmniText.body.copyWith(
+                        color: OmniPalette.of(context).bad,
+                      ),
                     ),
                   ),
                 ],
@@ -451,15 +494,19 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
             ),
           ],
           // Both views edit [draft], so a change in one shows in the other.
-          views: OmniSegmented<RuleView>(
-            key: const ValueKey('rule-view'),
-            segments: const [
-              OmniSegment(RuleView.sentence, 'Sentence'),
-              OmniSegment(RuleView.diagram, 'Diagram'),
-            ],
-            selected: view,
-            onChanged: (v) => ref.read(ruleViewProvider.notifier).set(v),
-          ),
+          // The blocks reach the diagram from Options, so the switch shows
+          // only on the diagram, to come back.
+          views: view != RuleView.diagram
+              ? null
+              : OmniSegmented<RuleView>(
+                  key: const ValueKey('rule-view'),
+                  segments: const [
+                    OmniSegment(RuleView.sentence, 'Sentence'),
+                    OmniSegment(RuleView.diagram, 'Diagram'),
+                  ],
+                  selected: view,
+                  onChanged: (v) => ref.read(ruleViewProvider.notifier).set(v),
+                ),
           banners: [
             if (!_approved)
               OmniBanner.warning(
@@ -499,33 +546,60 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
               : (context) => [
                   KeyedSubtree(
                     key: const ValueKey('rule-editor'),
-                    child: _LookAndAsk(draft: draft),
+                    child: _Header(draft: draft, onRename: _rename),
                   ),
-                  TriggerBlock(draft: draft),
-                  ConditionBlock(
-                    draft: draft,
-                    conditions: spec.onlyIf,
-                    path: 'onlyIf',
-                  ),
+                  TriggerBlock(draft: draft, addable: false),
+                  // An empty Only if is not shown. Add a step offers it.
+                  if (spec.onlyIf.isNotEmpty ||
+                      draft.errorAt('onlyIf') != null) ...[
+                    const _Joint(),
+                    ConditionBlock(
+                      draft: draft,
+                      conditions: spec.onlyIf,
+                      path: 'onlyIf',
+                      addable: false,
+                    ),
+                  ],
+                  const _Joint(),
                   StepBlock(
                     draft: draft,
                     steps: spec.then,
                     path: 'then',
                     allowKeep: true,
+                    addable: false,
                   ),
                   if (spec.stopOnError)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: OmniSpace.xs,
+                      ),
                       child: Text(
                         'Stops at the first step that fails.',
-                        style: OmniText.caption,
+                        style: OmniText.captionOf(context),
                       ),
                     ),
+                  _AddAStep(onTap: () => _addAStep(draft)),
+                  const SizedBox(height: OmniSpace.md),
+                  _Options(
+                    draft: draft,
+                    onDiagram: () => ref
+                        .read(ruleViewProvider.notifier)
+                        .set(RuleView.diagram),
+                  ),
                   // A saved rule: its last run, clashes, why it did not
-                  // run, and History.
-                  if (widget.id != null) LastRunSection(id: widget.id!),
+                  // run, and its versions.
                   if (widget.id != null)
-                    AutomationInsights(id: widget.id!, onRestored: _load),
+                    OmniDisclosure(
+                      key: const ValueKey('rule-activity'),
+                      icon: OmniIcons.time,
+                      title: 'Activity',
+                      summary: 'Last runs and why one was skipped',
+                      storageId: 'rule-activity',
+                      children: [
+                        LastRunSection(id: widget.id!),
+                        AutomationInsights(id: widget.id!, onRestored: _load),
+                      ],
+                    ),
                 ],
         );
       },
@@ -533,33 +607,237 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
   }
 }
 
-/// The top of the editor: how the automation looks (its colour and icon)
-/// and how it runs (ask before running, notify when it runs). Each is a
-/// field of the rule spec the engine acts on.
-class _LookAndAsk extends StatelessWidget {
-  const _LookAndAsk({required this.draft});
+/// The top of the editor: the automation's icon on its colour and how
+/// to change it. A tap renames it.
+class _Header extends StatelessWidget {
+  const _Header({required this.draft, required this.onRename});
 
   final RuleDraft draft;
+  final VoidCallback onRename;
 
   @override
   Widget build(BuildContext context) {
     final spec = draft.spec;
-    final color = automationColor(spec.color);
+    final name = spec.name.trim();
+    final color = automationCardColor(spec.color);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: OmniSpace.lg),
+      child: Semantics(
+        button: true,
+        label: name.isEmpty ? 'Name this automation' : 'Rename $name',
+        excludeSemantics: true,
+        child: InkWell(
+          key: const ValueKey('rule-name'),
+          borderRadius: BorderRadius.circular(OmniRadii.card),
+          onTap: onRename,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: OmniSpace.targetLarge),
+            child: Row(
+              children: [
+                Container(
+                  width: OmniSpace.targetLarge,
+                  height: OmniSpace.targetLarge,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(OmniRadii.card / 1.5),
+                  ),
+                  child: Icon(
+                    automationIcon(spec.icon),
+                    color: OmniCardColors.onCard,
+                    fill: 1,
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(width: OmniSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // The name is the page's title, so it is not said
+                      // twice here.
+                      const Text(
+                        'Tap a word to change it',
+                        style: OmniText.bodyStrong,
+                      ),
+                      Text(
+                        name.isEmpty
+                            ? 'Tap here to give it a name'
+                            : 'Tap here to rename it',
+                        style: OmniText.captionOf(context),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The thin line joining two blocks, so they read as one sequence.
+class _Joint extends StatelessWidget {
+  const _Joint();
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: Padding(
+      padding: const EdgeInsets.only(left: OmniSpace.xl + 2),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          width: 2,
+          height: OmniSpace.sm,
+          margin: const EdgeInsets.only(bottom: OmniSpace.sm),
+          color: OmniPalette.of(context).line,
+        ),
+      ),
+    ),
+  );
+}
+
+/// The dashed "+ Add a step" block at the end of the steps.
+class _AddAStep extends StatelessWidget {
+  const _AddAStep({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
+    return Semantics(
+      button: true,
+      label: 'Add a step',
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(OmniRadii.step),
+          side: BorderSide(color: palette.line, width: 1.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: const ValueKey('rule-add-a-step'),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: OmniSpace.targetLarge),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(OmniIcons.add, color: palette.accent),
+                const SizedBox(width: OmniSpace.sm),
+                Flexible(
+                  child: Text(
+                    'Add a step',
+                    style: OmniText.button.copyWith(color: palette.accent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Options, collapsed: how the automation runs (ask first, notify, stop
+/// at the first failure), how it looks, and the diagram. Each is a field
+/// of the rule spec the engine acts on.
+class _Options extends StatelessWidget {
+  const _Options({required this.draft, required this.onDiagram});
+
+  final RuleDraft draft;
+  final VoidCallback onDiagram;
+
+  /// What is set, so most people never need to open it.
+  static String _summary(RuleSpec spec) {
+    final set = [
+      if (spec.askFirst) 'Asks first',
+      if (spec.notifyOnRun) 'Notifies',
+      if (spec.stopOnError) 'Stops on a failure',
+    ];
+    return set.isEmpty ? 'Ask first, notify, colour and icon' : set.join(', ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final spec = draft.spec;
+    final color = automationCardColor(spec.color);
     final keeps = spec.then.any((s) => s is KeepStep);
-    return Column(
-      key: const ValueKey('rule-look-and-ask'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final askError = draft.errorAt('askFirst');
+    return OmniDisclosure(
+      key: const ValueKey('rule-options'),
+      icon: OmniIcons.edit,
+      title: 'Options',
+      summary: askError ?? _summary(spec),
+      storageId: 'rule-options',
+      // An error on Ask first opens it, so the reason is in view.
+      initiallyOpen: askError != null,
       children: [
+        OmniListRow(
+          key: const ValueKey('rule-ask-first'),
+          icon: AutomationLook.askIcon,
+          title: 'Ask before running',
+          subtitle:
+              askError ??
+              (keeps && !spec.askFirst
+                  ? 'Not with a keep step: a keep holds its value on its own, '
+                        'so there is no run to ask about.'
+                  : 'When a trigger starts it, a notification asks first. '
+                        'Running it yourself never asks.'),
+          subtitleLines: 3,
+          onTap: keeps && !spec.askFirst
+              ? null
+              : () {
+                  spec.askFirst = !spec.askFirst;
+                  draft.changed();
+                },
+          trailing: Switch(
+            value: spec.askFirst,
+            // One set before a keep was added can still be turned off.
+            onChanged: keeps && !spec.askFirst
+                ? null
+                : (v) {
+                    spec.askFirst = v;
+                    draft.changed();
+                  },
+          ),
+        ),
+        OmniListRow(
+          key: const ValueKey('rule-notify-on-run'),
+          icon: OmniIcons.notifications,
+          title: 'Notify when it runs',
+          subtitle: 'A notification each time it finishes.',
+          onTap: () {
+            spec.notifyOnRun = !spec.notifyOnRun;
+            draft.changed();
+          },
+          trailing: Switch(
+            value: spec.notifyOnRun,
+            onChanged: (v) {
+              spec.notifyOnRun = v;
+              draft.changed();
+            },
+          ),
+        ),
         OmniListRow(
           key: const ValueKey('rule-look'),
           leading: Container(
-            width: 36,
-            height: 36,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.18),
+              color: color,
               borderRadius: BorderRadius.circular(OmniRadii.iconBox),
             ),
-            child: Icon(automationIcon(spec.icon), color: color, size: 22),
+            child: Icon(
+              automationIcon(spec.icon),
+              color: OmniCardColors.onCard,
+              size: 22,
+            ),
           ),
           title: 'Colour and icon',
           subtitle: lookWords((color: spec.color, icon: spec.icon)),
@@ -577,40 +855,31 @@ class _LookAndAsk extends StatelessWidget {
           },
         ),
         OmniListRow(
-          key: const ValueKey('rule-ask-first'),
-          icon: AutomationLook.askIcon,
-          title: 'Ask before running',
-          subtitle:
-              draft.errorAt('askFirst') ??
-              (keeps && !spec.askFirst
-                  ? 'Not with a keep step: a keep holds its value on its own, '
-                        'so there is no run to ask about.'
-                  : 'When a trigger starts it, a notification asks first. '
-                        'Running it yourself never asks.'),
-          subtitleLines: 3,
+          key: const ValueKey('rule-stop-on-error'),
+          icon: OmniIcons.error,
+          title: 'Stop at the first failed step',
+          subtitle: 'Otherwise every step runs, and failures are noted.',
+          subtitleLines: 2,
+          onTap: () {
+            spec.stopOnError = !spec.stopOnError;
+            draft.changed();
+          },
           trailing: Switch(
-            value: spec.askFirst,
-            // One set before a keep was added can still be turned off.
-            onChanged: keeps && !spec.askFirst
-                ? null
-                : (v) {
-                    spec.askFirst = v;
-                    draft.changed();
-                  },
-          ),
-        ),
-        OmniListRow(
-          key: const ValueKey('rule-notify-on-run'),
-          icon: OmniIcons.notifications,
-          title: 'Notify when it runs',
-          subtitle: 'A notification each time it finishes.',
-          trailing: Switch(
-            value: spec.notifyOnRun,
+            value: spec.stopOnError,
             onChanged: (v) {
-              spec.notifyOnRun = v;
+              spec.stopOnError = v;
               draft.changed();
             },
           ),
+        ),
+        OmniListRow(
+          key: const ValueKey('rule-diagram-view'),
+          icon: OmniIcons.branch,
+          title: 'See it as a diagram',
+          subtitle: 'Every step as a box, joined in order.',
+          chevron: true,
+          divider: false,
+          onTap: onDiagram,
         ),
       ],
     );

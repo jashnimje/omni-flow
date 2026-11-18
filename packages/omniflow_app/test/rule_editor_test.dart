@@ -61,7 +61,7 @@ void main() {
     expect(buttonEnabled(tester, 'rule-save'), isFalse);
     expect(find.text('Add a trigger and a step to save.'), findsOneWidget);
 
-    await tapText(tester, 'Add trigger');
+    await tapAdd(tester, 'Add trigger');
     expect(find.text('When…'), findsOneWidget);
     expect(find.text('Me'), findsWidgets);
     expect(find.text('Things'), findsWidgets);
@@ -70,18 +70,18 @@ void main() {
     await tapKey(tester, 'form-done');
     expect(find.text('I get home'), findsOneWidget);
 
-    await tapText(tester, 'Add condition');
+    await tapAdd(tester, 'Add condition');
     await tapKey(tester, 'pick-between');
     await tapKey(tester, 'form-done');
     expect(find.text('Between 18:00 and 23:30'), findsOneWidget);
 
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-device-desk_lamp');
     await tapKey(tester, 'act-on-power');
     await tapKey(tester, 'form-done');
     expect(find.text('Desk lamp · turn on'), findsOneWidget);
 
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-wait');
     await tapKey(tester, 'form-done');
     expect(find.text('Wait 3 s'), findsOneWidget);
@@ -141,7 +141,7 @@ void main() {
         },
       ),
     );
-    await tapText(tester, 'Add condition');
+    await tapAdd(tester, 'Add condition');
     await tapKey(tester, 'pick-variable');
     expect(find.byKey(const ValueKey('known-var-_scheduled_x')), findsNothing);
     await tapKey(tester, 'known-var-Mood');
@@ -210,7 +210,7 @@ void main() {
         },
       ),
     );
-    await tapText(tester, 'Add condition');
+    await tapAdd(tester, 'Add condition');
     await tapKey(tester, 'pick-thing-tv');
     expect(find.text('Power is…'), findsOneWidget);
     await tapKey(tester, 'opt-isnot-power');
@@ -218,7 +218,7 @@ void main() {
     await tapKey(tester, 'opt-choice-asleep');
     await tapKey(tester, 'form-done');
 
-    await tapText(tester, 'Add condition');
+    await tapAdd(tester, 'Add condition');
     await tapKey(tester, 'pick-thing-tv');
     await tapKey(tester, 'opt-is-app');
     await tapKey(tester, 'opt-pick');
@@ -272,7 +272,7 @@ void main() {
       ],
     };
     await pumpPushed(tester, engine, const RuleEditorPage());
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-device-tv');
     await tapKey(tester, 'act-launch_app');
     // The field and the sheet name the app, not the raw package param.
@@ -303,7 +303,7 @@ void main() {
     tester,
   ) async {
     await pumpPushed(tester, engine, const RuleEditorPage());
-    await tapText(tester, 'Add trigger');
+    await tapAdd(tester, 'Add trigger');
     await tapKey(tester, 'pick-thing-room_temp');
     expect(find.text('When Room temperature…'), findsOneWidget);
     await tapKey(tester, 'opt-above-temp');
@@ -318,7 +318,7 @@ void main() {
     tester,
   ) async {
     await pumpPushed(tester, engine, const RuleEditorPage());
-    await tapText(tester, 'Add trigger');
+    await tapAdd(tester, 'Add trigger');
     await tester.enterText(find.byKey(const ValueKey('picker-search')), 'temp');
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('pick-thing-room_temp')), findsOneWidget);
@@ -329,7 +329,7 @@ void main() {
   testWidgets('the step picker marks high-risk steps and says they need '
       'approval', (tester) async {
     await pumpPushed(tester, engine, const RuleEditorPage());
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     // The device row stays plain; the warning sits on the risky step.
     expect(
       find.descendant(
@@ -375,7 +375,7 @@ void main() {
     tester,
   ) async {
     await pumpPushed(tester, engine, const RuleEditorPage());
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tester.enterText(
       find.byKey(const ValueKey('picker-search')),
       'movie',
@@ -573,7 +573,7 @@ void main() {
         },
       ),
     );
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-if');
     expect(find.text('If… otherwise'), findsOneWidget);
     expect(find.text('IF · all of these hold'), findsOneWidget);
@@ -633,7 +633,7 @@ void main() {
 
   testWidgets('a try step saves its steps and its fallback', (tester) async {
     await pumpBlank(tester);
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-try');
     expect(find.text('Try, with a fallback'), findsWidgets);
     await notifyIn(tester, 'block-then[0].try', 'Prime');
@@ -662,7 +662,7 @@ void main() {
     tester,
   ) async {
     await pumpBlank(tester);
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-repeat');
     await tapKey(tester, 'repeat-how');
     await tester.enterText(find.byKey(const ValueKey('repeat-times')), '5');
@@ -715,7 +715,7 @@ void main() {
         },
       ),
     );
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-together');
     for (final b in [0, 1]) {
       await tapIn(tester, 'block-then[0].together[$b]', 'Add step');
@@ -761,7 +761,7 @@ void main() {
       engine,
       const RuleEditorPage(initial: {'name': 'Bulb off while away'}),
     );
-    await tapText(tester, 'Add step');
+    await tapAdd(tester, 'Add step');
     await tapKey(tester, 'pick-keep');
     expect(find.text('Keep a value'), findsOneWidget);
     expect(buttonEnabled(tester, 'keep-done'), isFalse);
@@ -769,7 +769,7 @@ void main() {
     await tapKey(tester, 'pick-keep-hall_bulb');
     await tapKey(tester, 'opt-off-power');
     await tapKey(tester, 'form-done');
-    await tapText(tester, 'Add condition');
+    await tapAdd(tester, 'Add condition');
     await tapKey(tester, 'pick-presence');
     await tapText(tester, 'I am away');
     await tapKey(tester, 'form-done');
@@ -812,8 +812,13 @@ void main() {
       engine,
       RuleEditorPage(initial: {..._arrive, 'name': 'Evening'}),
     );
+    // It waits in Options, collapsed, and no longer in the menu.
     await tapKey(tester, 'rule-menu');
-    await tapText(tester, 'Stop at the first failed step');
+    expect(find.text('Stop at the first failed step'), findsNothing);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'rule-options');
+    await tapKey(tester, 'rule-stop-on-error');
     expect(find.text('Stops at the first step that fails.'), findsOneWidget);
     await tapKey(tester, 'rule-save');
     expect(savedSpec(engine)['stopOnError'], isTrue);

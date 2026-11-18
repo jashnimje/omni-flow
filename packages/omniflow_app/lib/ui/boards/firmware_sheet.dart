@@ -226,10 +226,10 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
             chevron: true,
             onTap: _pickOwn,
           ),
-          const Text(
+          Text(
             'A Pico W is flashed by holding BOOTSEL while plugging it in, '
             'then copying the firmware to the drive it shows.',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
           if (progress case final p?) ...[
             const SizedBox(height: OmniSpace.md),

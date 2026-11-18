@@ -236,9 +236,9 @@ class _AddPinPageState extends ConsumerState<AddPinPage> {
                 },
               ),
             ),
-            child: const Text(
+            child: Text(
               'Off when the button connects the pin to 3.3 V instead.',
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
         if (_role == PinRole.relay)
@@ -252,9 +252,9 @@ class _AddPinPageState extends ConsumerState<AddPinPage> {
                 onChanged: (v) => setState(() => _activeLow = v),
               ),
             ),
-            child: const Text(
+            child: Text(
               'For relay boards that switch on when the pin is low.',
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
       ],
@@ -311,7 +311,7 @@ class _PinGrid extends StatelessWidget {
         ? (palette.accent, palette.accent, palette.onAccent)
         : user != null
         ? (palette.accentSoft, palette.accentLine, palette.accent)
-        : (palette.card, palette.line, OmniColors.text);
+        : (palette.card, palette.line, OmniPalette.of(context).text);
     return Semantics(
       button: true,
       enabled: enabled,

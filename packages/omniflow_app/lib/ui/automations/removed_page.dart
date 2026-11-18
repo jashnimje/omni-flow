@@ -77,11 +77,11 @@ class _RemovedPageState extends ConsumerState<RemovedPage> {
             'put it back.',
       ),
       children: (context) => [
-        const Padding(
-          padding: EdgeInsets.only(bottom: OmniSpace.sm),
+        Padding(
+          padding: const EdgeInsets.only(bottom: OmniSpace.sm),
           child: Text(
             'Restore puts an automation back as it was, on or off.',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ),
         for (final row in removed.requireValue) _row(row),

@@ -21,9 +21,10 @@ class RemoteKey {
   final String? text;
 }
 
-/// The remote of the mockup (4.1): the top row, the D-pad, then back, menu,
-/// info, volume and media. Scrolling down: numbers, colour keys, channels,
-/// inputs, guide and TV settings, sleep and wake, and the text box.
+/// The remote of design v2: the D-pad and six large keys in front (Back,
+/// Home, Mute, Vol -, Play, Vol +). Everything else (input, voice, menu,
+/// numbers, colour keys, channels, inputs, guide and sleep, the text box)
+/// sits under More buttons.
 abstract final class RemoteLayout {
   static const power = RemoteKey(26, 'Power', OmniIcons.power);
   static const input = RemoteKey(178, 'Input', null, 'Input');
@@ -137,6 +138,12 @@ abstract final class RemoteLayout {
     mode,
   ];
 
+  /// The six keys in front, under the D-pad.
+  static const front = [back, home, mute, volumeDown, playPause, volumeUp];
+
+  /// The keys of the top and middle rows that are not in front.
+  static const extra = [input, assistant, menu, info, previous, next];
+
   static final placed = <int>{
     for (final k in [
       ...top,
@@ -171,12 +178,21 @@ enum _RemoteMode {
 }
 
 class TvRemoteTab extends StatefulWidget {
-  const TvRemoteTab({super.key, required this.tv, this.active = true});
+  const TvRemoteTab({
+    super.key,
+    required this.tv,
+    this.active = true,
+    this.sections = const [],
+  });
 
   final TvController tv;
 
   /// Whether the tab is on screen: the mouse's picture only reads then.
   final bool active;
+
+  /// The page's collapsed sections, under More buttons: TV tools,
+  /// Automations, Activity and More settings.
+  final List<Widget> sections;
 
   @override
   State<TvRemoteTab> createState() => _TvRemoteTabState();
@@ -199,18 +215,23 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
   void _press(RemoteKey k, {bool long = false}) =>
       tv.key(k.keycode, longPress: long);
 
-  Widget _key(RemoteKey k, {Color? background, Color? foreground}) =>
-      TvKeyButton(
-        key: ValueKey('key-${k.keycode}'),
-        label: k.label,
-        icon: k.icon,
-        showLabel: k.icon == null || k.text != null,
-        text: k.text,
-        background: background,
-        foreground: foreground ?? OmniColors.text,
-        onTap: () => _press(k),
-        onLongPress: () => _press(k, long: true),
-      );
+  Widget _key(
+    RemoteKey k, {
+    Color? background,
+    Color? foreground,
+    double height = OmniSpace.target,
+  }) => TvKeyButton(
+    key: ValueKey('key-${k.keycode}'),
+    label: k.label,
+    icon: k.icon,
+    showLabel: k.icon == null || k.text != null,
+    text: k.text,
+    background: background,
+    foreground: foreground,
+    height: height,
+    onTap: () => _press(k),
+    onLongPress: () => _press(k, long: true),
+  );
 
   Future<void> _pickMode() async {
     final picked = await showPickerSheet<_RemoteMode>(
@@ -240,6 +261,105 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
     if (result['ok'] == true && mounted) _text.clear();
   }
 
+  /// The remote's other keys, folded away under More buttons.
+  OmniDisclosure _moreButtons(BuildContext context) => OmniDisclosure(
+    key: const ValueKey('tv-more-buttons'),
+    storageId: 'tv-more-buttons-${tv.id}',
+    icon: OmniIcons.apps,
+    title: 'More buttons',
+    summary: 'Numbers, colours, input, voice',
+    children: [
+      const SizedBox(height: OmniSpace.sm),
+      TvKeyGrid(
+        columns: 3,
+        children: [for (final k in RemoteLayout.extra) _key(k)],
+      ),
+      const OmniSectionHeader('Numbers'),
+      TvKeyGrid(
+        columns: 3,
+        children: [for (final k in RemoteLayout.numbers) _key(k)],
+      ),
+      const OmniSectionHeader('Colour keys'),
+      TvKeyGrid(
+        columns: 4,
+        children: [
+          for (final (k, color) in RemoteLayout.colors)
+            _key(k, background: color, foreground: OmniSurface.low),
+        ],
+      ),
+      const OmniSectionHeader('Channels'),
+      TvKeyGrid(
+        columns: 3,
+        children: [for (final k in RemoteLayout.channels) _key(k)],
+      ),
+      const OmniSectionHeader('Inputs'),
+      TvKeyGrid(
+        columns: 4,
+        children: [for (final k in RemoteLayout.inputs) _key(k)],
+      ),
+      const OmniSectionHeader('Guide, settings and sleep'),
+      TvKeyGrid(
+        columns: 3,
+        children: [
+          for (final k in RemoteLayout.more) _key(k),
+          for (final k in RemoteLayout.playback) _key(k),
+        ],
+      ),
+      const OmniSectionHeader('Type on the TV'),
+      TextField(
+        key: const ValueKey('tv-text'),
+        controller: _text,
+        maxLength: TvCalls.maxText,
+        textInputAction: TextInputAction.send,
+        decoration: InputDecoration(
+          labelText: 'Text for the box in focus on the TV',
+          counterText: '',
+          suffixIcon: OmniIconAction(
+            key: const ValueKey('tv-text-send'),
+            icon: TvIcons.send,
+            label: 'Type it on the TV',
+            color: OmniPalette.of(context).accent,
+            onPressed: _sendText,
+          ),
+        ),
+        onSubmitted: (_) => _sendText(),
+      ),
+      for (final g in tv.keyGroups)
+        if (g.keys.where((k) => !_isPlaced(k)).toList() case final extra
+            when extra.isNotEmpty) ...[
+          OmniSectionHeader('More ${g.group} keys'),
+          Wrap(
+            spacing: OmniSpace.xs,
+            children: [
+              for (final k in extra)
+                OmniFilterChip(
+                  key: ValueKey('catalog-${k.key}'),
+                  label: k.label,
+                  onTap: () => tv.sendKey(name: k.key),
+                ),
+            ],
+          ),
+        ],
+      const SizedBox(height: OmniSpace.sm),
+      OmniListRow(
+        key: const ValueKey('tv-remote-mode'),
+        icon: _mode.icon,
+        title: 'Use it as a gamepad or a mouse',
+        subtitle: 'Now: ${_mode.label}',
+        chevron: true,
+        divider: false,
+        onTap: _pickMode,
+      ),
+      Padding(
+        padding: const EdgeInsets.only(top: OmniSpace.xs),
+        child: Text(
+          'Hold a key to send a long press.',
+          style: OmniText.captionOf(context),
+        ),
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: tv,
@@ -252,113 +372,36 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
           : null,
       padding: omniBodyPadding(OmniInsets.bottom(context)),
       children: [
-        // One row of tabs above (the page's chips): how the remote works is
-        // a choice inside it, not a second row of tabs.
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: OmniStatusChip(
-            key: const ValueKey('tv-remote-mode'),
-            icon: _mode.icon,
-            label: 'Keys: ${_mode.label}',
-            onTap: _pickMode,
-          ),
-        ),
-        const SizedBox(height: OmniSpace.sm),
-        if (_mode == _RemoteMode.gamepad)
-          ..._gamepadKeys()
-        else if (_mode == _RemoteMode.mouse)
-          TvMouse(tv: tv, active: widget.active)
-        else ...[
-          TvKeyGrid(
-            columns: 4,
-            children: [for (final k in RemoteLayout.top) _key(k)],
-          ),
-          _DPad(press: _press),
-          TvKeyGrid(
-            columns: 3,
-            children: [for (final k in RemoteLayout.middle) _key(k)],
-          ),
-          const Padding(
-            padding: EdgeInsets.only(top: OmniSpace.sm),
-            child: Text(
-              'Swipe up for numbers, colours, channels, inputs and text',
-              textAlign: TextAlign.center,
-              style: OmniText.caption,
+        if (_mode != _RemoteMode.remote) ...[
+          // The way back to the remote's buttons, in front while the
+          // gamepad or the mouse is.
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: OmniStatusChip(
+              key: const ValueKey('tv-remote-mode'),
+              icon: _mode.icon,
+              label: 'Keys: ${_mode.label}',
+              onTap: _pickMode,
             ),
           ),
-          const OmniSectionHeader('Numbers'),
-          TvKeyGrid(
-            columns: 3,
-            children: [for (final k in RemoteLayout.numbers) _key(k)],
-          ),
-          const OmniSectionHeader('Colour keys'),
-          TvKeyGrid(
-            columns: 4,
-            children: [
-              for (final (k, color) in RemoteLayout.colors)
-                _key(k, background: color, foreground: OmniSurface.low),
-            ],
-          ),
-          const OmniSectionHeader('Channels'),
-          TvKeyGrid(
-            columns: 3,
-            children: [for (final k in RemoteLayout.channels) _key(k)],
-          ),
-          const OmniSectionHeader('Inputs'),
-          TvKeyGrid(
-            columns: 4,
-            children: [for (final k in RemoteLayout.inputs) _key(k)],
-          ),
-          const OmniSectionHeader('Guide, settings and sleep'),
+          const SizedBox(height: OmniSpace.sm),
+          if (_mode == _RemoteMode.gamepad)
+            ..._gamepadKeys()
+          else
+            TvMouse(tv: tv, active: widget.active),
+        ] else ...[
+          _DPad(press: _press, size: _DPad.large, ok: _DPad.largeOk),
           TvKeyGrid(
             columns: 3,
             children: [
-              for (final k in RemoteLayout.more) _key(k),
-              for (final k in RemoteLayout.playback) _key(k),
+              for (final k in RemoteLayout.front)
+                _key(k, height: OmniSpace.targetLarge),
             ],
           ),
-          const OmniSectionHeader('Type on the TV'),
-          TextField(
-            key: const ValueKey('tv-text'),
-            controller: _text,
-            maxLength: TvCalls.maxText,
-            textInputAction: TextInputAction.send,
-            decoration: InputDecoration(
-              labelText: 'Text for the box in focus on the TV',
-              counterText: '',
-              suffixIcon: OmniIconAction(
-                key: const ValueKey('tv-text-send'),
-                icon: TvIcons.send,
-                label: 'Type it on the TV',
-                color: OmniPalette.of(context).accent,
-                onPressed: _sendText,
-              ),
-            ),
-            onSubmitted: (_) => _sendText(),
-          ),
-          for (final g in tv.keyGroups)
-            if (g.keys.where((k) => !_isPlaced(k)).toList() case final extra
-                when extra.isNotEmpty) ...[
-              OmniSectionHeader('More ${g.group} keys'),
-              Wrap(
-                spacing: OmniSpace.xs,
-                children: [
-                  for (final k in extra)
-                    OmniFilterChip(
-                      key: ValueKey('catalog-${k.key}'),
-                      label: k.label,
-                      onTap: () => tv.sendKey(name: k.key),
-                    ),
-                ],
-              ),
-            ],
+          const SizedBox(height: OmniSpace.lg),
+          _moreButtons(context),
+          ...widget.sections,
         ],
-        const SizedBox(height: OmniSpace.sm),
-        const Text(
-          'Hold a key to send a long press.',
-          textAlign: TextAlign.center,
-          style: OmniText.caption,
-        ),
       ],
     ),
   );
@@ -445,7 +488,7 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
     k,
     width: width,
     height: 44,
-    shape: const StadiumBorder(side: BorderSide(color: OmniColors.line)),
+    shape: StadiumBorder(side: BorderSide(color: OmniPalette.of(context).line)),
     accent: false,
   );
 
@@ -492,82 +535,103 @@ class _TvRemoteTabState extends State<TvRemoteTab> {
       k.keycode != null && RemoteLayout.placed.contains(k.keycode);
 }
 
-/// Up, down, left and right around OK, in the mockup's 168 dp ring.
+/// Up, down, left and right around OK in a ring: 232 dp with a 100 dp OK
+/// on the remote, 168 dp beside the gamepad's face buttons.
 class _DPad extends StatelessWidget {
-  const _DPad({required this.press});
+  const _DPad({required this.press, this.size = 168, this.ok = 60});
+
+  static const large = 232.0;
+  static const largeOk = 100.0;
 
   final void Function(RemoteKey k, {bool long}) press;
+  final double size;
+  final double ok;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: OmniSpace.sm),
-    child: Center(
-      child: Container(
-        width: 168,
-        height: 168,
-        decoration: BoxDecoration(
-          color: OmniPalette.of(context).card,
-          shape: BoxShape.circle,
-          border: Border.all(color: OmniPalette.of(context).line),
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Align(
-              alignment: Alignment.topCenter,
-              child: _ringKey(RemoteLayout.up),
-            ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: _ringKey(RemoteLayout.down),
-            ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: _ringKey(RemoteLayout.left),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: _ringKey(RemoteLayout.right),
-            ),
-            _ringKey(RemoteLayout.ok, ok: true),
-          ],
+  Widget build(BuildContext context) {
+    final palette = OmniPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: OmniSpace.md),
+      child: Center(
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: palette.card,
+            shape: BoxShape.circle,
+            border: Border.all(color: palette.line),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Align(
+                alignment: Alignment.topCenter,
+                child: _ringKey(context, RemoteLayout.up),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _ringKey(context, RemoteLayout.down),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _ringKey(context, RemoteLayout.left),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _ringKey(context, RemoteLayout.right),
+              ),
+              _ringKey(context, RemoteLayout.ok, isOk: true),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
-  Widget _ringKey(RemoteKey k, {bool ok = false}) => SizedBox.square(
-    dimension: ok ? 60 : OmniSpace.target + 4,
-    child: Semantics(
-      button: true,
-      label: k.label,
-      excludeSemantics: true,
-      onTap: () => press(k),
-      onLongPress: () => press(k, long: true),
-      child: Tooltip(
-        message: k.label,
-        excludeFromSemantics: true,
-        child: Material(
-          key: ValueKey('key-${k.keycode}'),
-          color: ok ? OmniColors.raised : Colors.transparent,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => press(k),
-            onLongPress: () => press(k, long: true),
-            child: Center(
-              child: ok
-                  ? Text(
-                      'OK',
-                      style: OmniText.label.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    )
-                  : Icon(k.icon, color: OmniColors.muted, size: 26),
+  Widget _ringKey(BuildContext context, RemoteKey k, {bool isOk = false}) {
+    final palette = OmniPalette.of(context);
+    // The arrows grow with the ring, so each stays at least 56 dp.
+    final arrow = (size - ok) / 2 < OmniSpace.targetLarge
+        ? OmniSpace.target + 4
+        : OmniSpace.targetLarge + 8;
+    return SizedBox.square(
+      dimension: isOk ? ok : arrow,
+      child: Semantics(
+        button: true,
+        label: k.label,
+        excludeSemantics: true,
+        onTap: () => press(k),
+        onLongPress: () => press(k, long: true),
+        child: Tooltip(
+          message: k.label,
+          excludeFromSemantics: true,
+          child: Material(
+            key: ValueKey('key-${k.keycode}'),
+            color: isOk ? palette.raised : Colors.transparent,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => press(k),
+              onLongPress: () => press(k, long: true),
+              child: Center(
+                child: isOk
+                    ? Text(
+                        'OK',
+                        style:
+                            (ok >= largeOk
+                                    ? OmniText.pageTitle
+                                    : OmniText.label)
+                                .copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: palette.text,
+                                ),
+                      )
+                    : Icon(k.icon, color: palette.muted, size: 28),
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }

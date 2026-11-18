@@ -42,11 +42,11 @@ void main() {
       );
       expect(
         tileTint(DeviceView(light({'temp': 2200}, ['color_temp']))),
-        OmniColors.warmWhite,
+        LightWhite.warm,
       );
       expect(
         tileTint(DeviceView(light({'level': 50}, ['level']))),
-        OmniColors.warmWhite,
+        LightWhite.warm,
       );
       expect(
         tileTint(

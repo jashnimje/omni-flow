@@ -71,7 +71,30 @@ Future<void> tapIn(WidgetTester tester, String block, String text) async {
 Future<void> tapKey(WidgetTester tester, String key) async {
   final finder = find.byKey(ValueKey(key));
   await tester.ensureVisible(finder.first);
+  // Lays the scroll out where it moved, so the tap lands on the target.
+  await tester.pump();
   await tester.tap(finder.first);
+  await tester.pumpAndSettle();
+}
+
+/// Adds a part to the rule on screen the way a person does: a group's
+/// page keeps its own "Add step" link, and the editor's own blocks are
+/// added to from its one "Add a step", which asks which kind first.
+Future<void> tapAdd(WidgetTester tester, String label) async {
+  if (find.text(label).evaluate().isNotEmpty) return tapText(tester, label);
+  await tapKey(tester, 'rule-add-a-step');
+  await tapKey(tester, switch (label) {
+    'Add trigger' => 'add-part-when',
+    'Add condition' => 'add-part-onlyIf',
+    _ => 'add-part-then',
+  });
+}
+
+/// Opens the collapsed section [title] (Options, Activity, Ideas for you).
+Future<void> openSection(WidgetTester tester, String title) async {
+  final finder = find.text(title);
+  await tester.ensureVisible(finder.last);
+  await tester.tap(finder.last);
   await tester.pumpAndSettle();
 }
 

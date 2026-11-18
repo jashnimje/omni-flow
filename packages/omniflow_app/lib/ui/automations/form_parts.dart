@@ -83,9 +83,9 @@ class ChoiceRow extends StatelessWidget {
               size: 22,
             )
           : warning
-          ? const Icon(
+          ? Icon(
               OmniIcons.warning,
-              color: OmniColors.warn,
+              color: OmniPalette.of(context).warn,
               size: 20,
               semanticLabel: 'High risk',
             )
@@ -487,7 +487,7 @@ class _ParamControlsState extends State<ParamControls> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: OmniText.caption),
+            Text(label, style: OmniText.captionOf(context)),
             Wrap(
               key: ValueKey('param-$key'),
               spacing: 6,

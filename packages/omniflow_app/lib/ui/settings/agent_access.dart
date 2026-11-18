@@ -70,14 +70,14 @@ class AgentAccessRow extends ConsumerWidget {
               onTap: () => Navigator.of(sheet).pop(level),
             ),
           const SizedBox(height: OmniSpace.sm),
-          const Text(
+          Text(
             'Never open to an agent: keys and passwords, pairing, removing '
             'things or places, approving or running high-risk automations, '
             'writing firmware, and the TV shell, installs, raw settings and '
             'file deletes. A computer you allowed for USB debugging can still '
             'do anything you can, so allow only your own.',
             key: ValueKey('agent-access-user-only'),
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ],
       ),

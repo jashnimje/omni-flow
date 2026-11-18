@@ -166,7 +166,7 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
           PopupMenuButton<bool>(
             key: const ValueKey('places-menu'),
             tooltip: 'Say where you are',
-            icon: const Icon(OmniIcons.more, color: OmniColors.muted),
+            icon: Icon(OmniIcons.more, color: OmniPalette.of(context).muted),
             onSelected: (home) async {
               final done = await ref
                   .read(engineApiProvider)
@@ -254,13 +254,13 @@ class _PlacesPageState extends ConsumerState<PlacesPage> {
               onChanged: (on) => _setBeacon(zone, on),
             ),
           ),
-          const OmniListRow(
+          OmniListRow(
             key: ValueKey('presence-hub'),
             icon: OmniIcons.hub,
             title: 'Seen by a hub',
             subtitle: 'Coming later',
             value: 'Not yet',
-            valueColor: OmniColors.muted,
+            valueColor: OmniPalette.of(context).muted,
           ),
         ],
         const SizedBox(height: OmniSpace.md),

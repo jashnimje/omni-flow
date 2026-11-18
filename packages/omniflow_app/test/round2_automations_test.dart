@@ -208,9 +208,8 @@ void main() {
   });
 
   group('#57 the filter chips', () {
-    testWidgets('every chip has a count, and All counts the scenes', (
-      tester,
-    ) async {
+    testWidgets('the filters are All, Rules and Scenes, and All lists the '
+        'scenes', (tester) async {
       engine.answers['automation.list'] = {
         'ok': true,
         'automations': [
@@ -219,16 +218,29 @@ void main() {
         ],
       };
       await pumpPage(tester, engine, const AutomationsScreen());
-      expect(find.text('Quick links 0'), findsOneWidget);
-      expect(find.textContaining(RegExp(r'^Off \d')), findsOneWidget);
-      expect(find.textContaining(RegExp(r'^All \d')), findsOneWidget);
+      final filters = find.byKey(const ValueKey('automation-filters'));
+      for (final f in ['All', 'Rules', 'Scenes']) {
+        expect(
+          find.descendant(of: filters, matching: find.text(f)),
+          findsOneWidget,
+        );
+      }
+      expect(find.textContaining('Quick links'), findsNothing);
+      expect(find.textContaining(RegExp(r'^Off \d')), findsNothing);
+      expect(find.byKey(const ValueKey('scene-movie')), findsOneWidget);
     });
 
     testWidgets('the Scenes filter has no New scene of its own', (
       tester,
     ) async {
       await pumpPage(tester, engine, const AutomationsScreen());
-      await tapKey(tester, 'filter-scenes');
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('automation-filters')),
+          matching: find.text('Scenes'),
+        ),
+      );
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('scene-new')), findsNothing);
       expect(find.text('New scene'), findsNothing);
     });
@@ -293,6 +305,9 @@ void main() {
     ) async {
       await pumpPushed(tester, engine, const SceneEditorPage());
       expect(find.byKey(const ValueKey('scene-icon-movie')), findsNothing);
+      // Colour and icon wait in Options, collapsed.
+      expect(find.byKey(const ValueKey('scene-look')), findsNothing);
+      await tapKey(tester, 'scene-options');
       await tapKey(tester, 'scene-look');
       expect(find.byKey(const ValueKey('look-icon-bolt')), findsOneWidget);
       expect(find.byKey(const ValueKey('look-color-A78BFA')), findsOneWidget);

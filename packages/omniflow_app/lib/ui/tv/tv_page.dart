@@ -18,8 +18,8 @@ import 'tv_system.dart';
 import 'tv_settings.dart';
 import 'tv_widgets.dart';
 
-/// The Android device page's tabs. A TV and a phone show different ones
-/// as chips, and the rest under More.
+/// The Android device page's views. The ones used every day switch under
+/// one segmented control; the rest are tools that open as their own page.
 enum TvTab {
   remote('Remote'),
   screen('Screen'),
@@ -33,15 +33,15 @@ enum TvTab {
 
   final String label;
 
-  /// The three a TV is used for every day, as chips. The rest sit under
-  /// More.
-  static const main = [remote, screen, apps];
+  /// The three a TV is used for every day, in the switch. The rest are TV
+  /// tools, in a section under the remote.
+  static const main = [remote, apps, screen];
 
-  /// A phone is looked at and touched rather than pointed at, so its chips
-  /// are Screen, Apps and Files, and its keys sit under More, Remote.
+  /// A phone is looked at and touched rather than pointed at, so its switch
+  /// is Screen, Apps and Files, and its keys are a tool, Remote.
   static const phoneMain = [screen, apps, files];
 
-  /// What a phone shows under More, in order.
+  /// A phone's tools, in order.
   static const phoneMore = [system, settings, remote, console];
 
   bool get isMain => main.contains(this);
@@ -60,11 +60,12 @@ enum TvTab {
 }
 
 /// The Android device page, picked by driver. For a TV (4.1 to 4.5) the
-/// live header on every tab, then Remote, Screen and Apps as tabs, with
-/// System, Files, Settings and Console under More. For another phone
-/// Screen, Apps and Files, with System, Settings, Remote and Console under
-/// More. A tab is built the first time it is opened and kept after, so its
-/// list and scroll survive a switch.
+/// live header, then Remote, Apps and Screen under one switch. Under the
+/// remote, collapsed: More buttons, TV tools (System, Files, TV settings,
+/// Console, each its own page), Automations, Activity and More settings.
+/// For another phone Screen, Apps and Files, with System, Settings, Remote
+/// and Console as tools from the header. A view is built the first time it
+/// is opened and kept after, so its list and scroll survive a switch.
 class TvPage extends ConsumerStatefulWidget {
   const TvPage({
     super.key,
@@ -114,48 +115,133 @@ class _TvPageState extends ConsumerState<TvPage> {
     _opened.add(tab);
   });
 
-  /// The tabs that are not chips, as a sheet to pick one from.
-  Future<void> _more() async {
+  @override
+  void initState() {
+    super.initState();
+    // A tool is a page of its own, so opening on one opens it over the
+    // remote.
+    if (!widget.tab.isMainFor(phone: _phone)) {
+      _tab = TvTab.mainFor(phone: _phone).first;
+      _opened
+        ..clear()
+        ..add(_tab);
+      final tool = widget.tab;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openTool(tool);
+      });
+    }
+  }
+
+  /// What each tool is for, in a line.
+  String _toolLine(TvTab t) => switch (t) {
+    TvTab.system => 'How it is doing, what runs on it, restart',
+    TvTab.files => 'Files to and from this phone',
+    TvTab.settings => 'Change settings on the ${tv.noun}',
+    TvTab.remote => 'Back, Home, Recents, volume, notifications and lock',
+    _ => 'Commands on the ${tv.noun}, for experts',
+  };
+
+  static IconData _toolIcon(TvTab t) => switch (t) {
+    TvTab.system => OmniIcons.system,
+    TvTab.files => OmniIcons.storage,
+    TvTab.settings => OmniIcons.settings,
+    TvTab.remote => OmniIcons.phone,
+    _ => OmniIcons.terminal,
+  };
+
+  String _toolTitle(TvTab t) =>
+      t == TvTab.settings && !_phone ? 'TV settings' : t.label;
+
+  /// Opens [tool] as its own page over this one, with the same live
+  /// header and power key.
+  void _openTool(TvTab tool) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => ListenableBuilder(
+        listenable: tv,
+        builder: (context, _) => DetailPage.custom(
+          key: ValueKey('tv-tool-${tool.name}'),
+          title: _toolTitle(tool),
+          actions: [_powerAction(context)],
+          hero: TvHeader(tv: tv),
+          body: (_) => _body(tool, active: true),
+        ),
+      ),
+    ),
+  );
+
+  /// Sleep and wake, in the header of the page and of every tool.
+  Widget _powerAction(BuildContext context) {
+    final on = tv.state.isOn;
+    final palette = OmniPalette.of(context);
+    return OmniIconAction(
+      key: const ValueKey('tv-header-power'),
+      icon: OmniIcons.power,
+      label: _phone
+          ? (on ? 'Lock the phone' : 'Wake the phone')
+          : (on ? 'Put the TV to sleep' : 'Wake the TV'),
+      color: on ? palette.accent : palette.muted,
+      onPressed: () => tv.key(on ? Keycodes.sleep : Keycodes.wakeup),
+    );
+  }
+
+  /// A phone's tools, as a sheet to pick one from.
+  Future<void> _phoneTools() async {
     final picked = await showPickerSheet<TvTab>(
       context,
-      title: 'More',
-      selected: _tab,
+      title: 'Phone tools',
       sections: [
         PickerSection([
           for (final t in TvTab.moreFor(phone: _phone))
             PickerItem(
               key: ValueKey('tv-more-${t.name}'),
               value: t,
-              icon: switch (t) {
-                TvTab.system => OmniIcons.system,
-                TvTab.files => OmniIcons.storage,
-                TvTab.settings => OmniIcons.settings,
-                TvTab.remote => OmniIcons.phone,
-                _ => OmniIcons.terminal,
-              },
-              title: t.label,
-              subtitle: switch (t) {
-                TvTab.system => 'how it is doing, what runs on it, restart',
-                TvTab.files =>
-                  'the files on the ${tv.noun}, to and from this phone',
-                TvTab.settings => 'change settings on the ${tv.noun}',
-                TvTab.remote =>
-                  'Back, Home, Recents, volume, notifications and lock',
-                _ => 'run commands on the ${tv.noun}, for experts',
-              },
+              icon: _toolIcon(t),
+              title: _toolTitle(t),
+              subtitle: _toolLine(t),
             ),
         ]),
       ],
     );
-    if (picked != null && mounted) _open(picked);
+    if (picked != null && mounted) _openTool(picked);
   }
 
-  Widget _body(TvTab tab) => switch (tab) {
+  /// The TV's tools, folded away under the remote.
+  OmniDisclosure _tvTools() => OmniDisclosure(
+    key: const ValueKey('tv-tools'),
+    storageId: 'tv-tools-${widget.id}',
+    icon: OmniIcons.handyman,
+    title: 'TV tools',
+    summary: 'System, files, TV settings',
+    children: [
+      for (final (i, t) in TvTab.moreFor(phone: _phone).indexed)
+        OmniListRow(
+          key: ValueKey('tv-more-${t.name}'),
+          icon: _toolIcon(t),
+          title: _toolTitle(t),
+          subtitle: _toolLine(t),
+          chevron: true,
+          divider: i < TvTab.moreFor(phone: _phone).length - 1,
+          onTap: () => _openTool(t),
+        ),
+    ],
+  );
+
+  Widget _body(TvTab tab, {bool active = false}) => switch (tab) {
     TvTab.remote when _phone => PhoneRemoteTab(tv: tv),
-    TvTab.remote => TvRemoteTab(tv: tv, active: _tab == TvTab.remote),
-    TvTab.screen => TvScreenTab(tv: tv, active: _tab == TvTab.screen),
+    TvTab.remote => Consumer(
+      builder: (context, ref, _) => TvRemoteTab(
+        tv: tv,
+        active: active || _tab == TvTab.remote,
+        sections: [
+          _tvTools(),
+          if (_device case final device?)
+            ...deviceSections(ref, DeviceView(device)),
+        ],
+      ),
+    ),
+    TvTab.screen => TvScreenTab(tv: tv, active: active || _tab == tab),
     TvTab.apps => TvAppsTab(tv: tv),
-    TvTab.system => TvSystemTab(tv: tv, active: _tab == TvTab.system),
+    TvTab.system => TvSystemTab(tv: tv, active: active || _tab == tab),
     TvTab.settings => TvSettingsTab(tv: tv),
     TvTab.files => TvFilesTab(tv: tv),
     TvTab.console => TvConsoleTab(tv: tv),
@@ -177,20 +263,17 @@ class _TvPageState extends ConsumerState<TvPage> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: tv,
     builder: (context, _) {
-      final on = tv.state.isOn;
-      final palette = OmniPalette.of(context);
       return DetailPage.custom(
         title: widget.name,
         actions: [
-          OmniIconAction(
-            key: const ValueKey('tv-header-power'),
-            icon: OmniIcons.power,
-            label: _phone
-                ? (on ? 'Lock the phone' : 'Wake the phone')
-                : (on ? 'Put the TV to sleep' : 'Wake the TV'),
-            color: on ? palette.accent : OmniColors.muted,
-            onPressed: () => tv.key(on ? Keycodes.sleep : Keycodes.wakeup),
-          ),
+          _powerAction(context),
+          if (_phone)
+            OmniIconAction(
+              key: const ValueKey('tv-tab-more'),
+              icon: OmniIcons.handyman,
+              label: 'Phone tools',
+              onPressed: _phoneTools,
+            ),
           if (_device case final device?)
             OmniIconAction(
               key: const ValueKey('tv-header-device'),
@@ -229,37 +312,14 @@ class _TvPageState extends ConsumerState<TvPage> {
             ),
         ],
         hero: TvHeader(tv: tv),
-        // Start-aligned, so the row does not jump as the More chip's
-        // name changes length.
-        tabs: Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: SingleChildScrollView(
-            key: const ValueKey('tv-tabs'),
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final t in TvTab.mainFor(phone: _phone)) ...[
-                  OmniFilterChip(
-                    key: ValueKey('tv-tab-${t.name}'),
-                    label: t.label,
-                    selected: _tab == t,
-                    onTap: () => _open(t),
-                  ),
-                  const SizedBox(width: OmniSpace.sm),
-                ],
-                // Names the tab it is showing, so it is clear where you are.
-                OmniFilterChip(
-                  key: const ValueKey('tv-tab-more'),
-                  label: _tab.isMainFor(phone: _phone)
-                      ? 'More'
-                      : 'More: ${_tab.label}',
-                  icon: OmniIcons.more,
-                  selected: !_tab.isMainFor(phone: _phone),
-                  onTap: _more,
-                ),
-              ],
-            ),
-          ),
+        tabs: OmniSegmented<TvTab>(
+          key: const ValueKey('tv-tabs'),
+          segments: [
+            for (final t in TvTab.mainFor(phone: _phone))
+              OmniSegment(t, t.label),
+          ],
+          selected: _tab,
+          onChanged: _open,
         ),
         body: (context) => IndexedStack(
           index: _tab.index,
@@ -289,12 +349,15 @@ class TvHeader extends StatelessWidget {
       final app = s.app;
       final name = tv.appName;
       final playing = playingLabel(s.playing);
+      // Large text gets the full height slider and a second line, so
+      // nothing in the header is cut.
+      final large = MediaQuery.textScalerOf(context).scale(16) / 16 > 1.3;
       return OmniCard(
         // The detail template puts the gap under the hero.
         margin: EdgeInsets.zero,
         padding: const EdgeInsets.fromLTRB(
           OmniSpace.md,
-          OmniSpace.gap,
+          OmniSpace.md,
           OmniSpace.xs,
           OmniSpace.xs,
         ),
@@ -307,7 +370,7 @@ class TvHeader extends StatelessWidget {
                 icon: tv.isPhone ? OmniIcons.phone : OmniIcons.tv,
                 size: 40,
               ),
-            const SizedBox(width: OmniSpace.gap),
+            const SizedBox(width: OmniSpace.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,7 +400,7 @@ class TvHeader extends StatelessWidget {
                             ),
                         ],
                       ),
-                      maxLines: 1,
+                      maxLines: large ? 3 : 1,
                       overflow: TextOverflow.ellipsis,
                     )
                   else
@@ -352,7 +415,7 @@ class TvHeader extends StatelessWidget {
                         child: OmniLabelledSlider(
                           key: const ValueKey('tv-volume'),
                           label: 'Volume',
-                          height: 28,
+                          height: large ? OmniSpace.targetLarge : 28,
                           min: 0,
                           max: max.toDouble(),
                           step: 1,

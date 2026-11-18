@@ -136,12 +136,17 @@ class StepFlow extends StatelessWidget {
                   if (heading != null)
                     Semantics(
                       header: true,
-                      child: Text(heading!, style: OmniText.titleMedium),
+                      child: Text(heading!, style: OmniText.reading),
                     ),
                   if (why != null)
                     Padding(
                       padding: const EdgeInsets.only(top: OmniSpace.xs),
-                      child: Text(why!, style: OmniText.caption),
+                      child: Text(
+                        why!,
+                        style: OmniText.body.copyWith(
+                          color: OmniPalette.of(context).muted,
+                        ),
+                      ),
                     ),
                   if (heading != null || why != null)
                     const SizedBox(height: OmniSpace.lg),

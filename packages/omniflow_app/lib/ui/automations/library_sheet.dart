@@ -220,11 +220,11 @@ class _LibraryState extends State<_Library> {
                 subtitle: c.subtitle,
                 subtitleLines: 2,
                 chevron: c.onTap != null,
-                iconForeground: c.warning ? OmniColors.warn : null,
+                iconForeground: c.warning ? OmniPalette.of(context).warn : null,
                 trailing: c.warning
-                    ? const Icon(
+                    ? Icon(
                         OmniIcons.warning,
-                        color: OmniColors.warn,
+                        color: OmniPalette.of(context).warn,
                         size: 20,
                         semanticLabel: 'High risk',
                       )

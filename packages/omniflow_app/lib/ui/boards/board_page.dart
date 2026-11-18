@@ -279,7 +279,9 @@ class _BoardPageState extends ConsumerState<BoardPage> {
                 title: p.label,
                 subtitle: p.description,
                 value: p.valueIn(state),
-                valueColor: p.valueIn(state) == '-' ? OmniColors.muted : null,
+                valueColor: p.valueIn(state) == '-'
+                    ? OmniPalette.of(context).muted
+                    : null,
                 trailing: p.mode == 'out'
                     ? Semantics(
                         label: p.label,

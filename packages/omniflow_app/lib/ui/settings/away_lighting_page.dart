@@ -117,13 +117,13 @@ class AwayLightingPage extends ConsumerWidget {
             onChanged: view == null ? null : (on) => _set(ref, on: on),
           ),
         ),
-        const Padding(
+        Padding(
           padding: EdgeInsets.symmetric(vertical: OmniSpace.xs),
           child: Text(
             'While everyone is away, the lights you pick turn on and off as '
             'they did on the same day last week, each up to 20 minutes '
             'earlier or later. It stops the moment someone gets home.',
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ),
         const OmniSectionHeader('Lights to use'),

@@ -25,9 +25,8 @@ void main() {
 
   setUp(() => engine = FakeEngine());
 
-  testWidgets('four tabs, Home first, with the Add button on Home', (
-    tester,
-  ) async {
+  testWidgets('four tabs, Home first, labels always shown, and no floating '
+      'button on Home', (tester) async {
     await pumpApp(tester, engine);
     for (final label in ['Home', 'Automations', 'Devices', 'Settings']) {
       expect(
@@ -38,8 +37,17 @@ void main() {
         findsOneWidget,
       );
     }
+    final bar = tester.widget<NavigationBar>(
+      find.byKey(const ValueKey('shell-tabs')),
+    );
+    expect(bar.labelBehavior, NavigationDestinationLabelBehavior.alwaysShow);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('shell-tabs'))).height,
+      greaterThanOrEqualTo(80),
+    );
     expect(find.byType(HomeScreen), findsOneWidget);
-    expect(fabWith('add-device'), findsOneWidget);
+    // Add is the + in Home's top bar, so nothing floats over the tiles.
+    expect(find.byType(FloatingActionButton), findsNothing);
     expect(find.text('Packets'), findsNothing);
     expect(find.byKey(const ValueKey('command-bar')), findsNothing);
   });
@@ -65,7 +73,8 @@ void main() {
     expect(fabWith('new-rule'), findsOneWidget);
     expect(find.text('New'), findsOneWidget);
     await openTab(tester, 'Devices');
-    expect(fabWith('add-device'), findsOneWidget);
+    expect(find.byType(FloatingActionButton), findsNothing);
+    expect(find.byKey(const ValueKey('devices-add')), findsOneWidget);
     await openTab(tester, 'Settings');
     expect(find.byType(FloatingActionButton), findsNothing);
   });
@@ -84,7 +93,8 @@ void main() {
     tester,
   ) async {
     await pumpApp(tester, engine);
-    await tester.tap(fabWith('add-device'));
+    await openTab(tester, 'Devices');
+    await tester.tap(find.byKey(const ValueKey('devices-add')));
     await tester.pumpAndSettle();
     expect(find.byType(AddPage), findsOneWidget);
     expect(find.byKey(const ValueKey('shell-tabs')), findsNothing);
@@ -124,6 +134,11 @@ void main() {
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     await pumpApp(tester, engine);
     await openTab(tester, 'Settings');
+    await openMoreSettings(tester, developers: true);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('settings-developer')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-developer')));
     await tester.pump();
     await tester.pump();

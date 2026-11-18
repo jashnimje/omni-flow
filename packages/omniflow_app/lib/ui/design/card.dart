@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'tokens.dart';
 
 /// A card: a title row with an optional [trailing] widget (a switch, a
-/// value), then [child]. [highlighted] draws the accent border of the
-/// search's "Do it" result.
+/// value), then [child]. It sits on the container tone with no shadow.
+/// [highlighted] draws the accent border of the search's "Do it" result.
 class OmniCard extends StatelessWidget {
   const OmniCard({
     super.key,
@@ -17,7 +17,7 @@ class OmniCard extends StatelessWidget {
       horizontal: OmniSpace.screen,
       vertical: OmniSpace.md,
     ),
-    this.margin = const EdgeInsets.only(bottom: OmniSpace.gap),
+    this.margin = const EdgeInsets.only(bottom: OmniSpace.md),
   });
 
   final String? title;
@@ -39,20 +39,25 @@ class OmniCard extends StatelessWidget {
         children: [
           if (title != null || trailing != null)
             ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 24),
+              constraints: const BoxConstraints(minHeight: OmniSpace.xl),
               child: Row(
                 children: [
                   Expanded(
                     child: title == null
                         ? const SizedBox.shrink()
-                        : Text(title!, style: OmniText.bodyStrong),
+                        : Text(
+                            title!,
+                            style: OmniText.bodyStrong.copyWith(
+                              color: OmniPalette.of(context).text,
+                            ),
+                          ),
                   ),
                   ?trailing,
                 ],
               ),
             ),
           if ((title != null || trailing != null) && child != null)
-            const SizedBox(height: 6),
+            const SizedBox(height: OmniSpace.sm),
           ?child,
         ],
       ),
@@ -70,35 +75,19 @@ class OmniCard extends StatelessWidget {
           type: MaterialType.transparency,
           shape: RoundedRectangleBorder(borderRadius: radius),
           clipBehavior: Clip.antiAlias,
-          child: OmniSheen(
-            child: onTap == null
-                ? content
-                : InkWell(onTap: onTap, child: content),
-          ),
+          child: onTap == null
+              ? content
+              : InkWell(onTap: onTap, child: content),
         ),
       ),
     );
   }
 }
 
-/// The faint light along the top of a card or tile ([OmniDepth.sheen]),
-/// under [child].
-class OmniSheen extends StatelessWidget {
-  const OmniSheen({super.key, required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: const BoxDecoration(gradient: OmniDepth.sheen),
-    child: child,
-  );
-}
-
 enum HeroTone { accent, plain, problem }
 
-/// The large card at the top of a device, sensor, tag or place page: a
-/// [title] in 18 and a [subtitle] line, an optional [trailing] (the power
+/// The state card at the top of a device, sensor, tag or place page: a
+/// [title] in 28 ("On · 60%") and a [subtitle] line, an optional [trailing] (the power
 /// button) and [child] below (a chart). [centered] stacks a big [icon] over
 /// centred text (a tag, a pairing step).
 class OmniHeroCard extends StatelessWidget {
@@ -131,8 +120,8 @@ class OmniHeroCard extends StatelessWidget {
     final palette = OmniPalette.of(context);
     final captionColor = switch (tone) {
       HeroTone.accent => palette.onAccentSoft,
-      HeroTone.plain => OmniColors.muted,
-      HeroTone.problem => OmniColors.bad,
+      HeroTone.plain => palette.muted,
+      HeroTone.problem => palette.bad,
     };
     final caption = OmniText.caption.copyWith(color: captionColor);
     final align = centered
@@ -143,12 +132,12 @@ class OmniHeroCard extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (icon != null) ...[
-          Icon(icon, size: 44, color: OmniColors.text),
+          Icon(icon, size: 44, color: palette.text),
           const SizedBox(height: OmniSpace.sm),
         ],
         Text(
           title,
-          style: OmniText.heroTitle,
+          style: OmniText.heroTitle.copyWith(color: palette.text),
           textAlign: centered ? TextAlign.center : null,
         ),
         if (subtitle != null) ...[
@@ -179,10 +168,9 @@ class OmniHeroCard extends StatelessWidget {
           color: switch (tone) {
             HeroTone.accent => palette.accentLine,
             HeroTone.plain => OmniDepth.edgeOn(palette.card),
-            HeroTone.problem => OmniColors.badLine,
+            HeroTone.problem => palette.badLine,
           },
         ),
-        boxShadow: OmniDepth.shadow,
       ),
       child: Column(
         crossAxisAlignment: align,

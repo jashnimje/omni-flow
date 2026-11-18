@@ -167,7 +167,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                 : 'run shell commands, install apps or change settings, '
                       'or control any device not listed above',
             key: const ValueKey('review-cannot'),
-            style: OmniText.caption,
+            style: OmniText.captionOf(context),
           ),
         ),
       ],
@@ -229,7 +229,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         OmniListRow(
           key: const ValueKey('can-commands'),
           icon: OmniIcons.warning,
-          iconForeground: OmniColors.warn,
+          iconForeground: OmniPalette.of(context).warn,
           title: 'Run commands on ${names(risky)}',
           subtitle: 'High risk: it can do anything a command there can',
           subtitleLines: 2,
@@ -244,11 +244,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     ];
     return rows.isEmpty
         ? [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: OmniSpace.xs),
               child: Text(
                 'Nothing: it drives no device and runs nothing.',
-                style: OmniText.caption,
+                style: OmniText.captionOf(context),
               ),
             ),
           ]

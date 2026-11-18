@@ -119,19 +119,28 @@ class _SentenceRowState extends State<SentenceRow> {
   Widget build(BuildContext context) {
     final w = widget;
     final borderColor = w.error != null
-        ? OmniColors.bad
+        ? OmniPalette.of(context).bad
         : switch (w.style) {
-            StepRowStyle.flow => OmniColors.flowLine,
-            _ => OmniColors.line,
+            StepRowStyle.flow => OmniPalette.of(context).flowLine,
+            _ => OmniPalette.of(context).line,
           };
     final radius = BorderRadius.circular(OmniRadii.step);
-    final ink = RuleBlockColor.maybeOf(context) ?? OmniColors.text;
+    final inBlock = RuleBlockColor.maybeOf(context);
+    final ink = inBlock ?? OmniPalette.of(context).text;
+    // Inside a stacked block a plain row sits on the block's own colour.
+    // A wait, a group or an error keeps its edge.
+    final bare =
+        inBlock != null && w.error == null && w.style == StepRowStyle.normal;
     Widget handle = Semantics(
       label: 'Drag to reorder',
-      child: const SizedBox(
+      child: SizedBox(
         width: 32,
         height: OmniSpace.target,
-        child: Icon(OmniIcons.drag, size: 20, color: OmniColors.muted),
+        child: Icon(
+          OmniIcons.drag,
+          size: 20,
+          color: OmniPalette.of(context).muted,
+        ),
       ),
     );
     if (w.reorderIndex != null) {
@@ -156,7 +165,7 @@ class _SentenceRowState extends State<SentenceRow> {
               children: [
                 Text.rich(_sentence(ink)),
                 if (w.subtitle != null)
-                  Text(w.subtitle!, style: OmniText.caption),
+                  Text(w.subtitle!, style: OmniText.captionOf(context)),
               ],
             ),
           ),
@@ -167,11 +176,11 @@ class _SentenceRowState extends State<SentenceRow> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(w.trailingText!, style: OmniText.caption),
-                const Icon(
+                Text(w.trailingText!, style: OmniText.captionOf(context)),
+                Icon(
                   OmniIcons.chevron,
                   size: 18,
-                  color: OmniColors.muted,
+                  color: OmniPalette.of(context).muted,
                 ),
               ],
             ),
@@ -185,12 +194,17 @@ class _SentenceRowState extends State<SentenceRow> {
       ],
     );
     final card = Material(
-      color: OmniColors.card,
+      color: bare
+          ? OmniPalette.of(context).background.withValues(alpha: 0.24)
+          : OmniPalette.of(context).card,
       shape: w.style == StepRowStyle.wait && w.error == null
-          ? const _DashedBorder(radius: OmniRadii.step)
+          ? _DashedBorder(
+              radius: OmniRadii.step,
+              color: OmniPalette.of(context).muted,
+            )
           : RoundedRectangleBorder(
               borderRadius: radius,
-              side: BorderSide(color: borderColor),
+              side: bare ? BorderSide.none : BorderSide(color: borderColor),
             ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(onTap: w.onTap, child: body),
@@ -212,7 +226,9 @@ class _SentenceRowState extends State<SentenceRow> {
               ),
               child: Text(
                 w.error!,
-                style: OmniText.caption.copyWith(color: OmniColors.bad),
+                style: OmniText.caption.copyWith(
+                  color: OmniPalette.of(context).bad,
+                ),
               ),
             ),
         ],
@@ -223,9 +239,10 @@ class _SentenceRowState extends State<SentenceRow> {
 
 /// A rounded rectangle drawn with dashes, for a wait step.
 class _DashedBorder extends ShapeBorder {
-  const _DashedBorder({required this.radius});
+  const _DashedBorder({required this.radius, required this.color});
 
   final double radius;
+  final Color color;
 
   @override
   EdgeInsetsGeometry get dimensions => const EdgeInsets.all(1);
@@ -241,7 +258,7 @@ class _DashedBorder extends ShapeBorder {
   @override
   void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
     final paint = Paint()
-      ..color = OmniColors.muted
+      ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     final path = getOuterPath(rect.deflate(0.5));
@@ -253,5 +270,6 @@ class _DashedBorder extends ShapeBorder {
   }
 
   @override
-  ShapeBorder scale(double t) => _DashedBorder(radius: radius * t);
+  ShapeBorder scale(double t) =>
+      _DashedBorder(radius: radius * t, color: color);
 }

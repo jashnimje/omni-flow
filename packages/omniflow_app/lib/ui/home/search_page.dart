@@ -184,8 +184,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         textInputAction: TextInputAction.go,
         onChanged: _changed,
         onSubmitted: _submit,
-        decoration: const InputDecoration(
-          prefixIcon: Icon(OmniIcons.chevron, color: OmniColors.muted),
+        decoration: InputDecoration(
+          prefixIcon: Icon(
+            OmniIcons.chevron,
+            color: OmniPalette.of(context).muted,
+          ),
           hintText: 'Search, or say what to do: desk lamp 50',
         ),
       ),
@@ -205,10 +208,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             highlighted: runnable,
             title: runnable ? '${reading['summary']}' : _askText(reading),
             trailing: runnable
-                ? const Icon(
+                ? Icon(
                     OmniIcons.enter,
                     size: 18,
-                    color: OmniColors.muted,
+                    color: OmniPalette.of(context).muted,
                     semanticLabel: 'Press enter to run',
                   )
                 : null,
@@ -220,7 +223,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       shortDriverName(drivers[target.driver], target.driver),
                       ?target.room,
                     ].join(' · '),
-                    style: OmniText.caption,
+                    style: OmniText.captionOf(context),
                   ),
           ),
         ],

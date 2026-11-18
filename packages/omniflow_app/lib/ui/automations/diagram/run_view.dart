@@ -393,7 +393,7 @@ class _LastRunSectionState extends ConsumerState<LastRunSection> {
             child: Text(
               caption,
               key: const ValueKey('last-run-caption'),
-              style: OmniText.caption,
+              style: OmniText.captionOf(context),
             ),
           ),
         KeyedSubtree(

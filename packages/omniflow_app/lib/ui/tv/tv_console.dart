@@ -88,7 +88,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
     // card, with the prompt in the light accent tint.
     final palette = OmniPalette.of(context);
     final mono = OmniText.mono.copyWith(color: palette.onAccentSoft);
-    final out = OmniText.mono.copyWith(color: OmniColors.muted);
+    final out = OmniText.mono.copyWith(color: OmniPalette.of(context).muted);
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         OmniSpace.screen,
@@ -140,7 +140,9 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
                                   r.output,
                                   key: ValueKey('console-run-$i'),
                                   style: r.failed
-                                      ? out.copyWith(color: OmniColors.bad)
+                                      ? out.copyWith(
+                                          color: OmniPalette.of(context).bad,
+                                        )
                                       : out,
                                 ),
                               if (r.exitCode case final code?)
@@ -149,8 +151,8 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
                                   key: ValueKey('console-exit-$i'),
                                   style: out.copyWith(
                                     color: code == 0
-                                        ? OmniColors.muted
-                                        : OmniColors.bad,
+                                        ? OmniPalette.of(context).muted
+                                        : OmniPalette.of(context).bad,
                                   ),
                                 ),
                             ],
@@ -165,7 +167,7 @@ class _TvConsoleTabState extends ConsumerState<TvConsoleTab> {
               padding: EdgeInsets.only(top: OmniSpace.xs),
               child: OmniProgressBar(height: 2, semanticLabel: 'Running'),
             ),
-          const SizedBox(height: OmniSpace.gap),
+          const SizedBox(height: OmniSpace.md),
           Row(
             children: [
               Expanded(

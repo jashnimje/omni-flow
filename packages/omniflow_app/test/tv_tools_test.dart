@@ -101,7 +101,7 @@ void main() {
   testWidgets('Gamepad sends A as the controller key', (tester) async {
     final engine = tvEngine();
     await pumpTv(tester, engine);
-    await tester.tap(find.byKey(const ValueKey('tv-remote-mode')));
+    await openRemoteMode(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Gamepad'));
     await tester.pumpAndSettle();
@@ -124,7 +124,7 @@ void main() {
         'tv.input.tap': {'ok': true},
       });
     await pumpTv(tester, engine);
-    await tester.tap(find.byKey(const ValueKey('tv-remote-mode')));
+    await openRemoteMode(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Mouse'));
     await tester.pumpAndSettle();

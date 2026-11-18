@@ -224,12 +224,12 @@ class OmniTileGridSkeleton extends StatelessWidget {
         children: [
           for (var r = 0; r * columns < count; r++)
             Padding(
-              padding: const EdgeInsets.only(bottom: OmniSpace.gap),
+              padding: const EdgeInsets.only(bottom: OmniSpace.md),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (var c = 0; c < columns; c++) ...[
-                    if (c > 0) const SizedBox(width: OmniSpace.gap),
+                    if (c > 0) const SizedBox(width: OmniSpace.md),
                     Expanded(
                       child: r * columns + c < count
                           ? const OmniTileSkeleton()
