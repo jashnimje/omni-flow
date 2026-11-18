@@ -8,6 +8,7 @@ import 'package:omniflow_engine/omniflow_engine.dart' show ruleIdFor;
 import '../../api/engine_calls.dart';
 import '../../api/rule_calls.dart';
 import '../../rules/rule_spec.dart';
+import '../../state/clock.dart' show hour12Provider;
 import '../../state/providers.dart';
 import '../design/automation_look.dart';
 import '../design/design.dart';
@@ -160,17 +161,25 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
   String get _name => _draft?.spec.name.trim() ?? '';
 
   Future<void> _rename() async {
+    final draft = _draft;
     final name = await askName(
       context,
       title: 'Name this automation',
-      initial: _name,
+      // A new name starts from what the rule does, never a template's.
+      initial: _name.isEmpty && draft != null
+          ? draft.words.suggestedName(
+              draft.spec,
+              hour12: ref.read(hour12Provider),
+            )
+          : _name,
     );
     if (name == null || _draft == null) return;
     _draft!.spec.name = name;
     _draft!.changed();
   }
 
-  /// What still keeps Save off, in plain words, or null when it can save.
+  /// What still keeps Save off, in the WHEN and THEN words of the blocks,
+  /// or null when it can save.
   String? _missing(RuleSpec spec) => spec.missing;
 
   Future<void> _test() async {
@@ -286,9 +295,7 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     final ok = await confirm(
       context,
       title: 'Remove $_name?',
-      body:
-          'It stops running and is removed. You can undo it for a moment '
-          'after.',
+      body: 'It stops running. You can put it back from Recently removed.',
       action: 'Remove',
       destructive: true,
     );
@@ -326,37 +333,61 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  /// The kinds "Add a step" offers. A WHEN or THEN still empty shows its
+  /// own target in its block, which is the one way to fill it, so it is
+  /// left out here until that block has something.
+  static List<SentenceKind> _addable(RuleSpec spec) => [
+    if (spec.when.isNotEmpty) SentenceKind.when,
+    SentenceKind.onlyIf,
+    if (spec.then.isNotEmpty) SentenceKind.then,
+  ];
+
+  /// What the end block says for [kinds]: "Add a step" once it can add
+  /// one, else the checks it offers.
+  static String _addLabel(List<SentenceKind> kinds) =>
+      kinds.contains(SentenceKind.then)
+      ? 'Add a step'
+      : kinds.contains(SentenceKind.when)
+      ? 'Add another WHEN or an ONLY IF'
+      : 'Add an ONLY IF';
+
   /// The one "Add a step": asks which kind, then opens that kind's picker.
+  /// With one kind to offer it goes straight to that picker.
   Future<void> _addAStep(RuleDraft draft) async {
-    final kind = await showPickerSheet<SentenceKind>(
-      context,
-      title: 'Add a step',
-      sections: [
-        PickerSection([
-          PickerItem(
-            key: const ValueKey('add-part-when'),
-            value: SentenceKind.when,
-            title: 'When',
-            subtitle: 'Something that starts it',
-            icon: SentenceColors.iconOf(SentenceKind.when),
-          ),
-          PickerItem(
-            key: const ValueKey('add-part-onlyIf'),
-            value: SentenceKind.onlyIf,
-            title: 'Only if',
-            subtitle: 'A check that has to be true',
-            icon: SentenceColors.iconOf(SentenceKind.onlyIf),
-          ),
-          PickerItem(
-            key: const ValueKey('add-part-then'),
-            value: SentenceKind.then,
-            title: 'Then',
-            subtitle: 'Something it does',
-            icon: SentenceColors.iconOf(SentenceKind.then),
-          ),
-        ]),
-      ],
-    );
+    final kinds = _addable(draft.spec);
+    final kind = kinds.length == 1
+        ? kinds.single
+        : await showPickerSheet<SentenceKind>(
+            context,
+            title: _addLabel(kinds),
+            sections: [
+              PickerSection([
+                if (kinds.contains(SentenceKind.when))
+                  PickerItem(
+                    key: const ValueKey('add-part-when'),
+                    value: SentenceKind.when,
+                    title: 'When',
+                    subtitle: 'Something that starts it',
+                    icon: SentenceColors.iconOf(SentenceKind.when),
+                  ),
+                PickerItem(
+                  key: const ValueKey('add-part-onlyIf'),
+                  value: SentenceKind.onlyIf,
+                  title: 'Only if',
+                  subtitle: 'A check that has to be true',
+                  icon: SentenceColors.iconOf(SentenceKind.onlyIf),
+                ),
+                if (kinds.contains(SentenceKind.then))
+                  PickerItem(
+                    key: const ValueKey('add-part-then'),
+                    value: SentenceKind.then,
+                    title: 'Then',
+                    subtitle: 'Something it does',
+                    icon: SentenceColors.iconOf(SentenceKind.then),
+                  ),
+              ]),
+            ],
+          );
     if (kind == null || !mounted) return;
     final spec = draft.spec;
     switch (kind) {
@@ -578,7 +609,10 @@ class _RuleEditorPageState extends ConsumerState<RuleEditorPage> {
                         style: OmniText.captionOf(context),
                       ),
                     ),
-                  _AddAStep(onTap: () => _addAStep(draft)),
+                  _AddAStep(
+                    label: _addLabel(_addable(spec)),
+                    onTap: () => _addAStep(draft),
+                  ),
                   const SizedBox(height: OmniSpace.md),
                   _Options(
                     draft: draft,
@@ -620,6 +654,12 @@ class _Header extends StatelessWidget {
     final spec = draft.spec;
     final name = spec.name.trim();
     final color = automationCardColor(spec.color);
+    // "Tap a word" means nothing until a block has words in it.
+    final hasWords =
+        spec.when.isNotEmpty || spec.onlyIf.isNotEmpty || spec.then.isNotEmpty;
+    final nameHint = name.isEmpty
+        ? 'Tap here to give it a name'
+        : 'Tap here to rename it';
     return Padding(
       padding: const EdgeInsets.only(bottom: OmniSpace.lg),
       child: Semantics(
@@ -656,16 +696,15 @@ class _Header extends StatelessWidget {
                     children: [
                       // The name is the page's title, so it is not said
                       // twice here.
-                      const Text(
-                        'Tap a word to change it',
-                        style: OmniText.bodyStrong,
-                      ),
-                      Text(
-                        name.isEmpty
-                            ? 'Tap here to give it a name'
-                            : 'Tap here to rename it',
-                        style: OmniText.captionOf(context),
-                      ),
+                      if (hasWords) ...[
+                        const Text(
+                          'Tap a word to change it',
+                          key: ValueKey('rule-words-hint'),
+                          style: OmniText.bodyStrong,
+                        ),
+                        Text(nameHint, style: OmniText.captionOf(context)),
+                      ] else
+                        Text(nameHint, style: OmniText.bodyStrong),
                     ],
                   ),
                 ),
@@ -699,10 +738,12 @@ class _Joint extends StatelessWidget {
   );
 }
 
-/// The dashed "+ Add a step" block at the end of the steps.
+/// The dashed "+ Add a step" block at the end of the steps, worded for
+/// what it can add while a block is still empty.
 class _AddAStep extends StatelessWidget {
-  const _AddAStep({required this.onTap});
+  const _AddAStep({required this.label, required this.onTap});
 
+  final String label;
   final VoidCallback onTap;
 
   @override
@@ -710,7 +751,7 @@ class _AddAStep extends StatelessWidget {
     final palette = OmniPalette.of(context);
     return Semantics(
       button: true,
-      label: 'Add a step',
+      label: label,
       excludeSemantics: true,
       child: Material(
         color: Colors.transparent,
@@ -731,7 +772,8 @@ class _AddAStep extends StatelessWidget {
                 const SizedBox(width: OmniSpace.sm),
                 Flexible(
                   child: Text(
-                    'Add a step',
+                    label,
+                    key: const ValueKey('rule-add-a-step-label'),
                     style: OmniText.button.copyWith(color: palette.accent),
                   ),
                 ),
@@ -787,7 +829,7 @@ class _Options extends StatelessWidget {
               (keeps && !spec.askFirst
                   ? 'Not with a keep step: a keep holds its value on its own, '
                         'so there is no run to ask about.'
-                  : 'When a trigger starts it, a notification asks first. '
+                  : 'When its WHEN happens, a notification asks first. '
                         'Running it yourself never asks.'),
           subtitleLines: 3,
           onTap: keeps && !spec.askFirst

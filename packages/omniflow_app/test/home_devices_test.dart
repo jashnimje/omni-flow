@@ -290,7 +290,7 @@ void main() {
       // What the TV plays is on its tile, not a chip in front.
       expect(find.byKey(const ValueKey('chip-tv-lounge_tv')), findsNothing);
       expect(find.text('Netflix · Playing · vol 35'), findsOneWidget);
-      expect(find.text('Hall bulb offline'), findsOneWidget);
+      expect(find.text('Hall bulb is not answering'), findsOneWidget);
     });
 
     testWidgets('shows scenes, favourites and one grid per room in order', (
@@ -301,7 +301,9 @@ void main() {
       final favourites = tester.getTopLeft(find.text('Favourites')).dy;
       final lounge = tester.getTopLeft(find.text('Lounge')).dy;
       final study = tester.getTopLeft(find.text('Study')).dy;
-      final offline = tester.getTopLeft(find.text('Hall bulb offline')).dy;
+      final offline = tester
+          .getTopLeft(find.text('Hall bulb is not answering'))
+          .dy;
       expect(favourites < lounge && lounge < study && study < offline, isTrue);
       // The hall's only device is offline, so it has no grid of its own.
       expect(find.text('Hall'), findsNothing);
@@ -310,10 +312,16 @@ void main() {
       expect(find.text('80%'), findsNWidgets(2));
       expect(find.text('Netflix · Playing · vol 35'), findsOneWidget);
       expect(find.byKey(const ValueKey('tile-hall_bulb')), findsNothing);
-      expect(find.text('Hall bulb offline'), findsOneWidget);
+      expect(find.text('Hall bulb is not answering'), findsOneWidget);
       expect(find.text('24.5 °C'), findsOneWidget);
       expect(find.byKey(const ValueKey('tile-jade')), findsNothing);
-      expect(find.byKey(const ValueKey('tile-this_phone')), findsNothing);
+      // The phone has no room, so it is under Not in a room, as on
+      // Devices.
+      expect(find.byKey(const ValueKey('tile-this_phone')), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('tile-this_phone'))).dy,
+        greaterThan(tester.getTopLeft(find.text('Not in a room')).dy),
+      );
     });
 
     testWidgets('an offline TV drops its tile until it is heard again', (
@@ -330,12 +338,12 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(find.text(playing), findsNothing);
-      expect(find.text('2 offline'), findsOneWidget);
+      expect(find.text('2 not answering'), findsOneWidget);
       // A read it answers saves it and the engine sends its state again.
       engine.eventsOut.add({'event': 'device.stateChanged', 'device': tv()});
       await tester.pumpAndSettle();
       expect(find.text(playing), findsOneWidget);
-      expect(find.text('Hall bulb offline'), findsOneWidget);
+      expect(find.text('Hall bulb is not answering'), findsOneWidget);
     });
 
     testWidgets('a scene runs with one tap', (tester) async {
@@ -372,7 +380,7 @@ void main() {
         {...bulb(), 'id': 'porch_bulb', 'name': 'Porch bulb'},
       ];
       await pump(tester, engine);
-      expect(find.text('2 offline'), findsOneWidget);
+      expect(find.text('2 not answering'), findsOneWidget);
       expect(find.byKey(const ValueKey('tile-porch_bulb')), findsNothing);
       await tapKey(tester, 'home-offline');
       expect(
@@ -408,7 +416,13 @@ void main() {
       await tapKey(tester, 'open-alerts');
       expect(find.text('Movie night'), findsOneWidget);
       expect(find.text('Waiting for you to review it'), findsOneWidget);
-      expect(find.text('Hall bulb is offline'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('needs-device-hall_bulb')),
+          matching: find.text('Hall bulb is not answering'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('favourites are starred from Edit', (tester) async {
@@ -702,10 +716,10 @@ void main() {
       await openTab(tester, 'Devices');
       expect(find.text('Philips WiZ Light · 80%'), findsOneWidget);
       expect(
-        find.textContaining('Philips WiZ Light · offline since'),
+        find.textContaining('Philips WiZ Light · not answering since'),
         findsOneWidget,
       );
-      expect(find.text('Problems 1'), findsOneWidget);
+      expect(find.text('Needs a look 1'), findsOneWidget);
       expect(find.byKey(const ValueKey('device-row-jade')), findsNothing);
       expect(
         find.byKey(const ValueKey('device-row-this_phone')),
@@ -724,7 +738,7 @@ void main() {
       expect(find.text('Lights'), findsOneWidget);
       expect(find.text('Sensors'), findsOneWidget);
       expect(find.text('TVs'), findsOneWidget);
-      await tester.tap(find.text('Problems 1'));
+      await tester.tap(find.text('Needs a look 1'));
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('device-row-hall_bulb')),
@@ -911,7 +925,10 @@ void main() {
       await openDevicePage(tester, 'hall_bulb');
       expect(find.textContaining('Not answering since'), findsOneWidget);
       await openSectionKey(tester, 'device-automations-hall_bulb');
-      expect(find.text('Steps on it fail while it is offline'), findsOneWidget);
+      expect(
+        find.text('Steps on it fail while it is not answering'),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const ValueKey('device-power-hall_bulb')),
         findsNothing,

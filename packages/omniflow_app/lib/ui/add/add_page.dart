@@ -301,13 +301,13 @@ class _AddPageState extends ConsumerState<AddPage> {
               key: const ValueKey('add-more-ways'),
               icon: OmniIcons.more,
               title: 'More ways to add',
-              summary: 'Weather, boards on USB, firmware, every kind',
+              summary: 'Weather, small boards, every kind',
               children: [
                 const AddWeatherRow(),
                 OmniListRow(
                   key: const ValueKey('manual-usb-board'),
                   icon: OmniIcons.board,
-                  title: 'A board on USB',
+                  title: 'Plug in a board',
                   subtitle:
                       'ESP32, ESP8266, Pico W or Uno, plugged into this phone',
                   chevron: true,
@@ -316,8 +316,11 @@ class _AddPageState extends ConsumerState<AddPage> {
                 OmniListRow(
                   key: const ValueKey('manual-firmware'),
                   icon: OmniIcons.developer,
-                  title: 'Install firmware on a board',
-                  subtitle: 'OmniFlow, or your own .bin or .hex, over USB',
+                  title: 'Put the OmniFlow program on a board',
+                  subtitle:
+                      'A board runs one small program, called firmware. '
+                      'Write OmniFlow\'s, or your own, over USB',
+                  subtitleLines: 2,
                   chevron: true,
                   onTap: () => showFirmwareSheet(context),
                 ),

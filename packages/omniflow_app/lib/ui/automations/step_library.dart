@@ -63,6 +63,7 @@ Future<RuleStep?> pickStep(
     String? subtitle,
     String keywords = '',
     bool warning = false,
+    List<LibraryQuick> quick = const [],
   }) => LibraryChoice(
     key: key,
     title: title,
@@ -71,6 +72,7 @@ Future<RuleStep?> pickStep(
     category: category,
     keywords: keywords,
     warning: warning,
+    quick: quick,
     onTap: open == null ? null : _then(open),
   );
   const dv = StepCategories.devices, r = StepCategories.rooms;
@@ -262,6 +264,7 @@ Future<RuleStep?> pickStep(
         // The approval warning sits on each risky step, not the device.
         subtitle: t.actionsText,
         keywords: t.room ?? '',
+        quick: _onOff(t),
       ),
     for (final t in devices) ..._actionChoices(t),
     for (final s in scenes)
@@ -293,6 +296,24 @@ Future<RuleStep?> pickStep(
     suggestions: _suggestions(words, rule, automations, kinds),
     more: () => _appChoices(context, devices),
   );
+}
+
+/// On and Off on a device's row, for a device with one on/off switch, so
+/// "Desk lamp on" is one tap from the library.
+List<LibraryQuick> _onOff(Thing t) {
+  final toggles = t.actions.where((c) => c['type'] == 'toggle').toList();
+  if (toggles.length != 1 || t.isPhone) return const [];
+  final cap = '${toggles.single['id']}';
+  return [
+    for (final on in [true, false])
+      LibraryQuick(
+        key: 'quick-${t.id}-${on ? 'on' : 'off'}',
+        label: on ? 'On' : 'Off',
+        semanticLabel: 'Turn ${t.name} ${on ? 'on' : 'off'}',
+        onTap: (c) async =>
+            Navigator.of(c).pop(DoStep(t.id, cap, params: {'value': on})),
+      ),
+  ];
 }
 
 /// What a device can do, each as its own search result: "Turn Desk lamp

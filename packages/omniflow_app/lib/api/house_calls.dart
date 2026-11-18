@@ -176,15 +176,19 @@ class RoomLights {
 
   bool get anyOn => lightsOn > 0;
 
+  /// The lights in a few words, saying "not answering" for lights the
+  /// engine cannot reach, as every other screen does.
   String get summary {
     final reachable = lights - offline;
-    if (reachable <= 0) return lights == 1 ? 'Offline' : 'All offline';
+    if (reachable <= 0) {
+      return lights == 1 ? 'Not answering' : 'None answering';
+    }
     final on = lightsOn == 0
         ? 'All off'
         : lightsOn == reachable
         ? (brightness == null ? 'All on' : 'All on, $brightness%')
         : '$lightsOn of $reachable on';
-    return offline == 0 ? on : '$on, $offline offline';
+    return offline == 0 ? on : '$on, $offline not answering';
   }
 }
 

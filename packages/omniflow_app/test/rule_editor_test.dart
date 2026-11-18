@@ -59,7 +59,7 @@ void main() {
     await pumpPushed(tester, engine, const RuleEditorPage());
     expect(find.text('New automation'), findsOneWidget);
     expect(buttonEnabled(tester, 'rule-save'), isFalse);
-    expect(find.text('Add a trigger and a step to save.'), findsOneWidget);
+    expect(find.text('Choose a WHEN and a THEN to save.'), findsOneWidget);
 
     await tapAdd(tester, 'Add trigger');
     expect(find.text('When…'), findsOneWidget);
@@ -366,7 +366,10 @@ void main() {
     await tester.pumpAndSettle();
     await tapKey(tester, 'pick-device-living_tv');
     expect(
-      find.textContaining('High risk: runs commands on Living room TV'),
+      find.text(
+        'Runs commands on Living room TV. Asks you before it runs if an agent '
+        'set it up',
+      ),
       findsOneWidget,
     );
   });

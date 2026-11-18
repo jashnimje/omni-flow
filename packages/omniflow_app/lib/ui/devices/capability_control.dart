@@ -88,10 +88,14 @@ class _CapabilityControlState extends ConsumerState<CapabilityControl> {
     final known = cap['stateKey'] != null && state.containsKey(cap['stateKey']);
     switch (cap['type']) {
       case 'toggle':
-        // A switch like every other. One the device never reports (a
-        // phone's torch) shows what was last set here.
+        // A switch like every other. One the device never reports shows
+        // what was last set here. A phone's switches are the same: Android
+        // tells no app whether the torch is on, so until it is set from
+        // OmniFlow it says so rather than "Not read yet", which no read
+        // would ever change.
         final name = '${cap['label']}';
-        final readable = cap['stateKey'] != null;
+        final readable =
+            cap['stateKey'] != null && widget.device['driver'] != 'phone';
         final on = known ? current == true : _sent ?? false;
         return OmniListRow(
           key: key,

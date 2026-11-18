@@ -79,11 +79,15 @@ List<RunItem>? surpriseScenes(List<RunItem> items) {
 /// automation, then Surprise me with two scenes or more. "All" opens the
 /// Scenes page. Each button is keyed by the house and what it runs, so the
 /// last result of one house's button never shows on another's in the
-/// same place.
+/// same place. With nothing to run it is one row that says what a scene
+/// is and opens the Scenes page, so Scenes can always be found from Home.
 class RunSection extends ConsumerWidget {
-  const RunSection({super.key, required this.items});
+  const RunSection({super.key, required this.items, this.loading = false});
 
   final List<RunItem> items;
+
+  /// The scenes have not loaded yet, so an empty [items] is not "none".
+  final bool loading;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -95,7 +99,25 @@ class RunSection extends ConsumerWidget {
       if (surprise != null)
         SurpriseTile(key: ValueKey('run-surprise-$house'), scenes: surprise),
     ];
-    if (tiles.isEmpty) return const SizedBox.shrink();
+    if (tiles.isEmpty) {
+      if (loading) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(top: OmniSpace.sm),
+        child: OmniCard(
+          key: const ValueKey('home-scenes-empty'),
+          padding: EdgeInsets.zero,
+          child: OmniListRow(
+            icon: OmniIcons.scene,
+            title: 'Scenes',
+            subtitle: 'Save how things are and run them with one tap',
+            subtitleLines: 2,
+            chevron: true,
+            divider: false,
+            onTap: () => openScenes(context),
+          ),
+        ),
+      );
+    }
     return Column(
       key: const ValueKey('home-run'),
       crossAxisAlignment: CrossAxisAlignment.stretch,

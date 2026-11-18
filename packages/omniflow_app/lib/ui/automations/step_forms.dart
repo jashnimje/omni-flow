@@ -181,8 +181,8 @@ Future<RuleStep?> actionForm(
             key: ValueKey('act-${c['id']}'),
             title: '${c['label'] ?? c['id']}',
             subtitle: isHighRisk(c)
-                ? 'High risk: runs commands on ${thing.name}. An automation an '
-                      'agent makes needs your approval before it can do this'
+                ? 'Runs commands on ${thing.name}. Asks you before it runs if '
+                      'an agent set it up'
                 : null,
             icon: OmniIcons.forCapability(c['type'] as String?),
             warning: isHighRisk(c),
@@ -440,8 +440,7 @@ Future<HttpStep?> httpForm(
       WebHeadersEditor(controller: headers, onChanged: () => setState(() {})),
       const SizedBox(height: OmniSpace.xs),
       Text(
-        'A web request is high risk: when an agent makes an automation with '
-        'one, it waits for your approval.',
+        'Asks you before it runs if an agent set it up.',
         style: OmniText.captionOf(context),
       ),
     ],

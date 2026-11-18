@@ -52,7 +52,7 @@ void main() {
     expect(find.text('Arrive home'), findsNothing);
     await tapKey(tester, 'scene-run-movie');
     expect(engine.callsOf('scene.run').single.$2, {'id': 'movie'});
-    expect(find.text('Movie is set'), findsOneWidget);
+    expect(find.text('Ran Movie'), findsOneWidget);
   });
 
   testWidgets('with no scenes it says what one is', (tester) async {
@@ -79,12 +79,12 @@ void main() {
     await tapKey(tester, 'scene-look');
     await tapKey(tester, 'look-icon-moon');
     await tapKey(tester, 'look-done');
-    await tapText(tester, 'Add an action');
+    await tapText(tester, 'Add a step');
     await tapKey(tester, 'pick-device-desk_lamp');
     expect(find.byKey(const ValueKey('act-toggle-power')), findsNothing);
     await tapKey(tester, 'act-off-power');
     await tapKey(tester, 'form-done');
-    await tapText(tester, 'Add an action');
+    await tapText(tester, 'Add a step');
     await tapKey(tester, 'pick-device-desk_lamp');
     await tapKey(tester, 'act-brightness');
     await tapKey(tester, 'form-done');
@@ -151,10 +151,12 @@ void main() {
 
   testWidgets('Remove asks first, and Cancel keeps the scene', (tester) async {
     await pumpPushed(tester, engine, const SceneEditorPage(id: 'movie'));
+    await tapKey(tester, 'scene-menu');
     await tapKey(tester, 'scene-remove');
     expect(find.text('Remove Movie?'), findsOneWidget);
     await tapKey(tester, 'confirm-cancel');
     expect(engine.callsOf('scene.remove'), isEmpty);
+    await tapKey(tester, 'scene-menu');
     await tapKey(tester, 'scene-remove');
     await tapKey(tester, 'confirm');
     expect(engine.callsOf('scene.remove').single.$2, {'id': 'movie'});

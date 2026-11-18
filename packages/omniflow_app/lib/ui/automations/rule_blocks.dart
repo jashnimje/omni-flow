@@ -261,6 +261,10 @@ class TriggerBlock extends StatelessWidget {
               icon: draft.words.triggerIcon(t),
               parts: draft.words.triggerParts(t),
               error: draft.errorAt('when[$i]'),
+              note: switch (RuleWords.deviceOf(t)) {
+                final id? => draft.words.offlineNote(id),
+                null => null,
+              },
               onBlank: (blank) async {
                 if (t is! TimeTrigger) return;
                 if (blank == Blank.time) {
@@ -283,7 +287,7 @@ class TriggerBlock extends StatelessWidget {
                       when[i] = edited;
                       draft.changed();
                     },
-              onRemove: () => _removeWithUndo(draft, when, i, 'Trigger'),
+              onRemove: () => _removeWithUndo(draft, when, i, 'WHEN'),
             );
             // Each trigger can start a dry run as if it had just happened.
             return Column(
@@ -521,6 +525,11 @@ class StepBlock extends StatelessWidget {
       error: group || s is KeepStep
           ? draft.groupErrorAt(at)
           : draft.errorAt(at),
+      // A device that is not answering is said, but does not stop a save.
+      note: switch (RuleWords.deviceOf(s)) {
+        final id? => words.offlineNote(id),
+        null => null,
+      },
       onBlank: group || s is KeepStep || s is UnknownStep
           ? s is ForEachStep
                 ? (_) => replaceWith(

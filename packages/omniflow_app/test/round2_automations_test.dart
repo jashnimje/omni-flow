@@ -133,7 +133,7 @@ void main() {
           kind: TestRunKind.tryAsIf,
         ),
       );
-      expect(find.text('Evening TV · try as if'), findsOneWidget);
+      expect(find.text('Evening TV · pretend'), findsOneWidget);
       expect(find.textContaining('if this happened: At'), findsOneWidget);
       expect(find.text('pretended it happened'), findsOneWidget);
       expect(find.byKey(const ValueKey('run-now')), findsOneWidget);

@@ -16,7 +16,7 @@ class AlertsSettingsRow extends StatelessWidget {
     key: const ValueKey('settings-alerts'),
     icon: OmniIcons.notifications,
     title: 'Alerts and modes',
-    subtitle: 'Offline and low battery alerts, house modes',
+    subtitle: 'Not answering and low battery alerts, house modes',
     chevron: true,
     onTap: () =>
         Navigator.of(context)
@@ -50,8 +50,8 @@ class AlertsPage extends ConsumerWidget {
         OmniListRow(
           key: const ValueKey('alert-offline'),
           icon: OmniIcons.wifi,
-          title: 'A device goes offline',
-          subtitle: 'after 10 minutes, and again when it is back',
+          title: 'A device stops answering',
+          subtitle: 'after 10 minutes, and again when it answers',
           trailing: Switch(
             value: alerts?.offline ?? true,
             onChanged: alerts == null

@@ -113,6 +113,41 @@ int byOrderThenName(DeviceView a, DeviceView b) {
       : a.name.toLowerCase().compareTo(b.name.toLowerCase());
 }
 
+/// The heading of the devices in no room, on Home and on Devices.
+const notInARoom = 'Not in a room';
+
+/// [devices] by room, the same way on Home and on Devices: by the room's
+/// id (its name when the row has no id), rooms in their order, a room the
+/// list does not know yet after them, and the devices in no room last.
+/// Rooms with none of [devices] are left out.
+List<({String title, List<DeviceView> devices})> roomGroups(
+  List<DeviceView> devices,
+  List<Room> rooms,
+) {
+  final byRoom = <String?, List<DeviceView>>{};
+  for (final d in devices) {
+    byRoom.putIfAbsent(d.roomId ?? d.room, () => []).add(d);
+  }
+  final out = <({String title, List<DeviceView> devices})>[];
+  for (final r in rooms) {
+    final ds = byRoom.remove(r.id) ?? byRoom.remove(r.name);
+    if (ds != null) {
+      out.add((title: r.name, devices: ds..sort(byOrderThenName)));
+    }
+  }
+  final none = byRoom.remove(null);
+  for (final e in byRoom.entries) {
+    out.add((
+      title: e.value.first.room ?? e.key!,
+      devices: e.value..sort(byOrderThenName),
+    ));
+  }
+  if (none != null) {
+    out.add((title: notInARoom, devices: none..sort(byOrderThenName)));
+  }
+  return out;
+}
+
 /// Devices grouped into named sections, rooms in their order.
 List<({String title, List<DeviceView> devices})> groupDevices(
   List<DeviceView> devices,
@@ -123,14 +158,7 @@ List<({String title, List<DeviceView> devices})> groupDevices(
   final groups = <String, List<DeviceView>>{};
   switch (view) {
     case DevicesView.byRoom:
-      for (final r in rooms) {
-        groups[r.name] = [];
-      }
-      for (final d in devices) {
-        groups.putIfAbsent(d.room ?? 'Not in a room', () => []).add(d);
-      }
-      final none = groups.remove('Not in a room');
-      if (none != null) groups['Not in a room'] = none;
+      return roomGroups(devices, rooms);
     case DevicesView.byType:
       for (final g in typeGroups) {
         groups[g] = [];
@@ -202,7 +230,7 @@ class _DevicesScreenState extends ConsumerState<DevicesScreen> {
             const OmniSegment(DevicesView.byType, 'By type'),
             OmniSegment(
               DevicesView.problems,
-              'Problems',
+              'Needs a look',
               count: problems == 0 ? null : problems,
             ),
           ],
@@ -408,14 +436,16 @@ class _DeviceList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // By room and By type list what answers. The ones that do not are
-    // grouped at the end, folded away when there is more than one.
-    final problems = view == DevicesView.problems;
-    final offline = problems
+    // By room lists every device in its room, so its rooms are Home's
+    // rooms, a room whose devices are all not answering too. By type lists
+    // what answers, and the ones that do not are grouped at the end,
+    // folded away when there is more than one.
+    final keepAll = view != DevicesView.byType;
+    final offline = keepAll
         ? const <DeviceView>[]
         : (devices.where((d) => !d.online).toList()..sort(byOrderThenName));
     final groups = groupDevices(
-      problems
+      keepAll
           ? devices
           : [
               for (final d in devices)

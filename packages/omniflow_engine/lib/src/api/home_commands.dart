@@ -39,6 +39,21 @@ class HomeLocationStore {
         : file.update({'location': json});
   }
 
+  /// The place name saved with [house]'s location ("Bengaluru, India"),
+  /// or null when none was given.
+  Future<String?> readName([String house = firstHouseId]) async {
+    final name = (await _file(house).read())['locationName'];
+    return name is String && name.isNotEmpty ? name : null;
+  }
+
+  /// Saves [name] beside [house]'s location, or clears it when null.
+  Future<void> writeName(String? name, [String house = firstHouseId]) {
+    final file = _file(house);
+    return name == null
+        ? file.update(const {}, remove: const ['locationName'])
+        : file.update({'locationName': name});
+  }
+
   /// Reads where every house other than the first is, into the flow
   /// engine, and keeps it so as houses are added: a new house has no
   /// location, so its sun rules never borrow the first house's.
@@ -107,18 +122,28 @@ class HomeCommands {
   /// `{house?}`: where the house is, the first house when none is named.
   Future<Map<String, Object?>> get(Map<String, Object?> args) async {
     final house = _core.houses.target(args);
-    return {..._reply(houseLocation(_core, house)), 'house': house};
+    final location = houseLocation(_core, house);
+    final name = location == null ? null : await store.readName(house);
+    return {..._reply(location), 'name': ?name, 'house': house};
   }
 
-  /// `{latitude, longitude, house?}`, north and east positive.
+  /// `{latitude, longitude, name?, house?}`, north and east positive. The
+  /// optional [name] is the place as people say it, kept for display; a
+  /// new location without one clears the old name.
   Future<Map<String, Object?>> set(Map<String, Object?> args) async {
     final location = homeLocationOf({
       'latitude': args['latitude'],
       'longitude': args['longitude'],
     });
+    final name = optStringArg(args, 'name')?.trim();
+    if (name != null && name.length > 80) {
+      throw ApiError('invalid', 'name must be at most 80 characters');
+    }
     final house = _core.houses.target(args);
     await apply(location, house: house);
-    return {..._reply(location), 'house': house};
+    final kept = location == null || name == null || name.isEmpty ? null : name;
+    await store.writeName(kept, house);
+    return {..._reply(location), 'name': ?kept, 'house': house};
   }
 
   /// Saves [location] as [house]'s and moves its running sun triggers.

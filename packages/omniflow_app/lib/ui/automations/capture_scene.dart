@@ -21,16 +21,17 @@ List<DeviceView> captureDevices(List<Json> devices) => [
       DeviceView(j),
 ];
 
-/// "Save how things are now" on the Scenes list: pick devices, and their
-/// state now becomes a scene.
+/// "Save how things are now" on the Scenes list, as a labelled button:
+/// pick devices, and their state now becomes a scene.
 class CaptureSceneAction extends ConsumerWidget {
   const CaptureSceneAction({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => OmniIconAction(
+  Widget build(BuildContext context, WidgetRef ref) => OmniButton.ghost(
     key: const ValueKey('scene-capture'),
     icon: Icons.photo_camera_rounded,
     label: 'Save how things are now',
+    expand: false,
     onPressed: () => showCaptureScene(context, ref),
   );
 }
@@ -120,7 +121,7 @@ Future<void> showCaptureScene(BuildContext context, WidgetRef ref) async {
                         : OmniPalette.of(context).muted,
                     title: d.name,
                     subtitle: switch (staleWords(d, hour12: hour12)) {
-                      final stale? => 'Offline. $stale',
+                      final stale? => 'Not answering. $stale',
                       null => d.room,
                     },
                     subtitleLines: 2,

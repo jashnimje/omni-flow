@@ -209,7 +209,8 @@ Future<DaysCondition?> daysForm(
               if (days.contains(d)) d,
           ]),
     build: (context, setState) => [
-      DayChips(days: days, onChanged: () => setState(() {})),
+      // A days check with none picked checks nothing, so no Every day.
+      DayChips(days: days, everyDay: false, onChanged: () => setState(() {})),
     ],
   );
 }

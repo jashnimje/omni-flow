@@ -279,7 +279,7 @@ enum TestRunKind {
   /// judged at the time of the test.
   test,
 
-  /// Try as if this happens: what the rule would do if one trigger
+  /// Pretend this just happened: what the rule would do if one trigger
   /// happened, judged at that trigger's own time.
   tryAsIf,
 
@@ -431,7 +431,7 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
       title: switch (widget.kind) {
         TestRunKind.testAndRuns => '${widget.name} · test',
         TestRunKind.test => '${widget.name} · test run',
-        TestRunKind.tryAsIf => '${widget.name} · try as if',
+        TestRunKind.tryAsIf => '${widget.name} · pretend',
         TestRunKind.runs => '${widget.name} · runs',
       },
       actions: widget.actions,
@@ -467,7 +467,7 @@ class _TestRunPageState extends ConsumerState<TestRunPage> {
             const OmniEmptyState(
               icon: OmniIcons.info,
               title: 'Nothing would run',
-              message: 'Its trigger did not lead to any step.',
+              message: 'Its WHEN did not lead to any step.',
               compact: true,
             )
           else ...[

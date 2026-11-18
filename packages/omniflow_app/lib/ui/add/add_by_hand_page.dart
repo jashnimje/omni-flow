@@ -12,6 +12,11 @@ import 'driver_kinds.dart';
 import 'guided_steps_page.dart';
 import 'room_field.dart';
 
+/// Where to find a device's IP address, under the field that takes it.
+const ipAddressHelp =
+    'Four numbers with dots. Find it in the device\'s own app or your '
+    'router\'s app, in the list of connected devices.';
+
 /// A device id from its name, the engine's way for any name, Latin or not.
 String deviceIdFor(String name) => thingIdFor(name);
 
@@ -341,7 +346,7 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
           ? null
           : _virtual || _host.text.trim().isNotEmpty
           ? 'Give it a name first.'
-          : 'Type its address, or look for it, first.',
+          : 'Look for it, or type its IP address, first.',
       banners: [
         if (_failure case final f?)
           OmniBanner.error(
@@ -360,9 +365,9 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
         ),
         if (!_virtual) ...[
           const SizedBox(height: OmniSpace.sm),
-          OmniButton.ghost(
+          OmniButton(
             key: const ValueKey('add-scan'),
-            label: _scanning ? 'Looking' : 'Look for it on the network',
+            label: _scanning ? 'Looking' : 'Look for it on your Wi-Fi',
             icon: OmniIcons.search,
             onPressed: _scanning ? null : _scan,
           ),
@@ -370,7 +375,7 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
             const OmniEmptyState(
               icon: OmniIcons.search,
               title: 'Nothing found',
-              message: 'Type its address below.',
+              message: 'Type its IP address below.',
               compact: true,
             ),
           for (final f in found ?? const <Json>[])
@@ -393,8 +398,10 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
             controller: _host,
             keyboardType: TextInputType.url,
             decoration: const InputDecoration(
-              labelText: 'Address',
-              hintText: '192.168.1.40',
+              labelText: 'IP address on your Wi-Fi',
+              hintText: '192.168.1.20',
+              helperText: ipAddressHelp,
+              helperMaxLines: 3,
             ),
             onChanged: (_) => setState(() => _stableId = null),
           ),

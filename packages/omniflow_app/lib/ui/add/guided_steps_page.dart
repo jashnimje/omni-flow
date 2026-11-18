@@ -76,7 +76,7 @@ Future<void> followAdded(
   final thingId = id ?? added.id;
   final next = added.next;
   if (added.provisionError case final error?) {
-    showMessage('The board is offline: $error');
+    showMessage('The board is not answering: $error');
   }
   if (thingId == null ||
       (!always && next.kind == NextKind.done && next.optional.isEmpty)) {

@@ -304,6 +304,46 @@ void main() {
       );
     });
 
+    test('say a device stopped answering and answers again', () {
+      expect(
+        DeviceActivitySection.plain(e('online', false), d, const {}),
+        'Stopped answering',
+      );
+      expect(
+        DeviceActivitySection.plain(e('online', true), d, const {}),
+        'Answering again',
+      );
+    });
+
+    test('the page before asks up to the end of the oldest second and '
+        'skips what of it is held, and a new change goes in front', () {
+      final second = DateTime.utc(2026, 11, 19, 14, 43, 7);
+      HistoryEntry at(DateTime t, Object v) =>
+          HistoryEntry(at: t, key: 'dimming', value: v);
+      final held = [
+        at(second.add(const Duration(seconds: 5)), 1),
+        at(second, 2),
+        at(second, 3),
+      ];
+      final page = DeviceActivitySection.olderPage(held);
+      expect(page.before, second.add(const Duration(seconds: 1)));
+      expect(page.skip, 2);
+      expect(page.limit, historyPage + 2);
+
+      final fresh = at(second.add(const Duration(seconds: 9)), 0);
+      expect(
+        [
+          for (final x in DeviceActivitySection.merged([
+            fresh,
+            ...held.take(2),
+          ], held))
+            x.value,
+        ],
+        [0, 1, 2, 3],
+      );
+      expect(DeviceActivitySection.merged(held, null), same(held));
+    });
+
     test('count today only in the summary', () {
       final now = DateTime(2026, 11, 19, 18);
       HistoryEntry on(DateTime at) =>
@@ -429,8 +469,8 @@ void main() {
   });
 
   group('Devices', () {
-    testWidgets('more than one device not answering folds into one section '
-        'at the end', (tester) async {
+    testWidgets('By type folds more than one device not answering into one '
+        'section at the end', (tester) async {
       final engine = FakeEngine()
         ..devices = [
           lamp(),
@@ -439,6 +479,8 @@ void main() {
         ];
       await pumpApp(tester, engine);
       await openTab(tester, 'Devices');
+      await tester.tap(find.text('By type'));
+      await tester.pumpAndSettle();
       final section = find.byKey(const ValueKey('devices-not-answering'));
       expect(section, findsOneWidget);
       expect(find.text('2 devices'), findsOneWidget);
@@ -459,12 +501,14 @@ void main() {
       expect(find.byKey(const ValueKey('device-row-porch')), findsOneWidget);
     });
 
-    testWidgets('one device not answering stays in view at the end', (
+    testWidgets('By type keeps one device not answering in view at the end', (
       tester,
     ) async {
       final engine = FakeEngine()..devices = [lamp(), bulb()];
       await pumpApp(tester, engine);
       await openTab(tester, 'Devices');
+      await tester.tap(find.text('By type'));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('devices-not-answering')), findsNothing);
       expect(find.text('Not answering'), findsOneWidget);
       expect(

@@ -304,17 +304,21 @@ class DeviceService {
     return updated;
   });
 
-  /// Merges [values] into the device state and marks it seen now.
-  Future<Device> mergeState(String deviceId, Map<String, Object?> values) =>
-      _serialised(deviceId, () async {
-        final (device, _) = await _resolve(deviceId);
-        final updated = device.copyWith(
-          state: {...device.state, ...values},
-          lastSeen: _clock(),
-        );
-        await _save(updated);
-        return updated;
-      });
+  /// Merges [values] into the device state and marks it seen now, unless
+  /// [seen] is false: a read the device did not answer.
+  Future<Device> mergeState(
+    String deviceId,
+    Map<String, Object?> values, {
+    bool seen = true,
+  }) => _serialised(deviceId, () async {
+    final (device, _) = await _resolve(deviceId);
+    final updated = device.copyWith(
+      state: {...device.state, ...values},
+      lastSeen: seen ? _clock() : null,
+    );
+    await _save(updated);
+    return updated;
+  });
 
   /// Merges a pushed state packet (WiZ syncPilot) into the device state.
   Future<Device?> applyPush(String deviceId, Map<String, Object?> message) =>

@@ -16,6 +16,7 @@ import 'look_picker.dart';
 import 'pickers.dart';
 import 'review_page.dart';
 import 'rule_words.dart';
+import 'sentence_row.dart' show OfflineNote;
 
 /// Scenes: named sets of device actions run together (Settings, Scenes and
 /// Home, Scenes, Edit). They are automations with a manual trigger, so
@@ -107,8 +108,8 @@ Future<void> runScene(WidgetRef ref, String id, String name) async {
   final failed = run.steps.where((n) => n.error != null).firstOrNull;
   showMessage(
     run.ok
-        ? '$name is set'
-        : '$name ran, but ${failed?.label ?? 'a step'} failed'
+        ? 'Ran $name'
+        : 'Ran $name, but ${failed?.label ?? 'a step'} failed'
               '${failed?.error == null ? '' : ': ${failed!.error}'}',
   );
 }
@@ -133,7 +134,6 @@ class ScenesPage extends ConsumerWidget {
           label: 'New scene',
           onPressed: () => openSceneEditor(context),
         ),
-        const CaptureSceneAction(),
       ],
       state: OmniLoad.of(
         async,
@@ -150,15 +150,29 @@ class ScenesPage extends ConsumerWidget {
         message:
             'A scene sets several things at once, like Movie: desk lamp 20%, '
             'hall bulb off.',
-        action: OmniButton(
-          key: const ValueKey('scenes-empty-new'),
-          label: 'New scene',
-          icon: OmniIcons.add,
-          expand: false,
-          onPressed: () => openSceneEditor(context),
+        action: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            OmniButton(
+              key: const ValueKey('scenes-empty-new'),
+              label: 'New scene',
+              icon: OmniIcons.add,
+              expand: false,
+              onPressed: () => openSceneEditor(context),
+            ),
+            const SizedBox(height: OmniSpace.sm),
+            const CaptureSceneAction(),
+          ],
         ),
       ),
-      children: (context) => [for (final s in scenes) SceneRow(scene: s)],
+      children: (context) => [
+        const Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: CaptureSceneAction(),
+        ),
+        const SizedBox(height: OmniSpace.sm),
+        for (final s in scenes) SceneRow(scene: s),
+      ],
     );
   }
 }
@@ -207,7 +221,9 @@ class SceneRow extends ConsumerWidget {
   }
 }
 
-/// A scene: its name and icon, and the device actions it runs together.
+enum _SceneMenu { remove }
+
+/// A scene: its name and icon, and the device steps it runs together.
 class SceneEditorPage extends ConsumerStatefulWidget {
   const SceneEditorPage({super.key, this.id});
 
@@ -331,16 +347,32 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
     final ok = await confirm(
       context,
       title: 'Remove $name?',
-      body: 'The scene is deleted. The devices stay as they are.',
+      body:
+          'The devices stay as they are. You can put it back from Recently '
+          'removed.',
       action: 'Remove',
       destructive: true,
     );
     if (!ok || !mounted) return;
-    final reply = await ref.read(engineApiProvider).removeScene(widget.id!);
+    final api = ref.read(engineApiProvider);
+    final automations = ref.read(automationsProvider.notifier);
+    final id = widget.id!;
+    final reply = await api.removeScene(id);
     if (!reply.ok || !mounted) return;
     _dirty = false;
-    await ref.read(automationsProvider.notifier).refresh();
-    showMessage('Removed $name');
+    await automations.refresh();
+    // The engine keeps a removed scene in Recently removed, so Undo is the
+    // same put back as Restore there.
+    showMessage(
+      'Removed $name',
+      action: 'Undo',
+      onAction: () async {
+        if (!(await api.unremoveAutomation(id)).ok) {
+          showMessage('$name could not be put back');
+        }
+        await automations.refresh();
+      },
+    );
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -377,7 +409,7 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
           ? null
           : _name.text.trim().isEmpty
           ? 'Give the scene a name first.'
-          : 'Add an action first.',
+          : 'Add a step first.',
       state: switch ((actions, _loadFailure)) {
         (_, final ApiFailure f) => OmniLoad.error(f.message, _load),
         (null, _) => const OmniLoad.loading(),
@@ -391,11 +423,26 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
             label: 'Run $title',
             onPressed: _dirty ? null : () => runScene(ref, widget.id!, title),
           ),
-          OmniIconAction(
-            key: const ValueKey('scene-remove'),
-            icon: OmniIcons.delete,
-            label: 'Remove $title',
-            onPressed: _remove,
+          // Remove sits in the ··· menu, where a rule's is.
+          PopupMenuButton<_SceneMenu>(
+            key: const ValueKey('scene-menu'),
+            tooltip: 'More',
+            icon: Icon(OmniIcons.more, color: OmniPalette.of(context).muted),
+            onSelected: (choice) => switch (choice) {
+              _SceneMenu.remove => _remove(),
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                key: const ValueKey('scene-remove'),
+                value: _SceneMenu.remove,
+                child: Text(
+                  'Remove',
+                  style: OmniText.body.copyWith(
+                    color: OmniPalette.of(context).bad,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ],
@@ -432,9 +479,9 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
           const SizedBox(height: OmniSpace.md),
           OmniRuleBlock(
             kind: SentenceKind.then,
-            heading: 'Then',
-            caption: 'together',
-            addLabel: 'Add an action',
+            heading: 'Do these together',
+            caption: '',
+            addLabel: 'Add a step',
             onAdd: () => _add(words),
             children: [
               // Scene actions run together, so their rows have no drag
@@ -445,6 +492,7 @@ class _SceneEditorPageState extends ConsumerState<SceneEditorPage> {
                   icon: words.stepIcon(_stepOf(a)),
                   text: words.step(_stepOf(a)),
                   error: f?.issuesAt('actions[$i]').firstOrNull,
+                  note: words.offlineNote(splitRef(a.action).$1),
                   onTap: () => _edit(words, i),
                   onRemove: () {
                     list.removeAt(i);
@@ -526,11 +574,15 @@ class _ActionRow extends StatelessWidget {
     required this.onTap,
     required this.onRemove,
     this.error,
+    this.note,
   });
 
   final IconData icon;
   final String text;
   final String? error;
+
+  /// A device that is not answering: said, and the scene still saves.
+  final String? note;
   final VoidCallback onTap;
   final VoidCallback onRemove;
 
@@ -549,6 +601,7 @@ class _ActionRow extends StatelessWidget {
           onPressed: onRemove,
         ),
       ),
+      if (note != null && error == null) OfflineNote(note!),
       if (error != null)
         Padding(
           // Lines up with the row's title, past its icon.

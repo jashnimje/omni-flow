@@ -11,7 +11,7 @@ import '../automations/new_automation.dart' show openNewAutomation;
 import '../design/design.dart';
 import '../devices/device_text.dart';
 import '../settings/home_location_page.dart'
-    show homeLocationProvider, openHomeLocation;
+    show homeLocationProvider, homePlaceName, openHomeLocation;
 import '../settings/phone_access.dart';
 import '../settings/places_page.dart' show homeZone, zonesProvider;
 
@@ -354,10 +354,10 @@ class _HomeSetupPageState extends ConsumerState<HomeSetupPage> {
 
   List<Widget> _homeBody(SetupProgress? p) => [
     if (p?.done.contains(SetupStep.home) ?? false) ...[
-      _doneLine(
-        'Home\'s location is set.',
-        key: const ValueKey('setup-home-done'),
-      ),
+      _doneLine(switch (homePlaceName(ref.watch(homeLocationProvider).value)) {
+        final String name => 'Home is set to $name.',
+        null => 'Home\'s location is set.',
+      }, key: const ValueKey('setup-home-done')),
       OmniButton.ghost(
         key: const ValueKey('setup-home-change'),
         label: 'Change home location',

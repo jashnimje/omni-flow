@@ -43,6 +43,7 @@ class SmartHomeSettingsRows extends StatelessWidget {
         icon: OmniIcons.sun,
         title: 'Follow the sun',
         subtitle: 'Lights warm and dim at night, cool and bright at midday',
+        subtitleLines: 2,
         chevron: true,
         onTap: () => openSunLighting(context),
       ),
@@ -51,6 +52,7 @@ class SmartHomeSettingsRows extends StatelessWidget {
         icon: OmniIcons.light,
         title: 'Away lighting',
         subtitle: 'Lights that look lived-in while nobody is home',
+        subtitleLines: 2,
         chevron: true,
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (_) => const AwayLightingPage()),
@@ -61,6 +63,7 @@ class SmartHomeSettingsRows extends StatelessWidget {
         icon: OmniIcons.plug,
         title: 'Energy',
         subtitle: 'What your plugs use, and the price of one kWh',
+        subtitleLines: 2,
         chevron: true,
         onTap: () => Navigator.of(context)
             .push(MaterialPageRoute<void>(builder: (_) => const EnergyPage())),

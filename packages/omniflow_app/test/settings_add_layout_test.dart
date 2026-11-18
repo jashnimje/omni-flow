@@ -159,7 +159,7 @@ void main() {
         },
       const VariablesPage(),
     );
-    expect(find.text('No variables yet'), findsNothing);
+    expect(find.text('Nothing saved yet'), findsNothing);
     expect(find.text('None of your own yet'), findsOneWidget);
   });
 

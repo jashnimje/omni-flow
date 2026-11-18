@@ -176,12 +176,18 @@ String? _lightLine(DeviceView d) {
   return parts.isEmpty ? null : parts.join(' · ');
 }
 
+/// The one name for a device the engine cannot reach, on every screen.
+const notAnswering = 'Not answering';
+
 /// A TV app's name from its package, the engine's way: com.netflix.ninja
 /// reads "Netflix".
 String appName(String package) => appLabelFor(package);
 
-/// What a TV is doing: "Netflix · vol 35", "Asleep".
+/// What a TV is doing: "Netflix · vol 35", "Asleep". A TV whose last read
+/// got no answer is not answering, never "Off": the engine only guesses it
+/// is off, with `reachable` false.
 String tvLine(DeviceView d) {
+  if (d.state['reachable'] == false) return notAnswering;
   final s = TvState.ofDevice(d.json);
   if (s.power == 'asleep') return 'Asleep';
   if (s.power == 'off') return 'Off';
@@ -228,9 +234,9 @@ bool isLit(DeviceView d) => switch (kindOf(d)) {
 };
 
 /// The one line under a tile's name: "80% · warm", "Netflix · vol 35",
-/// "Off", "Offline", "2 h ago".
+/// "Off", "Not answering", "2 h ago".
 String stateLine(DeviceView d, {DateTime? now}) {
-  if (!d.online) return 'Offline';
+  if (!d.online) return notAnswering;
   switch (kindOf(d)) {
     case DeviceKind.tv:
       return tvLine(d);
@@ -297,8 +303,8 @@ String rowSubtitle(
   if (!d.online) {
     final seen = d.lastSeen;
     detail = seen == null
-        ? 'offline'
-        : 'offline since ${when(seen, now: now, hour12: hour12)}';
+        ? 'not answering'
+        : 'not answering since ${when(seen, now: now, hour12: hour12)}';
   } else {
     detail = switch (kindOf(d)) {
       DeviceKind.tag => switch (lastScanned(d)) {

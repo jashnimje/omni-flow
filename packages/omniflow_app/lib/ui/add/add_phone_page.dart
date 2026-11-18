@@ -418,7 +418,7 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
       controller: _host,
       keyboardType: TextInputType.url,
       decoration: const InputDecoration(
-        labelText: 'Address, such as 192.168.1.20',
+        labelText: 'IP address, such as 192.168.1.20',
       ),
     ),
     const SizedBox(height: OmniSpace.md),
@@ -480,7 +480,7 @@ class _AddPhonePageState extends ConsumerState<AddPhonePage> {
       controller: _classicHost,
       keyboardType: TextInputType.url,
       decoration: const InputDecoration(
-        labelText: 'Address, such as 192.168.1.20',
+        labelText: 'IP address, such as 192.168.1.20',
       ),
     ),
     const SizedBox(height: OmniSpace.md),

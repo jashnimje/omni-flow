@@ -104,6 +104,7 @@ class OmniEngine {
         }
       }),
       _core.events.listen(_addCommands.observe),
+      _core.events.listen(_core.history.observe),
     ]);
     devices.events.listen(_core.history.record);
     devices.events.listen(

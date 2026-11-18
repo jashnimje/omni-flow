@@ -229,12 +229,14 @@ Command<int> deviceHistoryCommand() => _Verb(
     'key': ?a.option('key'),
     'limit': ?_intOption(a, 'limit'),
     'since': ?a.option('since'),
+    'before': ?a.option('before'),
   },
-  usageLine: 'ID [--key KEY] [--limit N] [--since TIME]',
+  usageLine: 'ID [--key KEY] [--limit N] [--since TIME] [--before TIME]',
   options: (p) => p
     ..addOption('key', help: 'Only this state key.')
     ..addOption('limit', help: 'How many, 1 to 500. Defaults to 100.')
-    ..addOption('since', help: 'Only changes after this ISO 8601 time.'),
+    ..addOption('since', help: 'Only changes after this ISO 8601 time.')
+    ..addOption('before', help: 'Only changes before this ISO 8601 time.'),
 );
 
 /// `omni automation`: every automation as the app lists it, and templates.

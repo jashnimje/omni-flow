@@ -7,9 +7,13 @@ abstract final class HomeLocationCalls {
   static const get = 'home.location';
   static const set = 'home.location.set';
 
-  static Json setArgs(double latitude, double longitude) => {
+  /// [name] is the place as people say it ("Bengaluru, India"). The
+  /// engine keeps it with the location, and a location sent without one
+  /// clears it.
+  static Json setArgs(double latitude, double longitude, {String? name}) => {
     'latitude': latitude,
     'longitude': longitude,
+    'name': ?name,
   };
 }
 
@@ -20,6 +24,7 @@ class HomeLocationView {
     this.longitude,
     this.sunrise,
     this.sunset,
+    this.name,
   });
 
   factory HomeLocationView.of(Json r) {
@@ -32,11 +37,17 @@ class HomeLocationView {
       longitude: number(at['longitude']),
       sunrise: time(today['sunrise']),
       sunset: time(today['sunset']),
+      name: r['name'] is String && (r['name'] as String).isNotEmpty
+          ? r['name'] as String
+          : null,
     );
   }
 
   final double? latitude;
   final double? longitude;
+
+  /// The place name saved with the location, or null when none was given.
+  final String? name;
 
   /// Today's sunrise and sunset at home, local time. Null on a day the
   /// sun does not rise or set there.
@@ -64,11 +75,11 @@ class HomeLocationApi {
     }
   }
 
-  Future<Json> set(double latitude, double longitude) async {
+  Future<Json> set(double latitude, double longitude, {String? name}) async {
     try {
       return await _client.call(
         HomeLocationCalls.set,
-        HomeLocationCalls.setArgs(latitude, longitude),
+        HomeLocationCalls.setArgs(latitude, longitude, name: name),
       );
     } on Object catch (e) {
       return {

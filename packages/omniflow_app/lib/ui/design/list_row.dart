@@ -33,7 +33,7 @@ class StatusDot extends StatelessWidget {
         label ??
         switch (kind) {
           StatusKind.online => 'Online',
-          StatusKind.offline => 'Offline',
+          StatusKind.offline => 'Not answering',
           StatusKind.warning => 'Needs attention',
           StatusKind.problem => 'Problem',
         },

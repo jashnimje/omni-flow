@@ -1,1 +1,1 @@
-const String omniflowEngineVersion = '0.11.0';
+const String omniflowEngineVersion = '1.0.0';

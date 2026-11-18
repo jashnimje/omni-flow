@@ -105,6 +105,7 @@ void main() {
         'volume': 30,
         'volumeMax': 100,
         'muted': false,
+        'reachable': true,
       });
       final device =
           (await engine.handle('device.get', {'id': 'tv'}))['device'] as Map;
@@ -113,6 +114,7 @@ void main() {
         'app': 'com.google.android.youtube.tv',
         'playing': 'playing',
         'volume': 30,
+        'reachable': true,
       });
       expect(
         adbd.commands.where((c) => c.contains('dumpsys')),
@@ -206,6 +208,40 @@ void main() {
       expect(state['power'], 'off');
       expect(changed, isEmpty);
     });
+
+    test(
+      'a TV that times out keeps reachable false in its state, is not '
+      'marked seen, and its history says it stopped answering once',
+      () async {
+        await ok('tv.state', {});
+        Future<Map> device() async =>
+            (await engine.handle('device.get', {'id': 'tv'}))['device'] as Map;
+        final seen = (await device())['lastSeen'];
+        await adbd.close();
+        await ok('tv.state', {});
+        await ok('tv.state', {});
+        final after = await device();
+        expect((after['state'] as Map)['reachable'], isFalse);
+        expect((after['state'] as Map)['power'], 'off');
+        expect(after['lastSeen'], seen, reason: 'no answer is not seen');
+        final history =
+            ((await engine.handle('device.history', {'id': 'tv'}))['entries']
+                    as List)
+                .cast<Map>();
+        expect(
+          [
+            for (final e in history)
+              if (e['key'] == 'online') e['value'],
+          ],
+          [false],
+        );
+        expect(
+          history.where((e) => e['key'] == 'power' || e['key'] == 'reachable'),
+          hasLength(1),
+          reason: 'only the first read wrote power, the guess is not a change',
+        );
+      },
+    );
 
     test('a device that is not a TV over ADB is refused', () async {
       await engine.handle('device.add', {
@@ -1228,6 +1264,7 @@ void main() {
           'app': 'com.netflix.ninja',
           'playing': 'paused',
           'volume': 30,
+          'reachable': true,
         });
         final distinct = {for (final c in changes) '$c'};
         expect(distinct.length, changes.length, reason: 'no unchanged saves');

@@ -495,6 +495,15 @@ class HistoryEntry {
   final String? by;
 
   bool get byUser => by == 'user';
+
+  /// The key of an entry for a device that stopped answering (`false`) or
+  /// answers again (`true`), the engine's `historyOnlineKey`.
+  static const onlineKey = 'online';
+
+  /// Whether this says the device stopped answering (false), answers
+  /// again (true), or is a state change (null).
+  bool? get answering =>
+      key == onlineKey && value is bool ? value as bool : null;
 }
 
 enum PresenceSource { wifi, ble, hub, manual, unknown }
@@ -1040,17 +1049,20 @@ class EngineApi {
       _call(EngineCalls.presenceSet, {'home': home, 'person': ?person}, (_) {});
 
   /// The newest state changes of [id], newest first: only [key] when given,
-  /// at most [limit] (the engine defaults to 100), none before [since].
+  /// at most [limit] (the engine defaults to 100), none from [since] back
+  /// and none from [before] on.
   Future<Reply<List<HistoryEntry>>> history(
     String id, {
     String? key,
     int? limit,
     DateTime? since,
+    DateTime? before,
   }) => _call(EngineCalls.deviceHistory, {
     'id': id,
     'key': ?key,
     'limit': ?limit,
     'since': ?since?.toUtc().toIso8601String(),
+    'before': ?before?.toUtc().toIso8601String(),
   }, (r) => [for (final j in _rows(r['entries'])) HistoryEntry.fromJson(j)]);
 
   // Scenes.

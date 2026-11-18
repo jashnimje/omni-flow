@@ -1,6 +1,6 @@
 # OmniFlow app: design v2
 
-> Status: design, not built. Mockups: `~/scratch/design_v2/mockups.html` with PNG renders beside it. Builds on `page-templates.md` (the eight templates and the screen inventory) and `design/tokens.dart` as on disk 2026-11-19.
+> Status: built, and updated after the new-user usability review of 2026-11-19. Mockups: `~/scratch/design_v2/mockups.html` with PNG renders beside it. Builds on `page-templates.md` (the eight templates and the screen inventory) and `design/tokens.dart` as on disk 2026-11-19.
 
 ## Problem
 
@@ -74,8 +74,8 @@ Standard labels, used the same on every screen:
 
 ### Devices list
 
-- In front: rooms as headers, each device a tile with name and state.
-- Behind a section: devices not answering are grouped under "Not answering" at the end, collapsed when there is more than one.
+- In front: the By room, By type and Needs a look switch, then each device as a row with its name and state. Needs a look lists the devices with a problem and shows their count on the switch.
+- By room keeps a device that is not answering inside its room, so a room never seems to lose a device. Only By type takes the devices that are not answering out of their groups, into "Not answering" at the end, collapsed when there is more than one.
 
 ### Light page
 
@@ -84,9 +84,11 @@ Standard labels, used the same on every screen:
 
 ### Every device page (plug, sensor, phone, weather, generic)
 
-- In front: the state card, the device's main controls, and for an offline device the one recovery step (Try again) with "Find it on the network" next to it.
+- In front: the state card, the device's main controls, and for a device that is not answering the one recovery step (Try again) with "Find it on the network" next to it.
 - Behind a section: the same three sections as the light page, in the same order. **Activity is always collapsed and always below the controls, on every device page. The device history is never in front.**
 - Activity lists only changes that read as plain words ("Turned on by you", "Brightness 60% by you", "Turned off by Good night"). Entries without a plain description (a key with no capability label, a null value) are dropped from Activity and shown under Developer details -> Raw changes.
+- Activity also says when the device stopped answering and when it answered again, as "Stopped answering" and "Answering again". The engine writes one entry for each change of state, not one per failed poll. Earlier reads the page of changes before the oldest one shown, so it reaches back past today.
+- A TV that did not answer its last read says "Not answering", never "Off".
 - The high-risk warning banner ("Some controls run commands on...") moves to a one-time confirm on the first such command.
 
 ### TV page
@@ -102,6 +104,7 @@ Standard labels, used the same on every screen:
 ### Automation editor
 
 - In front: the icon and name, then the steps as stacked blocks (When, Only if, Then) joined by a thin line, each block saying its step as a sentence with the changeable words highlighted. One "Add a step" block at the end. Test run and Save pinned at the bottom.
+- A simple time rule stays short. "Desk lamp on at 7 PM weekdays" takes 11 taps from New to Saved, with one sheet open at a time: picking Time closes the step library, and the time sheet has a Weekdays choice. A widget test counts the taps.
 - Behind a section: Options (Ask before running, Notify when it runs, Colour and icon, See it as a diagram), Activity (last runs, why a run was skipped). The Sentence and Diagram switch at the top moves into Options. An empty Only if block is not shown. "Add a step" offers it.
 
 ### Scenes
@@ -111,8 +114,8 @@ Standard labels, used the same on every screen:
 
 ### Settings
 
-- In front: three groups. Your home (Rooms, Places and people, House mode), This phone (Appearance, Alerts), Your data (Backup and restore). About at the end.
-- Behind a section: More settings (NFC tags, Variables, Follow the sun, Away lighting, Energy, Home location, Home runs on, Shake to run a scene, Boards on USB), For developers (Developer, Agents). "Set up your home" shows in front only until it is done.
+- In front: three groups. Your home (Rooms, Places and people, Home location, House mode), This phone (Appearance, Alerts and modes, Phone setup), Your data (Backup and restore, Your activity). About at the end. Home location sits right under Places and people and names the city home is in, so nobody has to search for it.
+- Behind a section: More settings (NFC tags, Saved values, Follow the sun, Away lighting, Energy, Home runs on, Shake to run a scene, Plug in a board), For developers (Developer, Agents). "Set up your home" shows in front only until it is done.
 
 ### Add
 
@@ -124,7 +127,7 @@ Standard labels, used the same on every screen:
 | Screen | Moves behind | Into section |
 | --- | --- | --- |
 | Home | Run history, energy card, TV status chip, "Save how things are now" | Activity, Energy, Scenes page |
-| Devices list | Offline devices (more than one) | Not answering |
+| Devices list, By type | Devices not answering (more than one) | Not answering |
 | Every device page | Recent list (device history) | Activity |
 | Every device page | Automations that use it | Automations |
 | Every device page | Room, name and address, Follow the sun, Remove | More settings |
@@ -138,7 +141,7 @@ Standard labels, used the same on every screen:
 | Automations list | Quick links and Off filters, "Type what you want" | search, the New sheet |
 | Automation editor | Ask before running, Notify, Colour and icon, Diagram view | Options |
 | Automation editor | Runs page, test run history | Activity |
-| Settings | Nine rarely used rows | More settings |
+| Settings | Eight rarely used rows | More settings |
 | Settings | Developer, Agents | For developers |
 | NFC tag page | Tag id, write history | Developer details, Activity |
 

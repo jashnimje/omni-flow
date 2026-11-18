@@ -155,9 +155,27 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               [a.name, for (final p in a.sentence) p.text].join(' '),
             ),
           ).take(5).toList();
-    final places = query.isEmpty
-        ? const <SettingsPlace>[]
-        : _byHits(settingsPlaces, (p) => _hits(query, p.title)).toList();
+    // Scenes are automations, not settings: the scenes whose names match,
+    // and the Scenes page itself, list under Automations.
+    final scenes = query.isEmpty
+        ? const <Scene>[]
+        : _byHits([
+            for (final s in ref.watch(scenesProvider).value ?? const [])
+              if (s.id != null) s,
+          ], (s) => _hits(query, s.name)).take(5).toList();
+    // Each place under the heading of where it sits ("Settings, Your
+    // home"), in the order Settings shows them.
+    final placesBySection = <String, List<SettingsPlace>>{
+      if (query.isNotEmpty)
+        for (final section in {for (final p in settingsPlaces) p.section})
+          section: [
+            for (final p in settingsPlaces)
+              if (p.section == section && p.matches(query)) p,
+          ],
+    }..removeWhere((_, places) => places.isEmpty);
+    final automationPlaces =
+        placesBySection.remove(_automationsHeading) ?? const [];
+    final suggestions = _suggestions(devices, automations, drivers);
     // A reading of what was typed before is not shown for what is typed
     // now, when the new text could not be read.
     final reading = _readFor == _field.text ? _reading : null;
@@ -173,7 +191,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         !showReading &&
         things.isEmpty &&
         matching.isEmpty &&
-        places.isEmpty;
+        scenes.isEmpty &&
+        automationPlaces.isEmpty &&
+        placesBySection.isEmpty;
     return ListPage(
       key: const ValueKey('search-list'),
       title: 'Search',
@@ -241,8 +261,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               onTap: () => openDevice(context, d.id),
             ),
         ],
-        if (matching.isNotEmpty) ...[
-          const OmniSectionHeader('Automations'),
+        if (matching.isNotEmpty ||
+            scenes.isNotEmpty ||
+            automationPlaces.isNotEmpty) ...[
+          const OmniSectionHeader(_automationsHeading),
+          for (final p in automationPlaces) _placeRow(context, p),
           for (final a in matching)
             OmniListRow(
               key: ValueKey('search-automation-${a.id}'),
@@ -258,16 +281,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               onTap: () =>
                   ref.read(shellControllerProvider).open(AutomationLink(a.id)),
             ),
-        ],
-        if (places.isNotEmpty) ...[
-          const OmniSectionHeader('Settings'),
-          for (final p in places)
+          for (final sc in scenes)
             OmniListRow(
-              icon: p.icon,
-              title: p.title,
+              key: ValueKey('search-scene-${sc.id}'),
+              icon: sceneIconFor(sc.icon),
+              title: sc.name,
+              subtitle: 'Scene',
               chevron: true,
-              onTap: () => p.open(context, ref),
+              onTap: () => openSceneEditor(context, id: sc.id),
             ),
+        ],
+        for (final MapEntry(key: section, value: places)
+            in placesBySection.entries) ...[
+          OmniSectionHeader(section),
+          for (final p in places) _placeRow(context, p),
         ],
         if (nothing)
           OmniEmptyState(
@@ -278,14 +305,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             compact: true,
           ),
         // No commands to try under no results, so a search that found
-        // nothing is not answered with something unrelated.
-        if (!nothing) ...[
+        // nothing is not answered with something unrelated. With nothing
+        // that answers to try, there is no heading either.
+        if (!nothing && suggestions.isNotEmpty) ...[
           const OmniSectionHeader('Try'),
           Wrap(
             spacing: OmniSpace.sm,
             runSpacing: OmniSpace.xs,
             children: [
-              for (final s in _suggestions(devices, automations, drivers))
+              for (final s in suggestions)
                 OmniFilterChip(
                   key: ValueKey('try-$s'),
                   label: s,
@@ -297,6 +325,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       ],
     );
   }
+
+  Widget _placeRow(BuildContext context, SettingsPlace p) => OmniListRow(
+    key: ValueKey('search-place-${p.title}'),
+    icon: p.icon,
+    title: p.title,
+    chevron: true,
+    onTap: () => p.open(context, ref),
+  );
 
   /// The quick commands the command bar documents (`<device> 50%`,
   /// `<device> off`, `run <automation>`), made from the user's own lights,
@@ -327,6 +363,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     ];
   }
 }
+
+/// The heading of automations, scenes and the Scenes page in search. A
+/// place whose section is this lists under it.
+const _automationsHeading = 'Automations';
 
 /// How many words of [query] appear in [text]. Numbers and single letters
 /// do not count, so "desk lamp 50" finds the desk lamp, then the desk plug.

@@ -48,6 +48,33 @@ const _testLight = {
   ],
 };
 
+/// A switch at a loopback port nothing listens on, polled every second, so
+/// each hub poll fails as one that stopped answering does.
+const _deadPolledSwitch = {
+  'schemaVersion': 1,
+  'id': 'dead_polled_switch',
+  'name': 'Dead polled switch',
+  'category': 'switch',
+  'transport': {'type': 'http', 'port': 9},
+  'statePoll': {
+    'command': {'method': 'GET', 'path': '/state'},
+    'intervalSeconds': 1,
+  },
+  'capabilities': [
+    {
+      'id': 'power',
+      'type': 'toggle',
+      'label': 'Power',
+      'command': {
+        'method': 'POST',
+        'path': '/power',
+        'body': {'on': '{{value}}'},
+      },
+      'stateJsonPath': r'$.on',
+    },
+  ],
+};
+
 /// A switch at a loopback port nothing listens on, so every command fails
 /// at once with the connection refused.
 const _brokenSwitch = {
@@ -346,6 +373,109 @@ void main() {
     await ok('device.remove', {'id': 'lamp'});
     await ok('device.add', {'id': 'lamp', 'driver': 'test_light'});
     expect((await ok('device.history', {'id': 'lamp'}))['entries'], isEmpty);
+  });
+
+  test('device.history takes before, strictly older, with limit and since, '
+      'to page back past today', () async {
+    await engine.close();
+    final day = DateTime.utc(2026, 11, 10, 19);
+    final db = OmniDatabase.file(File('${home.path}/omniflow.sqlite'));
+    await DriftHistoryStore(db).add('lamp', [
+      for (var i = 0; i < 6; i++)
+        HistoryEntry(day.add(Duration(hours: i)), 'temp', i),
+    ]);
+    await db.close();
+    await sub.cancel();
+    engine = await OmniEngine.open(
+      home: home,
+      secrets: InMemorySecretStore(),
+      discoveryTargets: () async => [InternetAddress.loopbackIPv4],
+      mdns: MdnsDiscovery(client: () => FakeMdns(const [])),
+    );
+    sub = engine.events.listen(events.add);
+    Future<List<Object?>> values(Map<String, Object?> args) async => [
+      for (final e
+          in ((await ok('device.history', {'id': 'lamp', ...args}))['entries']
+                  as List)
+              .cast<Map>())
+        e['value'],
+    ];
+    expect(await values({'limit': 2}), [5, 4]);
+    final at4 = day.add(const Duration(hours: 4)).toIso8601String();
+    expect(await values({'limit': 2, 'before': at4}), [3, 2]);
+    expect(
+      await values({
+        'before': at4,
+        'since': day.add(const Duration(hours: 1)).toIso8601String(),
+      }),
+      [3, 2],
+    );
+    expect(await values({'before': day.toIso8601String()}), isEmpty);
+    expect(
+      (await fails('device.history', {'id': 'lamp', 'before': 'soon'}))['type'],
+      'invalid',
+    );
+  });
+
+  test('device.history writes one entry when a device stops answering and '
+      'one when it answers again, also across a restart', () async {
+    await ok('driver.register', {'manifest': _deadPolledSwitch});
+    await ok('device.add', {
+      'id': 'plug',
+      'driver': 'dead_polled_switch',
+      'host': InternetAddress.loopbackIPv4.address,
+    });
+    Future<List<(Object?, Object?)>> answering() async => [
+      for (final e
+          in ((await ok('device.history', {
+                    'id': 'plug',
+                    'key': 'online',
+                  }))['entries']
+                  as List)
+              .cast<Map>())
+        (e['key'], e['value']),
+    ];
+    Future<void> pollFor() async {
+      events.clear();
+      await ok('hub.start', {'wizPort': 0, 'helloPort': 0});
+      await until(
+        () =>
+            events.where((e) => e['event'] == 'device.pollFailed').length >= 2,
+      );
+      await ok('hub.stop', {});
+    }
+
+    await pollFor();
+    expect(await answering(), [('online', false)], reason: 'polls fail twice');
+
+    // A save that is not an answer (pinning it) is not back again.
+    await ok('device.organize', {'id': 'plug', 'favourite': true});
+    expect(await answering(), [('online', false)]);
+    await engine.devices.mergeState('plug', {'on': true});
+    expect(await answering(), [('online', true), ('online', false)]);
+    final all = (await ok('device.history', {'id': 'plug'}))['entries'] as List;
+    expect(
+      [for (final e in all.cast<Map>()) e['key']],
+      ['on', 'online', 'online'],
+    );
+
+    await pollFor();
+    await sub.cancel();
+    await engine.close();
+    engine = await OmniEngine.open(
+      home: home,
+      secrets: InMemorySecretStore(),
+      discoveryTargets: () async => [InternetAddress.loopbackIPv4],
+      mdns: MdnsDiscovery(client: () => FakeMdns(const [])),
+    );
+    events = [];
+    sub = engine.events.listen(events.add);
+    await pollFor();
+    expect(await answering(), [
+      ('online', false),
+      ('online', true),
+      ('online', false),
+    ], reason: 'the restart knows it already stopped answering');
   });
 
   group('scenes', () {

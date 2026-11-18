@@ -72,6 +72,13 @@ final messengerKey = GlobalKey<ScaffoldMessengerState>();
 /// once.
 ({ScaffoldMessengerState on, String text})? _lastMessage;
 
+/// How long a snackbar with nothing to tap stays.
+const messageFor = Duration(seconds: 4);
+
+/// How long a snackbar with an action (Undo, Try again, Details) stays,
+/// unless it is dismissed first.
+const messageWithActionFor = Duration(seconds: 8);
+
 /// Shows [text] as a snackbar, in plain words: an address, a port, a
 /// retry count or a rule path never reaches the user. When [text] carried
 /// such detail and there is no other action, a Details action shows it.
@@ -109,8 +116,10 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showMessage(
       behavior: SnackBarBehavior.floating,
       margin: snackMargin(messenger.context),
       // With an action Flutter keeps it up until tapped, over the Save
-      // button. It goes after the usual few seconds instead.
+      // button. It goes on its own instead, but only after time enough to
+      // reach the action (Material asks for at least 6 seconds then).
       persist: false,
+      duration: button == null ? messageFor : messageWithActionFor,
       action: button,
     ),
   );

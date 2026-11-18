@@ -1130,7 +1130,11 @@ class _HomeLocationSet extends _ApiCommand {
       ) {
     argParser
       ..addOption('latitude', mandatory: true, help: 'Degrees north.')
-      ..addOption('longitude', mandatory: true, help: 'Degrees east.');
+      ..addOption('longitude', mandatory: true, help: 'Degrees east.')
+      ..addOption(
+        'name',
+        help: 'The place as you say it, such as "Bengaluru".',
+      );
   }
 
   @override
@@ -1139,7 +1143,11 @@ class _HomeLocationSet extends _ApiCommand {
     num parse(String key) =>
         num.tryParse(a.option(key)!) ??
         (throw UsageException('$key must be a number', ''));
-    return {'latitude': parse('latitude'), 'longitude': parse('longitude')};
+    return {
+      'latitude': parse('latitude'),
+      'longitude': parse('longitude'),
+      'name': ?a.option('name'),
+    };
   }
 }
 

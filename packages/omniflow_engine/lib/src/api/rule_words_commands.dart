@@ -45,10 +45,10 @@ String? ruleMissing(Map<String, Object?> rule) {
       then.isNotEmpty && then.every((s) => s is Map && s.containsKey('keep'));
   if (when.isEmpty && !onlyKeeps) {
     return then.isEmpty
-        ? 'Add a trigger and a step to save.'
-        : 'Add a trigger to save.';
+        ? 'Choose a WHEN and a THEN to save.'
+        : 'Choose a WHEN to save.';
   }
-  if (then.isEmpty) return 'Add a step to save.';
+  if (then.isEmpty) return 'Choose a THEN step to save.';
   if (!stepsFilled(then)) {
     return 'A group needs filling in: each If needs a check and a step, '
         'each branch a step and each keep a while.';

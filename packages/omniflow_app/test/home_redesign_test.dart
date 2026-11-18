@@ -377,9 +377,16 @@ void main() {
       await tapKey(tester, 'home-location-use-phone');
       expect(find.byKey(const ValueKey('home-location-problem')), findsOne);
       expect(engine.callsOf('home.location.set'), isEmpty);
-      final fields = find.byType(TextField);
-      await tester.enterText(fields.at(0), '12,9716');
-      await tester.enterText(fields.at(1), '77.5946');
+      // Latitude and longitude sit under Advanced.
+      await tapKey(tester, 'home-location-advanced');
+      TextField field(String key) => tester.widget<TextField>(
+        find.descendant(
+          of: find.byKey(ValueKey(key)),
+          matching: find.byType(TextField),
+        ),
+      );
+      field('home-location-latitude').controller!.text = '12,9716';
+      field('home-location-longitude').controller!.text = '77.5946';
       await tapKey(tester, 'home-location-save');
       expect(engine.callsOf('home.location.set').single.$2, {
         'latitude': 12.9716,
@@ -463,6 +470,8 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Last known'), findsOneWidget);
+      expect(find.textContaining('Not answering. Last known'), findsOneWidget);
+      expect(find.textContaining('Offline'), findsNothing);
       await tester.enterText(
         find.byKey(const ValueKey('capture-name')),
         'Evening',

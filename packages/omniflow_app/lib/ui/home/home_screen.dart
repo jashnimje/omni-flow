@@ -43,17 +43,15 @@ import '../devices/weather_page.dart' show WeatherCard;
 import '../help/screen_help.dart';
 import '../onboarding/home_setup.dart' show openHomeSetup;
 
-/// The things Home shows as tiles: not the phone, people or places.
-List<DeviceView> tileDevices(List<Json> devices) => [
-  for (final j in devices)
-    if (j['driver'] != 'phone' && !presenceDrivers.contains(j['driver']))
-      DeviceView(j),
-];
+/// The things Home shows as tiles: everything Devices lists, the phone
+/// too, so a phone with no room is under "Not in a room" on both. People
+/// and places live in Settings, Places and people.
+List<DeviceView> tileDevices(List<Json> devices) => listedDevices(devices);
 
 /// Whether Home shows the first run or the empty home: the list loaded
-/// and nothing in it is a tile.
+/// and nothing in it is a tile but this phone, which is always there.
 bool homeIsEmpty(WidgetRef ref) => switch (ref.watch(devicesProvider).value) {
-  final list? => tileDevices(list).isEmpty,
+  final list? => tileDevices(list).every((d) => d.driver == 'phone'),
   null => false,
 };
 
@@ -102,35 +100,66 @@ class HomeScreen extends ConsumerWidget {
 
 /// Home's header actions: search, what needs you, help and Add (the +,
 /// so nothing floats over the tiles). They stay on the error state too.
-List<Widget> _homeActions(BuildContext context, WidgetRef ref) => [
-  OmniIconAction(
-    key: const ValueKey('open-search'),
-    icon: OmniIcons.search,
-    label: 'Search and commands',
-    onPressed: () => ref.read(shellControllerProvider).open(const SearchLink()),
-  ),
-  switch (needsYouCount(ref)) {
-    final n => Badge(
-      key: const ValueKey('alerts-count'),
-      isLabelVisible: n > 0,
-      label: Text('$n'),
-      offset: const Offset(-OmniSpace.xs, OmniSpace.xs),
-      child: OmniIconAction(
-        key: const ValueKey('open-alerts'),
-        icon: OmniIcons.notifications,
-        label: n == 0 ? 'What needs you' : 'What needs you, $n',
-        onPressed: () => showNeedsYou(context, ref),
-      ),
+/// From [largeTextScale] Help and Add move into a More menu, so the
+/// greeting keeps the room to wrap and the bell's count stays clear.
+List<Widget> _homeActions(BuildContext context, WidgetRef ref) {
+  final n = needsYouCount(ref);
+  final large =
+      MediaQuery.textScalerOf(context).scale(16) / 16 >= largeTextScale;
+  return [
+    OmniIconAction(
+      key: const ValueKey('open-search'),
+      icon: OmniIcons.search,
+      label: 'Search and commands',
+      onPressed: () =>
+          ref.read(shellControllerProvider).open(const SearchLink()),
     ),
-  },
-  const ScreenHelpButton(HelpScreen.home),
-  OmniIconAction(
-    key: const ValueKey('add-device'),
-    icon: OmniIcons.add,
-    label: 'Add a device',
-    onPressed: () => openAddThing(context),
-  ),
-];
+    OmniIconAction(
+      key: const ValueKey('open-alerts'),
+      icon: OmniIcons.notifications,
+      label: n == 0 ? 'What needs you' : 'What needs you, $n',
+      badge: n,
+      onPressed: () => showNeedsYou(context, ref),
+    ),
+    if (large)
+      PopupMenuButton<_HomeMore>(
+        key: const ValueKey('home-more'),
+        tooltip: 'More',
+        icon: Icon(OmniIcons.more, color: OmniPalette.of(context).muted),
+        onSelected: (choice) => switch (choice) {
+          _HomeMore.help => showScreenHelp(context, HelpScreen.home),
+          _HomeMore.add => openAddThing(context),
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(
+            key: ValueKey('home-more-help'),
+            value: _HomeMore.help,
+            child: Text('Help'),
+          ),
+          PopupMenuItem(
+            key: ValueKey('home-more-add'),
+            value: _HomeMore.add,
+            child: Text('Add a device'),
+          ),
+        ],
+      )
+    else ...[
+      const ScreenHelpButton(HelpScreen.home),
+      OmniIconAction(
+        key: const ValueKey('add-device'),
+        icon: OmniIcons.add,
+        label: 'Add a device',
+        onPressed: () => openAddThing(context),
+      ),
+    ],
+  ];
+}
+
+enum _HomeMore { help, add }
+
+/// From this text size Home's top bar keeps only search and the bell, and
+/// the rest is under More.
+const largeTextScale = 1.3;
 
 class _Overview extends ConsumerStatefulWidget {
   const _Overview({required this.devices});
@@ -165,7 +194,8 @@ class _OverviewState extends ConsumerState<_Overview> {
     final person = personOf(all);
     final presence = person == null ? null : Presence.of(person.json);
     final summaries = ref.watch(summariesProvider).value;
-    final scenes = ref.watch(scenesProvider).value ?? const [];
+    final scenesRead = ref.watch(scenesProvider);
+    final scenes = scenesRead.value ?? const [];
     final rooms = ref.watch(roomsProvider).value ?? const [];
     final drivers = ref.watch(driversProvider).value ?? const {};
     final now = DateTime.now();
@@ -208,9 +238,12 @@ class _OverviewState extends ConsumerState<_Overview> {
               const TimerStrip(),
               const WeatherCard(),
               ..._favourites(context, ref, tiles, drivers),
-              RunSection(items: runItems(scenes, summaries)),
+              RunSection(
+                items: runItems(scenes, summaries),
+                loading: !scenesRead.hasValue && !scenesRead.hasError,
+              ),
               const RoomTileRow(),
-              for (final g in _roomGroups(
+              for (final g in roomGroups(
                 tiles.where((d) => d.online).toList(),
                 rooms,
               )) ...[
@@ -259,34 +292,6 @@ class _OverviewState extends ConsumerState<_Overview> {
       if (favourites.isNotEmpty)
         TileGrid(devices: favourites, drivers: drivers),
     ];
-  }
-
-  static List<({String title, List<DeviceView> devices})> _roomGroups(
-    List<DeviceView> tiles,
-    List<Room> rooms,
-  ) {
-    final byRoom = <String?, List<DeviceView>>{};
-    for (final d in tiles) {
-      byRoom.putIfAbsent(d.roomId ?? d.room, () => []).add(d);
-    }
-    final out = <({String title, List<DeviceView> devices})>[];
-    for (final r in rooms) {
-      final ds = byRoom.remove(r.id);
-      if (ds != null) {
-        out.add((title: r.name, devices: ds..sort(byOrderThenName)));
-      }
-    }
-    final none = byRoom.remove(null);
-    for (final e in byRoom.entries) {
-      out.add((
-        title: e.value.first.room ?? e.key!,
-        devices: e.value..sort(byOrderThenName),
-      ));
-    }
-    if (none != null) {
-      out.add((title: 'Not in a room', devices: none..sort(byOrderThenName)));
-    }
-    return out;
   }
 }
 
@@ -379,9 +384,9 @@ class TileGrid extends ConsumerWidget {
   }
 }
 
-/// Every device that is offline, as one row at the bottom of Home rather
-/// than a grid of grey tiles. It opens the device when there is one, and
-/// Devices' Problems list when there are more.
+/// Every device that is not answering, as one row at the bottom of Home
+/// rather than a grid of grey tiles. It opens the device when there is
+/// one, and Devices' Needs a look list when there are more.
 class OfflineRow extends ConsumerWidget {
   const OfflineRow({super.key, required this.devices});
 
@@ -398,8 +403,8 @@ class OfflineRow extends ConsumerWidget {
         child: OmniListRow(
           icon: AreaIcons.offline,
           title: one == null
-              ? '${devices.length} offline'
-              : '${one.name} offline',
+              ? '${devices.length} not answering'
+              : '${one.name} is not answering',
           subtitle: one == null
               ? devices.map((d) => d.name).join(', ')
               : 'Tap to see what to try',
@@ -587,7 +592,7 @@ Future<void> showNeedsYou(BuildContext context, WidgetRef ref) {
               OmniListRow(
                 key: ValueKey('needs-device-${d.id}'),
                 icon: AreaIcons.offline,
-                title: '${d.name} is offline',
+                title: '${d.name} is not answering',
                 subtitle: 'Tap to see what to try',
                 chevron: true,
                 onTap: () {

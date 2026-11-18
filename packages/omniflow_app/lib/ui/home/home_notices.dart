@@ -56,10 +56,15 @@ class HomeNotice {
     required this.action,
     required this.onAction,
     this.warning = true,
+    this.short,
   });
 
   final String id;
   final String message;
+
+  /// The message in a line, for large text, where [message] would take a
+  /// third of the screen. Null when [message] is already short.
+  final String? short;
   final String action;
   final VoidCallback onAction;
   final bool warning;
@@ -84,6 +89,7 @@ List<HomeNotice> homeNotices({
       action: 'Set up presence',
       onAction: setUpPresence,
       warning: false,
+      short: 'OmniFlow cannot tell yet whether you are home.',
     ),
   if (wifiPlace && status?['locationOn'] == false)
     HomeNotice(
@@ -107,6 +113,9 @@ List<HomeNotice> homeNotices({
 /// shows, in that order.
 class HomeNotices extends ConsumerStatefulWidget {
   const HomeNotices({super.key, required this.devices});
+
+  /// From this text size a notice uses its short words.
+  static const compactFrom = 1.3;
 
   final List<DeviceView> devices;
 
@@ -146,20 +155,24 @@ class _HomeNoticesState extends ConsumerState<HomeNotices> {
     );
     if (notices.isEmpty) return const SizedBox.shrink();
     // One notice at a time, the one that matters most, so Home stays calm.
-    // The next shows once it is fixed.
+    // The next shows once it is fixed. At large text it says it in a line.
+    final large =
+        MediaQuery.textScalerOf(context).scale(16) / 16 >=
+        HomeNotices.compactFrom;
+    String words(HomeNotice n) => large ? n.short ?? n.message : n.message;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final n in notices.take(1))
           n.warning
               ? OmniBanner.warning(
-                  n.message,
+                  words(n),
                   key: ValueKey('home-notice-${n.id}'),
                   actionLabel: n.action,
                   onAction: n.onAction,
                 )
               : OmniBanner.info(
-                  n.message,
+                  words(n),
                   key: ValueKey('home-notice-${n.id}'),
                   actionLabel: n.action,
                   onAction: n.onAction,

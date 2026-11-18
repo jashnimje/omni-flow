@@ -9,7 +9,7 @@ Future<RuleTrigger?> pickTrigger(
   BuildContext context,
   RuleWords words, {
   bool thingsOnly = false,
-}) {
+}) async {
   final things = [
     for (final t in words.things)
       if (!t.isPerson && !t.isPlace && !t.isTag && _reports(t)) t,
@@ -34,15 +34,16 @@ Future<RuleTrigger?> pickTrigger(
   );
   const me = 'Me', onPhone = 'This phone', inThings = 'Things';
   const time = 'Time';
-  return showLibrary(
+  final picked = await showLibrary<Object>(
     context,
     title: thingsOnly ? 'Wait until…' : 'When…',
     hint: 'Search devices, places, tags',
+    // Time first: the most common WHEN.
     categories: [
+      if (!thingsOnly) time,
       me,
       onPhone,
       inThings,
-      if (!thingsOnly) time,
       phoneMoreCategory,
     ],
     choices: [
@@ -155,13 +156,15 @@ Future<RuleTrigger?> pickTrigger(
           keywords: t.isPhone ? '' : t.room ?? '',
         ),
       if (!thingsOnly) ...[
-        choice(
-          time,
-          'pick-time',
-          'At a time',
-          OmniIcons.time,
-          timeTriggerForm,
-          subtitle: 'on chosen days',
+        // Closes the library first, so the time and days are one sheet
+        // with nothing stacked under it.
+        LibraryChoice(
+          key: 'pick-time',
+          title: 'At a time',
+          subtitle: 'every day, on weekdays or on chosen days',
+          icon: OmniIcons.time,
+          category: time,
+          onTap: (c) async => Navigator.of(c).pop(_atATime),
         ),
         choice(
           time,
@@ -198,7 +201,15 @@ Future<RuleTrigger?> pickTrigger(
       ],
     ],
   );
+  if (picked == _atATime) {
+    return context.mounted ? timeTriggerForm(context) : null;
+  }
+  return picked as RuleTrigger?;
 }
+
+/// What "At a time" hands back, so its sheet opens once the library has
+/// closed.
+const _atATime = Object();
 
 /// An app opening or closing, or a notification from it: [key] is
 /// `app_opened`, `app_closed` or `notification`. No app means any app.
@@ -678,15 +689,15 @@ Future<TimeTrigger?> timeTriggerForm(
           )
         : null,
     build: (context, setState) => [
-      TimeRow(
+      ClockPicker(
         key: const ValueKey('time-at'),
-        label: 'At',
         value: at,
         onChanged: (v) => setState(() => at = v),
       ),
       const SizedBox(height: OmniSpace.md),
       Text(
-        'On ${daysText(days.toList()).replaceFirst('on ', '')}',
+        daysCaption(days),
+        key: const ValueKey('time-days'),
         style: OmniText.captionOf(context),
       ),
       const SizedBox(height: OmniSpace.xs),
@@ -844,10 +855,7 @@ Future<SunTrigger?> sunTriggerForm(
         ),
       ],
       const SizedBox(height: OmniSpace.md),
-      Text(
-        'On ${daysText(days.toList()).replaceFirst('on ', '')}',
-        style: OmniText.captionOf(context),
-      ),
+      Text(daysCaption(days), style: OmniText.captionOf(context)),
       const SizedBox(height: OmniSpace.xs),
       DayChips(days: days, onChanged: () => setState(() {})),
     ],

@@ -29,7 +29,8 @@ Future<Reply<PinsSaved>> saveBoardPins(
   await devices.refresh();
   if (reply.value?.provisionError case final error?) {
     showMessage(
-      'Saved. The board is offline, so it is set up when it is back: $error',
+      'Saved. The board is not answering, so it is set up when it answers: '
+      '$error',
     );
   }
   return reply;
@@ -240,7 +241,7 @@ class _BoardPageState extends ConsumerState<BoardPage> {
                   ? 'reading'
                   : online
                   ? 'online'
-                  : 'offline'}',
+                  : 'not answering'}',
           subtitle: [
             ?info?.node ?? device['stableId'] as String?,
             ?device['host'] as String?,

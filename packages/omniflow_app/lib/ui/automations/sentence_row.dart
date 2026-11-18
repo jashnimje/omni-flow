@@ -14,7 +14,8 @@ import 'rule_words.dart';
 /// It looks like [OmniStepRow]: a drag handle (pass [reorderIndex] inside
 /// a [ReorderableListView] without default handles), the icon, the words,
 /// and a remove button or a [trailingText] for a group. An [error] draws
-/// it red with the reason under it.
+/// it red with the reason under it. A [note] is a heads-up under it that
+/// does not block saving, such as a device that is not answering.
 class SentenceRow extends StatefulWidget {
   const SentenceRow({
     super.key,
@@ -28,6 +29,7 @@ class SentenceRow extends StatefulWidget {
     this.trailingText,
     this.reorderIndex,
     this.error,
+    this.note,
   });
 
   final List<WordPart> parts;
@@ -40,6 +42,7 @@ class SentenceRow extends StatefulWidget {
   final String? trailingText;
   final int? reorderIndex;
   final String? error;
+  final String? note;
 
   /// The sentence as plain words.
   String get text => joinParts(parts);
@@ -216,6 +219,7 @@ class _SentenceRowState extends State<SentenceRow> {
         mainAxisSize: MainAxisSize.min,
         children: [
           _named(card),
+          if (w.note != null && w.error == null) OfflineNote(w.note!),
           if (w.error != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -231,6 +235,37 @@ class _SentenceRowState extends State<SentenceRow> {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A heads-up under a step in the warning colour, with its icon, such as
+/// "Desk lamp is not answering right now".
+class OfflineNote extends StatelessWidget {
+  const OfflineNote(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final warn = OmniPalette.of(context).warn;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        OmniSpace.md,
+        OmniSpace.xs,
+        OmniSpace.md,
+        0,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(OmniIcons.warning, size: 16, color: warn),
+          const SizedBox(width: OmniSpace.xs),
+          Expanded(
+            child: Text(text, style: OmniText.caption.copyWith(color: warn)),
+          ),
         ],
       ),
     );

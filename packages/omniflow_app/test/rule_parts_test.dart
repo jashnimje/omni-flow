@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omniflow_app/api/engine_calls.dart';
 import 'package:omniflow_app/rules/rule_spec.dart';
+import 'package:omniflow_app/rules/things.dart';
 import 'package:omniflow_app/ui/automations/dialogs.dart';
 import 'package:omniflow_app/ui/automations/form_parts.dart';
 import 'package:omniflow_app/ui/automations/rule_blocks.dart';
@@ -50,6 +51,18 @@ void main() {
       },
     });
     expect(RuleWords(const []).step(step), 'Send POST to 192.168.1.20');
+  });
+
+  test('Thing.online is false only when the engine says so, and the '
+      'offline note reads it', () {
+    final lamp = Thing({'id': 'lamp', 'name': 'Desk lamp'});
+    final gone = Thing({'id': 'fan', 'name': 'Fan', 'online': false});
+    expect(lamp.online, isTrue);
+    expect(gone.online, isFalse);
+    final words = RuleWords([lamp, gone]);
+    expect(words.offlineNote('lamp'), isNull);
+    expect(words.offlineNote('fan'), 'Fan is not answering right now');
+    expect(words.offlineNote('nope'), isNull);
   });
 
   test('keep steps stay last', () {

@@ -36,6 +36,7 @@ void main() {
       for (final row in [
         'settings-rooms',
         'settings-places',
+        'settings-home-location',
         'settings-appearance',
         'settings-alerts',
         'settings-background',
@@ -51,7 +52,6 @@ void main() {
         'settings-sun-lighting',
         'settings-away-lighting',
         'settings-energy',
-        'settings-home-location',
         'settings-home-runs-on',
         'settings-shake-scene',
         'settings-usb',
@@ -90,7 +90,7 @@ void main() {
           hasExpandedState: true,
           isExpanded: false,
           hasTapAction: true,
-          label: 'More settings, Tags, variables, energy, away lighting',
+          label: 'More settings, Tags, saved values, energy, away lighting',
         ),
       );
       handle.dispose();

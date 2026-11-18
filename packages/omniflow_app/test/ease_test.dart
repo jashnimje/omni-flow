@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -94,7 +96,13 @@ void main() {
             .data,
         'On',
       );
-      expect(find.bySemanticsLabel('Turn Arrive home off'), findsOneWidget);
+      // A switch: its name, toggled on, and what a tap does.
+      final node = tester.getSemantics(
+        find.byKey(const ValueKey('enable-arrive_home')),
+      );
+      expect(node.label, 'Arrive home');
+      expect(node.hint, 'Turns it off');
+      expect(node.flagsCollection.isToggled, Tristate.isTrue);
     });
 
     testWidgets('a swipe right turns it off, and Undo turns it on again', (

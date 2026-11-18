@@ -165,8 +165,10 @@ class _UsbBoardSheetState extends ConsumerState<_UsbBoardSheet> {
     final boards = _boards;
     final hasBoards = boards != null && boards.isNotEmpty;
     return SheetTemplate(
-      title: 'Board on USB',
-      subtitle: 'Plug the board into this phone with a USB cable.',
+      title: 'Plug in a board',
+      subtitle:
+          'A small board such as an ESP32 or Pico W, plugged into this phone '
+          'with a USB cable.',
       state: OmniLoad.flags(loading: boards == null),
       primaryLabel: hasBoards ? (_busy ? 'Setting up…' : 'Set it up') : null,
       primaryKey: const ValueKey('usb-save'),

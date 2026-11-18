@@ -252,7 +252,7 @@ class _DiagramEditorState extends ConsumerState<DiagramEditor> {
                 title: insert.as == DiagramInsert.check
                     ? 'A check'
                     : insert.as == DiagramInsert.trigger
-                    ? 'A trigger'
+                    ? 'A WHEN'
                     : 'A step',
               ),
           ]),
@@ -490,7 +490,7 @@ void removeRulePart(RuleDraft draft, RulePlace place) {
   _forgetUndo();
   _undoDraft = draft;
   final what = switch (removed) {
-    RuleTrigger() => 'Trigger',
+    RuleTrigger() => 'WHEN',
     RuleCondition() => 'Condition',
     _ => 'Step',
   };

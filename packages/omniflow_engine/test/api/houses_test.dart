@@ -466,6 +466,32 @@ void main() {
       expect((await ok('home.mode'))['mode'], 'night');
     });
 
+    test('a location keeps its place name per house, and a new one without a '
+        'name clears it', () async {
+      await twoHouses();
+      final set = await ok('home.location.set', {
+        'latitude': 12.97,
+        'longitude': 77.59,
+        'name': 'Bengaluru, India',
+        'house': 'bangalore',
+      });
+      expect(set['name'], 'Bengaluru, India');
+      expect(
+        (await ok('home.location', {'house': 'bangalore'}))['name'],
+        'Bengaluru, India',
+      );
+      expect((await ok('home.location')).containsKey('name'), isFalse);
+      await ok('home.location.set', {
+        'latitude': 12.9,
+        'longitude': 77.6,
+        'house': 'bangalore',
+      });
+      expect(
+        (await ok('home.location', {'house': 'bangalore'})).containsKey('name'),
+        isFalse,
+      );
+    });
+
     test('location, alerts, energy price and timers are per house', () async {
       await twoHouses();
       await ok('home.location.set', {'latitude': 19.07, 'longitude': 72.87});

@@ -841,7 +841,7 @@ void main() {
           for (final e in seen)
             if (e['event'] == 'flow.announce') e['title'],
         ];
-        expect(titles, ['Hall bulb is offline']);
+        expect(titles, ['Hall bulb is not answering']);
         await DriftDeviceStore(harness.db).put(
           Device(
             id: 'bulb',
@@ -853,7 +853,7 @@ void main() {
         );
         await alerts.check(at: now.add(const Duration(minutes: 11)));
         await Future<void>.delayed(Duration.zero);
-        expect(seen.last['title'], 'Hall bulb is back online');
+        expect(seen.last['title'], 'Hall bulb is answering again');
       } finally {
         await s.cancel();
         await harness.shutdown();

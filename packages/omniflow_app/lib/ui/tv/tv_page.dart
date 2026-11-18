@@ -345,6 +345,10 @@ class TvHeader extends StatelessWidget {
     listenable: tv,
     builder: (context, _) {
       final s = tv.state;
+      // The engine records a TV that did not answer as off (deep standby
+      // drops it off the network), so a failed last read says that, never
+      // "Off" or what it was playing before.
+      final silent = tv.offline != null && !tv.needsPairing;
       final max = s.volumeMax <= 0 ? 100 : s.volumeMax;
       final app = s.app;
       final name = tv.appName;
@@ -363,7 +367,7 @@ class TvHeader extends StatelessWidget {
         ),
         child: Row(
           children: [
-            if (app != null && name != null && s.isOn)
+            if (app != null && name != null && s.isOn && !silent)
               AppBadge(package: app, name: name, size: 40)
             else
               OmniIconBox(
@@ -375,7 +379,7 @@ class TvHeader extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (s.isOn)
+                  if (s.isOn && !silent)
                     Text.rich(
                       TextSpan(
                         children: [
@@ -405,7 +409,13 @@ class TvHeader extends StatelessWidget {
                     )
                   else
                     Text(
-                      powerLabel(s.power, loaded: tv.loaded, phone: tv.isPhone),
+                      silent
+                          ? 'Not answering'
+                          : powerLabel(
+                              s.power,
+                              loaded: tv.loaded,
+                              phone: tv.isPhone,
+                            ),
                       key: const ValueKey('tv-power-state'),
                       style: OmniText.bodyStrong,
                     ),

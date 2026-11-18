@@ -162,7 +162,7 @@ class HouseAlerts {
       if (d.isOnline(now, window)) {
         if (_offline.remove(d.id)) {
           changed = true;
-          _notify('online', d, '${d.name} is back online', 'It answers again');
+          _notify('online', d, '${d.name} is answering again', 'It is back');
         }
         continue;
       }
@@ -174,7 +174,7 @@ class HouseAlerts {
         _notify(
           'offline',
           d,
-          '${d.name} is offline',
+          '${d.name} is not answering',
           'Not heard from for ${durationWords(now.difference(seen))}',
         );
       }

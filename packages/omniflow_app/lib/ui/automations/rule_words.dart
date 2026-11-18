@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:omniflow_engine/omniflow_engine.dart'
-    show daysWords, lightStepWords;
+    show clockWords, daysWords, lightStepWords;
 
 import '../../api/engine_calls.dart' show Json;
 import '../../api/rule_calls.dart' show RuleWordPiece, RuleWordsReply;
@@ -950,6 +950,25 @@ class RuleWords {
     UnknownStep() => OmniIcons.info,
   };
 
+  /// "Desk lamp is not answering right now" when the device [id] names is
+  /// offline, or null. A rule with it still saves: the device may be back
+  /// by the time the rule runs.
+  String? offlineNote(String id) {
+    final t = thing(id);
+    if (t == null || t.online) return null;
+    return '${t.name} is not answering right now';
+  }
+
+  /// The device a step or trigger sends to or listens to, when it names
+  /// one.
+  static String? deviceOf(Object part) => switch (part) {
+    DoStep(:final thing) ||
+    ToggleStep(:final thing) ||
+    KeepStep(:final thing) when !isEachDevice(thing) => thing,
+    OnTrigger(:final thing) => thing,
+    _ => null,
+  };
+
   /// The rule written as one line, for a review or a template preview.
   String sentence(RuleSpec rule) {
     final when = [for (final t in rule.when) trigger(t)];
@@ -961,6 +980,38 @@ class RuleWords {
       if (then.isNotEmpty) then.join(', then '),
     ].join(', ');
   }
+
+  /// A name made from what [rule] does and when: "Desk lamp on at 7 PM",
+  /// "Hall bulb off at sunset", "Desk lamp on when I get home". Empty when
+  /// it has no step yet, and just the step when the whole would be long.
+  String suggestedName(RuleSpec rule, {bool hour12 = true}) {
+    if (rule.then.isEmpty) return '';
+    final what = _stepForName(rule.then.first);
+    final when = rule.when.isEmpty ? '' : _whenForName(rule.when.first, hour12);
+    final both = when.isEmpty ? what : '$what $when';
+    return _capital(both.length <= 40 ? both : what);
+  }
+
+  String _stepForName(RuleStep s) => switch (s) {
+    DoStep(:final thing, :final params)
+        when !isEachDevice(thing) &&
+            params.length == 1 &&
+            params['value'] is bool &&
+            this.thing(thing)?.capability(s.capability)?['type'] == 'toggle' =>
+      '${_name(thing)} ${params['value'] == true ? 'on' : 'off'}',
+    ToggleStep(:final thing) => 'Toggle ${_name(thing)}',
+    _ => step(s).replaceAll(' · ', ' '),
+  };
+
+  String _whenForName(RuleTrigger t, bool hour12) => switch (t) {
+    TimeTrigger() =>
+      'at ${clockWords(t.at, hour12: hour12).replaceFirst(':00 ', ' ')}',
+    SunTrigger() => _lower(
+      sunText(SunTrigger(t.event, offsetMinutes: t.offsetMinutes)),
+    ),
+    ManualTrigger() || EngineStartTrigger() => '',
+    _ => 'when ${_lower(trigger(t))}',
+  };
 
   /// [s] with its first letter lowered for the middle of a sentence, unless
   /// it starts with "I" or an acronym ("TV").

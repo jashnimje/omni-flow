@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:omniflow_engine/omniflow_engine.dart' show clockWords;
 
 import '../../api/engine_calls.dart' show Json;
@@ -184,29 +185,189 @@ class TimeRow extends ConsumerWidget {
   }
 }
 
-/// The days of the week as chips. None picked means every day.
+/// "Every day", "On weekdays", "On Mon, Wed and Fri": what a set of days
+/// reads as above its chips. None picked is every day.
+String daysCaption(Iterable<String> days) =>
+    days.isEmpty ? 'Every day' : capitalised(daysText(days.toList()));
+
+String capitalised(String s) =>
+    s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+
+const _weekdays = {'mon', 'tue', 'wed', 'thu', 'fri'};
+const _weekends = {'sat', 'sun'};
+
+/// The days of the week as chips: first the quick choices (Every day,
+/// Weekdays, Weekends), then each day. None picked means every day, so
+/// Every day is offered only where none is allowed ([everyDay]).
 class DayChips extends StatelessWidget {
-  const DayChips({super.key, required this.days, required this.onChanged});
+  const DayChips({
+    super.key,
+    required this.days,
+    required this.onChanged,
+    this.everyDay = true,
+  });
 
   final Set<String> days;
   final VoidCallback onChanged;
+  final bool everyDay;
+
+  bool _is(Set<String> set) =>
+      days.length == set.length && days.containsAll(set);
+
+  void _set(Set<String> set) {
+    days
+      ..clear()
+      ..addAll(set);
+    onChanged();
+  }
 
   @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 6,
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
     children: [
-      for (final d in weekDays)
-        OmniFilterChip(
-          key: ValueKey('day-$d'),
-          label: dayName(d),
-          selected: days.contains(d),
-          onTap: () {
-            days.contains(d) ? days.remove(d) : days.add(d);
-            onChanged();
-          },
-        ),
+      Wrap(
+        key: const ValueKey('day-quick'),
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          if (everyDay)
+            OmniFilterChip(
+              key: const ValueKey('days-every'),
+              label: 'Every day',
+              selected: days.isEmpty,
+              onTap: () => _set(const {}),
+            ),
+          OmniFilterChip(
+            key: const ValueKey('days-weekdays'),
+            label: 'Weekdays',
+            selected: _is(_weekdays),
+            onTap: () => _set(_weekdays),
+          ),
+          OmniFilterChip(
+            key: const ValueKey('days-weekends'),
+            label: 'Weekends',
+            selected: _is(_weekends),
+            onTap: () => _set(_weekends),
+          ),
+        ],
+      ),
+      const SizedBox(height: OmniSpace.sm),
+      Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final d in weekDays)
+            OmniFilterChip(
+              key: ValueKey('day-$d'),
+              label: dayName(d),
+              selected: days.contains(d),
+              onTap: () {
+                days.contains(d) ? days.remove(d) : days.add(d);
+                onChanged();
+              },
+            ),
+        ],
+      ),
     ],
   );
+}
+
+/// A time of day picked in place, with no dialog over the sheet: the
+/// time in large type, an hour and a minute stepper, and AM or PM when
+/// the phone reads the time that way. Minutes move by five.
+class ClockPicker extends ConsumerWidget {
+  const ClockPicker({super.key, required this.value, required this.onChanged});
+
+  /// `HH:MM`.
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hour12 = ref.watch(hour12Provider);
+    final t = TimeRow.parse(value);
+    void set(int hour, int minute) => onChanged(
+      TimeRow.format(TimeOfDay(hour: hour % 24, minute: minute % 60)),
+    );
+    final nextMinute = (t.minute ~/ 5 + 1) * 5;
+    final lastMinute = t.minute % 5 == 0 ? t.minute - 5 : t.minute ~/ 5 * 5;
+    final shown = clockWords(value, hour12: hour12);
+    final hourText = hour12
+        ? '${t.hour % 12 == 0 ? 12 : t.hour % 12}'
+        : t.hour.toString().padLeft(2, '0');
+    final minuteText = t.minute.toString().padLeft(2, '0');
+    Widget stepper(
+      String what,
+      String text,
+      VoidCallback down,
+      VoidCallback up,
+    ) => Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        OmniIconAction(
+          key: ValueKey('clock-$what-up'),
+          icon: Symbols.keyboard_arrow_up_rounded,
+          label: 'Later $what',
+          onPressed: up,
+        ),
+        Text(text, style: OmniText.displaySmall),
+        OmniIconAction(
+          key: ValueKey('clock-$what-down'),
+          icon: Symbols.keyboard_arrow_down_rounded,
+          label: 'Earlier $what',
+          onPressed: down,
+        ),
+      ],
+    );
+    return Semantics(
+      key: const ValueKey('clock-picker'),
+      container: true,
+      label: 'Time $shown',
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          stepper(
+            'hour',
+            hourText,
+            () => set(t.hour - 1, t.minute),
+            () => set(t.hour + 1, t.minute),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+            child: ExcludeSemantics(
+              child: Text(':', style: OmniText.displaySmall),
+            ),
+          ),
+          stepper(
+            'minute',
+            minuteText,
+            () => set(t.hour, lastMinute < 0 ? 55 : lastMinute),
+            () => set(t.hour, nextMinute >= 60 ? 0 : nextMinute),
+          ),
+          if (hour12) ...[
+            const SizedBox(width: OmniSpace.md),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final pm in [false, true])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: OmniSpace.xs),
+                    child: OmniFilterChip(
+                      key: ValueKey(pm ? 'clock-pm' : 'clock-am'),
+                      label: pm ? 'PM' : 'AM',
+                      selected: (t.hour >= 12) == pm,
+                      onTap: () =>
+                          set(pm ? t.hour % 12 + 12 : t.hour % 12, t.minute),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 enum DurationUnit {

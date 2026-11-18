@@ -83,7 +83,7 @@ void main() {
         {...FakeEngine.lamp(), 'online': false},
       ];
       await pumpApp(tester, engine);
-      expect(find.text('Desk lamp offline'), findsOneWidget);
+      expect(find.text('Desk lamp is not answering'), findsOneWidget);
       await openDevicePage(tester, 'desk_lamp');
       expect(find.byKey(const ValueKey('offline-desk_lamp')), findsOneWidget);
     });

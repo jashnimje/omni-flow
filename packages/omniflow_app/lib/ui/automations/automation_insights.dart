@@ -182,7 +182,7 @@ class _AutomationInsightsState extends ConsumerState<AutomationInsights> {
             icon: OmniIcons.time,
             title: 'It has not been set off yet',
             message:
-                'When its trigger happens and a check or a setting stops '
+                'When its WHEN happens and a check or a setting stops '
                 'it, the reason shows here.',
             compact: true,
           )
@@ -224,7 +224,7 @@ class _AutomationInsightsState extends ConsumerState<AutomationInsights> {
   }
 }
 
-/// "Try as if": a dry run of the rule on screen from its trigger [index],
+/// "Pretend this just happened": a dry run of the rule on screen from its trigger [index],
 /// with an event the engine makes up for that trigger, shown step by step.
 /// Nothing is sent to any device.
 class TryAsIfButton extends ConsumerStatefulWidget {
@@ -282,7 +282,7 @@ class _TryAsIfButtonState extends ConsumerState<TryAsIfButton> {
       key: ValueKey('try-as-if-${widget.index}'),
       onPressed: _busy ? null : _try,
       icon: const Icon(OmniIcons.test, size: 18),
-      label: const Text('Try as if this happens'),
+      label: const Text('Pretend this just happened'),
       style: TextButton.styleFrom(
         minimumSize: const Size(OmniSpace.target, OmniSpace.target),
       ),

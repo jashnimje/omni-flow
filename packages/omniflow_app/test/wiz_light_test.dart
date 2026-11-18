@@ -364,7 +364,7 @@ void main() {
       await pumpPushed(tester, engine, const SceneEditorPage());
       await tester.enterText(find.byKey(const ValueKey('scene-name')), 'Calm');
       await tester.pump();
-      await tapText(tester, 'Add an action');
+      await tapText(tester, 'Add a step');
       await tapKey(tester, 'pick-device-bedroom');
       await tapKey(tester, 'act-scene');
       await tester.tap(find.text('Dynamic'));

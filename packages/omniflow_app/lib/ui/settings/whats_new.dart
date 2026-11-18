@@ -8,11 +8,26 @@ import '../../state/providers.dart';
 import '../design/design.dart';
 
 /// The version in pubspec.yaml.
-const appVersion = '0.11.0';
+const appVersion = '1.0.0';
 
 /// What each version brought, newest first. It ships in the app so it
 /// reads the same with no network.
 const releaseNotes = <({String version, String date, List<String> notes})>[
+  (
+    version: '1.0.0',
+    date: '19 Nov 2026',
+    notes: [
+      'A new look: bigger text and buttons, devices as large tiles, '
+          'automations as colour cards and stacked blocks, and details '
+          'tucked into sections until you open them.',
+      'Light mode, following your phone, with Light and Dark in Appearance.',
+      'A time automation in a few taps, with Time first and Weekdays as '
+          'one choice.',
+      'Set where home is by searching for your city, offline.',
+      'A device that stops answering says so everywhere, and its Activity '
+          'shows when it stopped and came back.',
+    ],
+  ),
   (
     version: '0.11.0',
     date: '19 Nov 2026',

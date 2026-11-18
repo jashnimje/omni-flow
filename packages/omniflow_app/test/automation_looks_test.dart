@@ -337,12 +337,13 @@ void main() {
       expect(find.byType(ReviewPage), findsOneWidget);
     });
 
-    testWidgets('with nothing to run there is no Scenes section, and saving '
-        'how things are is on the Scenes page, not Home', (tester) async {
+    testWidgets('with nothing to run Scenes is one row, and saving how '
+        'things are is on the Scenes page, not Home', (tester) async {
       final engine = household();
       engine.answers['scene.list'] = {'ok': true, 'scenes': []};
       await pump(tester, engine);
       expect(find.byKey(const ValueKey('home-run')), findsNothing);
+      expect(find.byKey(const ValueKey('home-scenes-empty')), findsOneWidget);
       expect(find.byType(RunTile), findsNothing);
       expect(find.byKey(const ValueKey('run-capture')), findsNothing);
       expect(find.text('Save how things are now'), findsNothing);

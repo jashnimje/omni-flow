@@ -682,21 +682,23 @@ McpServer createOmniMcpServerFor(EngineConnection engine) {
     'device_history',
     description:
         'A device\'s recent state changes, newest first: when, which key, the value, and by '
-        'which automation or the user. key, limit (1 to 500, default 100) and since (ISO 8601) '
-        'narrow it.',
+        'which automation or the user. Key "online" false or true is the device stopping '
+        'answering or answering again. key, limit (1 to 500, default 100), since and before '
+        '(ISO 8601) narrow it; pass the oldest entry\'s at as before for the page before it.',
     inputSchema: JsonSchema.object(
       properties: {
         'deviceId': JsonSchema.string(),
         'key': JsonSchema.string(),
         'limit': JsonSchema.integer(),
         'since': JsonSchema.string(),
+        'before': JsonSchema.string(),
       },
       required: ['deviceId'],
     ),
     callback: (args, _) async => reply(
       await asAgent('device.history', {
         'id': args['deviceId'],
-        for (final key in const ['key', 'limit', 'since'])
+        for (final key in const ['key', 'limit', 'since', 'before'])
           if (args[key] != null) key: args[key],
       }),
     ),

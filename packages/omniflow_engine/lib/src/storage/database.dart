@@ -756,26 +756,30 @@ class DriftHistoryStore {
   }
 
   /// The newest changes of [deviceId] first, of [key] only when given, and
-  /// only those after [since].
+  /// only those after [since] and before [before]. Times are kept to the
+  /// whole second.
   Future<List<HistoryEntry>> recent(
     String deviceId, {
     String? key,
     int limit = 100,
     DateTime? since,
+    DateTime? before,
   }) async {
     final q = _db.select(_db.deviceHistory)
       ..where((h) {
         var where = h.deviceId.equals(deviceId);
         if (key != null) where &= h.key.equals(key);
         if (since != null) where &= h.at.isBiggerThanValue(since);
+        if (before != null) where &= h.at.isSmallerThanValue(before);
         return where;
       })
       ..orderBy([
         (h) => OrderingTerm(expression: h.id, mode: OrderingMode.desc),
       ])
       ..limit(limit);
+    final rows = await q.get();
     return [
-      for (final r in await q.get())
+      for (final r in rows)
         HistoryEntry(
           r.at.toUtc(),
           r.key,

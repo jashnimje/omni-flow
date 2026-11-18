@@ -150,7 +150,7 @@ void main() {
       };
       await pumpScreen(tester, engine, const BoardPage(id: 'desk'));
       expect(find.byKey(const ValueKey('board-stale')), findsOneWidget);
-      expect(find.text('ESP32 · offline'), findsOneWidget);
+      expect(find.text('ESP32 · not answering'), findsOneWidget);
     });
 
     testWidgets('a board that never answered offers to try again', (
@@ -162,7 +162,7 @@ void main() {
       };
       await pumpScreen(tester, engine, const BoardPage(id: 'desk'));
       expect(find.byKey(const ValueKey('board-offline')), findsOneWidget);
-      expect(find.text('Board · offline'), findsOneWidget);
+      expect(find.text('Board · not answering'), findsOneWidget);
       await tester.tap(find.text('Try again'));
       await tester.pumpAndSettle();
       expect(engine.callsOf('board.describe'), hasLength(2));

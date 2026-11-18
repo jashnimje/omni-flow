@@ -43,7 +43,7 @@ class DiagramHandlers {
 /// The words a "+" says for where it adds.
 String plusLabel(DiagramInsert insert) => switch (insert.as) {
   DiagramInsert.check => 'Add a check here',
-  DiagramInsert.trigger => 'Add a trigger here',
+  DiagramInsert.trigger => 'Add a WHEN here',
   _ => 'Add a step here',
 };
 

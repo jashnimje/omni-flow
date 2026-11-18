@@ -26,7 +26,9 @@ import '../storage/database.dart' show DriftDeviceStore;
 import '../transports/udp_transport.dart' show TransportTimeoutException;
 
 /// The state keys the hub keeps for a TV, so rules can start on them.
-const tvStateKeys = ['power', 'app', 'playing', 'volume'];
+/// `reachable` is false when the last read got no answer, so a list can
+/// tell a TV that did not answer from one that said it is off.
+const tvStateKeys = ['power', 'app', 'playing', 'volume', 'reachable'];
 
 /// What the hub keeps for a phone: its screen too, `on` or `off`.
 const androidPhoneStateKeys = [...tvStateKeys, 'screen'];
@@ -396,15 +398,19 @@ class TvCommands {
   }
 
   /// The TV's power, app, playback and volume, and whether the TV answered.
-  /// A TV that does not answer at all is off: Android TVs drop off the
-  /// network in deep standby.
+  /// A TV that does not answer at all is taken as off, since Android TVs
+  /// drop off the network in deep standby, with `reachable` false so the
+  /// app says it is not answering rather than off.
   Future<({Map<String, Object?> state, bool answered})> _readState(
     _Tv tv,
   ) async {
     if (tv.isPhone) return _readPhoneState(tv);
     try {
       final output = await _run(tv, tvSections(tvStateCommands));
-      return (state: parseTvState(splitTvSections(output)), answered: true);
+      return (
+        state: {...parseTvState(splitTvSections(output)), 'reachable': true},
+        answered: true,
+      );
     } on TransportTimeoutException {
       return (
         state: <String, Object?>{
@@ -414,6 +420,7 @@ class TvCommands {
           'playing': null,
           'volume': null,
           'volumeMax': null,
+          'reachable': false,
         },
         answered: false,
       );
@@ -464,10 +471,11 @@ class TvCommands {
     await _readAndRecord(await _tv({'id': deviceId, 'allowPairing': false}));
   }
 
-  /// Saves [state] when a key changed. A read the TV [answered] with
-  /// nothing changed still marks it seen, at most once a [_seenEvery] or
-  /// at once when [force] says it failed before, so its last seen time
-  /// stays current without a save on every poll.
+  /// Saves [state] when a key changed, marking the TV seen only when it
+  /// [answered]. A read the TV answered with nothing changed still marks it
+  /// seen, at most once a [_seenEvery] or at once when [force] says it
+  /// failed before, so its last seen time stays current without a save on
+  /// every poll.
   Future<void> _record(
     String deviceId,
     Map<String, Object?> state, {
@@ -480,7 +488,7 @@ class TvCommands {
     final values = {for (final k in keys) k: state[k]};
     final changed = values.entries.any((e) => device.state[e.key] != e.value);
     if (changed || !keys.every(device.state.containsKey)) {
-      await _core.devices.mergeState(deviceId, values);
+      await _core.devices.mergeState(deviceId, values, seen: answered);
       return;
     }
     final seen = device.lastSeen;

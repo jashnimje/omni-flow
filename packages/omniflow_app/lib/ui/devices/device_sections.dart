@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../api/plain_error.dart' show plainError;
 import '../../state/clock.dart' show hour12Provider;
 import '../../state/providers.dart';
 import '../add/guided_steps_page.dart';
@@ -30,8 +31,19 @@ import '../../api/screen_calls.dart';
 /// The newest state changes of one device, reloaded when its state moves.
 final deviceHistoryProvider = FutureProvider.family<List<HistoryEntry>, String>(
   (ref, id) async =>
-      (await ref.watch(engineApiProvider).history(id, limit: 20)).or(const []),
+      (await ref.watch(engineApiProvider).history(id, limit: historyFirst)).or(
+        const [],
+      ),
 );
+
+/// How many changes a device page reads first.
+const historyFirst = 20;
+
+/// The most changes one read asks for, which is how many the engine keeps.
+const historyMost = 500;
+
+/// How many older changes each Earlier reads, once those read are shown.
+const historyPage = 50;
 
 /// The live row of [id] from the devices list, or null. It rebuilds the
 /// page only when this device's row changes, not on every other device's
@@ -367,7 +379,7 @@ List<OmniDisclosure> deviceSections(
 /// by you", "Brightness 60% by Good night"). A change with no plain
 /// description (a key no capability names, an empty value) is left out
 /// here and shown only under Developer details, Raw changes.
-class DeviceActivitySection extends ConsumerWidget {
+class DeviceActivitySection extends ConsumerStatefulWidget {
   const DeviceActivitySection({super.key, required this.device});
 
   final DeviceView device;
@@ -381,6 +393,13 @@ class DeviceActivitySection extends ConsumerWidget {
     DeviceView d,
     Map<String, String> names,
   ) {
+    switch (e.answering) {
+      case false:
+        return stopped;
+      case true:
+        return answeringAgain;
+      case null:
+    }
     final cap = d.capabilities.where((c) => c['stateKey'] == e.key).firstOrNull;
     if (cap == null) return null;
     final label = switch (cap['label']) {
@@ -440,35 +459,172 @@ class DeviceActivitySection extends ConsumerWidget {
     };
   }
 
+  static const stopped = 'Stopped answering';
+  static const answeringAgain = 'Answering again';
+
+  /// A device that is not answering, as Activity's first line, when the
+  /// history does not already start with it stopping: a device the hub
+  /// does not poll only goes quiet, so the line comes from when it was
+  /// last seen.
+  static String? stoppedLine(DeviceView d, List<HistoryEntry> entries) {
+    if (d.online) return null;
+    final last = entries.where((e) => e.answering != null).firstOrNull;
+    return last?.answering == false ? null : stopped;
+  }
+
+  /// [head] (the newest page, read again on every change) in front of
+  /// [kept] (what Earlier read before), without repeats. A change that
+  /// came in since sits in [head] before [kept]'s newest entry.
+  static List<HistoryEntry> merged(
+    List<HistoryEntry> head,
+    List<HistoryEntry>? kept,
+  ) {
+    if (kept == null || kept.isEmpty) return head;
+    final first = kept.first;
+    final at = head.indexWhere((e) => _same(e, first));
+    final newer = at >= 0
+        ? head.take(at)
+        : head.where((e) => e.at.isAfter(first.at));
+    return [...newer, ...kept];
+  }
+
+  static bool _same(HistoryEntry a, HistoryEntry b) =>
+      a.at.isAtSameMomentAs(b.at) &&
+      a.key == b.key &&
+      a.by == b.by &&
+      '${a.value}' == '${b.value}';
+
+  /// The `device.history` read for the page older than [all]. The engine
+  /// keeps whole seconds, so it asks up to the end of the oldest second and
+  /// [skip]s the entries of that second already held.
+  static ({DateTime before, int limit, int skip}) olderPage(
+    List<HistoryEntry> all,
+  ) {
+    final oldest = all.last.at;
+    final skip = all.reversed
+        .takeWhile((e) => e.at.isAtSameMomentAs(oldest))
+        .length;
+    return (
+      before: oldest.add(const Duration(seconds: 1)),
+      limit: (historyPage + skip).clamp(1, historyMost),
+      skip: skip,
+    );
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final entries = ref.watch(deviceHistoryProvider(device.id)).value;
+  ConsumerState<DeviceActivitySection> createState() =>
+      _DeviceActivitySectionState();
+}
+
+class _DeviceActivitySectionState extends ConsumerState<DeviceActivitySection> {
+  /// How many changes are shown.
+  var _shown = DeviceActivitySection.shown;
+
+  /// The changes read so far once Earlier went past the first page, the
+  /// first page as it was then followed by the older pages.
+  List<HistoryEntry>? _kept;
+
+  /// The engine has nothing older than what is read.
+  var _end = false;
+  var _reading = false;
+
+  DeviceView get device => widget.device;
+
+  Future<void> _earlier(List<HistoryEntry> all, int plainCount) async {
+    setState(() => _shown += DeviceActivitySection.shown * 2);
+    if (_shown <= plainCount || _end || _reading || all.isEmpty) return;
+    _reading = true;
+    final page = DeviceActivitySection.olderPage(all);
+    final reply = await ref
+        .read(engineApiProvider)
+        .history(device.id, limit: page.limit, before: page.before);
+    _reading = false;
+    if (!mounted) return;
+    if (!reply.ok) {
+      final failure = reply.failure!;
+      showMessage(
+        'Could not read older changes. '
+        '${plainError(failure.type, failure.message)}',
+      );
+      return;
+    }
+    final got = reply.value!;
+    setState(() {
+      _end = got.length < page.limit;
+      _kept = [...all, ...got.skip(page.skip)];
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final head = ref.watch(deviceHistoryProvider(device.id)).value;
+    final entries = head == null
+        ? null
+        : DeviceActivitySection.merged(head, _kept);
     if (entries == null) {
       return const OmniListSkeleton(rows: 2, label: 'Loading what happened');
     }
-    final plain = plainEntries(entries, device, automationNames(ref));
+    final plain = DeviceActivitySection.plainEntries(
+      entries,
+      device,
+      automationNames(ref),
+    );
     final hour12 = ref.watch(hour12Provider);
+    final stopped = DeviceActivitySection.stoppedLine(device, entries);
+    final seen = device.lastSeen;
+    final stoppedRow = stopped == null
+        ? null
+        : OmniListRow(
+            key: ValueKey('activity-stopped-${device.id}'),
+            icon: AreaIcons.offline,
+            title: stopped,
+            value: seen == null ? null : when(seen, hour12: hour12),
+            valueColor: OmniPalette.of(context).muted,
+            dot: StatusKind.offline,
+            divider: plain.isNotEmpty,
+          );
     if (plain.isEmpty) {
-      return Padding(
-        key: ValueKey('activity-none-${device.id}'),
-        padding: const EdgeInsets.symmetric(vertical: OmniSpace.md),
-        child: Text(
-          'Nothing has changed yet. Changes show here as they happen.',
-          style: OmniText.captionOf(context),
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ?stoppedRow,
+          Padding(
+            key: ValueKey('activity-none-${device.id}'),
+            padding: const EdgeInsets.symmetric(vertical: OmniSpace.md),
+            child: Text(
+              'Nothing has changed yet. Changes show here as they happen.',
+              style: OmniText.captionOf(context),
+            ),
+          ),
+        ],
       );
     }
+    final rows = plain.take(_shown).toList();
+    // More to show: rows read but not shown, or a full read that may have
+    // older days behind it.
+    final more =
+        plain.length > rows.length || (!_end && entries.length >= historyFirst);
     return Column(
       key: ValueKey('activity-${device.id}'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final (i, (words, e)) in plain.take(shown).indexed)
+        ?stoppedRow,
+        for (final (i, (words, e)) in rows.indexed)
           OmniListRow(
             key: ValueKey('activity-${device.id}-$i'),
             title: words,
             value: when(e.at, hour12: hour12),
             valueColor: OmniPalette.of(context).muted,
-            divider: i < plain.take(shown).length - 1,
+            divider: i < rows.length - 1 || more,
+          ),
+        if (more)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton(
+              key: ValueKey('activity-earlier-${device.id}'),
+              onPressed: () => _earlier(entries, plain.length),
+              child: const Text('Earlier'),
+            ),
           ),
       ],
     );
@@ -494,8 +650,8 @@ class UsedInSection extends ConsumerWidget {
       return drives ? 'Has a step on it' : 'Starts or checks on it';
     }
     return drives
-        ? 'Steps on it fail while it is offline'
-        : 'Does not start or check it while it is offline';
+        ? 'Steps on it fail while it is not answering'
+        : 'Does not start or check it while it is not answering';
   }
 
   /// A new rule that already turns [d] on, when it can be, so only the

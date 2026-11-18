@@ -82,12 +82,26 @@ Future<void> tapKey(WidgetTester tester, String key) async {
 /// added to from its one "Add a step", which asks which kind first.
 Future<void> tapAdd(WidgetTester tester, String label) async {
   if (find.text(label).evaluate().isNotEmpty) return tapText(tester, label);
+  // An empty WHEN or THEN is filled from its own target, which Add a step
+  // leaves out until the block has something.
+  final target = switch (label) {
+    'Add trigger' => 'Choose what starts it',
+    'Add condition' => null,
+    _ => 'Choose what it does',
+  };
+  if (target != null && find.text(target).evaluate().isNotEmpty) {
+    return tapText(tester, target);
+  }
   await tapKey(tester, 'rule-add-a-step');
-  await tapKey(tester, switch (label) {
+  // With one kind to offer, Add a step opens that picker straight away.
+  final part = switch (label) {
     'Add trigger' => 'add-part-when',
     'Add condition' => 'add-part-onlyIf',
     _ => 'add-part-then',
-  });
+  };
+  if (find.byKey(ValueKey(part)).evaluate().isNotEmpty) {
+    await tapKey(tester, part);
+  }
 }
 
 /// Opens the collapsed section [title] (Options, Activity, Ideas for you).

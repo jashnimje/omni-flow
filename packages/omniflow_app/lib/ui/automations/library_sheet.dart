@@ -15,6 +15,7 @@ class LibraryChoice {
     this.warning = false,
     this.keywords = '',
     this.searchOnly = false,
+    this.quick = const [],
   });
 
   final String key;
@@ -31,6 +32,11 @@ class LibraryChoice {
   /// Shown only for a search that matches it, such as each device action.
   final bool searchOnly;
 
+  /// One-tap picks on the row itself, such as a lamp's On and Off, so the
+  /// common step needs no second sheet. The row's own tap still opens
+  /// every choice.
+  final List<LibraryQuick> quick;
+
   bool matches(String query) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return !searchOnly;
@@ -41,6 +47,23 @@ class LibraryChoice {
       category,
     ].any((s) => s.toLowerCase().contains(q));
   }
+}
+
+/// A one-tap pick on a library row: its short [label] ("On"), what a
+/// screen reader says ([semanticLabel], "Turn Desk lamp on"), and what it
+/// does with the library sheet's context.
+class LibraryQuick {
+  const LibraryQuick({
+    required this.key,
+    required this.label,
+    required this.semanticLabel,
+    required this.onTap,
+  });
+
+  final String key;
+  final String label;
+  final String semanticLabel;
+  final Future<void> Function(BuildContext context) onTap;
 }
 
 /// A quick pick at the top of the library: a device or step kind this
@@ -228,7 +251,29 @@ class _LibraryState extends State<_Library> {
                         size: 20,
                         semanticLabel: 'High risk',
                       )
-                    : null,
+                    : c.quick.isEmpty || searching
+                    ? null
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final q in c.quick)
+                            TextButton(
+                              key: ValueKey(q.key),
+                              onPressed: () => q.onTap(context),
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(
+                                  OmniSpace.target,
+                                  OmniSpace.target,
+                                ),
+                                textStyle: OmniText.label,
+                              ),
+                              child: Text(
+                                q.label,
+                                semanticsLabel: q.semanticLabel,
+                              ),
+                            ),
+                        ],
+                      ),
                 onTap: c.onTap == null ? null : () => c.onTap!(context),
               ),
           ],

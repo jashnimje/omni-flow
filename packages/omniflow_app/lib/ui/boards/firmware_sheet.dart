@@ -158,11 +158,13 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
     final progress = _progress;
     final hasPorts = ports != null && ports.isNotEmpty;
     return SheetTemplate(
-      title: 'Install firmware',
-      subtitle: 'For a new board, or to put OmniFlow back on one.',
+      title: 'Put the OmniFlow program on a board',
+      subtitle:
+          'A board runs one small program, called firmware. Write '
+          'OmniFlow\'s to a new board, or to put OmniFlow back on one.',
       state: OmniLoad.flags(loading: ports == null),
       primaryLabel: hasPorts
-          ? (progress == null ? 'Write firmware' : 'Writing…')
+          ? (progress == null ? 'Write the program' : 'Writing…')
           : null,
       primaryKey: const ValueKey('fw-write'),
       onPrimary: progress != null || _port == null ? null : _flash,
@@ -219,16 +221,16 @@ class _FirmwareSheetState extends ConsumerState<_FirmwareSheet> {
           OmniListRow(
             key: const ValueKey('fw-own'),
             icon: OmniIcons.edit,
-            title: _own == null ? 'OmniFlow firmware' : _own!.name,
+            title: _own == null ? 'The OmniFlow program' : _own!.name,
             subtitle: _own == null
                 ? 'Or tap to write your own ${_chip == 'uno' ? '.hex' : '.bin'}, built with the Arduino IDE or arduino-cli'
-                : 'Your own firmware. Tap to choose another',
+                : 'Your own program. Tap to choose another',
             chevron: true,
             onTap: _pickOwn,
           ),
           Text(
             'A Pico W is flashed by holding BOOTSEL while plugging it in, '
-            'then copying the firmware to the drive it shows.',
+            'then copying the program to the drive it shows.',
             style: OmniText.captionOf(context),
           ),
           if (progress case final p?) ...[

@@ -75,7 +75,7 @@ void main() {
   });
 
   test('save, values and keep order are the engine\'s rules', () async {
-    expect(RuleSpec(name: 'x').missing, 'Add a trigger and a step to save.');
+    expect(RuleSpec(name: 'x').missing, 'Choose a WHEN and a THEN to save.');
     expect(
       RuleSpec(
         name: 'x',
@@ -100,7 +100,7 @@ void main() {
     expect(steps.first, isA<WaitStep>());
 
     final reply = await RuleCalls.fetchWords(client, {'name': 'New'});
-    expect(reply?.missing, 'Add a trigger and a step to save.');
+    expect(reply?.missing, 'Choose a WHEN and a THEN to save.');
   });
 
   test('Undo puts a removed automation back off, as it was', () async {

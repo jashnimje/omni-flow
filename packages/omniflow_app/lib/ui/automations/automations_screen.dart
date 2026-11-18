@@ -134,10 +134,11 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
         ),
         const ScreenHelpButton(HelpScreen.automations),
       ],
-      filters: all.isEmpty ? null : _filters(),
+      // The switch shows even with nothing saved, so Scenes can always be
+      // found here.
+      filters: _filters(),
       state: OmniLoad.of(
         async,
-        isEmpty: (v) => v.isEmpty,
         onRetry: () => ref.read(automationsProvider.notifier).retry(),
         error:
             error is AutomationsUnavailable &&
@@ -145,33 +146,6 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
             ? 'The automations did not load: ${error.failure.message}'
             : 'OmniFlow did not answer, so the automations cannot show. It '
                   'may still be starting. Try again in a moment.',
-      ),
-      empty: OmniEmptyState(
-        key: const ValueKey('automations-empty'),
-        icon: OmniIcons.automations,
-        title: 'No automations yet',
-        message:
-            'Make one from a template, like arrive home or bedtime, or link a '
-            'button to a light.',
-        action: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            OmniButton(
-              label: 'New automation',
-              icon: OmniIcons.add,
-              expand: false,
-              onPressed: () => openNewAutomation(context),
-            ),
-            const SizedBox(height: OmniSpace.sm),
-            OmniButton(
-              key: const ValueKey('automations-empty-type-it'),
-              label: 'Type what you want',
-              kind: OmniButtonKind.ghost,
-              expand: false,
-              onPressed: () => openTypeIt(context),
-            ),
-          ],
-        ),
       ),
       body: (context, padding) => _list(all, padding),
     );
@@ -246,30 +220,51 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
               onAction: () => _search('needs you'),
             ),
           if (shown.isEmpty)
-            if (_filter == AutomationFilter.scenes && scenes == 0)
-              const OmniEmptyState(
-                key: ValueKey('scenes-empty'),
+            if (all.isEmpty && plain)
+              const _NothingYet()
+            else if (_filter == AutomationFilter.scenes && scenes == 0)
+              OmniEmptyState(
+                key: const ValueKey('scenes-empty'),
                 icon: OmniIcons.scene,
                 title: 'No scenes yet',
                 message:
                     'A scene sets several things at once, like Movie: lamp '
                     '20%, TV on.',
                 compact: true,
+                action: OmniButton(
+                  key: const ValueKey('scenes-filter-new'),
+                  label: 'New scene',
+                  icon: OmniIcons.add,
+                  expand: false,
+                  onPressed: () => openSceneEditor(context),
+                ),
+              )
+            else if (_filter == AutomationFilter.rules && _q.isEmpty)
+              OmniEmptyState(
+                key: const ValueKey('filter-empty'),
+                icon: OmniIcons.automations,
+                title: 'No rules yet.',
+                compact: true,
+                action: OmniButton(
+                  key: const ValueKey('rules-filter-new'),
+                  label: 'New automation',
+                  icon: OmniIcons.add,
+                  expand: false,
+                  onPressed: () => openNewAutomation(context),
+                ),
               )
             else
               OmniEmptyState(
                 key: const ValueKey('filter-empty'),
                 icon: OmniIcons.search,
-                title: _q.isNotEmpty
-                    ? switch (_q) {
-                        'off' => 'Every automation is on.',
-                        'needs you' =>
-                          'Nothing needs you. Every automation is approved '
-                              'and its last run worked.',
-                        'link' || 'quick links' => 'No quick links yet.',
-                        _ => 'Nothing matches "${_query.text.trim()}".',
-                      }
-                    : 'No rules yet.',
+                title: switch (_q) {
+                  'off' => 'Every automation is on.',
+                  'needs you' =>
+                    'Nothing needs you. Every automation is approved '
+                        'and its last run worked.',
+                  'link' || 'quick links' => 'No quick links yet.',
+                  _ => 'Nothing matches "${_query.text.trim()}".',
+                },
                 compact: true,
               ),
           _grid(context, shown),
@@ -422,6 +417,51 @@ class _AutomationsScreenState extends ConsumerState<AutomationsScreen> {
     _gone.remove(id);
     setState(() => _removing.remove(id));
   }
+}
+
+/// The list with nothing saved yet: both ways to start, a rule or a
+/// scene, and typing it. Ideas and Recently removed still follow it.
+class _NothingYet extends StatelessWidget {
+  const _NothingYet();
+
+  @override
+  Widget build(BuildContext context) => OmniEmptyState(
+    key: const ValueKey('automations-empty'),
+    icon: OmniIcons.automations,
+    title: 'No automations yet',
+    message:
+        'An automation runs on its own, like the desk lamp on at 7 PM. A '
+        'scene sets several things at once when you tap it.',
+    action: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        OmniButton(
+          key: const ValueKey('automations-empty-new'),
+          label: 'New automation',
+          icon: OmniIcons.add,
+          expand: false,
+          onPressed: () => openNewAutomation(context),
+        ),
+        const SizedBox(height: OmniSpace.sm),
+        OmniButton(
+          key: const ValueKey('automations-empty-new-scene'),
+          label: 'New scene',
+          icon: OmniIcons.scene,
+          kind: OmniButtonKind.ghost,
+          expand: false,
+          onPressed: () => openSceneEditor(context),
+        ),
+        const SizedBox(height: OmniSpace.sm),
+        OmniButton(
+          key: const ValueKey('automations-empty-type-it'),
+          label: 'Type what you want',
+          kind: OmniButtonKind.ghost,
+          expand: false,
+          onPressed: () => openTypeIt(context),
+        ),
+      ],
+    ),
+  );
 }
 
 /// What shows under a row as it is swiped: the action's icon and words.
@@ -630,9 +670,10 @@ class _AutomationCardState extends ConsumerState<AutomationCard> {
   }
 }
 
-/// The state pill on a rule's card: On, Off, Asks (on, and asks before it
-/// runs) or Review. A tap turns it on or off, with a 48 dp target; one
-/// waiting for review cannot be turned on.
+/// The state switch on a rule's card: its word (On, Off, Asks when it is
+/// on and asks before it runs) beside a switch track, so it reads as a
+/// control. A tap turns it on or off, with a 48 dp target. One waiting
+/// for review shows Review and cannot be turned on.
 class _StateBadge extends StatelessWidget {
   const _StateBadge({
     required this.automation,
@@ -654,16 +695,27 @@ class _StateBadge extends StatelessWidget {
         : a.askFirst
         ? 'Asks'
         : 'On';
+    const ink = OmniCardColors.onCard;
+    final card = automationCardColor(a.color);
+    final text = Text(
+      label,
+      key: ValueKey('enable-label-${a.id}'),
+      style: OmniText.labelMedium.copyWith(
+        color: ink,
+        fontWeight: FontWeight.w700,
+      ),
+    );
     return Semantics(
       container: true,
       button: true,
-      toggled: on,
+      toggled: a.needsApproval ? null : on,
       enabled: onChanged != null,
       label: a.needsApproval
           ? '${a.name} waits for your review'
-          : on
-          ? 'Turn ${a.name} off'
-          : 'Turn ${a.name} on',
+          : a.askFirst
+          ? '${a.name}, asks first'
+          : a.name,
+      hint: a.needsApproval ? null : (on ? 'Turns it off' : 'Turns it on'),
       excludeSemantics: true,
       child: InkWell(
         key: ValueKey('enable-${a.id}'),
@@ -674,30 +726,61 @@ class _StateBadge extends StatelessWidget {
             minWidth: OmniSpace.target,
             minHeight: OmniSpace.target,
           ),
-          child: Center(
-            widthFactor: 1,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: OmniSpace.sm + 2,
-                vertical: OmniSpace.xs,
-              ),
-              decoration: BoxDecoration(
-                color: on
-                    ? OmniCardColors.onCard
-                    : OmniCardColors.onCard.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(OmniRadii.chip),
-              ),
-              child: Text(
-                label,
-                key: ValueKey('enable-label-${a.id}'),
-                style: OmniText.labelMedium.copyWith(
-                  color: on
-                      ? automationCardColor(a.color)
-                      : OmniCardColors.onCard,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: OmniSpace.xs),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                text,
+                if (!a.needsApproval) ...[
+                  const SizedBox(width: OmniSpace.sm),
+                  _SwitchTrack(
+                    key: ValueKey('enable-switch-${a.id}'),
+                    on: on,
+                    card: card,
+                  ),
+                ],
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A switch drawn in the card's own colours: a white track with the thumb
+/// to the right when on, a faint track with the thumb to the left when
+/// off.
+class _SwitchTrack extends StatelessWidget {
+  const _SwitchTrack({super.key, required this.on, required this.card});
+
+  final bool on;
+  final Color card;
+
+  @override
+  Widget build(BuildContext context) {
+    const ink = OmniCardColors.onCard;
+    final reduce = MediaQuery.disableAnimationsOf(context);
+    return AnimatedContainer(
+      duration: reduce ? Duration.zero : const Duration(milliseconds: 150),
+      width: 40,
+      height: 24,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: on ? ink : ink.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ink, width: 1.5),
+      ),
+      child: AnimatedAlign(
+        duration: reduce ? Duration.zero : const Duration(milliseconds: 150),
+        alignment: on ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          width: 15,
+          height: 15,
+          decoration: BoxDecoration(
+            color: on ? card : ink,
+            shape: BoxShape.circle,
           ),
         ),
       ),

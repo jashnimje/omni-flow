@@ -40,11 +40,11 @@ void main() {
     test('counts only the lights that answer', () {
       expect(
         room(2, 1, offline: 1, level: 80).summary,
-        'All on, 80%, 1 offline',
+        'All on, 80%, 1 not answering',
       );
-      expect(room(3, 1, offline: 1).summary, '1 of 2 on, 1 offline');
-      expect(room(1, 0, offline: 1).summary, 'Offline');
-      expect(room(2, 0, offline: 2).summary, 'All offline');
+      expect(room(3, 1, offline: 1).summary, '1 of 2 on, 1 not answering');
+      expect(room(1, 0, offline: 1).summary, 'Not answering');
+      expect(room(2, 0, offline: 2).summary, 'None answering');
       expect(room(2, 0).summary, 'All off');
     });
   });

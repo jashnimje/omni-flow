@@ -117,9 +117,11 @@ class OmniScreenTitle extends StatelessWidget {
                   : ExcludeSemantics(
                       child: Opacity(
                         opacity: shown,
+                        // Two lines, so a long greeting at large text
+                        // wraps rather than cutting off mid-word.
                         child: Text(
                           title,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: OmniText.screenTitle,
                         ),

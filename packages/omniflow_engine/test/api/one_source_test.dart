@@ -98,20 +98,20 @@ void main() {
     });
 
     test('what keeps a rule from saving is worded once', () {
-      expect(ruleMissing(const {}), 'Add a trigger and a step to save.');
+      expect(ruleMissing(const {}), 'Choose a WHEN and a THEN to save.');
       expect(
         ruleMissing({
           'then': [
             {'wait': 1000},
           ],
         }),
-        'Add a trigger to save.',
+        'Choose a WHEN to save.',
       );
       expect(
         ruleMissing({
           'when': ['manual'],
         }),
-        'Add a step to save.',
+        'Choose a THEN step to save.',
       );
       expect(
         ruleMissing({
@@ -260,7 +260,7 @@ void main() {
       final unfinished = await ok('rule.words', {
         'rule': {'name': 'New'},
       });
-      expect(unfinished['missing'], 'Add a trigger and a step to save.');
+      expect(unfinished['missing'], 'Choose a WHEN and a THEN to save.');
       expect(unfinished['parts'], isEmpty);
     });
 

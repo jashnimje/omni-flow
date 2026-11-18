@@ -4,12 +4,13 @@ import '../../state/clock.dart' show timeOfDayText;
 import '../design/design.dart';
 
 /// Asks for a name in a sheet, starting from [initial]. Null when closed.
+/// No example name shows unless the caller gives one that fits.
 Future<String?> askName(
   BuildContext context, {
   required String title,
   String initial = '',
   String action = 'Save',
-  String hint = 'Arrive home',
+  String? hint,
 }) => showPromptSheet(
   context,
   title: title,

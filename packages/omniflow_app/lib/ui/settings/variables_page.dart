@@ -147,13 +147,13 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
         if (isSystemVariable(n)) n,
     ];
     return ListPage(
-      title: 'Variables',
+      title: 'Saved values',
       actions: [
         if (vars != null)
           OmniIconAction(
             key: const ValueKey('var-add'),
             icon: OmniIcons.add,
-            label: 'Add a variable',
+            label: 'Add a saved value',
             onPressed: () => _edit(),
           ),
       ],
@@ -164,8 +164,9 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
       ),
       children: (context) => [
         Text(
-          'Values automations set for each other to check. Change one '
-          'that is stuck, or clear it.',
+          'Values automations remember and check, such as whether you are '
+          'away. Automations call them variables. Change one that is '
+          'stuck, or clear it.',
           style: OmniText.captionOf(context),
         ),
         const SizedBox(height: OmniSpace.md),
@@ -173,7 +174,7 @@ class _VariablesPageState extends ConsumerState<VariablesPage> {
           const OmniEmptyState(
             key: ValueKey('vars-empty'),
             icon: OmniIcons.level,
-            title: 'No variables yet',
+            title: 'Nothing saved yet',
             message: _howToAdd,
           )
         else if (own.isEmpty)

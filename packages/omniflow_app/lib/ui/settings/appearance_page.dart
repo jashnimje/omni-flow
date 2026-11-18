@@ -81,7 +81,9 @@ class AppearancePage extends ConsumerWidget {
             AsyncData(value: null) =>
               'This phone does not share its wallpaper colours, so '
                   'OmniFlow stays teal. It needs Android 12 or later.',
-            _ => 'Takes its colours from your wallpaper',
+            _ =>
+              'Picks up the colours of your phone\'s wallpaper, so OmniFlow '
+                  'matches the rest of your phone',
           },
           swatch: wallpaper?.value?.primary,
           selected: appearance.colours == ColourSource.wallpaper,
@@ -116,7 +118,8 @@ class AppearancePage extends ConsumerWidget {
 }
 
 const _pureBlackWords =
-    'Black screens in the dark theme, which use less power on OLED phones';
+    'Fully black screens in the dark theme. On many phones this saves '
+    'battery';
 
 /// One choice: an [icon], or a round swatch of a colour, the words, and a
 /// tick when chosen.

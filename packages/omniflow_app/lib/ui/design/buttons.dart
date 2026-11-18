@@ -116,11 +116,20 @@ class OmniIconAction extends StatelessWidget {
     required this.onPressed,
     this.color,
     this.selected = false,
+    this.badge,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
+
+  /// A count drawn on the icon (the bell's "4"), inside the button's own
+  /// 48 dp box so it never covers the button beside it. Its text grows
+  /// with the text size only to [badgeMaxScale]; [label] says the count.
+  final int? badge;
+
+  /// How far a badge's count grows with the text size.
+  static const badgeMaxScale = 1.3;
 
   /// The icon colour; the palette's muted grey by default.
   final Color? color;
@@ -129,23 +138,36 @@ class OmniIconAction extends StatelessWidget {
   final bool selected;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-    onPressed: onPressed,
-    tooltip: label,
-    isSelected: selected,
-    constraints: const BoxConstraints(
-      minWidth: OmniSpace.target,
-      minHeight: OmniSpace.target,
-    ),
-    icon: Icon(
+  Widget build(BuildContext context) {
+    Widget glyph = Icon(
       icon,
       color: selected
           ? OmniPalette.of(context).accent
           : color ?? OmniPalette.of(context).muted,
       fill: selected ? 1 : 0,
       semanticLabel: label,
-    ),
-  );
+    );
+    if (badge case final n? when n > 0) {
+      glyph = Badge(
+        key: const ValueKey('omni-icon-badge'),
+        label: MediaQuery.withClampedTextScaling(
+          maxScaleFactor: badgeMaxScale,
+          child: ExcludeSemantics(child: Text('$n')),
+        ),
+        child: glyph,
+      );
+    }
+    return IconButton(
+      onPressed: onPressed,
+      tooltip: label,
+      isSelected: selected,
+      constraints: const BoxConstraints(
+        minWidth: OmniSpace.target,
+        minHeight: OmniSpace.target,
+      ),
+      icon: glyph,
+    );
+  }
 }
 
 /// Grows the hit area of a small control to 48 dp without changing how it

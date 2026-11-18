@@ -31,7 +31,7 @@ abstract final class RunColors {
 
 /// What a node is, in words a screen reader says.
 String nodeKindWords(String kind) => switch (kind) {
-  NodeKind.trigger => 'Trigger',
+  NodeKind.trigger => 'When',
   NodeKind.check || NodeKind.decision => 'Check',
   NodeKind.ask => 'Question',
   NodeKind.wait => 'Wait',

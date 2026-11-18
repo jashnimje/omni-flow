@@ -38,32 +38,117 @@ import 'away_lighting_page.dart' show SmartHomeSettingsRows;
 
 /// A place in Settings that search can open.
 class SettingsPlace {
-  const SettingsPlace(this.title, this.icon, this.page);
+  const SettingsPlace(
+    this.title,
+    this.icon,
+    this.page, {
+    required this.section,
+    this.keywords = const [],
+  });
 
   final String title;
   final IconData icon;
   final Widget Function() page;
+
+  /// Where it sits, as its heading reads: "Settings, Your home", or
+  /// "Automations" for Scenes, which is not a setting.
+  final String section;
+
+  /// Other words that find it, such as "city" for Home location.
+  final List<String> keywords;
+
+  /// Whether every word of [query] starts a word of the title or keywords.
+  bool matches(String query) {
+    final words = [
+      for (final t in [title, ...keywords])
+        ...t.toLowerCase().split(RegExp(r'\s+')),
+    ];
+    final asked = query.toLowerCase().split(RegExp(r'\s+'))
+      ..removeWhere((w) => w.isEmpty);
+    return asked.isNotEmpty &&
+        asked.every((q) => words.any((w) => w.startsWith(q)));
+  }
 
   void open(BuildContext context, WidgetRef ref) =>
       Navigator.of(context)
           .push(MaterialPageRoute<void>(builder: (_) => page()));
 }
 
+const _yourHome = 'Settings, Your home';
+const _thisPhone = 'Settings, This phone';
+const _yourData = 'Settings, Your data';
+const _more = 'Settings, More settings';
+
 final settingsPlaces = [
-  SettingsPlace('Places and people', OmniIcons.place, PlacesPage.new),
-  SettingsPlace('Home location', OmniIcons.sun, HomeLocationPage.new),
-  SettingsPlace('Rooms', OmniIcons.room, RoomsPage.new),
-  SettingsPlace('NFC tags', OmniIcons.tag, TagsPage.new),
-  SettingsPlace('Scenes', OmniIcons.scene, ScenesPage.new),
-  SettingsPlace('Phone setup', OmniIcons.settings, PhoneAccessPage.new),
-  SettingsPlace('Appearance', OmniIcons.color, AppearancePage.new),
-  SettingsPlace('Permissions', OmniIcons.permissions, PhoneAccessPage.new),
-  SettingsPlace('Hubs', OmniIcons.hub, HubPage.new),
-  SettingsPlace('Home runs on', OmniIcons.server, HubPage.new),
-  SettingsPlace('Backup and restore', OmniIcons.backup, BackupPage.new),
-  SettingsPlace('Your activity', OmniIcons.automations, YourHomePage.new),
-  SettingsPlace('Variables', OmniIcons.level, VariablesPage.new),
-  SettingsPlace('Developer', OmniIcons.developer, DeveloperScreen.new),
+  SettingsPlace(
+    'Places and people',
+    OmniIcons.place,
+    PlacesPage.new,
+    section: _yourHome,
+    keywords: ['presence', 'wifi', 'away'],
+  ),
+  SettingsPlace(
+    'Home location',
+    OmniIcons.sun,
+    HomeLocationPage.new,
+    section: _yourHome,
+    keywords: ['city', 'sunrise', 'sunset', 'address', 'where'],
+  ),
+  SettingsPlace('Rooms', OmniIcons.room, RoomsPage.new, section: _yourHome),
+  SettingsPlace(
+    'Scenes',
+    OmniIcons.scene,
+    ScenesPage.new,
+    section: 'Automations',
+  ),
+  SettingsPlace(
+    'Appearance',
+    OmniIcons.color,
+    AppearancePage.new,
+    section: _thisPhone,
+    keywords: ['theme', 'light', 'dark', 'colours', 'colors', 'black'],
+  ),
+  SettingsPlace(
+    'Phone setup',
+    OmniIcons.settings,
+    PhoneAccessPage.new,
+    section: _thisPhone,
+    keywords: ['battery', 'background'],
+  ),
+  SettingsPlace(
+    'Permissions',
+    OmniIcons.permissions,
+    PhoneAccessPage.new,
+    section: _thisPhone,
+  ),
+  SettingsPlace(
+    'Backup and restore',
+    OmniIcons.backup,
+    BackupPage.new,
+    section: _yourData,
+  ),
+  SettingsPlace(
+    'Your activity',
+    OmniIcons.automations,
+    YourHomePage.new,
+    section: _yourData,
+  ),
+  SettingsPlace('NFC tags', OmniIcons.tag, TagsPage.new, section: _more),
+  SettingsPlace(
+    'Saved values',
+    OmniIcons.level,
+    VariablesPage.new,
+    section: _more,
+    keywords: ['variables'],
+  ),
+  SettingsPlace('Hubs', OmniIcons.hub, HubPage.new, section: _more),
+  SettingsPlace('Home runs on', OmniIcons.server, HubPage.new, section: _more),
+  SettingsPlace(
+    'Developer',
+    OmniIcons.developer,
+    DeveloperScreen.new,
+    section: 'Settings, For developers',
+  ),
 ];
 
 /// The engine's own status, for Home runs on and the Developer engine tab.
@@ -89,7 +174,7 @@ final engineStatusProvider = FutureProvider<Json>((ref) async {
 const engineStatusEvents = {'automation.changed', deviceChangedEvent};
 
 /// Settings (docs/ui/design-v2.md, Settings): three groups in front,
-/// Your home (places and people, rooms, house mode), This phone
+/// Your home (rooms, places and people, home location, house mode), This phone
 /// (appearance, alerts, phone setup) and Your data (backup, your
 /// activity), then the rarely used rows inside a collapsed More settings
 /// with For developers nested in it, and About at the end. "Set up your
@@ -170,9 +255,9 @@ class SettingsScreen extends ConsumerWidget {
                 _ => 'Where you are, and how OmniFlow knows',
               },
               chevron: true,
-              divider: mode != null,
               onTap: () => _push(context, const PlacesPage()),
             ),
+            HomeLocationRow(divider: mode != null),
             if (mode != null)
               OmniListRow(
                 key: const ValueKey('settings-mode'),
@@ -252,7 +337,7 @@ class SettingsScreen extends ConsumerWidget {
           key: const ValueKey('settings-more'),
           icon: OmniIcons.level,
           title: 'More settings',
-          summary: 'Tags, variables, energy, away lighting',
+          summary: 'Tags, saved values, energy, away lighting',
           children: [
             OmniListRow(
               key: const ValueKey('settings-tags'),
@@ -265,20 +350,25 @@ class SettingsScreen extends ConsumerWidget {
             OmniListRow(
               key: const ValueKey('settings-variables'),
               icon: OmniIcons.level,
-              title: 'Variables',
-              subtitle: 'Values automations set, to see or clear',
+              title: 'Saved values',
+              subtitle:
+                  'What automations remember, such as whether you are '
+                  'away. To see, change or clear',
+              subtitleLines: 2,
               chevron: true,
               onTap: () => _push(context, const VariablesPage()),
             ),
             const SmartHomeSettingsRows(),
-            const HomeLocationRow(),
             const HomeRunsOnRow(),
             const ShakeSceneRow(),
             OmniListRow(
               key: const ValueKey('settings-usb'),
               icon: OmniIcons.board,
-              title: 'Boards on USB',
-              subtitle: 'Set up a board, or install firmware on it',
+              title: 'Plug in a board',
+              subtitle:
+                  'Set up a small board such as an ESP32 over a USB cable, '
+                  'or put the OmniFlow program on it',
+              subtitleLines: 2,
               chevron: true,
               onTap: () => showUsbBoardSheet(context),
             ),

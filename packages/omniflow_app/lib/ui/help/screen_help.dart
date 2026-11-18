@@ -116,10 +116,10 @@ const screenHelp = <HelpScreen, ({String title, List<HelpSection> sections})>{
             'key. Keys stay on this phone only.',
       ),
       (
-        heading: 'Offline',
+        heading: 'Not answering',
         body:
-            'A device that stops answering shows as offline. Check it has '
-            'power and is on the same Wi-Fi as the phone.',
+            'A device that stops answering shows as Not answering. Check it '
+            'has power and is on the same Wi-Fi as the phone.',
       ),
     ],
   ),
@@ -129,10 +129,11 @@ const screenHelp = <HelpScreen, ({String title, List<HelpSection> sections})>{
       (
         heading: 'Your home',
         body:
-            'Places and people say where home is and who lives there. A '
-            'place knows you are there from its Wi-Fi or a Bluetooth beacon. '
-            'Rooms group your devices. Things you change less often sit '
-            'in More settings at the end.',
+            'Rooms group your devices. Places and people say who lives '
+            'there and how the phone knows you are home, from its Wi-Fi or '
+            'a Bluetooth beacon. Home location is the city home is in, for '
+            'sunrise, sunset and the weather. Things you change less often '
+            'sit in More settings at the end. Scenes are with Automations.',
       ),
       (
         heading: 'Setting up',

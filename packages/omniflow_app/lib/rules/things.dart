@@ -13,6 +13,9 @@ class Thing {
   String get driver => '${json['driver'] ?? ''}';
   bool get isBoard => json['board'] == true;
 
+  /// False only when the engine reported it not answering.
+  bool get online => json['online'] != false;
+
   /// Phone, People, Places, Tags or Devices, for grouping in a picker.
   String get group => switch (driver) {
     'phone' => 'Phone',

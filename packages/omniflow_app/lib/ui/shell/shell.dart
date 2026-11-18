@@ -33,12 +33,15 @@ class ShellController extends ChangeNotifier {
   /// Whether [tab] shows its root page, which is when its button shows.
   bool atRoot(ShellTab tab) => _depth[tab]! <= 1;
 
-  /// Shows [tab]. Choosing the tab already shown goes back to its root.
+  /// Shows [tab]. Choosing the tab already shown goes back to its root, as
+  /// on Android and iOS. Home always opens at Home: a page opened from it
+  /// (search, a setting found there) does not stay in front of it. The
+  /// other tabs keep their back stack while another is shown.
   void select(ShellTab tab) {
-    if (tab == _tab) {
+    if (tab == _tab || tab == ShellTab.home) {
       navigators[tab]!.currentState?.popUntil((r) => r.isFirst);
-      return;
     }
+    if (tab == _tab) return;
     _tab = tab;
     notifyListeners();
   }
