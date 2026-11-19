@@ -1,6 +1,6 @@
 # OmniFlow
 
-OmniFlow is a local-first home automation app for Android. It controls lights, plugs, TVs, computers and microcontroller boards straight over your own network, with no vendor cloud, and runs your automations on the phone itself.
+OmniFlow is a local-first home automation app, made for Android and built for iOS, macOS, Windows and Linux too. It controls lights, plugs, TVs, computers and microcontroller boards straight over your own network, with no vendor cloud, and runs your automations on the phone itself.
 
 <p>
   <img src="docs/screenshots/home-light.png" width="200" alt="Home">
@@ -48,10 +48,19 @@ OmniFlow is a local-first home automation app for Android. It controls lights, p
 
 The engine's own README, [packages/omniflow_engine/README.md](packages/omniflow_engine/README.md), has many more CLI examples.
 
+## Platforms
+
+- **Android** is the full app: automations keep running with the screen off, and it has the phone's own triggers and actions, NFC tags, USB boards and hub mode.
+- **iOS, macOS, Windows and Linux** run the same engine inside the app, so automations run only while it is open. They have no phone triggers or actions, no NFC, no USB boards and no hub mode, and hide those screens. The iOS build is unsigned.
+- **The `omni` CLI and hub** are released for macOS (arm64 and x64). They keep secrets in the macOS keychain, so the Linux and Windows builds are compiled in CI but not released until those systems get a secret store.
+- **No web build.** The engine talks to devices over raw UDP and TCP and keeps its data in SQLite, and a browser offers neither.
+
+[CONTRIBUTING.md](CONTRIBUTING.md#releases) says how each one is built and released.
+
 ## Repo layout
 
 - `packages/omniflow_engine/` - the pure Dart engine with all the logic, the `omni` CLI (`bin/omni.dart`) and the MCP server.
-- `packages/omniflow_app/` - the Flutter app, Android only. It runs the engine in a foreground service and holds no logic of its own.
+- `packages/omniflow_app/` - the Flutter app. On Android it runs the engine in a foreground service, and on iOS and the desktop inside the app while it is open. It holds no logic of its own.
 - `drivers/` - the built-in driver manifests, embedded into the engine at build time.
 - `firmware/omniflow_node/` - the one Arduino sketch for every board, with a native virtual board for tests.
 - `tv_helper/` - a small Android TV app that draws a mouse pointer, installed on the TV by the app.
@@ -67,4 +76,4 @@ The engine's own README, [packages/omniflow_engine/README.md](packages/omniflow_
 
 ## Status
 
-Version 1.0.0, in active development by one person. Android is the only app target, and the Mac runs the CLI and the optional hub. The app runs from release builds on an Android 17 phone and the Android 17 emulator. On real hardware so far: WiZ bulbs and an Android TV over ADB. Every other driver, and the firmware's board protocol, is proven against loopback fakes and the native virtual board, not yet against the real device. BLE scanning for presence, the graph canvas editor and accounts with sync are not built. [docs/ROADMAP.md](docs/ROADMAP.md) tracks each item and what has been proven. There is no published release and no licence file yet.
+Version 1.0.0, in active development by one person. Android is the main app target, and the Mac runs the CLI and the optional hub. The app runs from release builds on an Android 17 phone and the Android 17 emulator, and the macOS app and the iOS simulator open to Home with the engine running. On real hardware so far: WiZ bulbs and an Android TV over ADB. Every other driver, and the firmware's board protocol, is proven against loopback fakes and the native virtual board, not yet against the real device. BLE scanning for presence, the graph canvas editor and accounts with sync are not built. [docs/ROADMAP.md](docs/ROADMAP.md) tracks each item and what has been proven. There is no published release and no licence file yet.

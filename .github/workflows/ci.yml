@@ -1,0 +1,41 @@
+name: CI
+
+# The checks in CONTRIBUTING.md, for both packages, on every push to main
+# and every pull request. Live hardware tests stay skipped.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  FLUTTER_VERSION: 3.47.9
+
+jobs:
+  # macOS, because the engine ships on Android and macOS, and its serial,
+  # ADB and Tuya tests are written against macOS behaviour.
+  checks:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+
+      - name: Engine
+        working-directory: packages/omniflow_engine
+        run: |
+          dart analyze
+          dart format --output=none --set-exit-if-changed lib test tool bin
+          dart run tool/embed_drivers.dart --check
+          dart run tool/hub/embed_templates.dart --check
+          dart test
+
+      - name: App
+        working-directory: packages/omniflow_app
+        run: |
+          flutter analyze
+          dart format --output=none --set-exit-if-changed lib test tool
+          flutter test

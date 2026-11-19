@@ -4,7 +4,7 @@ Thanks for helping. Read [ARCHITECTURE.md](ARCHITECTURE.md) first for where thin
 
 ## Setup
 
-You need macOS for the full set. The engine's CLI keeps secrets in the macOS keychain and refuses to start on other systems for now, while the engine tests and the app build also run on Linux.
+You need macOS for the full set. The engine's CLI keeps secrets in the macOS keychain and refuses to start on other systems for now. CI runs the tests on macOS: on Linux, about 20 serial-port, ADB-over-TLS and Tuya timing tests fail today, so Linux is not a supported engine host yet. The app itself builds on Linux.
 
 1. **Flutter 3.47.9 (stable, with Dart 3.13.7).** Install it with mise, which pins the version for this checkout:
 
@@ -13,7 +13,7 @@ You need macOS for the full set. The engine's CLI keeps secrets in the macOS key
    flutter --version
    ```
 
-   This is the version CI builds with (`FLUTTER_VERSION` in `.github/workflows/release.yml`). Use Flutter's own `dart`, so `dart` and `flutter` agree.
+   This is the version CI builds with (`FLUTTER_VERSION` in `.github/workflows/ci.yml` and `release.yml`). Use Flutter's own `dart`, so `dart` and `flutter` agree.
 
 2. **The Android SDK.** Install Android Studio, or the command-line tools, and set `ANDROID_HOME` (the tools also look in `~/Library/Android/sdk`). Accept the licences and check the setup:
 
@@ -116,6 +116,51 @@ A few other tests skip themselves where the machine cannot run them: the virtual
 ## Secrets never go in logs or tests
 
 A Tuya local key, an SSH or ADB key, a TV pairing key, a Hue username, a Home Assistant token or a Wi-Fi password never goes in a manifest, a flow, a test, a fixture, a log line, a commit or an issue. In code, secrets go through `SecretStore` and are read by key. In tests, use `InMemorySecretStore` with made-up values. The same goes for anything that identifies a real home: use made-up addresses, device ids, MAC addresses, serials and network names in fixtures, docs and screenshots. Grep your diff for key-shaped strings before you commit.
+
+## Releases
+
+Two workflows run on GitHub Actions. `ci.yml` runs the checks above on every push to `main` and every pull request. `release.yml` builds every target on a `v*` tag, or by hand from Actions, Release, Run workflow:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Each build is uploaded as `omniflow-<version>-<platform>-<arch>.<ext>`, with `dev` as the version on a run by hand. A tag build also makes a GitHub release with every file and a `SHA256SUMS`. The tests run once, in the `test` job, and the release waits for them.
+
+| Target | File | Built on |
+| --- | --- | --- |
+| Android app | `android-arm64.apk`, `android-arm32.apk`, `android-x86_64.apk`, `android-universal.aab` | Ubuntu |
+| Android TV pointer helper | `androidtv-helper.apk` | Ubuntu |
+| Board firmware | `firmware-esp32.bin`, `firmware-esp8266.bin`, `firmware-uno.hex`, `firmware-pico_w.uf2` | Ubuntu |
+| iOS app, unsigned | `ios-arm64-unsigned.ipa` | macOS |
+| macOS app | `macos-universal.zip` | macOS |
+| Windows app | `windows-x64.zip` | Windows Server 2022 |
+| Linux app | `linux-x64.tar.gz` | Ubuntu |
+| `omni` CLI and hub | `cli-macos-arm64.tar.gz`, `cli-macos-x64.tar.gz` (Linux and Windows are built in CI but not released, see above) | each macOS runner |
+
+The Android app bundles the firmware and the TV helper that the same run built. It is signed with the release key from the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` secrets. A tag build fails without them, since an APK signed with another key cannot update an installed one. A run by hand without them is signed with the debug key. Everything else is unsigned.
+
+Off Android the app runs the engine inside itself while it is open, with its data in the app's support folder rather than `~/.omniflow`. `DeviceFeatures` (`lib/state/device_features.dart`) says what the device has, and the screens hide the rest: the background service and Phone setup, the phone's own triggers and actions, NFC tags, USB boards, hub mode and shake to run a scene. The iOS and macOS bundle id is `com.jashnm.omniflowApp`, since Apple ids cannot hold an underscore. Android keeps `com.jashnm.omniflow_app`.
+
+There is no web build. The engine reaches devices over UDP, TCP and mDNS with `dart:io` and keeps its data in SQLite through FFI, and a browser has neither.
+
+To build them on a Mac, from `packages/omniflow_app`:
+
+```sh
+flutter build apk --release --split-per-abi
+flutter build appbundle --release
+flutter build ios --release --no-codesign
+flutter build macos --release
+```
+
+and the CLI, from `packages/omniflow_engine`. It needs `dart build cli`, not `dart compile exe`, because the sqlite3 package has build hooks. A Mac can cross-build the Linux bundles, not the macOS x64 or Windows ones:
+
+```sh
+dart build cli -o build/omni
+dart build cli --target-os linux --target-arch arm64 -o build/omni-linux-arm64
+```
+
+The Windows and Linux apps build only on their own systems, so only CI proves them.
 
 ## Commits
 

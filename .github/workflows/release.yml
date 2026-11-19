@@ -1,14 +1,24 @@
 name: Release
 
-# Push a version tag to publish the Android app:
+# Push a version tag to publish every build:
 #   git tag v0.2.0 && git push origin v0.2.0
-# Run it by hand (Actions, Release, Run workflow) to build without
-# publishing.
+# Run it by hand (Actions, Release, Run workflow) to build everything
+# without publishing. Files are named omniflow-<version>-<platform>-<arch>,
+# with "dev" as the version on a manual run.
 #
-# The release key comes from three secrets: ANDROID_KEYSTORE_BASE64,
-# ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS. A tag build fails without
-# them: an APK signed with another key cannot update an installed one, so it
-# would make people uninstall and lose their home.
+# Signing:
+# - Android: the release key comes from three secrets,
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS.
+#   A tag build fails without them: an APK signed with another key cannot
+#   update an installed one, so it would make people uninstall and lose
+#   their home. A manual run without them is signed with a debug key.
+# - The TV helper is signed with its debug key, as tv_helper/ sets it.
+# - iOS: an unsigned .ipa, installable only by sideloading.
+# - macOS, Windows, Linux and the CLI: unsigned, so expect Gatekeeper and
+#   SmartScreen prompts.
+#
+# No web build: the engine needs dart:io sockets (UDP, TCP, mDNS) and
+# SQLite through FFI, which a browser does not have.
 on:
   push:
     tags: ['v*']
@@ -21,10 +31,101 @@ env:
   FLUTTER_VERSION: 3.47.9
 
 jobs:
-  android:
+  # Tests run once, here. The build jobs run beside it, and the release
+  # waits for it.
+  test:
+    # macOS, for the same reason as ci.yml.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Engine
+        working-directory: packages/omniflow_engine
+        run: |
+          dart run tool/embed_drivers.dart --check
+          dart test
+      - name: App
+        working-directory: packages/omniflow_app
+        run: flutter test
+
+  firmware:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # The four board toolchains need more disk than the runner has free.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Board cores
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json \
+            https://arduino.esp8266.com/stable/package_esp8266com_index.json \
+            https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr esp32:esp32 esp8266:esp8266 rp2040:rp2040
+          arduino-cli lib install Servo
+      - name: Build
+        working-directory: packages/omniflow_app
+        run: dart run tool/firmware_assets.dart
+      # The app bundles these, so the Android job takes them as they are.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-assets
+          path: packages/omniflow_app/assets/firmware
+      - name: Collect
+        run: |
+          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
+          mkdir -p dist
+          fw=packages/omniflow_app/assets/firmware
+          cp "$fw/esp32.bin"   "dist/omniflow-$v-firmware-esp32.bin"
+          cp "$fw/esp8266.bin" "dist/omniflow-$v-firmware-esp8266.bin"
+          cp "$fw/uno.hex"     "dist/omniflow-$v-firmware-uno.hex"
+          cp "$fw/pico_w.uf2"  "dist/omniflow-$v-firmware-pico_w.uf2"
+      - uses: actions/upload-artifact@v7
+        with: { name: firmware, path: dist }
+
+  tv-helper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: '17' }
+      - name: Build
+        working-directory: tv_helper
+        run: ./gradlew assembleRelease -q
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tv-helper-asset
+          path: tv_helper/build/outputs/apk/release/omniflow-tv-helper-release.apk
+      - name: Collect
+        run: |
+          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
+          mkdir -p dist
+          cp tv_helper/build/outputs/apk/release/omniflow-tv-helper-release.apk \
+            "dist/omniflow-$v-androidtv-helper.apk"
+      - uses: actions/upload-artifact@v7
+        with: { name: tv-helper, path: dist }
+
+  android:
+    needs: [firmware, tv-helper]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: '17' }
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -54,43 +155,199 @@ jobs:
             echo "storeFile=release.jks"
           } > "$app/key.properties"
 
-      - name: Board firmware
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
-          arduino-cli config init
-          arduino-cli config add board_manager.additional_urls \
-            https://espressif.github.io/arduino-esp32/package_esp32_index.json \
-            https://arduino.esp8266.com/stable/package_esp8266com_index.json \
-            https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
-          arduino-cli core update-index
-          arduino-cli core install arduino:avr esp32:esp32 esp8266:esp8266 rp2040:rp2040
-          cd packages/omniflow_app && dart run tool/firmware_assets.dart
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-assets
+          path: packages/omniflow_app/assets/firmware
+      - uses: actions/download-artifact@v8
+        with:
+          name: tv-helper-asset
+          path: tv-helper-asset
+      - run: mv tv-helper-asset/omniflow-tv-helper-release.apk packages/omniflow_app/assets/tv_helper/omniflow-tv-helper.apk
 
       - run: flutter pub get
-      - name: Tests
-        run: |
-          (cd packages/omniflow_engine && dart test)
-          (cd packages/omniflow_app && flutter test)
-
       - name: Build
         working-directory: packages/omniflow_app
-        run: flutter build apk --release --split-per-abi
+        run: |
+          flutter build apk --release --split-per-abi
+          flutter build appbundle --release
 
       - name: Collect
         run: |
           v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
           mkdir -p dist
-          out=packages/omniflow_app/build/app/outputs/flutter-apk
-          mv "$out/app-arm64-v8a-release.apk"   "dist/omniflow-$v-android-arm64.apk"
-          mv "$out/app-armeabi-v7a-release.apk" "dist/omniflow-$v-android-arm32.apk"
-          mv "$out/app-x86_64-release.apk"      "dist/omniflow-$v-android-x86_64.apk"
-          (cd dist && sha256sum *.apk > SHA256SUMS)
-      - uses: actions/upload-artifact@v4
+          out=packages/omniflow_app/build/app/outputs
+          mv "$out/flutter-apk/app-arm64-v8a-release.apk"   "dist/omniflow-$v-android-arm64.apk"
+          mv "$out/flutter-apk/app-armeabi-v7a-release.apk" "dist/omniflow-$v-android-arm32.apk"
+          mv "$out/flutter-apk/app-x86_64-release.apk"      "dist/omniflow-$v-android-x86_64.apk"
+          mv "$out/bundle/release/app-release.aab"          "dist/omniflow-$v-android-universal.aab"
+      - uses: actions/upload-artifact@v7
         with: { name: android, path: dist }
 
-      - name: Publish
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build
+        working-directory: packages/omniflow_app
+        run: flutter build ios --release --no-codesign
+      - name: Package an unsigned ipa
+        run: |
+          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
+          mkdir -p Payload dist
+          cp -R packages/omniflow_app/build/ios/iphoneos/Runner.app Payload/
+          zip -qr "dist/omniflow-$v-ios-arm64-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v7
+        with: { name: ios, path: dist }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build
+        working-directory: packages/omniflow_app
+        run: flutter build macos --release
+      - name: Package
+        run: |
+          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
+          mkdir -p dist
+          # ditto keeps the bundle's links and modes, which zip -r breaks.
+          ditto -c -k --keepParent \
+            packages/omniflow_app/build/macos/Build/Products/Release/OmniFlow.app \
+            "dist/omniflow-$v-macos-universal.zip"
+      - uses: actions/upload-artifact@v7
+        with: { name: macos, path: dist }
+
+  windows:
+    # Pinned to the image with Visual Studio 2022 (17), the newest one every
+    # Flutter release maps to a CMake generator. windows-latest moves on.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build
+        working-directory: packages/omniflow_app
+        run: flutter build windows --release
+      - name: Package
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
+          mkdir -p dist
+          cd packages/omniflow_app/build/windows/x64/runner/Release
+          7z a -tzip "$GITHUB_WORKSPACE/dist/omniflow-$v-windows-x64.zip" .
+      - uses: actions/upload-artifact@v7
+        with: { name: windows, path: dist }
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Desktop build packages
+        # libsecret for flutter_secure_storage, GTK for the window.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build
+        working-directory: packages/omniflow_app
+        run: flutter build linux --release
+      - name: Package
+        run: |
+          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
+          mkdir -p dist
+          tar -C packages/omniflow_app/build/linux/x64/release/bundle -czf \
+            "dist/omniflow-$v-linux-x64.tar.gz" .
+      - uses: actions/upload-artifact@v7
+        with: { name: linux, path: dist }
+
+  # The omni CLI, which is also the hub. `dart build cli` because sqlite3
+  # has build hooks, which `dart compile exe` does not run. The bundle is
+  # bin/omni with SQLite in lib/, and they ship together.
+  # On Linux and Windows the CLI keeps its macOS-only secret store for now,
+  # so those two are built to keep them compiling but are not released.
+  cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-latest, os: macos, arch: arm64 }
+          - { runner: macos-15-intel, os: macos, arch: x64 }
+          - { runner: ubuntu-latest, os: linux, arch: x64 }
+          # Flutter has no Linux arm64 SDK, and the pub workspace needs
+          # Flutter, so this one is cross-compiled on x64.
+          - { runner: ubuntu-latest, os: linux, arch: arm64 }
+          - { runner: windows-2022, os: windows, arch: x64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build
+        shell: bash
+        working-directory: packages/omniflow_engine
+        run: |
+          dart build cli --target-os ${{ matrix.os }} --target-arch ${{ matrix.arch }} -o build/omni
+      - name: Package
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
+          mkdir -p dist
+          name="omniflow-$v-cli-${{ matrix.os }}-${{ matrix.arch }}"
+          bundle=packages/omniflow_engine/build/omni/bundle
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            (cd "$bundle" && 7z a -tzip "$GITHUB_WORKSPACE/dist/$name.zip" .)
+          else
+            tar -C "$bundle" -czf "dist/$name.tar.gz" .
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cli-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist
+
+  release:
+    # Only for a tag. A manual run stops at the artifacts.
+    if: github.ref_type == 'tag'
+    needs: [test, firmware, tv-helper, android, ios, macos, windows, linux, cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with: { path: artifacts }
+      # The *-asset artifacts are inputs to the Android build, not downloads.
+      - name: Collect
+        run: |
+          mkdir -p dist
+          for d in artifacts/*; do
+            case "$d" in *-asset|*/cli-linux-*|*/cli-windows-*) continue ;; esac
+            mv "$d"/* dist/
+          done
+          (cd dist && sha256sum -- * > SHA256SUMS)
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
