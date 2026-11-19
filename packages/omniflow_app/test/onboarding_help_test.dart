@@ -253,9 +253,9 @@ void main() {
               'id': 'bedtime',
               'name': 'Bedtime',
               'form': 'rule',
-              'removedAt': now
-                  .subtract(const Duration(hours: 2))
-                  .toIso8601String(),
+              // Halfway through today on the local clock, so it reads
+              // "today" at any hour, just after midnight too.
+              'removedAt': _halfwayThroughToday().toUtc().toIso8601String(),
               'keptUntil': now
                   .add(const Duration(days: 6, hours: 22))
                   .toIso8601String(),
@@ -590,4 +590,10 @@ void main() {
       expect(find.byType(BackupPage), findsOneWidget);
     });
   });
+}
+
+DateTime _halfwayThroughToday() {
+  final local = DateTime.now();
+  final midnight = DateTime(local.year, local.month, local.day);
+  return midnight.add(local.difference(midnight) ~/ 2);
 }
