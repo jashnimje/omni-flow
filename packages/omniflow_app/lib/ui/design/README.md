@@ -6,7 +6,7 @@ Everything the redesigned screens are built from. Import one file:
 import 'design/design.dart'; // from lib/ui/, or '../design/design.dart'
 ```
 
-The spec is `docs/ui/design-v2.md`, on top of `docs/ui/mockups.html` (visual) and `docs/ui/ui-spec.md` (written). Use these components and tokens rather than raw colours, sizes or Material icons, so every screen matches and stays accessible. Every component already gives a 48 dp target, a semantics label and AA contrast, and skips animation when the system asks for reduced motion.
+The spec is `docs/ui/design-v2.md`, on top of `docs/ui/ui-spec.md`. Use these components and tokens rather than raw colours, sizes or Material icons, so every screen matches and stays accessible. Every component already gives a 48 dp target, a semantics label and AA contrast, and skips animation when the system asks for reduced motion.
 
 ## Tokens (`tokens.dart`)
 

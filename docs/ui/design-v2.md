@@ -1,6 +1,6 @@
 # OmniFlow app: design v2
 
-> Status: built, and updated after the new-user usability review of 2026-11-19. Mockups: `~/scratch/design_v2/mockups.html` with PNG renders beside it. Builds on `page-templates.md` (the eight templates and the screen inventory) and `design/tokens.dart` as on disk 2026-11-19.
+> Status: built, and updated after the new-user usability review of 2026-11-19. Screenshots: `docs/screenshots/`. Builds on `page-templates.md` (the eight templates and the screen inventory) and `design/tokens.dart` as on disk 2026-11-19.
 
 ## Problem
 

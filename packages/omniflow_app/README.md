@@ -1,6 +1,6 @@
 # omniflow_app
 
-Flutter client for OmniFlow, Android only. Design: `../../docs/DESIGN.md`.
+Flutter client for OmniFlow, Android only. Design: `../../docs/engine-design.md`.
 
 The engine runs in a `connectedDevice` foreground service (`flutter_foreground_task`), so automations keep running with the screen off and after the app is swiped away. The service's task runs in its own Flutter engine and isolate, and it is the only place that opens the database. The UI reaches it only through `EngineClient`: `ServiceEngineClient` sends JSON command and event messages over the plugin's data channel (`lib/service/`). The notification's Stop button asks first and says how to start again. A watchdog alarm (`ServiceKeeper.kt`) starts a service Android killed, and a widget, tile or shortcut tap starts a stopped one.
 

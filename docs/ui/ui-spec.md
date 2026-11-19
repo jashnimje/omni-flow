@@ -1,6 +1,6 @@
 # OmniFlow App Design
 
-> Status: active. Direction A ("Home and automations") approved and built 2026-11-08. The visual spec is `docs/ui/mockups.html`; this file is the written spec the rebuild is checked against.
+> Status: active. Direction A ("Home and automations") approved and built 2026-11-08. This file is the written spec the rebuild is checked against.
 
 ## Goals
 
@@ -39,7 +39,7 @@ Each screen lists what it shows, the engine calls behind it, its states and its 
 ### 1.1 Home
 
 - **Shows**: a greeting with the person's name; a status line (things on, automations active); status chips (presence, what the TV plays, problems such as an offline device); scenes; favourites as tiles; then one tile grid per room.
-- **Engine**: `device.list` with capabilities and state, live `device.stateChanged` events; presence from the person thing (`jade.home`); scenes and favourites (new, see Engine additions); `automation.list` for the count.
+- **Engine**: `device.list` with capabilities and state, live `device.stateChanged` events; presence from the person thing (`alex.home`); scenes and favourites (new, see Engine additions); `automation.list` for the count.
 - **Tile**: icon by capability, name, one-line state ("80% · warm", "Netflix · vol 35", "Offline"). On-state tiles use the accent gradient; offline tiles are dimmed. Tap toggles a device with a power capability, otherwise opens it. Long press opens the quick sheet.
 - **States**: loading shows tile skeletons; empty shows 8.2; a problem chip appears when any device is offline.
 
@@ -154,7 +154,7 @@ A live header on every tab: the app in front with its playing state, a volume sl
 
 ## Engine additions
 
-Built on 2026-11-08, all through the core API with CLI verbs. DESIGN.md (UI, Engine additions for the redesign) has the full contract.
+Built on 2026-11-08, all through the core API with CLI verbs. `docs/engine-design.md` (UI, Engine additions for the redesign) has the full contract.
 
 - **Scenes**: `scene.save`, `scene.list`, `scene.run` and `scene.remove`, stored as automations with source `scene` (a manual trigger and a `together` step), so validation, approval, trust and the run log apply. `automation.save` and `automation.dry_run` take `form: scene`.
 - **Favourites and room order**: `device.organize {id, name?, room?, favourite?, order?}`. Device rows carry `favourite`, `order`, `roomId`, `room`, `category` and `icon`.
@@ -169,6 +169,6 @@ Not built: the `hub` presence source, a stored wait before away for Wi-Fi, folde
 
 ## Acceptance
 
-- Every screen in `docs/ui/mockups.html` exists and matches it, checked side by side on the phone with screenshots.
+- Every screen exists and matches this spec, checked on the phone with screenshots.
 - A new-user review by a fresh agent, given only "you have this app on your phone" and goals (turn on the desk lamp, make the TV turn on when you get home, find why the hall bulb is not working), succeeds without being told where things are.
 - `flutter analyze` and `flutter test` pass, with a widget test for each screen and each destructive confirm.

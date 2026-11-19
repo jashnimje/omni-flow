@@ -225,7 +225,7 @@ Batch 0 lands first because every other batch imports it. Batches 1 to 3 then ru
 
 ## 4. Code-level UI bugs
 
-Ranked most severe first. All confirmed by reading the code path unless marked suspected. None is listed as open in `docs/ROADMAP.md` or `docs/ui-ux-audit.md` (ui-ux-audit item 22, "edge to edge with real insets", is the general goal that bug 1 breaks).
+Ranked most severe first. All confirmed by reading the code path unless marked suspected. None is listed as open in `docs/ROADMAP.md`. Edge to edge with real insets, an item of the earlier UI and UX audit, is the general goal that bug 1 breaks.
 
 1. **High. Sheet content sits under the system navigation bar.** `design/sheet.dart:18` passes `useSafeArea: true`, which Flutter implements as `SafeArea(bottom: false, ...)` (`flutter/lib/src/material/bottom_sheet.dart:1167`), and `OmniSheet` (`design/sheet.dart:53-60`) pads only the keyboard inset plus 16. The app runs edge to edge (`shell/shell.dart:146`), so on a phone with 3-button navigation the last button of every sheet (Save, Pair, Write it, Remove) sits behind the 48 dp bar. Fix: add `MediaQuery.paddingOf(context).bottom` to the sheet's bottom padding. Confidence: confirmed by reading both sources, not seen on a device.
 2. **Medium. Variables FAB covers the last row.** `settings/variables_page.dart:189` ends the list with `SizedBox(height: OmniSpace.xl)` (24) while `:193` adds an extended FAB (56 + 16 margin). The last variable's row and its Clear button sit under the FAB. Fix: `OmniInsets.fabClearance(context)` bottom padding, or move Add to the header per the FAB rule.

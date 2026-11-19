@@ -1,6 +1,6 @@
 # Mac Mini Hub and Several Phones
 
-> Status: approved, 2026-11-12. Building. Supersedes the "[Rejected for now] A Mac Mini hub" line in DESIGN.md.
+> Status: approved, 2026-11-12. Building. Supersedes the "[Rejected for now] A Mac Mini hub" line in `docs/engine-design.md`.
 
 ## Problem
 
@@ -44,7 +44,7 @@ This meets every requirement. The weak point is that the home stops while the Ma
 
 ### B. Every device runs its own engine and they sync [Rejected for now]
 
-This is the deferred design in DESIGN.md: an encrypted change log in Google Drive and a signed "I will run this" claim on the LAN. It survives a hub outage, but it needs a merge for two edits made at once, a listener on every phone for the claims, secrets synced to every phone, and a rule for what an away phone does. It is several times the work of A, and the double-run risk never goes fully away. It stays the fallback if a single hub proves too fragile.
+This is the deferred design in `docs/engine-design.md`: an encrypted change log in Google Drive and a signed "I will run this" claim on the LAN. It survives a hub outage, but it needs a merge for two edits made at once, a listener on every phone for the claims, secrets synced to every phone, and a rule for what an away phone does. It is several times the work of A, and the double-run risk never goes fully away. It stays the fallback if a single hub proves too fragile.
 
 ### C. Phones connect to each other directly [Rejected]
 
@@ -54,7 +54,7 @@ A phone would need a listener that other phones reach, which breaks requirement 
 
 ```mermaid
 flowchart LR
-  subgraph phone1["Phone, Jade"]
+  subgraph phone1["Phone, Alex"]
     app1["OmniFlow app"]
     sens1["Phone sensors"]
   end

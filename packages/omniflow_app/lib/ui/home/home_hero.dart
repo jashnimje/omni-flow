@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../design/design.dart';
 import 'house_switcher.dart';
 
-/// The top of Home (look B in docs/ui/home-modern-mockups.html): the
+/// The top of Home: the
 /// greeting, the house in view and one line with presence and the house
 /// mode, in one gradient card with the accent glowing in its corner. The
 /// numbers, the streak and achievements are in Settings, Your activity.

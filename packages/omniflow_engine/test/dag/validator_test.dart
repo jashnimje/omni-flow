@@ -24,7 +24,7 @@ final refs = FlowReferences(
   eventsOf: (t) => _devices.containsKey(t) ? _of(t, true) : {},
 );
 
-/// The evening-desk flow from docs/DESIGN.md.
+/// The evening-desk flow from docs/engine-design.md.
 Map<String, Object?> eveningFlow() => {
   'schemaVersion': 1,
   'id': 'flow_arrive_desk_evening',

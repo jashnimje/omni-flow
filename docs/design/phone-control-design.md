@@ -29,7 +29,7 @@ OmniFlow controls an Android TV over ADB: screen, recording, apps, files, system
 Pairing is the AOSP protocol: TLS 1.3 to the pairing port, SPAKE2 over edwards25519 keyed by the code and 64 bytes of TLS exporter material, then each side's RSA public key sent under AES-128-GCM. Connecting is classic ADB to the connect port, upgraded with `STLS` to TLS 1.3, with OmniFlow's ADB key as the client certificate. Both listeners are Android's own adbd, so requirement 7 holds. The Dart TLS exporter was already proven against OpenSSL; SPAKE2 is built from the AOSP and BoringSSL sources and proven against a real Wireless Debugging pairing on the emulator.
 
 - **[Rejected] An OmniFlow server app on the other phone.** It would be a new listener with our own authentication, and an app cannot read another app's screen or files without the same powers ADB already grants.
-- **[Rejected] Shizuku.** It controls the phone it runs on, not another one.
+- **[Rejected] A helper with ADB rights running on the other phone itself.** It controls the phone it runs on, not another one.
 
 ## What the other phone gets
 

@@ -1,6 +1,6 @@
 # OmniFlow node firmware
 
-One Arduino sketch for ESP32, ESP8266, Raspberry Pi Pico W and Arduino Uno. It speaks protocol v2 (`docs/DESIGN.md`, "Universal board runtime"): every usable pin is offered with its capabilities, and the app decides at runtime what each pin does. You never edit or reflash it to add a button, relay, servo or sensor.
+One Arduino sketch for ESP32, ESP8266, Raspberry Pi Pico W and Arduino Uno. It speaks protocol v2 (`docs/engine-design.md`, "Universal board runtime"): every usable pin is offered with its capabilities, and the app decides at runtime what each pin does. You never edit or reflash it to add a button, relay, servo or sensor.
 
 ## Flash
 

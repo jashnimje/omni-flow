@@ -15,7 +15,7 @@ import 'stored_flows.dart';
 
 /// `automation.diagram`: an automation as a decision graph the app lays out
 /// top to bottom, with each node's place in the rule and the words the
-/// sentence uses for it. The design is `docs/flow-diagram-design.md`.
+/// sentence uses for it. The design is `docs/design/flow-diagram-design.md`.
 ///
 /// - `{id}` or `{spec, form?}` (an unsaved rule, scene, link or graph):
 ///   `{nodes, edges, source}`.

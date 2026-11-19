@@ -15,7 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'fake_engine.dart';
 import 'home_devices_test.dart' show household, tapKey;
 
-/// Houses in the app (docs/houses-design.md): the house in view, passed on
+/// Houses in the app (docs/design/houses-design.md): the house in view, passed on
 /// every list and save by the calls layer, the switcher, arrival, and Home
 /// without the rewards.
 

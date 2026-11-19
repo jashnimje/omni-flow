@@ -1,7 +1,7 @@
 import 'engine_calls.dart' show Json;
 import 'engine_client.dart';
 
-/// Every call about houses (docs/houses-design.md), and the commands that
+/// Every call about houses (docs/design/houses-design.md), and the commands that
 /// take the house in view.
 abstract final class HousesCalls {
   static const list = 'house.list';

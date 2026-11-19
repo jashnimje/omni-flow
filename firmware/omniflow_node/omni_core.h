@@ -1,4 +1,4 @@
-// OmniFlow node protocol v2 core (docs/DESIGN.md, "Universal board runtime").
+// OmniFlow node protocol v2 core (docs/engine-design.md, "Universal board runtime").
 //
 // Plain C++ with no Arduino headers, no STL and no heap, so the same code runs
 // on an Uno with 2 KB of RAM, on ESP32, ESP8266 and Pico W, and natively on a

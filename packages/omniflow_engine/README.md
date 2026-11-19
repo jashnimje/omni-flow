@@ -1,6 +1,6 @@
 # omniflow_engine
 
-Pure Dart OmniFlow engine and the `omni` CLI. Design: `../../docs/DESIGN.md`.
+Pure Dart OmniFlow engine and the `omni` CLI. Design: `../../docs/engine-design.md`.
 
 ```sh
 dart test -x live                           # unit tests
@@ -108,7 +108,7 @@ omni board ports
 
 After changing anything in `../../drivers/`, run `dart run tool/embed_drivers.dart` (a test fails until you do). After changing `lib/src/storage/database.dart`, run `dart run build_runner build --delete-conflicting-outputs`.
 
-Flows. Save the sample flow from `docs/DESIGN.md` (Flows, Schema v1) to a file first. Its id is `flow_arrive_desk_evening`.
+Flows. Save the sample flow from `docs/engine-design.md` (Flows, Schema v1) to a file first. Its id is `flow_arrive_desk_evening`.
 
 ```sh
 omni flow save arrive_desk.flow.json       # validated against your devices and zones
