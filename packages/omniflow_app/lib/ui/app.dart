@@ -104,7 +104,7 @@ class _HomeState extends ConsumerState<Home> {
     // A rule's Notify step, while the app is open. Android notifications
     // from the service come later.
     _announced = engine.events
-        .where((e) => e['event'] == EngineCalls.flowAnnounceEvent)
+        .where(toastsAnnouncement)
         .listen((e) => showMessage(announcementText(e)));
     _nfc = NfcForwarder(
       engine,
@@ -171,6 +171,16 @@ class _HomeState extends ConsumerState<Home> {
     );
   }
 }
+
+/// Whether [event] is a Notify step to show as a toast while the app is
+/// open. A device that stopped or started answering in the background is
+/// not: nothing the user just did caused it, and its alert, when turned on,
+/// is a notification already.
+bool toastsAnnouncement(Json event) =>
+    event['event'] == EngineCalls.flowAnnounceEvent &&
+    !_answeringAlerts.contains(event['alert']);
+
+const _answeringAlerts = {'offline', 'online'};
 
 /// A Notify step's title, then its text when it has one.
 String announcementText(Json event) => [

@@ -170,5 +170,5 @@ Each step goes through the builder-security skill where it touches SSH or a list
 ## Decisions
 
 - **Hub down:** phones are read-only with the last known state until the hub is back. Option B stays the later route if outages matter.
-- **FileVault:** decided when the Mac mini is set up. With FileVault on, someone logs in once after a power cut, and planned restarts use `fdesetup authrestart`. With it off and automatic login for a dedicated hub user, the hub comes back on its own after a power cut, but a stolen Mac exposes the device keys in the keychain.
+- **FileVault: off, with automatic login.** The hub's home has frequent power cuts and no UPS, so the Mac mini must come back and run automations without anyone logging in. The hub runs in a dedicated standard (non-admin) macOS user that logs in automatically, and the Mac starts on its own after a power failure. The accepted risk is that someone who takes the Mac mini can read the device keys on its disk; the owner's own account and files stay in a separate user.
 - **Second person:** gets the full app on the same home.

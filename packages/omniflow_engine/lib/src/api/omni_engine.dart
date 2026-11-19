@@ -21,6 +21,7 @@ import 'engine_flow_host.dart';
 import 'error_of.dart';
 import 'flow_commands.dart';
 import 'home_commands.dart';
+import 'host_presence.dart';
 import 'house_helpers.dart';
 import 'home_stats_commands.dart';
 import 'host_key_commands.dart';
@@ -270,6 +271,13 @@ class OmniEngine {
       await engine._things.reload(quiet: true, restore: true);
       await engine._stored.migrateStored();
       await engine._stored.loadState();
+      final host = HostPresence(
+        engine._core,
+        householdPerson: engine._things.householdPerson,
+      );
+      await host.open();
+      engine._closers.add(host.close);
+      engine._core.hostAwayFrom = host.awayFrom;
       engine._house = await HouseHelpers.open(
         engine._core,
         home,

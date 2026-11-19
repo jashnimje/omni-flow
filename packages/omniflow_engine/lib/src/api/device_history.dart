@@ -16,7 +16,8 @@ const reachableKey = 'reachable';
 
 /// Writes every device state change to the capped history, and answers
 /// `device.history`. A device that stops answering and comes back is
-/// written too, once per transition, under [historyOnlineKey].
+/// written too, once per transition, under [historyOnlineKey], except
+/// while the phone running the engine is away from its house.
 class DeviceHistoryLog {
   DeviceHistoryLog(this._core);
 
@@ -60,8 +61,11 @@ class DeviceHistoryLog {
     if (id is String) _stopped(id, DateTime.now().toUtc());
   }
 
+  /// Nothing is written while the phone this engine runs on is away from
+  /// the device's house: out of its Wi-Fi every device there stops
+  /// answering, and that is the phone being out, not the device.
   void _stopped(String id, DateTime at) {
-    if (_down.containsKey(id)) return;
+    if (_down.containsKey(id) || _core.hostAwayFromThing(id)) return;
     _down[id] = at;
     _write(id, [HistoryEntry(at, historyOnlineKey, false)]);
   }

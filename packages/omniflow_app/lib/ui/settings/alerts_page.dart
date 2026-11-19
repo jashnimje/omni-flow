@@ -24,6 +24,13 @@ class AlertsSettingsRow extends StatelessWidget {
   );
 }
 
+/// How to hide the always-on service notification. Android keeps the
+/// service running with its channel turned off: the notification is only
+/// not shown.
+const runningNoticeHint =
+    "To hide the 'running' notice, long-press it and turn off Running in "
+    'the background.';
+
 /// The built-in alerts, on or off, and the house modes: your own modes
 /// and whether the mode follows who is home.
 class AlertsPage extends ConsumerWidget {
@@ -51,9 +58,11 @@ class AlertsPage extends ConsumerWidget {
           key: const ValueKey('alert-offline'),
           icon: OmniIcons.wifi,
           title: 'A device stops answering',
-          subtitle: 'after 10 minutes, and again when it answers',
+          subtitle:
+              'after 10 minutes, and again when it answers. Never while '
+              'this phone is away from the house',
           trailing: Switch(
-            value: alerts?.offline ?? true,
+            value: alerts?.offline ?? false,
             onChanged: alerts == null
                 ? null
                 : (on) => _call(ref, (api) => api.setAlerts(offline: on)),
@@ -70,6 +79,11 @@ class AlertsPage extends ConsumerWidget {
                 ? null
                 : (on) => _call(ref, (api) => api.setAlerts(battery: on)),
           ),
+        ),
+        Padding(
+          key: const ValueKey('running-notice-hint'),
+          padding: EdgeInsets.symmetric(vertical: OmniSpace.xs),
+          child: Text(runningNoticeHint, style: OmniText.captionOf(context)),
         ),
         if (modes != null) ...[
           const OmniSectionHeader('House modes'),

@@ -179,7 +179,7 @@ class HouseHelpers {
     final alerts = alertsOf(house);
     return {
       ...modesOf(house).backupJson(),
-      'alerts': {'offline': alerts.offline, 'battery': alerts.battery},
+      'alerts': {'answering': alerts.offline, 'battery': alerts.battery},
     };
   }
 
@@ -196,7 +196,8 @@ class HouseHelpers {
     final saved = home['alerts'];
     if (saved is Map) {
       await alertsOf(house).set({
-        if (saved['offline'] is bool) 'offline': saved['offline'],
+        // `answering`, not the old `offline` every backup saved as on.
+        if (saved['answering'] is bool) 'offline': saved['answering'],
         if (saved['battery'] is bool) 'battery': saved['battery'],
       });
     }

@@ -509,11 +509,11 @@ void main() {
             as Map)['latitude'],
         12.97,
       );
-      await ok('alerts.set', {'offline': false, 'house': 'bangalore'});
-      expect((await ok('alerts.get'))['offline'], isTrue);
+      await ok('alerts.set', {'offline': true, 'house': 'bangalore'});
+      expect((await ok('alerts.get'))['offline'], isFalse);
       expect(
         (await ok('alerts.get', {'house': 'bangalore'}))['offline'],
-        isFalse,
+        isTrue,
       );
       await ok('energy.price.set', {
         'perKwh': 8,

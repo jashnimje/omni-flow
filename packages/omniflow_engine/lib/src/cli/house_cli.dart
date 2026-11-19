@@ -147,7 +147,7 @@ Command<int> alertsCommand() =>
       _Verb('show', 'Show which alerts are on.', 'alerts.get', (_) => {}),
       _Verb(
         'set',
-        'Turn alerts on or off: omni alerts set --offline off',
+        'Turn alerts on or off: omni alerts set --offline on',
         'alerts.set',
         (a) => {
           'offline': ?_onOff(a.option('offline'), 'offline'),

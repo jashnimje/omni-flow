@@ -793,10 +793,10 @@ void main() {
   });
 
   group('alerts', () {
-    test('both on to start with, a switch lasts, and a low phone battery '
-        'notifies once', () async {
+    test('not answering off and battery on to start with, a switch lasts, '
+        'and a low phone battery notifies once', () async {
       final start = await ok('alerts.get');
-      expect((start['offline'], start['battery']), (true, true));
+      expect((start['offline'], start['battery']), (false, true));
       await ok('phone.battery', {'level': 50});
       await ok('phone.battery', {'level': 12});
       await until(() => announced().any((t) => t.contains('battery is low')));
@@ -806,9 +806,9 @@ void main() {
         announced().where((t) => t.contains('battery is low')),
         hasLength(1),
       );
-      await ok('alerts.set', {'offline': false});
+      await ok('alerts.set', {'offline': true});
       await reopen();
-      expect((await ok('alerts.get'))['offline'], isFalse);
+      expect((await ok('alerts.get'))['offline'], isTrue);
       expect(
         (await fails('alerts.set', {'battery': 'yes'}))['type'],
         'invalid',
@@ -833,6 +833,7 @@ void main() {
           ),
         );
         final alerts = HouseAlerts(harness.core, HomeFile(dir));
+        await alerts.set({'offline': true});
         await alerts.check(at: now.subtract(const Duration(minutes: 5)));
         await alerts.check(at: now.add(const Duration(minutes: 9)));
         await alerts.check(at: now.add(const Duration(minutes: 10)));
@@ -886,6 +887,7 @@ void main() {
         hubRunning: () => running,
       );
       await alerts.open();
+      await alerts.set({'offline': true});
       await alerts.check(at: now);
       running = true;
       await alerts.check(at: now.add(const Duration(minutes: 1)));

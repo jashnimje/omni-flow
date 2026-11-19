@@ -175,6 +175,18 @@ class EngineCore {
   /// The houses, each record's house, and the house view of commands.
   late final houses = Houses(this);
 
+  /// Whether the phone this engine runs on is away from a house, so its
+  /// devices not answering is the phone being out. Never, until the engine
+  /// sets it.
+  bool Function(String house) hostAwayFrom = _neverAway;
+
+  static bool _neverAway(String _) => false;
+
+  /// [hostAwayFrom] for the house of the thing [id] (the first house for a
+  /// thing with none).
+  bool hostAwayFromThing(String id) =>
+      hostAwayFrom(houses.thingHouses[id] ?? houses.defaultId);
+
   /// Each room's name by id, so device JSON names the room without a read.
   final roomNames = <String, String>{};
 

@@ -33,7 +33,40 @@ const stopButtonId = 'stop';
 /// started with, even across an app update, so the app sets them again on
 /// every start.
 const serviceTitle = 'OmniFlow is running';
-const serviceText = 'Automations keep running with the screen off';
+const serviceText = 'Automations stay on';
+
+/// The service notification's own channel, asked for at the lowest
+/// importance, with no sound and no vibration. Android raises a foreground
+/// service's channel from the lowest to low the first time it shows (unless
+/// the user already chose), so it stays silent but keeps its status bar
+/// icon until the user minimises or turns off the channel. Named plainly,
+/// so it is easy to find in Android's settings. With it off the service
+/// keeps running and only the notice is not shown.
+///
+/// A new id, since Android never lowers the importance of a channel that
+/// already exists, and the plugin reads the channel only when the service
+/// starts. A service set up before this moves over on the first start
+/// after the update, in `OmniFlowApplication.moveServiceChannel`, which
+/// names the same id.
+const serviceChannelId = 'omniflow_background';
+const serviceChannelName = 'Running in the background';
+
+/// The service notification's options, as the plugin takes them.
+final serviceNotificationOptions = AndroidNotificationOptions(
+  channelId: serviceChannelId,
+  channelName: serviceChannelName,
+  channelDescription:
+      'The notice Android needs while OmniFlow runs automations. Turn it '
+      'off to hide it: automations keep running',
+  channelImportance: NotificationChannelImportance.MIN,
+  priority: NotificationPriority.MIN,
+  enableVibration: false,
+  playSound: false,
+  showWhen: false,
+  showBadge: false,
+  onlyAlertOnce: true,
+  visibility: NotificationVisibility.VISIBILITY_SECRET,
+);
 const serviceIcon = NotificationIcon(
   metaDataName: 'com.jashnm.omniflow_app.SERVICE_ICON',
   backgroundColor: Color(0xFF00F5D4),
@@ -152,12 +185,7 @@ class ForegroundServiceControl implements ServiceControl, RefreshableService {
   /// while a run, a short window or a near time trigger needs them, and
   /// wakes the phone with an exact alarm for the next time trigger.
   static void _init() => FlutterForegroundTask.init(
-    androidNotificationOptions: AndroidNotificationOptions(
-      channelId: 'omniflow_service',
-      channelName: 'OmniFlow running',
-      channelDescription: 'Shown while OmniFlow runs flows in the background',
-      onlyAlertOnce: true,
-    ),
+    androidNotificationOptions: serviceNotificationOptions,
     iosNotificationOptions: const IOSNotificationOptions(),
     foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.nothing(),

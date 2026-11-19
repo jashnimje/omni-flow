@@ -197,7 +197,7 @@ class HouseAlerts {
   const HouseAlerts({required this.offline, required this.battery});
 
   factory HouseAlerts.fromJson(Json j) => HouseAlerts(
-    offline: j['offline'] != false,
+    offline: j['offline'] == true,
     battery: j['battery'] != false,
   );
 
