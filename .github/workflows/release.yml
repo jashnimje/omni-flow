@@ -83,7 +83,7 @@ jobs:
       # The app bundles these, so the Android job takes them as they are.
       - uses: actions/upload-artifact@v7
         with:
-          name: firmware-assets
+          name: firmware-asset
           path: packages/omniflow_app/assets/firmware
       - name: Collect
         run: |
@@ -161,7 +161,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: firmware-assets
+          name: firmware-asset
           path: packages/omniflow_app/assets/firmware
       - uses: actions/download-artifact@v8
         with:
