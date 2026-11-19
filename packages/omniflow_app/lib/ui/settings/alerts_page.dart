@@ -9,7 +9,10 @@ import '../home/mode_picker.dart' show modeIcon;
 
 /// The Settings row that opens [AlertsPage].
 class AlertsSettingsRow extends StatelessWidget {
-  const AlertsSettingsRow({super.key});
+  const AlertsSettingsRow({super.key, this.divider = true});
+
+  /// False when it is the group's last row.
+  final bool divider;
 
   @override
   Widget build(BuildContext context) => OmniListRow(
@@ -18,6 +21,7 @@ class AlertsSettingsRow extends StatelessWidget {
     title: 'Alerts and modes',
     subtitle: 'Not answering and low battery alerts, house modes',
     chevron: true,
+    divider: divider,
     onTap: () =>
         Navigator.of(context)
             .push(MaterialPageRoute<void>(builder: (_) => const AlertsPage())),

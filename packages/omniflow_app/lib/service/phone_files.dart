@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 typedef PickedFile = ({String name, String path});
 
@@ -53,12 +54,25 @@ class PluginPhoneFiles implements PhoneFiles {
     ];
   }
 
+  /// Off Android: the user's Downloads folder on the desktop, and the
+  /// app's own documents on iOS, which the Files app shows.
   @override
   Future<String?> downloadsDir() async {
     try {
-      await Directory(downloads).create(recursive: true);
-      return downloads;
+      final path = Platform.isAndroid
+          ? downloads
+          : Platform.isIOS
+          ? '${(await getApplicationDocumentsDirectory()).path}/OmniFlow'
+          : switch (await getDownloadsDirectory()) {
+              final dir? => '${dir.path}/OmniFlow',
+              null => null,
+            };
+      if (path == null) return null;
+      await Directory(path).create(recursive: true);
+      return path;
     } on FileSystemException {
+      return null;
+    } on UnsupportedError {
       return null;
     }
   }

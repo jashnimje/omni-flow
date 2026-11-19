@@ -31,7 +31,7 @@ Future<RuleStep?> pickStep(
 }) {
   final devices = [
     for (final t in words.things)
-      if (t.actions.isNotEmpty) t,
+      if (t.actions.isNotEmpty && _onThisDevice(context, t)) t,
   ];
   final scenes = [
     for (final a in automations)

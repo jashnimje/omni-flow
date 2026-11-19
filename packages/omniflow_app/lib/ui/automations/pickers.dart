@@ -11,6 +11,7 @@ import '../../rules/things.dart';
 import '../../service/installed_apps.dart';
 import '../../service/permissions.dart';
 import '../../state/clock.dart' show hour12Provider, timeOfDayText;
+import '../../state/device_features.dart';
 import '../../state/providers.dart';
 import '../design/design.dart';
 import '../settings/home_location_page.dart' show HomeLocationPage;
@@ -35,6 +36,19 @@ part 'phone_pickers.dart';
 /// 2.3: the trigger, condition and step pickers and their short forms in
 /// plain words. The library sheets live in the part files; each choice
 /// pops with what it built, or null.
+
+/// What the device the app runs on can do, for the pickers that are plain
+/// functions of a context.
+DeviceFeatures _features(BuildContext context) => ProviderScope.containerOf(
+  context,
+  listen: false,
+).read(deviceFeaturesProvider);
+
+/// Whether [t] belongs in a picker here: off Android there is no phone
+/// thing to feed or act, so its triggers, conditions and steps are left
+/// out.
+bool _onThisDevice(BuildContext context, Thing t) =>
+    !t.isPhone || _features(context).phoneThing;
 
 final _hhmm = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
 final _variable = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');

@@ -10,11 +10,18 @@ Future<RuleTrigger?> pickTrigger(
   RuleWords words, {
   bool thingsOnly = false,
 }) async {
+  final features = _features(context);
   final things = [
     for (final t in words.things)
-      if (!t.isPerson && !t.isPlace && !t.isTag && _reports(t)) t,
+      if (!t.isPerson &&
+          !t.isPlace &&
+          !t.isTag &&
+          _reports(t) &&
+          _onThisDevice(context, t))
+        t,
   ];
   final phone = words.phone?.id ?? 'phone';
+  final onThisPhone = features.phoneThing;
   LibraryChoice choice(
     String category,
     String key,
@@ -42,9 +49,9 @@ Future<RuleTrigger?> pickTrigger(
     categories: [
       if (!thingsOnly) time,
       me,
-      onPhone,
+      if (onThisPhone) onPhone,
       inThings,
-      phoneMoreCategory,
+      if (onThisPhone) phoneMoreCategory,
     ],
     choices: [
       if (words.people.isNotEmpty)
@@ -68,65 +75,68 @@ Future<RuleTrigger?> pickTrigger(
           subtitle: 'everyone in the home, each by their own phone',
           keywords: 'everyone family household away',
         ),
-      choice(
-        me,
-        'pick-tag',
-        'An NFC tag is scanned',
-        OmniIcons.tag,
-        words.tags.isEmpty ? null : (c) => tagTriggerForm(c, words),
-        subtitle: words.tags.isEmpty
-            ? 'No tags yet. Add one with Add, then come back'
-            : andList([for (final t in words.tags) t.name]),
-      ),
-      choice(
-        onPhone,
-        'pick-phone-app',
-        'An app opens',
-        AutomationIcons.app,
-        (c) => phoneAppTriggerForm(c, phone, PhoneKeys.appOpened),
-        subtitle: 'or closes, on this phone',
-        keywords: 'app closes',
-      ),
-      choice(
-        onPhone,
-        'pick-phone-notification',
-        'A notification arrives from',
-        OmniIcons.notifications,
-        (c) => phoneAppTriggerForm(c, phone, PhoneKeys.notification),
-        subtitle: 'a chosen app, or any app',
-      ),
-      choice(
-        onPhone,
-        'pick-phone-bluetooth',
-        'A Bluetooth device connects',
-        AutomationIcons.bluetooth,
-        (c) => phoneBluetoothTriggerForm(c, phone),
-        subtitle: 'or disconnects: the car, headphones',
-        keywords: 'disconnects car headphones',
-      ),
-      choice(
-        onPhone,
-        'pick-phone-screen',
-        'The screen turns on or off',
-        AutomationIcons.screen,
-        (c) => phoneSwitchTriggerForm(c, phone, PhoneKeys.screenOn),
-      ),
-      choice(
-        onPhone,
-        'pick-phone-dnd',
-        'Do Not Disturb turns on or off',
-        AutomationIcons.dnd,
-        (c) => phoneSwitchTriggerForm(c, phone, PhoneKeys.dndOn),
-      ),
-      choice(
-        onPhone,
-        'pick-phone-charging',
-        'The phone starts or stops charging',
-        AutomationIcons.charging,
-        (c) => phoneSwitchTriggerForm(c, phone, PhoneKeys.charging),
-        keywords: 'charger battery',
-      ),
-      ...phoneMoreTriggerChoices(phoneMoreCategory, phone),
+      if (features.nfc)
+        choice(
+          me,
+          'pick-tag',
+          'An NFC tag is scanned',
+          OmniIcons.tag,
+          words.tags.isEmpty ? null : (c) => tagTriggerForm(c, words),
+          subtitle: words.tags.isEmpty
+              ? 'No tags yet. Add one with Add, then come back'
+              : andList([for (final t in words.tags) t.name]),
+        ),
+      if (onThisPhone) ...[
+        choice(
+          onPhone,
+          'pick-phone-app',
+          'An app opens',
+          AutomationIcons.app,
+          (c) => phoneAppTriggerForm(c, phone, PhoneKeys.appOpened),
+          subtitle: 'or closes, on this phone',
+          keywords: 'app closes',
+        ),
+        choice(
+          onPhone,
+          'pick-phone-notification',
+          'A notification arrives from',
+          OmniIcons.notifications,
+          (c) => phoneAppTriggerForm(c, phone, PhoneKeys.notification),
+          subtitle: 'a chosen app, or any app',
+        ),
+        choice(
+          onPhone,
+          'pick-phone-bluetooth',
+          'A Bluetooth device connects',
+          AutomationIcons.bluetooth,
+          (c) => phoneBluetoothTriggerForm(c, phone),
+          subtitle: 'or disconnects: the car, headphones',
+          keywords: 'disconnects car headphones',
+        ),
+        choice(
+          onPhone,
+          'pick-phone-screen',
+          'The screen turns on or off',
+          AutomationIcons.screen,
+          (c) => phoneSwitchTriggerForm(c, phone, PhoneKeys.screenOn),
+        ),
+        choice(
+          onPhone,
+          'pick-phone-dnd',
+          'Do Not Disturb turns on or off',
+          AutomationIcons.dnd,
+          (c) => phoneSwitchTriggerForm(c, phone, PhoneKeys.dndOn),
+        ),
+        choice(
+          onPhone,
+          'pick-phone-charging',
+          'The phone starts or stops charging',
+          AutomationIcons.charging,
+          (c) => phoneSwitchTriggerForm(c, phone, PhoneKeys.charging),
+          keywords: 'charger battery',
+        ),
+        ...phoneMoreTriggerChoices(phoneMoreCategory, phone),
+      ],
       choice(
         me,
         'pick-house-mode',

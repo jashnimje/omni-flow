@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/clock.dart';
+import '../../state/device_features.dart';
 import '../../state/providers.dart';
 import '../../state/house.dart' show houseInViewProvider;
 import '../../state/reload_home.dart';
@@ -55,9 +56,12 @@ bool homeIsEmpty(WidgetRef ref) => switch (ref.watch(devicesProvider).value) {
   null => false,
 };
 
-/// Whether Home is the first run (8.1), which stands alone.
+/// Whether Home is the first run (8.1), which stands alone. It asks for
+/// what the background service needs, so a device without one skips it.
 bool homeShowsFirstRun(WidgetRef ref) =>
-    homeIsEmpty(ref) && ref.watch(firstRunDoneProvider).value == false;
+    ref.watch(deviceFeaturesProvider).backgroundService &&
+    homeIsEmpty(ref) &&
+    ref.watch(firstRunDoneProvider).value == false;
 
 /// 1.1: the daily overview. In front: the greeting, the mode and presence
 /// chips, at most one notice, favourites, scenes, one tile grid per room

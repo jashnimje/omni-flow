@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/appearance.dart';
+import '../../state/device_features.dart';
 import '../../state/house.dart' show houseShownProvider;
 import '../../state/house_providers.dart' show houseModeProvider;
 import '../../state/providers.dart';
@@ -44,7 +45,10 @@ class SettingsPlace {
     this.page, {
     required this.section,
     this.keywords = const [],
+    this.shownOn = _everywhere,
   });
+
+  static bool _everywhere(DeviceFeatures _) => true;
 
   final String title;
   final IconData icon;
@@ -56,6 +60,9 @@ class SettingsPlace {
 
   /// Other words that find it, such as "city" for Home location.
   final List<String> keywords;
+
+  /// Whether the device has what the page needs.
+  final bool Function(DeviceFeatures features) shownOn;
 
   /// Whether every word of [query] starts a word of the title or keywords.
   bool matches(String query) {
@@ -114,12 +121,14 @@ final settingsPlaces = [
     PhoneAccessPage.new,
     section: _thisPhone,
     keywords: ['battery', 'background'],
+    shownOn: _hasService,
   ),
   SettingsPlace(
     'Permissions',
     OmniIcons.permissions,
     PhoneAccessPage.new,
     section: _thisPhone,
+    shownOn: _hasService,
   ),
   SettingsPlace(
     'Backup and restore',
@@ -133,7 +142,13 @@ final settingsPlaces = [
     YourHomePage.new,
     section: _yourData,
   ),
-  SettingsPlace('NFC tags', OmniIcons.tag, TagsPage.new, section: _more),
+  SettingsPlace(
+    'NFC tags',
+    OmniIcons.tag,
+    TagsPage.new,
+    section: _more,
+    shownOn: (f) => f.nfc,
+  ),
   SettingsPlace(
     'Saved values',
     OmniIcons.level,
@@ -141,14 +156,35 @@ final settingsPlaces = [
     section: _more,
     keywords: ['variables'],
   ),
-  SettingsPlace('Hubs', OmniIcons.hub, HubPage.new, section: _more),
-  SettingsPlace('Home runs on', OmniIcons.server, HubPage.new, section: _more),
+  SettingsPlace(
+    'Hubs',
+    OmniIcons.hub,
+    HubPage.new,
+    section: _more,
+    shownOn: _hasHubMode,
+  ),
+  SettingsPlace(
+    'Home runs on',
+    OmniIcons.server,
+    HubPage.new,
+    section: _more,
+    shownOn: _hasHubMode,
+  ),
   SettingsPlace(
     'Developer',
     OmniIcons.developer,
     DeveloperScreen.new,
     section: 'Settings, For developers',
   ),
+];
+
+bool _hasService(DeviceFeatures f) => f.backgroundService;
+bool _hasHubMode(DeviceFeatures f) => f.hubMode;
+
+/// The places search can open on a device with [features].
+List<SettingsPlace> settingsPlacesFor(DeviceFeatures features) => [
+  for (final p in settingsPlaces)
+    if (p.shownOn(features)) p,
 ];
 
 /// The engine's own status, for Home runs on and the Developer engine tab.
@@ -208,6 +244,7 @@ class SettingsScreen extends ConsumerWidget {
     final house = ref.watch(houseShownProvider);
     final mode = ref.watch(houseModeProvider).value;
     final setupDone = ref.watch(setupProgressProvider)?.complete == true;
+    final features = ref.watch(deviceFeaturesProvider);
     final waitingInFront = waiting != null && waiting.isNotEmpty;
     final waitingRow = OmniListRow(
       key: const ValueKey('settings-waiting'),
@@ -272,7 +309,9 @@ class SettingsScreen extends ConsumerWidget {
               ),
           ],
         ),
-        const OmniSectionHeader('This phone'),
+        OmniSectionHeader(
+          features.backgroundService ? 'This phone' : 'This device',
+        ),
         SettingsGroup(
           children: [
             OmniListRow(
@@ -285,29 +324,30 @@ class SettingsScreen extends ConsumerWidget {
               chevron: true,
               onTap: () => _push(context, const AppearancePage()),
             ),
-            const AlertsSettingsRow(),
-            OmniListRow(
-              key: const ValueKey('settings-background'),
-              icon: OmniIcons.settings,
-              title: 'Phone setup',
-              subtitle: switch (access) {
-                null => 'Checking',
-                PhoneAccessState(running: false) => 'Off · automations wait',
-                PhoneAccessState(batteryUnrestricted: false) =>
-                  'On · battery saver can stop it',
-                PhoneAccessState(batteryUnrestricted: true) =>
-                  'On · battery saver off for OmniFlow',
-                _ => 'On',
-              },
-              dot: access == null
-                  ? null
-                  : access.backgroundOk
-                  ? StatusKind.online
-                  : StatusKind.warning,
-              chevron: true,
-              divider: false,
-              onTap: () => _push(context, const PhoneAccessPage()),
-            ),
+            AlertsSettingsRow(divider: features.backgroundService),
+            if (features.backgroundService)
+              OmniListRow(
+                key: const ValueKey('settings-background'),
+                icon: OmniIcons.settings,
+                title: 'Phone setup',
+                subtitle: switch (access) {
+                  null => 'Checking',
+                  PhoneAccessState(running: false) => 'Off · automations wait',
+                  PhoneAccessState(batteryUnrestricted: false) =>
+                    'On · battery saver can stop it',
+                  PhoneAccessState(batteryUnrestricted: true) =>
+                    'On · battery saver off for OmniFlow',
+                  _ => 'On',
+                },
+                dot: access == null
+                    ? null
+                    : access.backgroundOk
+                    ? StatusKind.online
+                    : StatusKind.warning,
+                chevron: true,
+                divider: false,
+                onTap: () => _push(context, const PhoneAccessPage()),
+              ),
           ],
         ),
         const OmniSectionHeader('Your data'),
@@ -339,14 +379,15 @@ class SettingsScreen extends ConsumerWidget {
           title: 'More settings',
           summary: 'Tags, saved values, energy, away lighting',
           children: [
-            OmniListRow(
-              key: const ValueKey('settings-tags'),
-              icon: OmniIcons.tag,
-              title: 'NFC tags',
-              subtitle: _count(tags, 'tag', 'tags'),
-              chevron: true,
-              onTap: () => _push(context, const TagsPage()),
-            ),
+            if (features.nfc)
+              OmniListRow(
+                key: const ValueKey('settings-tags'),
+                icon: OmniIcons.tag,
+                title: 'NFC tags',
+                subtitle: _count(tags, 'tag', 'tags'),
+                chevron: true,
+                onTap: () => _push(context, const TagsPage()),
+              ),
             OmniListRow(
               key: const ValueKey('settings-variables'),
               icon: OmniIcons.level,
@@ -359,19 +400,20 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => _push(context, const VariablesPage()),
             ),
             const SmartHomeSettingsRows(),
-            const HomeRunsOnRow(),
-            const ShakeSceneRow(),
-            OmniListRow(
-              key: const ValueKey('settings-usb'),
-              icon: OmniIcons.board,
-              title: 'Plug in a board',
-              subtitle:
-                  'Set up a small board such as an ESP32 over a USB cable, '
-                  'or put the OmniFlow program on it',
-              subtitleLines: 2,
-              chevron: true,
-              onTap: () => showUsbBoardSheet(context),
-            ),
+            if (features.hubMode) const HomeRunsOnRow(),
+            if (features.shake) const ShakeSceneRow(),
+            if (features.usbBoards)
+              OmniListRow(
+                key: const ValueKey('settings-usb'),
+                icon: OmniIcons.board,
+                title: 'Plug in a board',
+                subtitle:
+                    'Set up a small board such as an ESP32 over a USB cable, '
+                    'or put the OmniFlow program on it',
+                subtitleLines: 2,
+                chevron: true,
+                onTap: () => showUsbBoardSheet(context),
+              ),
             if (setupDone) const HomeSetupRow(),
             OmniDisclosure(
               key: const ValueKey('settings-for-developers'),

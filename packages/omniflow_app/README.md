@@ -1,8 +1,10 @@
 # omniflow_app
 
-Flutter client for OmniFlow, Android only. Design: `../../docs/engine-design.md`.
+Flutter client for OmniFlow. Design: `../../docs/engine-design.md`.
 
-The engine runs in a `connectedDevice` foreground service (`flutter_foreground_task`), so automations keep running with the screen off and after the app is swiped away. The service's task runs in its own Flutter engine and isolate, and it is the only place that opens the database. The UI reaches it only through `EngineClient`: `ServiceEngineClient` sends JSON command and event messages over the plugin's data channel (`lib/service/`). The notification's Stop button asks first and says how to start again. A watchdog alarm (`ServiceKeeper.kt`) starts a service Android killed, and a widget, tile or shortcut tap starts a stopped one.
+On iOS, macOS, Windows and Linux the engine runs in the app's own isolate while it is open (`lib/service/in_app_runtime.dart`), and `DeviceFeatures` (`lib/state/device_features.dart`) hides what only Android has. The rest of this page is the Android app.
+
+On Android the engine runs in a `connectedDevice` foreground service (`flutter_foreground_task`), so automations keep running with the screen off and after the app is swiped away. The service's task runs in its own Flutter engine and isolate, and it is the only place that opens the database. The UI reaches it only through `EngineClient`: `ServiceEngineClient` sends JSON command and event messages over the plugin's data channel (`lib/service/`). The notification's Stop button asks first and says how to start again. A watchdog alarm (`ServiceKeeper.kt`) starts a service Android killed, and a widget, tile or shortcut tap starts a stopped one.
 
 The service holds its locks only while something needs them: the CPU wake lock during a run and around time triggers, and the multicast lock (`MulticastLockBridge.kt`) during a run, while a board on Wi-Fi is in the home and while a screen shows. Time triggers wake the phone with exact alarms. `DESIGN.md` (Platform support) has the details.
 

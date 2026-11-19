@@ -55,9 +55,20 @@ class Launcher extends StatefulWidget {
     this.platform = const [],
     this.serviceRunning,
     this.recheck = const Duration(seconds: 2),
+    this.startFailed = serviceStartFailed,
   });
 
   final Future<Started> Function() start;
+
+  /// What the failure screen says when [start] fails.
+  final String startFailed;
+
+  static const serviceStartFailed =
+      'Its background service did not answer. Try again, and if it keeps '
+      'happening, restart the phone.';
+  static const inAppStartFailed =
+      'Its engine did not open. Try again, and if it keeps happening, '
+      'restart OmniFlow.';
 
   /// Whether the service runs again after a stop that was not the user's
   /// (Android stopped it, then the plugin started it again), so the app
@@ -187,9 +198,7 @@ class _LauncherState extends State<Launcher> {
                 key: const ValueKey('start-error'),
                 icon: OmniIcons.error,
                 title: 'OmniFlow could not start',
-                message:
-                    'Its background service did not answer. Try again, and '
-                    'if it keeps happening, restart the phone.',
+                message: widget.startFailed,
                 action: OmniButton(
                   key: const ValueKey('start-retry'),
                   label: 'Try again',

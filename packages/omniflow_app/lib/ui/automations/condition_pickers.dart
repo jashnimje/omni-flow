@@ -7,7 +7,11 @@ part of 'pickers.dart';
 Future<RuleCondition?> pickCondition(BuildContext context, RuleWords words) {
   final things = [
     for (final t in words.things)
-      if (!t.isPerson && !t.isTag && t.stateKeys.isNotEmpty) t,
+      if (!t.isPerson &&
+          !t.isTag &&
+          t.stateKeys.isNotEmpty &&
+          _onThisDevice(context, t))
+        t,
   ];
   const me = 'Me', time = 'Time', inThings = 'Things';
   const variables = 'Variables';

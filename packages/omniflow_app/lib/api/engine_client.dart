@@ -32,10 +32,14 @@ class InProcessEngineClient implements EngineClient {
   Stream<Map<String, Object?>> get events => engine.events;
 }
 
-/// Secrets in the Android keystore (and the macOS keychain in tests).
+/// Secrets in the Android keystore, and the keychain on iOS and macOS.
 class SecureStorageSecretStore implements SecretStore {
   SecureStorageSecretStore([FlutterSecureStorage? storage])
-    : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage(mOptions: _macOS);
+
+  /// The login keychain on macOS. The data protection keychain needs a
+  /// keychain access group, which only a build signed with a team has.
+  static const _macOS = MacOsOptions(usesDataProtectionKeychain: false);
 
   final FlutterSecureStorage _storage;
 

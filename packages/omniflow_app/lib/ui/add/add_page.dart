@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/device_features.dart';
 import '../../state/providers.dart';
 import '../boards/firmware_sheet.dart';
 import '../boards/usb_board.dart';
@@ -140,6 +141,7 @@ class _AddPageState extends ConsumerState<AddPage> {
   @override
   Widget build(BuildContext context) {
     final wifi = _wifi(ref.watch(devicesProvider).value ?? const []);
+    final features = ref.watch(deviceFeaturesProvider);
     final find = _find;
     final kindsReady = _driversRead || !_looking;
     final found = _stable([
@@ -257,12 +259,13 @@ class _AddPageState extends ConsumerState<AddPage> {
                             ? openAddPhone(context)
                             : _byHand(kind: k.id),
                       ),
-                  AddKindTile(
-                    key: const ValueKey('manual-tag'),
-                    icon: OmniIcons.tag,
-                    title: 'NFC tag',
-                    onTap: () => showAddTagSheet(context),
-                  ),
+                  if (features.nfc)
+                    AddKindTile(
+                      key: const ValueKey('manual-tag'),
+                      icon: OmniIcons.tag,
+                      title: 'NFC tag',
+                      onTap: () => showAddTagSheet(context),
+                    ),
                   AddKindTile(
                     key: const ValueKey('manual-place'),
                     icon: OmniIcons.place,
@@ -301,29 +304,32 @@ class _AddPageState extends ConsumerState<AddPage> {
               key: const ValueKey('add-more-ways'),
               icon: OmniIcons.more,
               title: 'More ways to add',
-              summary: 'Weather, small boards, every kind',
+              summary: features.usbBoards
+                  ? 'Weather, small boards, every kind'
+                  : 'Weather, every kind',
               children: [
                 const AddWeatherRow(),
-                OmniListRow(
-                  key: const ValueKey('manual-usb-board'),
-                  icon: OmniIcons.board,
-                  title: 'Plug in a board',
-                  subtitle:
-                      'ESP32, ESP8266, Pico W or Uno, plugged into this phone',
-                  chevron: true,
-                  onTap: () => showUsbBoardSheet(context),
-                ),
-                OmniListRow(
-                  key: const ValueKey('manual-firmware'),
-                  icon: OmniIcons.developer,
-                  title: 'Put the OmniFlow program on a board',
-                  subtitle:
-                      'A board runs one small program, called firmware. '
-                      'Write OmniFlow\'s, or your own, over USB',
-                  subtitleLines: 2,
-                  chevron: true,
-                  onTap: () => showFirmwareSheet(context),
-                ),
+                if (features.usbBoards) ...[
+                  OmniListRow(
+                    key: const ValueKey('manual-usb-board'),
+                    icon: OmniIcons.board,
+                    title: 'Plug in a board',
+                    subtitle: 'ESP32, ESP8266, Pico W or Uno, plugged into this phone',
+                    chevron: true,
+                    onTap: () => showUsbBoardSheet(context),
+                  ),
+                  OmniListRow(
+                    key: const ValueKey('manual-firmware'),
+                    icon: OmniIcons.developer,
+                    title: 'Put the OmniFlow program on a board',
+                    subtitle:
+                        'A board runs one small program, called firmware. '
+                        'Write OmniFlow\'s, or your own, over USB',
+                    subtitleLines: 2,
+                    chevron: true,
+                    onTap: () => showFirmwareSheet(context),
+                  ),
+                ],
                 OmniListRow(
                   key: const ValueKey('add-by-driver'),
                   icon: OmniIcons.more,

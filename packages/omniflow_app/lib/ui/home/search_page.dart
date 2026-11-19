@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
+import '../../state/device_features.dart';
 import '../../state/providers.dart';
 import '../automations/automations.dart';
 import '../design/automation_look.dart' show AutomationBadge;
@@ -165,11 +166,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ], (s) => _hits(query, s.name)).take(5).toList();
     // Each place under the heading of where it sits ("Settings, Your
     // home"), in the order Settings shows them.
+    final places = settingsPlacesFor(ref.watch(deviceFeaturesProvider));
     final placesBySection = <String, List<SettingsPlace>>{
       if (query.isNotEmpty)
-        for (final section in {for (final p in settingsPlaces) p.section})
+        for (final section in {for (final p in places) p.section})
           section: [
-            for (final p in settingsPlaces)
+            for (final p in places)
               if (p.section == section && p.matches(query)) p,
           ],
     }..removeWhere((_, places) => places.isEmpty);

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/engine_calls.dart';
 import '../../state/clock.dart';
+import '../../state/device_features.dart';
 import '../../state/providers.dart';
 import '../add/room_field.dart';
 import '../design/design.dart';
@@ -119,25 +120,27 @@ class _BoardPageState extends ConsumerState<BoardPage> {
   }
 
   Future<void> _more(Json device) async {
+    final usb = ref.read(deviceFeaturesProvider).usbBoards;
     final choice = await showPickerSheet<String>(
       context,
       title: '${device['name'] ?? widget.id}',
-      sections: const [
+      sections: [
         PickerSection([
-          PickerItem(
+          const PickerItem(
             key: ValueKey('board-organize'),
             value: 'organize',
             icon: OmniIcons.edit,
             title: 'Name and room',
           ),
-          PickerItem(
-            key: ValueKey('board-usb'),
-            value: 'usb',
-            icon: OmniIcons.wifi,
-            title: 'Wi-Fi and name, over USB',
-            subtitle: 'Plug it into this phone',
-          ),
-          PickerItem(
+          if (usb)
+            const PickerItem(
+              key: ValueKey('board-usb'),
+              value: 'usb',
+              icon: OmniIcons.wifi,
+              title: 'Wi-Fi and name, over USB',
+              subtitle: 'Plug it into this phone',
+            ),
+          const PickerItem(
             key: ValueKey('board-remove'),
             value: 'remove',
             icon: OmniIcons.delete,
