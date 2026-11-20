@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.Settings
 import android.nfc.NfcAdapter
@@ -35,7 +36,8 @@ import java.util.concurrent.Executors
  * access Android requires before it names the Wi-Fi network, and for the
  * local network access Android 17 requires before an app reaches devices on
  * the LAN, and reports both. On omniflow/apps it lists the launchable apps
- * for the app picker.
+ * for the app picker. On omniflow/files it has Android index a file the app
+ * wrote in Download, so the system file picker and the Files app list it.
  */
 class MainActivity : FlutterActivity() {
     private var nfc: MethodChannel? = null
@@ -84,6 +86,13 @@ class MainActivity : FlutterActivity() {
                     if (apps != null) result.success(apps) else result.error("unavailable", "Could not list the apps", null)
                 }
             }.start()
+        }
+        MethodChannel(messenger, FILES_CHANNEL).setMethodCallHandler { call, result ->
+            val path = call.argument<String>("path")
+            if (call.method != "scan" || path == null) return@setMethodCallHandler result.notImplemented()
+            MediaScannerConnection.scanFile(applicationContext, arrayOf(path), null) { _, uri ->
+                mainThread.post { result.success(uri != null) }
+            }
         }
         MethodChannel(messenger, PERMISSIONS_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -416,6 +425,7 @@ class MainActivity : FlutterActivity() {
         )
         private const val PERMISSIONS_CHANNEL = "omniflow/permissions"
         private const val APPS_CHANNEL = "omniflow/apps"
+        private const val FILES_CHANNEL = "omniflow/files"
         private const val LOCATION_REQUEST = 7102
         private const val LOCAL_NETWORK_REQUEST = 7103
         private const val LOCATION_ALWAYS_REQUEST = 7104

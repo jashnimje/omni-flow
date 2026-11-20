@@ -8,6 +8,7 @@ import 'package:omniflow_engine/omniflow_engine.dart';
 import 'package:test/test.dart';
 
 import '../devices/fake_mdns.dart';
+import '../support/fake_wiz_bulb.dart';
 
 const _host = {
   'schemaVersion': 1,
@@ -178,13 +179,12 @@ void main() {
     final original = await ok(a, 'automation.get', {'id': 'kettle_at_sunrise'});
     expect(rule['spec'], original['spec']);
 
-    expect(imported['needsSecrets'], [
-      {
-        'id': 'plug',
-        'name': 'Kettle plug',
-        'secrets': ['localKey'],
-      },
-    ]);
+    final asked = (imported['needsSecrets'] as List).single as Map;
+    expect(asked['id'], 'plug');
+    expect(asked['name'], 'Kettle plug');
+    expect(asked['secrets'], ['localKey']);
+    expect(asked['labels'], ['Local key']);
+    expect(asked['pair'], isNull);
   });
 
   test('no secret value is in the export, and none is taken in', () async {
@@ -325,5 +325,156 @@ void main() {
     expect((replaced['remove'] as Map)['rooms'], ['study']);
     expect((replaced['remove'] as Map)['variables'], ['Extra']);
     expect(ids(await ok(b, 'room.list'), 'rooms'), ['living_room']);
+  });
+  group('a WiZ bulb', () {
+    final bulbs = <FakeWizBulb>[];
+    tearDown(() {
+      for (final bulb in bulbs) {
+        bulb.close();
+      }
+      bulbs.clear();
+    });
+
+    Future<void> addBulb({String? key}) async {
+      final bulb = await FakeWizBulb.start(
+        module: 'ESP25_SHRGB_01',
+        range: const [2200, 6500],
+        key: key,
+      );
+      bulbs.add(bulb);
+      await ok(a, 'device.add', {
+        'id': 'wiz',
+        'name': 'Philips WiZ',
+        'driver': 'philips_wiz_udp',
+        'host': bulb.host,
+        'port': bulb.port,
+        'room': 'living_room',
+      });
+      await a.devices.refreshState('wiz');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+
+    Map<String, Object?> thingIn(Map<String, Object?> backup, String id) =>
+        (backup['things'] as List).cast<Map<String, Object?>>().singleWhere(
+          (t) => t['id'] == id,
+        );
+
+    List<Object?> asked(Map<String, Object?> imported) => [
+      for (final s in imported['needsSecrets'] as List) (s as Map)['id'],
+    ];
+
+    test('comes back with what it said it is, and its optional key is not '
+        'asked for, while a required key still is', () async {
+      await addBulb();
+      final backup = await exported();
+      expect(backup['skipped'], isNull);
+      final settings = thingIn(backup, 'wiz')['settings'] as Map;
+      expect(settings['bulb'], containsPair('module', 'ESP25_SHRGB_01'));
+
+      final imported = await ok(b, 'config.import', {'backup': backup});
+      expect((imported['add'] as Map)['things'], contains('wiz'));
+      final wiz = (await ok(b, 'device.get', {'id': 'wiz'}))['device'] as Map;
+      expect(wiz['room'], 'Living room');
+      expect((wiz['settings'] as Map)['bulb'], settings['bulb']);
+      expect(asked(imported), isNot(contains('wiz')));
+      expect(asked(imported), contains('plug'));
+    });
+
+    test(
+      'that refused unsigned commands asks for its key after a restore',
+      () async {
+        const key = '00112233445566778899aabbccddeeff';
+        await addBulb(key: key);
+        final refused = await a.handle('device.invoke', {
+          'id': 'wiz',
+          'capability': 'power',
+          'params': {'value': true},
+        });
+        expect((refused['error'] as Map)['type'], 'needs_user');
+        final backup = await exported();
+        expect(jsonEncode(backup), isNot(contains(key)));
+        expect((thingIn(backup, 'wiz')['settings'] as Map)['setupNeeds'], [
+          'signingKey',
+        ]);
+
+        final imported = await ok(b, 'config.import', {'backup': backup});
+        expect(
+          (imported['needsSecrets'] as List).firstWhere(
+            (s) => (s as Map)['id'] == 'wiz',
+          ),
+          {
+            'id': 'wiz',
+            'name': 'Philips WiZ',
+            'secrets': ['signingKey'],
+            'labels': ['WiZ home key'],
+            'category': 'lighting',
+          },
+        );
+      },
+    );
+
+    test('with a setting its driver no longer lists still comes back, '
+        'without it', () async {
+      await addBulb();
+      final backup = await exported();
+      final things = [
+        for (final t in backup['things'] as List)
+          (t as Map)['id'] == 'wiz'
+              ? {
+                  ...t,
+                  'settings': {
+                    ...t['settings'] as Map,
+                    'retired': 1,
+                    'setupNeeds': ['nothing'],
+                  },
+                }
+              : t,
+      ];
+      final imported = await ok(b, 'config.import', {
+        'backup': {...backup, 'things': things},
+      });
+      expect((imported['add'] as Map)['things'], contains('wiz'));
+      final wiz = (await ok(b, 'device.get', {'id': 'wiz'}))['device'] as Map;
+      expect(wiz['settings'], isNot(contains('retired')));
+      expect(wiz['settings'], isNot(contains('setupNeeds')));
+      expect(asked(imported), isNot(contains('wiz')));
+    });
+    test('comes back with an automation that uses it, and only a TV paired '
+        'over ADB asks to pair again', () async {
+      await addBulb();
+      await ok(a, 'device.add', {
+        'id': 'den_tv',
+        'name': 'Den TV',
+        'driver': 'android_tv_adb',
+        'host': '192.168.1.60',
+      });
+      await ok(a, 'automation.save', {
+        'form': 'rule',
+        'trusted': true,
+        'spec': {
+          'name': 'Lights out',
+          'when': [
+            {'time': '23:00'},
+          ],
+          'then': ['wiz.power=false'],
+        },
+      });
+      final imported = await ok(b, 'config.import', {
+        'backup': await exported(),
+      });
+      expect(asked(imported), isNot(contains('wiz')));
+      final tv = (imported['needsSecrets'] as List).firstWhere(
+        (s) => (s as Map)['id'] == 'den_tv',
+      ) as Map;
+      expect(tv['pair'], isTrue);
+      expect(tv['pairing'], 'adb');
+      expect(tv['secrets'], isNull);
+      final rule = {
+        for (final r in (await ok(b, 'automation.list'))['automations'] as List)
+          (r as Map)['id']: r,
+      }['lights_out'];
+      expect(rule, isNotNull);
+      expect((rule as Map)['enabled'], isTrue);
+    });
   });
 }

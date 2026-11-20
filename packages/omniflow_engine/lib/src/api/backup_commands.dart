@@ -18,6 +18,8 @@ import '../dag/validator.dart';
 import '../devices/adb/adb_key.dart' show adbHostKeySecret;
 import '../devices/board.dart';
 import '../devices/device.dart';
+import '../devices/device_service.dart' show setupNeedsSetting;
+import '../devices/wiz_pilot.dart' show wizBulbSetting;
 import '../manifest/driver_manifest.dart';
 import '../manifest/validation.dart';
 import '../storage/database.dart';
@@ -30,6 +32,12 @@ const backupVersion = 1;
 
 final _id = RegExp(r'^[a-z][a-z0-9_]*$');
 final _variableName = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+
+/// Settings the engine records on a thing itself, which no driver lists:
+/// what a WiZ bulb said it is, what a device refused commands without, and
+/// the peripherals a board described. A backup carries them like any plain
+/// setting.
+const _recordedSettings = {wizBulbSetting, setupNeedsSetting, 'periph'};
 
 /// `config.export` and `config.import`: the whole home as one JSON object,
 /// and back.
@@ -460,11 +468,16 @@ class BackupCommands {
         continue;
       }
       if (manifest == null) continue;
+      t['settings'] = _keptSettings(
+        manifest,
+        Map<String, Object?>.from(settings),
+      );
       _checkSettings(
         issues,
         '$at.settings',
         manifest,
-        Map<String, Object?>.from(settings),
+        t['settings'] as Map<String, Object?>,
+        thing: '${t['name'] ?? id}',
       );
       if (manifest.id == nfcTagDriverId && settings['uid'] != null) {
         final uid = normalizeUid(settings['uid']);
@@ -573,22 +586,62 @@ class BackupCommands {
     );
   }
 
-  /// Plain settings of [manifest] only, as `device.add` checks them.
+  /// The settings of a thing on [manifest] that the import keeps. A built-in
+  /// driver can change between versions, so a setting it no longer lists
+  /// is left out, and the thing still comes back. `setupNeeds` keeps only
+  /// the secret settings the driver has.
+  Map<String, Object?> _keptSettings(
+    DriverManifest manifest,
+    Map<String, Object?> settings,
+  ) {
+    final builtIn = _core.registry.isBuiltIn(manifest.id);
+    final kept = {
+      for (final e in settings.entries)
+        if (!builtIn ||
+            _recordedSettings.contains(e.key) ||
+            manifest.settings.any((s) => s.key == e.key))
+          e.key: e.value,
+    };
+    final needs = kept[setupNeedsSetting];
+    if (needs != null) {
+      final secret = {
+        for (final s in manifest.settings)
+          if (s.secret) s.key,
+      };
+      final known = [
+        if (needs is List)
+          for (final key in needs)
+            if (key is String && secret.contains(key)) key,
+      ];
+      known.isEmpty
+          ? kept.remove(setupNeedsSetting)
+          : kept[setupNeedsSetting] = known;
+    }
+    return kept;
+  }
+
+  /// Plain settings of [manifest] only, as `device.add` checks them, and
+  /// the ones the engine records itself.
   void _checkSettings(
     IssueCollector issues,
     String at,
     DriverManifest manifest,
-    Map<String, Object?> settings,
-  ) {
+    Map<String, Object?> settings, {
+    required String thing,
+  }) {
     for (final key in settings.keys) {
       final spec = manifest.settings.where((s) => s.key == key).firstOrNull;
+      if (spec == null && _recordedSettings.contains(key)) continue;
       if (spec == null) {
-        issues.add('$at.$key', 'is not a setting of ${manifest.id}');
+        issues.add(
+          '$at.$key',
+          '$thing has a setting $key that ${manifest.name} does not have',
+        );
       } else if (spec.secret) {
         issues.add(
           '$at.$key',
-          'is a secret, and a backup never carries one. Take it out and '
-              'store it with omni secret set after the import',
+          '$thing has its ${spec.label} in the file. A backup never carries '
+              'a key: take it out and enter it again after the import',
         );
       }
     }
@@ -934,8 +987,38 @@ class BackupCommands {
     };
   }
 
+  /// The secret settings a thing on [manifest] works without none of: its
+  /// required secret steps, and an optional one only when the device
+  /// refused commands without it (its `setupNeeds`). A driver with no
+  /// setup steps needs each secret setting but the one pairing stores.
+  static List<SettingSpec> _secretsNeeded(
+    DriverManifest manifest,
+    Map<String, Object?> settings,
+  ) {
+    final needs = settings[setupNeedsSetting];
+    final secret = manifest.settings.where((s) => s.secret);
+    if (manifest.setup.isEmpty) {
+      final proof = pairingProofSecret(manifest);
+      return [
+        for (final s in secret)
+          if (s.key != proof) s,
+      ];
+    }
+    final keys = {
+      for (final step in manifest.setup)
+        if (step.kind == SetupKind.secret &&
+            (!step.optional || (needs is List && needs.contains(step.key))))
+          step.key,
+    };
+    return [
+      for (final s in secret)
+        if (keys.contains(s.key)) s,
+    ];
+  }
+
   /// The imported things whose secrets or pairing this engine does not
-  /// hold, which the user enters again.
+  /// hold, which the user enters again, with each secret's label, how the
+  /// thing pairs and its kind.
   Future<List<Map<String, Object?>>> _needsSecrets(_Plan plan) async {
     final out = <Map<String, Object?>>[];
     final hostKey = await _core.secrets.read(adbHostKeySecret);
@@ -943,11 +1026,16 @@ class BackupCommands {
       final id = '${t['id']}';
       final manifest = _core.registry['${t['driver']}'];
       if (manifest == null) continue;
-      final secrets = [
-        for (final s in manifest.settings.where((s) => s.secret))
-          if (await _core.secrets.read(deviceSecretKey(id, s.key)) == null)
-            s.key,
+      final settings = Map<String, Object?>.from(
+        t['settings'] as Map? ?? const {},
+      );
+      final missing = [
+        for (final s in _secretsNeeded(manifest, settings))
+          if ((await _core.secrets.read(deviceSecretKey(id, s.key)) ?? '')
+              .isEmpty)
+            s,
       ];
+      final secrets = [for (final s in missing) s.key];
       final proof = pairingProofSecret(manifest);
       final pair =
           manifest.pairingSpec != null &&
@@ -960,7 +1048,10 @@ class BackupCommands {
         'id': id,
         'name': t['name'],
         if (secrets.isNotEmpty) 'secrets': secrets,
+        if (secrets.isNotEmpty) 'labels': [for (final s in missing) s.label],
         if (pair) 'pair': true,
+        if (pair) 'pairing': manifest.pairingSpec!.method.wireName,
+        'category': manifest.category,
       });
     }
     return out;

@@ -1302,9 +1302,12 @@ void main() {
       final firstRun = FakeFirstRun(false);
       await pump(tester, engine, access: access, firstRun: firstRun);
       expect(find.byType(FirstRunScreen), findsOneWidget);
-      expect(find.text('Connect anything to anything'), findsOneWidget);
       expect(find.byKey(const ValueKey('add-device')), findsNothing);
       expect(find.byKey(const ValueKey('shell-tabs')), findsNothing);
+      // The first question is a backup, and Start fresh is one tap.
+      expect(find.text('Have a backup?'), findsOneWidget);
+      await tapKey(tester, 'first-run-fresh');
+      expect(find.text('Connect anything to anything'), findsOneWidget);
       await tapKey(tester, 'first-run-home');
       await tapKey(tester, 'first-run-start');
       await tester.pump(const Duration(milliseconds: 300));

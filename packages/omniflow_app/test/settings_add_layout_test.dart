@@ -163,21 +163,25 @@ void main() {
     expect(find.text('None of your own yet'), findsOneWidget);
   });
 
-  testWidgets('first run keeps Get started on screen on a small phone', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 3;
-    await pumpScreen(
-      tester,
-      FakeEngine(),
-      FirstRunScreen(onDone: () async {}),
-      size: _phone,
-      overrides: [
-        phoneAccessProvider.overrideWithValue(
-          FakeAccess(const PhoneAccessState()),
-        ),
-      ],
-    );
-    expectOnScreen(tester, 'first-run-start');
-  });
+  testWidgets(
+    'first run keeps Start fresh and Get started on screen on a small phone',
+    (tester) async {
+      tester.view.devicePixelRatio = 3;
+      await pumpScreen(
+        tester,
+        FakeEngine(),
+        FirstRunScreen(onDone: (_) async {}),
+        size: _phone,
+        overrides: [
+          phoneAccessProvider.overrideWithValue(
+            FakeAccess(const PhoneAccessState()),
+          ),
+        ],
+      );
+      expectOnScreen(tester, 'first-run-fresh');
+      await tester.tap(find.byKey(const ValueKey('first-run-fresh')));
+      await tester.pumpAndSettle();
+      expectOnScreen(tester, 'first-run-start');
+    },
+  );
 }

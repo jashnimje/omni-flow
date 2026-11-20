@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 typedef PickedFile = ({String name, String path});
@@ -18,6 +19,10 @@ abstract interface class PhoneFiles {
 
   /// Drops the copies [pick] made, once the engine has sent them.
   Future<void> cleanup();
+
+  /// Has the phone list a file the app wrote in [downloadsDir], so the
+  /// system file picker and the Files app show it.
+  Future<void> announce(String path);
 }
 
 /// For tests and platforms without a picker.
@@ -32,6 +37,9 @@ class NoPhoneFiles implements PhoneFiles {
 
   @override
   Future<void> cleanup() async {}
+
+  @override
+  Future<void> announce(String path) async {}
 }
 
 class PluginPhoneFiles implements PhoneFiles {
@@ -41,6 +49,9 @@ class PluginPhoneFiles implements PhoneFiles {
   /// folder by path without a storage permission, and they show in the
   /// Files app.
   static const downloads = '/storage/emulated/0/Download/OmniFlow';
+
+  /// The main activity's channel that has Android index a written file.
+  static const filesChannel = MethodChannel('omniflow/files');
 
   @override
   Future<List<PickedFile>> pick({List<String>? extensions}) async {
@@ -79,4 +90,18 @@ class PluginPhoneFiles implements PhoneFiles {
 
   @override
   Future<void> cleanup() => FilePicker.clearTemporaryFiles();
+
+  /// A file written by path is only on disk until Android indexes it, and
+  /// the system picker lists only what is indexed.
+  @override
+  Future<void> announce(String path) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await filesChannel.invokeMethod<bool>('scan', {'path': path});
+    } on PlatformException {
+      return;
+    } on MissingPluginException {
+      return;
+    }
+  }
 }

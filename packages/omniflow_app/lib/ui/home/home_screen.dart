@@ -42,7 +42,7 @@ import 'energy_card.dart' show HomeEnergySection;
 import '../add/add_page.dart' show openAddThing;
 import '../devices/weather_page.dart' show WeatherCard;
 import '../help/screen_help.dart';
-import '../onboarding/home_setup.dart' show openHomeSetup;
+import '../onboarding/home_setup.dart' show SetupStep, openHomeSetup;
 
 /// The things Home shows as tiles: everything Devices lists, the phone
 /// too, so a phone with no room is under "Not in a room" on both. People
@@ -58,9 +58,10 @@ bool homeIsEmpty(WidgetRef ref) => switch (ref.watch(devicesProvider).value) {
 
 /// Whether Home is the first run (8.1), which stands alone. It asks for
 /// what the background service needs, so a device without one skips it.
+/// A backup restored on the first run keeps it open for the permissions.
 bool homeShowsFirstRun(WidgetRef ref) =>
     ref.watch(deviceFeaturesProvider).backgroundService &&
-    homeIsEmpty(ref) &&
+    (homeIsEmpty(ref) || ref.watch(firstRunRestoredProvider)) &&
     ref.watch(firstRunDoneProvider).value == false;
 
 /// 1.1: the daily overview. In front: the greeting, the mode and presence
@@ -86,18 +87,28 @@ class HomeScreen extends ConsumerWidget {
         children: (_) => const [],
       );
     }
-    if (homeIsEmpty(ref)) {
-      if (homeShowsFirstRun(ref)) {
-        return FirstRunScreen(
-          onDone: () async {
-            await ref.read(firstRunStoreProvider).markDone();
-            ref.invalidate(firstRunDoneProvider);
-            if (context.mounted) unawaited(openHomeSetup(context));
-          },
-        );
-      }
-      return const EmptyHome();
+    if (homeShowsFirstRun(ref)) {
+      return FirstRunScreen(
+        onDone: (covered) async {
+          await ref.read(firstRunStoreProvider).markDone();
+          ref.invalidate(firstRunDoneProvider);
+          ref.read(firstRunRestoredProvider.notifier).set(false);
+          // A restored home skips the setup steps its backup answers.
+          final steps = [
+            for (final s in SetupStep.values)
+              if (!covered.contains(s)) s,
+          ];
+          if (context.mounted && steps.isNotEmpty) {
+            unawaited(
+              covered.isEmpty
+                  ? openHomeSetup(context)
+                  : openHomeSetup(context, steps: steps),
+            );
+          }
+        },
+      );
     }
+    if (homeIsEmpty(ref)) return const EmptyHome();
     return _Overview(devices: list);
   }
 }

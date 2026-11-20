@@ -114,15 +114,12 @@ void main() {
         'ok': true,
         'backup': {'schema': 'omniflow.backup', 'version': 1},
       };
+      final phone = FakePhoneFiles(downloads: dir.path);
       await pumpScreen(
         tester,
         engine,
         const BackupPage(),
-        overrides: [
-          phoneFilesProvider.overrideWithValue(
-            FakePhoneFiles(downloads: dir.path),
-          ),
-        ],
+        overrides: [phoneFilesProvider.overrideWithValue(phone)],
       );
       await tester.runAsync(() async {
         await tester.tap(find.byKey(const ValueKey('backup-export')));
@@ -137,6 +134,14 @@ void main() {
         containsPair('schema', 'omniflow.backup'),
       );
       expect(find.byKey(const ValueKey('backup-saved')), findsOneWidget);
+      // Android lists the file at once, so the system picker shows it.
+      expect(phone.announced, [files.single.path]);
+      expect(
+        find.textContaining(
+          RegExp(r'^Saved omniflow-backup-\d{4}-\d\d-\d\d-\d{4}\.json in '),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('Back up to Drive saves the file and opens Share with it', (

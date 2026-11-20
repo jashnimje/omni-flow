@@ -61,6 +61,12 @@ class FakePhoneFiles implements PhoneFiles {
 
   @override
   Future<void> cleanup() async => cleanups++;
+
+  /// The files [announce] was asked to list.
+  final announced = <String>[];
+
+  @override
+  Future<void> announce(String path) async => announced.add(path);
 }
 
 /// A FakeEngine with one TV and answers for every tv.* read.
