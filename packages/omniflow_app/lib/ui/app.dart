@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/engine_calls.dart';
 import '../state/appearance.dart'
     show darkPaletteProvider, lightPaletteProvider, themeChoiceProvider;
+import '../state/app_update.dart' show appUpdateProvider;
 import '../state/providers.dart';
 import 'design/design.dart';
 import 'settings/whats_new.dart' show whatsNewOnStart;
@@ -113,9 +114,16 @@ class _HomeState extends ConsumerState<Home> {
     );
     unawaited(_nfc.start());
     whatsNewOnStart(context, ref);
+    // The daily update check, on Android with the switch on. It only
+    // fills in the Settings row.
+    final updates = ref.read(appUpdateProvider.notifier);
+    unawaited(updates.maybeAutoCheck());
     // Reader mode only works while the app is in front.
     _lifecycle = AppLifecycleListener(
-      onResume: () => unawaited(_nfc.resume()),
+      onResume: () {
+        unawaited(_nfc.resume());
+        unawaited(updates.maybeAutoCheck());
+      },
       onPause: () => unawaited(_nfc.pause()),
     );
   }

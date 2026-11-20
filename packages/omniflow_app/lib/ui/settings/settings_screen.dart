@@ -33,6 +33,7 @@ import 'phone_access.dart';
 import 'places_page.dart';
 import 'rooms_page.dart';
 import 'shake_scene.dart';
+import 'update_rows.dart' show UpdateAvailableRow;
 import 'variables_page.dart';
 import 'whats_new.dart';
 import 'away_lighting_page.dart' show SmartHomeSettingsRows;
@@ -437,6 +438,7 @@ class SettingsScreen extends ConsumerWidget {
         ),
         SettingsGroup(
           children: [
+            UpdateAvailableRow(onTap: () => _push(context, const AboutPage())),
             OmniListRow(
               key: const ValueKey('settings-about'),
               icon: OmniIcons.about,

@@ -70,6 +70,11 @@
          titles on the phone; only a matching title is sent on. Asked when
          such a trigger is picked. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Settings, About, Check for updates installs a new OmniFlow from its
+         GitHub releases (AppUpdateBridge), after checking the download
+         against the release's checksums. Android asks the person to allow
+         it once, and confirms each install. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- No backup: secrets are keystore-bound, so a restored copy on another
          phone cannot be decrypted. -->
     <application

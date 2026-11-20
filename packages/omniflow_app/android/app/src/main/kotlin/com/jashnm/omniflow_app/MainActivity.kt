@@ -38,6 +38,7 @@ import java.util.concurrent.Executors
  * the LAN, and reports both. On omniflow/apps it lists the launchable apps
  * for the app picker. On omniflow/files it has Android index a file the app
  * wrote in Download, so the system file picker and the Files app list it.
+ * AppUpdateBridge installs app updates on omniflow/updates.
  */
 class MainActivity : FlutterActivity() {
     private var nfc: MethodChannel? = null
@@ -47,10 +48,12 @@ class MainActivity : FlutterActivity() {
     private val permissionResults = mutableMapOf<Int, MethodChannel.Result>()
     private val reader = Executors.newSingleThreadExecutor()
     private val mainThread = Handler(Looper.getMainLooper())
+    private var updates: AppUpdateBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        updates = AppUpdateBridge(this, messenger)
         takeTag(intent)?.let { tag ->
             launchReading = true
             readLive(tag) { scan ->
@@ -236,6 +239,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         reader.shutdownNow()
+        updates?.close()
         super.onDestroy()
     }
 

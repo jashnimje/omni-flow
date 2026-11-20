@@ -69,7 +69,11 @@ class OmniCommandRunner extends CommandRunner<int> {
        hubEnvironment = hubEnvironment ?? HubEnvironment(),
        super('omni', 'OmniFlow local-first automation engine.') {
     argParser
-      ..addFlag('version', negatable: false, help: 'Print the engine version.')
+      ..addFlag(
+        'version',
+        negatable: false,
+        help: 'Print the engine version and build.',
+      )
       ..addOption(
         'home',
         help: 'Data directory. Defaults to \$OMNIFLOW_HOME or ~/.omniflow.',
@@ -803,7 +807,7 @@ class OmniCommandRunner extends CommandRunner<int> {
     final results = parse(_hubRunsByDefault(args.toList()));
     _globals = results;
     if (results.flag('version')) {
-      out.writeln('omni $omniflowEngineVersion');
+      out.writeln('omni $omniflowVersionLabel');
       return 0;
     }
     return await runCommand(results) ?? 0;

@@ -10,7 +10,17 @@ void main() {
     final out = StringBuffer();
     final code = await OmniCommandRunner(out: out).run(['--version']);
     expect(code, 0);
-    expect(out.toString().trim(), 'omni $omniflowEngineVersion');
+    expect(out.toString().trim(), 'omni $omniflowVersionLabel');
+    expect(out.toString(), contains(omniflowEngineVersion));
+  });
+
+  test('the version label carries the build only in a release build', () {
+    expect(
+      omniflowVersionLabel,
+      omniflowBuild > 0
+          ? '$omniflowEngineVersion (build $omniflowBuild)'
+          : omniflowEngineVersion,
+    );
   });
 
   test('an unknown command is a usage error', () {

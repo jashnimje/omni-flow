@@ -83,6 +83,8 @@ abstract final class OmniIcons {
   static const agent = Symbols.smart_toy_rounded;
   static const developer = Symbols.swap_vert_rounded;
   static const about = Symbols.info_rounded;
+  static const update = Symbols.system_update_rounded;
+  static const openLink = Symbols.open_in_new_rounded;
   static const packets = Symbols.swap_vert_rounded;
   static const history = Symbols.history_rounded;
   static const tune = Symbols.tune_rounded;

@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../state/providers.dart';
 import '../design/design.dart';
+import 'update_rows.dart';
 
 /// The version in pubspec.yaml.
 const appVersion = '1.0.0';
@@ -295,7 +296,8 @@ class _Note extends StatelessWidget {
   );
 }
 
-/// About: the version, every version's notes, and the licences.
+/// About: the version, the update check, every version's notes, and the
+/// licences.
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
@@ -313,6 +315,8 @@ class AboutPage extends StatelessWidget {
         title: 'OmniFlow $appVersion',
         subtitle: 'Runs on this phone. Nothing leaves it unless you send it.',
       ),
+      const UpdateCheckRow(),
+      const UpdateAutoRow(),
       OmniListRow(
         key: const ValueKey('about-licences'),
         icon: OmniIcons.info,
