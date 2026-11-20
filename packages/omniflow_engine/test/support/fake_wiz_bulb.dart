@@ -19,6 +19,7 @@ class FakeWizBulb {
     this.minDim = 10,
     required this.now,
     this.methodInErrors = true,
+    this.mac = 'a8bb50aabbcc',
   });
 
   /// [module] picks the kind as real bulbs name it: `ESP01_SHRGB1C_31`
@@ -32,6 +33,7 @@ class FakeWizBulb {
     int minDim = 10,
     DateTime Function()? now,
     bool methodInErrors = true,
+    String mac = 'a8bb50aabbcc',
   }) async {
     final bulb = FakeWizBulb._(
       await UdpTransport.bind(),
@@ -41,6 +43,7 @@ class FakeWizBulb {
       minDim: minDim,
       now: now ?? DateTime.now,
       methodInErrors: methodInErrors,
+      mac: mac,
     );
     bulb._udp.incoming.listen(bulb._answer);
     return bulb;
@@ -55,6 +58,9 @@ class FakeWizBulb {
 
   /// Whether an error reply names the method, as most firmware does.
   final bool methodInErrors;
+
+  /// What `getSystemConfig` says its MAC is.
+  final String mac;
 
   /// Every request, as decoded JSON.
   final requests = <Map<String, Object?>>[];
@@ -99,7 +105,7 @@ class FakeWizBulb {
       case 'getSystemConfig':
         return reply({
           'result': {
-            'mac': 'a8bb50aabbcc',
+            'mac': mac,
             'moduleName': module,
             'fwVersion': key == null ? '1.25.0' : '1.38.0',
           },

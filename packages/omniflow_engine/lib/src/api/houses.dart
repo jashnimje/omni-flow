@@ -112,6 +112,7 @@ const houseViewCommands = {
   'timer.start',
   'device.add',
   'thing.add',
+  'wiz.import',
   'room.save',
   'zone.save',
   'tag.save',

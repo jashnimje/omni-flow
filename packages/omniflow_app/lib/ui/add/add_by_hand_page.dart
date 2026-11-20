@@ -11,6 +11,7 @@ import '../help/setting_help.dart' show settingHelpLine;
 import 'driver_kinds.dart';
 import 'guided_steps_page.dart';
 import 'room_field.dart';
+import 'wiz_import_page.dart';
 
 /// Where to find a device's IP address, under the field that takes it.
 const ipAddressHelp =
@@ -53,6 +54,9 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
   var _room = '';
   final _settings = <String, TextEditingController>{};
 
+  /// The optional secrets typed behind Add by IP address (a WiZ home key).
+  final _secrets = <String, TextEditingController>{};
+
   EngineApi get _quiet => EngineApi(ref.read(engineClientProvider));
 
   @override
@@ -88,7 +92,7 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
     _search.dispose();
     _host.dispose();
     _name.dispose();
-    for (final c in _settings.values) {
+    for (final c in [..._settings.values, ..._secrets.values]) {
       c.dispose();
     }
     super.dispose();
@@ -117,6 +121,18 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
 
   TextEditingController _setting(String key) =>
       _settings.putIfAbsent(key, TextEditingController.new);
+
+  /// A driver whose lights come in from their own app (WiZ) puts the
+  /// address behind Add by IP address, with its optional key beside it.
+  bool get _imports => _picked?['importFrom'] != null;
+
+  List<Json> get _secretFields => [
+    for (final s in (_picked?['settings'] as List? ?? const []))
+      if (s is Map && s['secret'] == true) Map<String, Object?>.from(s),
+  ];
+
+  TextEditingController _secret(String key) =>
+      _secrets.putIfAbsent(key, TextEditingController.new);
 
   Future<void> _scan() async {
     final driver = _driver;
@@ -183,6 +199,13 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
     });
     final added = reply.value;
     if (added == null) return;
+    if (_imports) {
+      for (final f in _secretFields) {
+        final value = _secret('${f['key']}').text.trim();
+        if (value.isEmpty) continue;
+        await _quiet.setSecret(id, '${f['key']}', value);
+      }
+    }
     await devices.refresh();
     await followAdded(
       navigator,
@@ -333,6 +356,40 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
     );
   }
 
+  Widget _hostField() => TextField(
+    key: const ValueKey('add-host'),
+    controller: _host,
+    keyboardType: TextInputType.url,
+    decoration: const InputDecoration(
+      labelText: 'IP address on your Wi-Fi',
+      hintText: '192.168.1.20',
+      helperText: ipAddressHelp,
+      helperMaxLines: 3,
+    ),
+    onChanged: (_) => setState(() => _stableId = null),
+  );
+
+  List<Widget> _secretInputs() => [
+    for (final f in _secretFields) ...[
+      const SizedBox(height: OmniSpace.sm),
+      TextField(
+        key: ValueKey('add-secret-${f['key']}'),
+        controller: _secret('${f['key']}'),
+        obscureText: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        decoration: InputDecoration(
+          label: Text('${f['label']} (optional)'),
+          helper: settingHelpLine(
+            settingKey: '${f['key']}',
+            label: '${f['label']}',
+            help: f['help'] as String?,
+          ),
+        ),
+      ),
+    ],
+  ];
+
   Widget _form(Json driver) {
     final found = _found;
     final accent = OmniPalette.of(context).accent;
@@ -355,6 +412,15 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
           ),
       ],
       children: (context) => [
+        if (_imports)
+          OmniListRow(
+            key: const ValueKey('add-from-wiz-app'),
+            icon: OmniIcons.light,
+            title: 'Easiest: from the WiZ app',
+            subtitle: 'Every WiZ light at once, with its name, room and key',
+            chevron: true,
+            onTap: () => openWizImport(context),
+          ),
         OmniListRow(
           key: const ValueKey('add-driver'),
           icon: _driverIcon(driver),
@@ -393,18 +459,17 @@ class _AddByHandPageState extends ConsumerState<AddByHandPage> {
               onTap: () => _pick(f),
             ),
           const SizedBox(height: OmniSpace.sm),
-          TextField(
-            key: const ValueKey('add-host'),
-            controller: _host,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              labelText: 'IP address on your Wi-Fi',
-              hintText: '192.168.1.20',
-              helperText: ipAddressHelp,
-              helperMaxLines: 3,
-            ),
-            onChanged: (_) => setState(() => _stableId = null),
-          ),
+          if (_imports)
+            OmniDisclosure(
+              key: const ValueKey('add-by-ip'),
+              icon: OmniIcons.wifi,
+              title: 'Add by IP address',
+              summary: 'Only when it is not found and not in its own app',
+              initiallyOpen: _host.text.isNotEmpty,
+              children: [_hostField(), ..._secretInputs()],
+            )
+          else
+            _hostField(),
         ],
         const SizedBox(height: OmniSpace.sm),
         TextField(

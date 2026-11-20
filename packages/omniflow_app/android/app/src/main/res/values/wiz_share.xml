@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The share sheet entry for the WiZ app's export link or file. -->
+    <string name="wiz_share_label">Add WiZ lights</string>
+</resources>

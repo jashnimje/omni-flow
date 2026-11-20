@@ -12,6 +12,9 @@ import 'discovery/mdns_discovery.dart';
 import 'discovery/ssdp_discovery.dart';
 import 'discovery/tuya_broadcast.dart';
 
+/// The event a discovery sweep sends as it starts, `{windowMs}`.
+const discoveryStartedEvent = 'discovery.started';
+
 class DiscoveredDevice {
   const DiscoveredDevice({
     required this.host,
@@ -95,6 +98,11 @@ class DeviceDiscovery {
   /// connecting to it puts "Allow USB debugging?" on the phone itself.
   final Future<Set<String>> Function() ownAddresses;
 
+  /// Told each time a sweep starts, with how long it listens. The engine
+  /// turns it into a `discovery.started` event, which the app's service
+  /// answers by holding Android's multicast lock for the sweep.
+  void Function(Duration window)? onSweep;
+
   /// [portOverride] applies to `udp_broadcast` only. A spec's `windowMs`
   /// lengthens [window] for that method.
   Future<List<DiscoveredDevice>> discover(
@@ -125,6 +133,8 @@ class DeviceDiscovery {
     int? portOverride,
   }) async {
     bool wanted(String method) => methods == null || methods.contains(method);
+    // A Tuya listen runs at least its own window, so that is the longest.
+    onSweep?.call(_atLeast(window, tuyaMinimumWindow));
     // Each run yields (driver id, device) pairs, merged in the order the
     // runs were started so the result does not depend on which answers first.
     final runs = <Future<List<(String, DiscoveredDevice)>>>[];
@@ -399,7 +409,13 @@ class UdpDiscovery {
     final port =
         portOverride ?? (spec.config['port'] as int?) ?? driver.transport.port;
     if (port == null) return const [];
-    final probe = utf8.encode(jsonEncode(spec.config['probe'] ?? const {}));
+    final probes = [
+      for (final p in switch (spec.config['probes']) {
+        final List list => list,
+        _ => [spec.config['probe'] ?? const {}],
+      })
+        utf8.encode(jsonEncode(p)),
+    ];
     final match = spec.config['matchJsonPath'] as String?;
     final idPath = spec.config['idJsonPath'] as String?;
 
@@ -417,20 +433,26 @@ class UdpDiscovery {
       final id = idPath == null
           ? null
           : JsonPath(idPath).readValues(json).firstOrNull;
+      final reply = Map<String, Object?>.from(json);
+      final earlier = found[d.address.address]?.reply;
       found[d.address.address] = DiscoveredDevice(
         host: d.address.address,
         stableId: id?.toString(),
-        reply: Map<String, Object?>.from(json),
+        // A device that answers several probes keeps what each said, so a
+        // WiZ bulb's module name survives its registration answer.
+        reply: earlier == null ? reply : _mergedReply(earlier, reply),
       );
     });
     try {
       final targets = await (_targets ?? broadcastTargets)();
       for (var round = 0; round < 2; round++) {
         for (final target in targets) {
-          try {
-            _udp.send(target, port, probe);
-          } on SocketException {
-            // An interface without broadcast: skip it.
+          for (final probe in probes) {
+            try {
+              _udp.send(target, port, probe);
+            } on SocketException {
+              // An interface without broadcast: skip it.
+            }
           }
         }
         await Future<void>.delayed(window ~/ 2);
@@ -440,6 +462,17 @@ class UdpDiscovery {
     }
     return found.values.toList();
   }
+
+  /// [later] over [earlier], with their `result` objects merged key by key.
+  static Map<String, Object?> _mergedReply(
+    Map<String, Object?> earlier,
+    Map<String, Object?> later,
+  ) => {
+    ...earlier,
+    ...later,
+    if (earlier['result'] case final Map a)
+      if (later['result'] case final Map b) 'result': {...a, ...b},
+  };
 
   /// A [DeviceLocator] for address healing: discover again and pick the
   /// reply whose stable id matches.

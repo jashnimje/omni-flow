@@ -285,6 +285,16 @@ class ServicePower {
         if (_runs.remove(e['run']) != null) unawaited(plan());
       case 'automation.changed':
         _planSoon();
+      case 'discovery.started':
+        // A find (Add, Look again, the WiZ import) hears broadcast and
+        // multicast answers only while the lock is held.
+        final window = e['windowMs'];
+        final ms = window is int && window > 0 ? window : 3000;
+        _multicastUntil = _later(
+          _multicastUntil,
+          _now().add(Duration(milliseconds: ms) + afterTrouble),
+        );
+        unawaited(plan());
       case 'device.offline' || 'device.pollFailed' || 'device.moved':
         // Finding a device again uses mDNS and broadcasts.
         _multicastUntil = _later(_multicastUntil, _now().add(afterTrouble));

@@ -28,6 +28,7 @@ import 'organize_cli.dart';
 import 'parity_cli.dart';
 import 'rule_cli.dart';
 import 'tv_cli.dart';
+import 'wiz_cli.dart';
 
 typedef EngineFactory = Future<OmniEngine> Function(
   Directory home, {
@@ -280,6 +281,7 @@ class OmniCommandRunner extends CommandRunner<int> {
     addCommand(_Mcp());
     addCommand(RuleCommand());
     addCommand(AddCommand());
+    addCommand(WizCommand());
     addCommand(TvCommand());
     addCommand(roomCommand());
     addCommand(sceneCommand());

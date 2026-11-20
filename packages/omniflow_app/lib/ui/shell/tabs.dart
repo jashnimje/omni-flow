@@ -91,9 +91,10 @@ final Map<ShellTab, ShellTabSpec> shellTabs = {
 
 /// The page [link] opens on top of its tab's root, or null when the root
 /// is the place (a [TabLink], or a page that does not exist yet).
-/// [AddLink] is not a page: the shell runs [openAddThing] for it.
+/// [AddLink] and [WizImportLink] are not pages: the shell runs
+/// [openAddThing] or the WiZ import over the tab shown.
 Widget? shellPageFor(ShellLink link) => switch (link) {
-  TabLink() || AddLink() => null,
+  TabLink() || AddLink() || WizImportLink() => null,
   SearchLink() => const SearchScreen(),
   DeveloperLink() => const DeveloperScreen(),
   AutomationLink(:final id) => AutomationPage(id: id),

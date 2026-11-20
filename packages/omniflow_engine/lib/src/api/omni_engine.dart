@@ -64,6 +64,7 @@ import '../storage/secret_store.dart';
 import '../transports/packet_tap.dart';
 import '../transports/udp_transport.dart';
 import '../version.dart';
+import 'wiz_import.dart';
 
 export 'api_error.dart';
 
@@ -234,6 +235,11 @@ class OmniEngine {
         ],
       );
       engine._phone = phone;
+      final emit = engine._core.emit;
+      discovery.onSweep = (window) => emit({
+        'event': discoveryStartedEvent,
+        'windowMs': window.inMilliseconds,
+      });
       phone.attach(
         engine._core,
         engine._things,
@@ -383,6 +389,7 @@ class OmniEngine {
   late final _hostKeyCommands = HostKeyCommands(_core);
   late final _pairingCommands = PairingCommands(_core);
   late final _addCommands = AddCommands(_core, _deviceCommands);
+  late final _wizImport = WizImport(_core, _deviceCommands, _hub);
   late final _tagCommands = TagCommands(_core, _things, _deviceCommands);
   late final _organizeCommands = OrganizeCommands(_core);
   late final HouseHelpers _house;
@@ -690,6 +697,7 @@ class OmniEngine {
     'board.periph': _boardCommands.periph,
     ..._automationCommands.commands,
     'thing.add': _addCommands.add,
+    'wiz.import': _wizImport.run,
     'thing.next': _deviceCommands.next,
     'thing.configure': _deviceCommands.configure,
     'link.create': _linkCommands.create,
@@ -856,6 +864,7 @@ class OmniEngine {
   static const deviceChangeCommands = {
     'device.add',
     'thing.add',
+    'wiz.import',
     'thing.configure',
     'device.remove',
     'device.organize',

@@ -59,6 +59,8 @@ class DeviceCommands {
           'highRisk': m.isHighRisk || _core.agentDrivers.contains(m.id),
           if (_core.agentDrivers.contains(m.id)) 'byAgent': true,
           'board': isBoardDriver(m),
+          // A WiZ home's lights come in at once from the WiZ app's export.
+          if (isWizPilot(m)) 'importFrom': 'wiz',
           if (m.pairingSpec case final p?) 'pairing': p.method.wireName,
           'settings': [
             for (final s in m.settings)

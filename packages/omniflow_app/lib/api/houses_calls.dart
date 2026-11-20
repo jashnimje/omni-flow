@@ -47,6 +47,7 @@ abstract final class HousesCalls {
     // Things made or saved go into the house in view.
     'device.add',
     'thing.add',
+    'wiz.import',
     'android.pair',
     'board.setup',
     'link.create',

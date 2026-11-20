@@ -643,7 +643,10 @@ const builtInDriverSources = <String, String>{
     {
       "method": "udp_broadcast",
       "port": 38899,
-      "probe": { "method": "registration", "params": { "phoneMac": "AAAAAAAAAAAA", "register": false, "phoneIp": "1.2.3.4", "id": "1" } },
+      "probes": [
+        { "method": "registration", "params": { "phoneMac": "AAAAAAAAAAAA", "register": false, "phoneIp": "1.2.3.4", "id": "1" } },
+        { "method": "getSystemConfig", "params": {} }
+      ],
       "matchJsonPath": "$.result.mac",
       "idJsonPath": "$.result.mac"
     }

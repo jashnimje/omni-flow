@@ -144,6 +144,22 @@ void main() {
       await power.stop();
     });
 
+    test('a discovery sweep holds the multicast lock while it listens, and '
+        'not after', () async {
+      final power = make();
+      await power.start();
+      expect(power.held!.multicast, isFalse);
+      events.add({'event': 'discovery.started', 'windowMs': 6000});
+      await pumpEventQueue();
+      expect(power.held!.multicast, isTrue);
+      expect(hands.multicast.last, isTrue);
+      expect(
+        power.held!.recheckAt,
+        now.add(const Duration(seconds: 6) + ServicePower.afterTrouble),
+      );
+      await power.stop();
+    });
+
     test('a Wi-Fi change opens a short awake window', () async {
       final power = make();
       await power.start();

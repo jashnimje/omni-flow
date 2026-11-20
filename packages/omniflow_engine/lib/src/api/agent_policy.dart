@@ -196,6 +196,8 @@ const _userOnly = {
   'device.remove': 'removing a thing deletes its secrets and history',
   'secret.set': 'keys and passwords never pass through an agent',
   'web.secret.set': 'keys and passwords never pass through an agent',
+  'wiz.import':
+      'it stores your WiZ home key, and keys never pass through an agent',
   'driver.register':
       'use register_custom_driver_manifest, which refuses '
       'drivers that run host commands',

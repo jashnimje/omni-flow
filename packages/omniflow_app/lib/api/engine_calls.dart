@@ -16,6 +16,7 @@ abstract final class EngineCalls {
   static const nfcScanned = 'nfc.scanned';
   static const tagWritePayload = 'tag.write_payload';
   static const thingAdd = 'thing.add';
+  static const wizImport = 'wiz.import';
   static const thingNext = 'thing.next';
   static const thingConfigure = 'thing.configure';
   static const secretSet = 'secret.set';
@@ -1261,6 +1262,11 @@ class EngineApi {
   /// the drivers added by hand.
   Future<Reply<AddFind>> discover() =>
       _call(EngineCalls.thingAdd, EngineCalls.discoverArgs, AddFind.fromJson);
+
+  /// Adds every light of a WiZ home export: [text] is the link or the
+  /// export itself, as pasted, shared or read from the file.
+  Future<Reply<Json>> wizImport(String text) =>
+      _call(EngineCalls.wizImport, {'text': text}, (r) => r);
 
   /// Adds a found [candidate] and says what step comes next.
   Future<Reply<Added>> addCandidate(

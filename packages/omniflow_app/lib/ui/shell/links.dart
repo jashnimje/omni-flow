@@ -31,6 +31,7 @@ sealed class ShellLink {
       ['settings'] => const TabLink(ShellTab.settings),
       ['search'] => const SearchLink(),
       ['add'] => const AddLink(),
+      ['add', 'wiz'] => const WizImportLink(),
       ['settings', 'developer'] => const DeveloperLink(),
       ['automation', final id] => AutomationLink(id),
       ['automation', final id, 'run', final run] => RunLink(id, run),
@@ -86,6 +87,17 @@ class AddLink extends ShellLink {
 
   @override
   String get location => '/add';
+}
+
+/// Add, From the WiZ app, as a share from the WiZ app opens it.
+class WizImportLink extends ShellLink {
+  const WizImportLink();
+
+  @override
+  ShellTab get tab => ShellTab.devices;
+
+  @override
+  String get location => '/add/wiz';
 }
 
 /// Settings, Developer (packets, run log, drivers, engine).

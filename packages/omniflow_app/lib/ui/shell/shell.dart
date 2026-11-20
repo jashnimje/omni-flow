@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/appearance.dart';
 import '../add/add_page.dart';
+import '../add/wiz_import_page.dart';
 import '../theme.dart';
 import 'hub_banner.dart';
 import 'links.dart';
@@ -52,7 +53,7 @@ class ShellController extends ChangeNotifier {
       _pending = link;
       return;
     }
-    final tab = link is AddLink ? _tab : link.tab;
+    final tab = link is AddLink || link is WizImportLink ? _tab : link.tab;
     if (tab != _tab) {
       _tab = tab;
       notifyListeners();
@@ -65,6 +66,10 @@ class ShellController extends ChangeNotifier {
     if (nav == null || !nav.mounted) return;
     if (link is AddLink) {
       await openAddThing(nav.context);
+      return;
+    }
+    if (link is WizImportLink) {
+      await openWizImport(nav.context);
       return;
     }
     nav.popUntil((r) => r.isFirst);

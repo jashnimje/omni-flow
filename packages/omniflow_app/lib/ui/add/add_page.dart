@@ -14,6 +14,7 @@ import 'add_by_hand_page.dart';
 import 'add_phone_page.dart';
 import 'driver_kinds.dart';
 import 'guided_steps_page.dart';
+import 'wiz_import_page.dart';
 import '../devices/weather_page.dart' show AddWeatherRow;
 
 /// Add covers the whole screen, tab bar included, as a task you finish or
@@ -232,6 +233,18 @@ class _AddPageState extends ConsumerState<AddPage> {
                         ),
                   onTap: _adding == null ? () => _add(f) : null,
                 ),
+            // Every WiZ light at once, named and in its rooms, beats typing
+            // each one's address.
+            if (_drivers.values.any((d) => d['importFrom'] == 'wiz'))
+              OmniListRow(
+                key: const ValueKey('add-from-wiz'),
+                icon: OmniIcons.light,
+                title: 'From the WiZ app',
+                subtitle:
+                    'Every WiZ light at once, with its name, room and key',
+                chevron: true,
+                onTap: () => openWizImport(context),
+              ),
             const OmniSectionHeader('Add by hand'),
             // The common kinds as big tiles, in plain words. Another phone
             // has its own steps. Until the drivers are read the kinds wait

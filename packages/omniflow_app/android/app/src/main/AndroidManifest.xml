@@ -243,6 +243,24 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <!-- The share sheet's "Add WiZ lights": the WiZ app's export link or
+             file. It only opens Add, From the WiZ app with it filled in;
+             nothing is added until the person taps Add there. -->
+        <activity
+            android:name=".WizShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/wiz_share_label"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+        </activity>
         <receiver
             android:name=".RunWidgetSmall"
             android:exported="true"
