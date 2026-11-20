@@ -122,21 +122,27 @@ A Tuya local key, an SSH or ADB key, a TV pairing key, a Hue username, a Home As
 Two workflows run on GitHub Actions. `ci.yml` runs the checks above on every push to `main` and every pull request. `release.yml` builds every target on a `v*` tag, or by hand from Actions, Release, Run workflow:
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag v1.0.0-build.45 && git push origin v1.0.0-build.45
 ```
 
-Each build is uploaded as `omniflow-<version>-<platform>-<arch>.<ext>`, with `dev` as the version on a run by hand. A tag build also makes a GitHub release with every file and a `SHA256SUMS`. The tests run once, in the `test` job, and the release waits for them.
+The version in the file names comes from `packages/omniflow_app/pubspec.yaml`, so a tag only has to start with `v` and be new. A run by hand uses `dev` as the version. The build number is the commit count of the built commit (`git rev-list --count HEAD`). The version can stay the same while the build rises with every release, and the app's update check compares both. Every build job writes the build into `omniflowBuild` in `packages/omniflow_engine/lib/src/version.dart`, and the Flutter builds also pass it as `--build-number`, so `omni --version` prints `omni 1.0.0 (build 45)`. A local build is build 0.
 
-| Target | File | Built on |
+A tag build makes a GitHub release with the downloads below and a `SHA256SUMS` covering all of them. The release body opens with a "Which file do I need?" table and a line `<!-- omniflow-release: version=1.0.0 build=45 -->` that the app reads, then GitHub's generated notes. The tests run once, in the `test` job, and the release waits for them.
+
+| Download | What it holds | Built on |
 | --- | --- | --- |
-| Android app | `android-arm64.apk`, `android-arm32.apk`, `android-x86_64.apk`, `android-universal.aab` | Ubuntu |
-| Android TV pointer helper | `androidtv-helper.apk` | Ubuntu |
-| Board firmware | `firmware-esp32.bin`, `firmware-esp8266.bin`, `firmware-uno.hex`, `firmware-pico_w.uf2` | Ubuntu |
-| iOS app, unsigned | `ios-arm64-unsigned.ipa` | macOS |
-| macOS app | `macos-universal.zip` | macOS |
-| Windows app | `windows-x64.zip` | Windows Server 2022 |
-| Linux app | `linux-x64.tar.gz` | Ubuntu |
-| `omni` CLI and hub | `cli-macos-arm64.tar.gz`, `cli-macos-x64.tar.gz` (Linux and Windows are built in CI but not released, see above) | each macOS runner |
+| `omniflow-<v>-android.apk` | The Android app for arm64, which almost every phone needs. The in-app updater looks for this name | Ubuntu |
+| `omniflow-<v>-ios-unsigned.ipa` | The iOS app, unsigned | macOS |
+| `omniflow-<v>-macos.zip` | The macOS app, universal | macOS |
+| `omniflow-<v>-windows-x64.zip` | The Windows app | Windows Server 2022 |
+| `omniflow-<v>-linux-x64.tar.gz` | The Linux app | Ubuntu |
+| `omniflow-<v>-hub-macos.tar.gz` | The `omni` CLI and hub, in `arm64/` and `x64/` | each macOS runner |
+| `omniflow-<v>-android-extras.zip` | `apk/` (arm32 and x86_64), `play/` (the app bundle) and `tv-helper/` (the Android TV pointer helper) | Ubuntu |
+| `omniflow-<v>-firmware.zip` | One folder per board: `esp32/`, `esp8266/`, `uno/`, `pico_w/` | Ubuntu |
+
+The hub archive holds two bundles rather than one universal binary. A Dart AOT executable finds its snapshot inside its own file, and `lipo` breaks that: a fat binary made from the arm64 bundle runs as a bare Dart runtime. The Linux and Windows CLI builds are compiled in CI but not released, see above.
+
+On Android, Settings, About, Check for updates asks `api.github.com` for the latest release, compares its version and build with the installed app, and installs `omniflow-<v>-android.apk` after checking it against `SHA256SUMS`. Downloads follow redirects only over https to `github.com`, `objects.githubusercontent.com` and `release-assets.githubusercontent.com`. A daily quiet check, which the person can turn off, only fills in a Settings row. Off Android, Check for updates opens the release page.
 
 The Android app bundles the firmware and the TV helper that the same run built. It is signed with the release key from the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` secrets. A tag build fails without them, since an APK signed with another key cannot update an installed one. A run by hand without them is signed with the debug key. Everything else is unsigned.
 

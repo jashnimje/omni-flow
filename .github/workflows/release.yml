@@ -1,10 +1,31 @@
 name: Release
 
 # Push a version tag to publish every build:
-#   git tag v0.2.0 && git push origin v0.2.0
-# Run it by hand (Actions, Release, Run workflow) to build everything
-# without publishing. Files are named omniflow-<version>-<platform>-<arch>,
-# with "dev" as the version on a manual run.
+#   git tag v1.0.0-build.45 && git push origin v1.0.0-build.45
+# The version in the file names is the one in packages/omniflow_app/
+# pubspec.yaml, so the tag only has to start with v and be new. Run it by
+# hand (Actions, Release, Run workflow) to build everything without
+# publishing, with "dev" as the version.
+#
+# The build number is the commit count of the built commit. It rises with
+# every release while the version stays the same, and the app's update
+# check compares it. Every build job stamps it into the engine's
+# version.dart, and the Flutter builds also pass it as --build-number.
+#
+# A release has eight downloads plus SHA256SUMS:
+#   omniflow-<v>-android.apk          arm64, what almost every phone needs.
+#                                     The app's updater looks for this name.
+#   omniflow-<v>-ios-unsigned.ipa
+#   omniflow-<v>-macos.zip
+#   omniflow-<v>-windows-x64.zip
+#   omniflow-<v>-linux-x64.tar.gz
+#   omniflow-<v>-hub-macos.tar.gz     the omni CLI and hub, arm64/ and x64/.
+#                                     Not one universal binary: lipo breaks
+#                                     a Dart AOT executable, which then
+#                                     cannot find its own snapshot.
+#   omniflow-<v>-android-extras.zip   apk/ (arm32, x86_64), play/ (the AAB)
+#                                     and tv-helper/.
+#   omniflow-<v>-firmware.zip         one folder per board.
 #
 # Signing:
 # - Android: the release key comes from three secrets,
@@ -31,6 +52,26 @@ env:
   FLUTTER_VERSION: 3.47.9
 
 jobs:
+  # The version and build number every other job uses.
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      build: ${{ steps.meta.outputs.build }}
+    steps:
+      # The whole history, so the commit count is the real one.
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - id: meta
+        run: |
+          version=$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' packages/omniflow_app/pubspec.yaml)
+          [ -n "$version" ] || { echo "No version in pubspec.yaml"; exit 1; }
+          [ "$GITHUB_REF_TYPE" = "tag" ] || version="dev"
+          build=$(git rev-list --count HEAD)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "OmniFlow $version, build $build"
+
   # Tests run once, here. The build jobs run beside it, and the release
   # waits for it.
   test:
@@ -54,6 +95,7 @@ jobs:
         run: flutter test
 
   firmware:
+    needs: meta
     runs-on: ubuntu-latest
     steps:
       # The four board toolchains need more disk than the runner has free.
@@ -85,18 +127,21 @@ jobs:
         with:
           name: firmware-asset
           path: packages/omniflow_app/assets/firmware
-      - name: Collect
+      - name: Package
+        env:
+          V: ${{ needs.meta.outputs.version }}
         run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
-          mkdir -p dist
           fw=packages/omniflow_app/assets/firmware
-          cp "$fw/esp32.bin"   "dist/omniflow-$v-firmware-esp32.bin"
-          cp "$fw/esp8266.bin" "dist/omniflow-$v-firmware-esp8266.bin"
-          cp "$fw/uno.hex"     "dist/omniflow-$v-firmware-uno.hex"
-          cp "$fw/pico_w.uf2"  "dist/omniflow-$v-firmware-pico_w.uf2"
+          mkdir -p pkg/esp32 pkg/esp8266 pkg/uno pkg/pico_w dist
+          cp "$fw/esp32.bin"   pkg/esp32/
+          cp "$fw/esp8266.bin" pkg/esp8266/
+          cp "$fw/uno.hex"     pkg/uno/
+          cp "$fw/pico_w.uf2"  pkg/pico_w/
+          (cd pkg && zip -qr "$GITHUB_WORKSPACE/dist/omniflow-$V-firmware.zip" .)
       - uses: actions/upload-artifact@v7
         with: { name: firmware, path: dist }
 
+  # Released only inside android-extras.zip, and bundled into the app.
   tv-helper:
     runs-on: ubuntu-latest
     steps:
@@ -110,18 +155,13 @@ jobs:
         with:
           name: tv-helper-asset
           path: tv_helper/build/outputs/apk/release/omniflow-tv-helper-release.apk
-      - name: Collect
-        run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
-          mkdir -p dist
-          cp tv_helper/build/outputs/apk/release/omniflow-tv-helper-release.apk \
-            "dist/omniflow-$v-androidtv-helper.apk"
-      - uses: actions/upload-artifact@v7
-        with: { name: tv-helper, path: dist }
 
   android:
-    needs: [firmware, tv-helper]
+    needs: [meta, firmware, tv-helper]
     runs-on: ubuntu-latest
+    env:
+      V: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
     steps:
       # Two release builds back to back ran the runner short and it was
       # stopped mid-build, so free disk and keep Gradle to a 4 GB heap.
@@ -167,31 +207,38 @@ jobs:
         with:
           name: tv-helper-asset
           path: tv-helper-asset
-      - run: mv tv-helper-asset/omniflow-tv-helper-release.apk packages/omniflow_app/assets/tv_helper/omniflow-tv-helper.apk
+      - run: cp tv-helper-asset/omniflow-tv-helper-release.apk packages/omniflow_app/assets/tv_helper/omniflow-tv-helper.apk
 
       - run: flutter pub get
+      - name: Stamp the build number
+        run: sed -i "s/^const int omniflowBuild = .*;/const int omniflowBuild = $BUILD;/" packages/omniflow_engine/lib/src/version.dart
       - name: Build
         working-directory: packages/omniflow_app
         run: |
           sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=1G/' android/gradle.properties
           echo "org.gradle.daemon=false" >> android/gradle.properties
-          flutter build apk --release --split-per-abi
-          flutter build appbundle --release
+          flutter build apk --release --split-per-abi --build-number "$BUILD"
+          flutter build appbundle --release --build-number "$BUILD"
 
-      - name: Collect
+      - name: Package
         run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
-          mkdir -p dist
+          mkdir -p dist extras/apk extras/play extras/tv-helper
           out=packages/omniflow_app/build/app/outputs
-          mv "$out/flutter-apk/app-arm64-v8a-release.apk"   "dist/omniflow-$v-android-arm64.apk"
-          mv "$out/flutter-apk/app-armeabi-v7a-release.apk" "dist/omniflow-$v-android-arm32.apk"
-          mv "$out/flutter-apk/app-x86_64-release.apk"      "dist/omniflow-$v-android-x86_64.apk"
-          mv "$out/bundle/release/app-release.aab"          "dist/omniflow-$v-android-universal.aab"
+          mv "$out/flutter-apk/app-arm64-v8a-release.apk"   "dist/omniflow-$V-android.apk"
+          mv "$out/flutter-apk/app-armeabi-v7a-release.apk" "extras/apk/omniflow-$V-android-arm32.apk"
+          mv "$out/flutter-apk/app-x86_64-release.apk"      "extras/apk/omniflow-$V-android-x86_64.apk"
+          mv "$out/bundle/release/app-release.aab"          "extras/play/omniflow-$V-android.aab"
+          cp tv-helper-asset/omniflow-tv-helper-release.apk "extras/tv-helper/omniflow-$V-androidtv-helper.apk"
+          (cd extras && zip -qr "$GITHUB_WORKSPACE/dist/omniflow-$V-android-extras.zip" .)
       - uses: actions/upload-artifact@v7
         with: { name: android, path: dist }
 
   ios:
+    needs: meta
     runs-on: macos-latest
+    env:
+      V: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -200,20 +247,25 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Stamp the build number
+        run: sed -i '' "s/^const int omniflowBuild = .*;/const int omniflowBuild = $BUILD;/" packages/omniflow_engine/lib/src/version.dart
       - name: Build
         working-directory: packages/omniflow_app
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign --build-number "$BUILD"
       - name: Package an unsigned ipa
         run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
           mkdir -p Payload dist
           cp -R packages/omniflow_app/build/ios/iphoneos/Runner.app Payload/
-          zip -qr "dist/omniflow-$v-ios-arm64-unsigned.ipa" Payload
+          zip -qr "dist/omniflow-$V-ios-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v7
         with: { name: ios, path: dist }
 
   macos:
+    needs: meta
     runs-on: macos-latest
+    env:
+      V: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -222,24 +274,29 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Stamp the build number
+        run: sed -i '' "s/^const int omniflowBuild = .*;/const int omniflowBuild = $BUILD;/" packages/omniflow_engine/lib/src/version.dart
       - name: Build
         working-directory: packages/omniflow_app
-        run: flutter build macos --release
+        run: flutter build macos --release --build-number "$BUILD"
       - name: Package
         run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
           mkdir -p dist
           # ditto keeps the bundle's links and modes, which zip -r breaks.
           ditto -c -k --keepParent \
             packages/omniflow_app/build/macos/Build/Products/Release/OmniFlow.app \
-            "dist/omniflow-$v-macos-universal.zip"
+            "dist/omniflow-$V-macos.zip"
       - uses: actions/upload-artifact@v7
         with: { name: macos, path: dist }
 
   windows:
+    needs: meta
     # Pinned to the image with Visual Studio 2022 (17), the newest one every
     # Flutter release maps to a CMake generator. windows-latest moves on.
     runs-on: windows-2022
+    env:
+      V: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -248,21 +305,28 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Stamp the build number
+        shell: bash
+        run: sed -i "s/^const int omniflowBuild = .*;/const int omniflowBuild = $BUILD;/" packages/omniflow_engine/lib/src/version.dart
       - name: Build
+        shell: bash
         working-directory: packages/omniflow_app
-        run: flutter build windows --release
+        run: flutter build windows --release --build-number "$BUILD"
       - name: Package
         shell: bash
         run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
           mkdir -p dist
           cd packages/omniflow_app/build/windows/x64/runner/Release
-          7z a -tzip "$GITHUB_WORKSPACE/dist/omniflow-$v-windows-x64.zip" .
+          7z a -tzip "$GITHUB_WORKSPACE/dist/omniflow-$V-windows-x64.zip" .
       - uses: actions/upload-artifact@v7
         with: { name: windows, path: dist }
 
   linux:
+    needs: meta
     runs-on: ubuntu-latest
+    env:
+      V: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
     steps:
       - uses: actions/checkout@v7
       - name: Desktop build packages
@@ -276,15 +340,16 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Stamp the build number
+        run: sed -i "s/^const int omniflowBuild = .*;/const int omniflowBuild = $BUILD;/" packages/omniflow_engine/lib/src/version.dart
       - name: Build
         working-directory: packages/omniflow_app
-        run: flutter build linux --release
+        run: flutter build linux --release --build-number "$BUILD"
       - name: Package
         run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
           mkdir -p dist
           tar -C packages/omniflow_app/build/linux/x64/release/bundle -czf \
-            "dist/omniflow-$v-linux-x64.tar.gz" .
+            "dist/omniflow-$V-linux-x64.tar.gz" .
       - uses: actions/upload-artifact@v7
         with: { name: linux, path: dist }
 
@@ -293,7 +358,10 @@ jobs:
   # bin/omni with SQLite in lib/, and they ship together.
   # On Linux and Windows the CLI keeps its macOS-only secret store for now,
   # so those two are built to keep them compiling but are not released.
+  # The two macOS bundles are tarred here, since an artifact loses the
+  # executable bit, and the release job puts them in one hub-macos archive.
   cli:
+    needs: meta
     strategy:
       fail-fast: false
       matrix:
@@ -306,6 +374,8 @@ jobs:
           - { runner: ubuntu-latest, os: linux, arch: arm64 }
           - { runner: windows-2022, os: windows, arch: x64 }
     runs-on: ${{ matrix.runner }}
+    env:
+      BUILD: ${{ needs.meta.outputs.build }}
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -314,6 +384,12 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Stamp the build number
+        shell: bash
+        run: |
+          f=packages/omniflow_engine/lib/src/version.dart
+          sed "s/^const int omniflowBuild = .*;/const int omniflowBuild = $BUILD;/" "$f" > "$f.new"
+          mv "$f.new" "$f"
       - name: Build
         shell: bash
         working-directory: packages/omniflow_engine
@@ -322,9 +398,8 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          v="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = "tag" ] || v="dev"
           mkdir -p dist
-          name="omniflow-$v-cli-${{ matrix.os }}-${{ matrix.arch }}"
+          name="cli-${{ matrix.os }}-${{ matrix.arch }}"
           bundle=packages/omniflow_engine/build/omni/bundle
           if [ "${{ matrix.os }}" = "windows" ]; then
             (cd "$bundle" && 7z a -tzip "$GITHUB_WORKSPACE/dist/$name.zip" .)
@@ -339,21 +414,60 @@ jobs:
   release:
     # Only for a tag. A manual run stops at the artifacts.
     if: github.ref_type == 'tag'
-    needs: [test, firmware, tv-helper, android, ios, macos, windows, linux, cli]
+    needs: [meta, test, firmware, tv-helper, android, ios, macos, windows, linux, cli]
     runs-on: ubuntu-latest
+    env:
+      V: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
     steps:
       - uses: actions/download-artifact@v8
         with: { path: artifacts }
-      # The *-asset artifacts are inputs to the Android build, not downloads.
       - name: Collect
         run: |
           mkdir -p dist
           for d in artifacts/*; do
-            case "$d" in *-asset|*/cli-linux-*|*/cli-windows-*) continue ;; esac
+            # The *-asset artifacts are inputs to the Android build, and the
+            # CLI ones are packaged below.
+            case "$d" in *-asset|*/cli-*) continue ;; esac
             mv "$d"/* dist/
           done
+          mkdir -p hub/arm64 hub/x64
+          tar -C hub/arm64 -xzf artifacts/cli-macos-arm64/cli-macos-arm64.tar.gz
+          tar -C hub/x64 -xzf artifacts/cli-macos-x64/cli-macos-x64.tar.gz
+          tar -C hub -czf "dist/omniflow-$V-hub-macos.tar.gz" arm64 x64
           (cd dist && sha256sum -- * > SHA256SUMS)
+          ls -l dist
+      # The app's update check reads the omniflow-release line, so its
+      # version and build stay in this form.
+      - name: Release notes
+        run: |
+          cat > notes.md <<'EOF'
+          OmniFlow @V@, build @BUILD@.
+
+          ## Which file do I need?
+
+          | Your device | Download | Install |
+          | --- | --- | --- |
+          | Android phone or tablet | `omniflow-@V@-android.apk` | Open the APK. OmniFlow updates itself after this. |
+          | iPhone or iPad | `omniflow-@V@-ios-unsigned.ipa` | Unsigned, so install it with a sideloading tool. |
+          | Mac | `omniflow-@V@-macos.zip` | Unzip it, then right-click OmniFlow and pick Open the first time. |
+          | Windows PC | `omniflow-@V@-windows-x64.zip` | Unzip it and run `omniflow_app.exe`. At the SmartScreen prompt pick More info, then Run anyway. |
+          | Linux PC | `omniflow-@V@-linux-x64.tar.gz` | Extract it and run `omniflow_app`. |
+          | Mac as the hub, or the `omni` CLI | `omniflow-@V@-hub-macos.tar.gz` | Extract it and run `arm64/bin/omni` on Apple silicon or `x64/bin/omni` on Intel. |
+          | Older or x86 Android, Google Play, Android TV | `omniflow-@V@-android-extras.zip` | `apk/` has the arm32 and x86_64 apps, `play/` the app bundle and `tv-helper/` the TV pointer helper. |
+          | A board to flash by hand | `omniflow-@V@-firmware.zip` | One folder per board. The Android app flashes boards itself. |
+
+          `SHA256SUMS` has the checksum of every file.
+
+          <!-- omniflow-release: version=@V@ build=@BUILD@ -->
+          EOF
+          sed -i -e "s/@V@/$V/g" -e "s/@BUILD@/$BUILD/g" notes.md
+          cat notes.md
+      # The generated notes, the changes since the last tag, follow the
+      # body.
       - uses: softprops/action-gh-release@v3
         with:
+          name: OmniFlow ${{ needs.meta.outputs.version }} (build ${{ needs.meta.outputs.build }})
+          body_path: notes.md
           files: dist/*
           generate_release_notes: true

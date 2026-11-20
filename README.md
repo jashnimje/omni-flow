@@ -21,6 +21,19 @@ OmniFlow is a local-first home automation app, made for Android and built for iO
 - **AI agents through MCP.** `omni mcp` gives Claude and other MCP clients the same commands the app uses, at the access level you choose. What an agent writes waits for your approval when it is high risk.
 - **A CLI for everything.** Every action in the app is also an `omni` command.
 
+## Download
+
+Each [release](https://github.com/jashnimje/omni-flow/releases/latest) opens with a "Which file do I need?" table. Most people need one file:
+
+- **Android:** `omniflow-<version>-android.apk`. Open it to install. After that, OmniFlow updates itself from Settings, About, Check for updates, and checks once a day unless you turn that off.
+- **Mac:** `omniflow-<version>-macos.zip`. Right-click OmniFlow and pick Open the first time, since it is unsigned.
+- **Windows:** `omniflow-<version>-windows-x64.zip`. At the SmartScreen prompt pick More info, then Run anyway.
+- **Linux:** `omniflow-<version>-linux-x64.tar.gz`.
+- **iPhone:** `omniflow-<version>-ios-unsigned.ipa`, for sideloading.
+- **The Mac hub and `omni` CLI:** `omniflow-<version>-hub-macos.tar.gz`, with `arm64/` and `x64/` builds.
+
+Other Android builds, the Play bundle and the Android TV helper are in `android-extras.zip`, and the board firmware in `firmware.zip`. `SHA256SUMS` covers every file.
+
 ## Quick start
 
 1. Install Flutter 3.47.9 (stable, Dart 3.13.7), for example with `mise use flutter@3.47.9`, and the Android SDK. [CONTRIBUTING.md](CONTRIBUTING.md) has the full setup.
@@ -52,7 +65,7 @@ The engine's own README, [packages/omniflow_engine/README.md](packages/omniflow_
 
 - **Android** is the full app: automations keep running with the screen off, and it has the phone's own triggers and actions, NFC tags, USB boards and hub mode.
 - **iOS, macOS, Windows and Linux** run the same engine inside the app, so automations run only while it is open. They have no phone triggers or actions, no NFC, no USB boards and no hub mode, and hide those screens. The iOS build is unsigned.
-- **The `omni` CLI and hub** are released for macOS (arm64 and x64). They keep secrets in the macOS keychain, so the Linux and Windows builds are compiled in CI but not released until those systems get a secret store.
+- **The `omni` CLI and hub** are released for macOS, arm64 and x64 in one archive. They keep secrets in the macOS keychain, so the Linux and Windows builds are compiled in CI but not released until those systems get a secret store.
 - **No web build.** The engine talks to devices over raw UDP and TCP and keeps its data in SQLite, and a browser offers neither.
 
 [CONTRIBUTING.md](CONTRIBUTING.md#releases) says how each one is built and released.
@@ -76,4 +89,4 @@ The engine's own README, [packages/omniflow_engine/README.md](packages/omniflow_
 
 ## Status
 
-Version 1.0.0, in active development by one person. Android is the main app target, and the Mac runs the CLI and the optional hub. The app runs from release builds on an Android 17 phone and the Android 17 emulator, and the macOS app and the iOS simulator open to Home with the engine running. On real hardware so far: WiZ bulbs and an Android TV over ADB. Every other driver, and the firmware's board protocol, is proven against loopback fakes and the native virtual board, not yet against the real device. BLE scanning for presence, the graph canvas editor and accounts with sync are not built. [docs/ROADMAP.md](docs/ROADMAP.md) tracks each item and what has been proven. There is no published release and no licence file yet.
+Version 1.0.0, in active development by one person. Android is the main app target, and the Mac runs the CLI and the optional hub. The app runs from release builds on an Android 17 phone and the Android 17 emulator, and the macOS app and the iOS simulator open to Home with the engine running. On real hardware so far: WiZ bulbs and an Android TV over ADB. Every other driver, and the firmware's board protocol, is proven against loopback fakes and the native virtual board, not yet against the real device. BLE scanning for presence, the graph canvas editor and accounts with sync are not built. [docs/ROADMAP.md](docs/ROADMAP.md) tracks each item and what has been proven. Releases are on GitHub, under the MIT licence.
